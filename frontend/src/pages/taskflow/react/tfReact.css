@@ -136,16 +136,78 @@
 }
 .tfr-toolbar {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 .tfr-toolbar input {
   flex: 1;
+  min-width: 180px;
   max-width: 360px;
   padding: 8px 12px;
   border-radius: 8px;
   border: 1px solid #d4c4b5;
+}
+.tfr-toolbar > button {
+  border: none;
+  background: #c45c26;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tfr-tab {
+  border: 1px solid #d4c4b5 !important;
+  background: #fff !important;
+  color: #5c4a3d !important;
+}
+.tfr-tab.on {
+  background: #c45c26 !important;
+  color: #fff !important;
+  border-color: #c45c26 !important;
+}
+.tfr-form {
+  display: grid;
+  gap: 12px;
+  max-width: 480px;
+  background: #fff;
+  border: 1px solid #e8ddd2;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.tfr-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.tfr-form input,
+.tfr-form textarea,
+.tfr-form select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d4c4b5;
+  font: inherit;
+  font-weight: 400;
+}
+.tfr-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.tfr-form > button {
+  border: none;
+  background: #c45c26;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  justify-self: start;
 }
 .tfr-table-wrap {
   overflow: auto;

@@ -2,30 +2,35 @@ import { useState } from 'react';
 import TasksMy from './TasksMy';
 import TasksAll from './TasksAll';
 import Employees from './Employees';
+import Leaves from './Leaves';
+import Tickets from './Tickets';
+import Verifications from './Verifications';
+import RescheduleRequests from './RescheduleRequests';
 import './tfReact.css';
 
 const NAV = [
   { key: 'my', label: 'My Tasks' },
   { key: 'all', label: 'All Tasks' },
+  { key: 'verifications', label: 'Verifications' },
+  { key: 'reschedule', label: 'Reschedule' },
+  { key: 'leaves', label: 'Leaves' },
+  { key: 'tickets', label: 'Tickets' },
   { key: 'employees', label: 'Employees' },
   { key: 'classic', label: 'Classic TaskFlow' },
 ];
 
-/**
- * Phase-1 React TaskFlow shell.
- * Full feature parity still uses Classic (legacy mount) via onOpenClassic.
- */
+const TITLES = {
+  my: 'My Tasks',
+  all: 'All Tasks',
+  verifications: 'Verifications',
+  reschedule: 'Reschedule Requests',
+  leaves: 'Leaves',
+  tickets: 'Tickets',
+  employees: 'Employees',
+};
+
 export default function TaskflowReactShell({ onOpenClassic }) {
   const [tab, setTab] = useState('my');
-
-  const title =
-    tab === 'my'
-      ? 'My Tasks'
-      : tab === 'all'
-        ? 'All Tasks'
-        : tab === 'employees'
-          ? 'Employees'
-          : 'TaskFlow';
 
   return (
     <div className="tfr-shell">
@@ -48,14 +53,18 @@ export default function TaskflowReactShell({ onOpenClassic }) {
           </button>
         ))}
         <p className="tfr-note">
-          React phase 1: My Tasks, All Tasks, Employees. Other modules → Classic
-          TaskFlow.
+          React TaskFlow — more modules still available in Classic (sites, drawings,
+          master data, recurring…).
         </p>
       </aside>
       <main className="tfr-main">
-        <h1>{title}</h1>
+        <h1>{TITLES[tab] || 'TaskFlow'}</h1>
         {tab === 'my' && <TasksMy />}
         {tab === 'all' && <TasksAll />}
+        {tab === 'verifications' && <Verifications />}
+        {tab === 'reschedule' && <RescheduleRequests />}
+        {tab === 'leaves' && <Leaves />}
+        {tab === 'tickets' && <Tickets />}
         {tab === 'employees' && <Employees />}
       </main>
     </div>
