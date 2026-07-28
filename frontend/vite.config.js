@@ -31,6 +31,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
+      target: 'es2020',
+      // Browser ES modules (Vercel/Vite 8 rolldown was emitting CJS → blank page)
+      rollupOptions: {
+        output: {
+          format: 'es',
+        },
+      },
     },
   };
 });
