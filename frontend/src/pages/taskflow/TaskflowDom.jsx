@@ -525,7 +525,24 @@ export default function TaskflowDom() {
             </div>
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
           </div>
-          <div id="myLeavesList" className="ticket-list" style={{marginTop: 20}}></div>
+          <div className="table-card view-desktop-only" style={{marginTop: 20}}>
+            <div className="table-scroll">
+              <table className="data-table" style={{minWidth: 720}}>
+                <thead>
+                  <tr>
+                    <th className="col-sr">Sr</th>
+                    <th>Dates</th>
+                    <th>Reason</th>
+                    <th className="col-status">Status</th>
+                    <th>Applied</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="myLeavesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="myLeavesList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
         </section>
 
         {/* LEAVE APPROVALS (admin) */}
@@ -547,7 +564,24 @@ export default function TaskflowDom() {
               </div>
             </div>
           </div>
-          <div id="leaveApprovalsList" className="ticket-list" style={{marginTop: 20}}></div>
+          <div className="table-card view-desktop-only" style={{marginTop: 20}}>
+            <div className="table-scroll">
+              <table className="data-table" style={{minWidth: 820}}>
+                <thead>
+                  <tr>
+                    <th className="col-sr">Sr</th>
+                    <th>Employee</th>
+                    <th>Dates</th>
+                    <th>Reason</th>
+                    <th className="col-status">Status</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="leaveApprovalsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="leaveApprovalsList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
         </section>
 
         {/* TICKETS */}
@@ -559,7 +593,24 @@ export default function TaskflowDom() {
             </div>
             <button id="openRaiseTicket" className="primary-btn primary-btn-inline">+ Raise ticket</button>
           </div>
-          <div id="ticketsList" className="ticket-list" style={{marginTop: 20}}></div>
+          <div className="table-card view-desktop-only" style={{marginTop: 20}}>
+            <div className="table-scroll">
+              <table className="data-table" style={{minWidth: 860}}>
+                <thead>
+                  <tr>
+                    <th className="col-sr">Sr</th>
+                    <th>Details</th>
+                    <th>Category</th>
+                    <th>Raised by</th>
+                    <th className="col-status">Status</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="ticketsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="ticketsList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
         </section>
 
         

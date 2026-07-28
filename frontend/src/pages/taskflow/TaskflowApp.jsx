@@ -82,7 +82,7 @@ export default function TaskflowApp() {
               Office
             </button>
             <button type="button" onClick={goSite}>
-              Switch to Site
+              Site
             </button>
           </div>
           <button

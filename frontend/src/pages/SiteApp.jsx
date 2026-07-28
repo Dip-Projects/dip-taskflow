@@ -37,7 +37,7 @@ export default function SiteApp() {
           <span className="tf-surface-label">Switch view</span>
           <div className="tf-surface-toggle">
             <button type="button" onClick={goApp}>
-              Switch to Office
+              Office
             </button>
             <button type="button" className="active" disabled>
               Site

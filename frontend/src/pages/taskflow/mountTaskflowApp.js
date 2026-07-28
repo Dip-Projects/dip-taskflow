@@ -115,6 +115,7 @@ function collectEls() {
     closeVerifyModal: document.getElementById('closeVerifyModal'),
     cancelVerifyModal: document.getElementById('cancelVerifyModal'),
     ticketsList: document.getElementById('ticketsList'),
+    ticketsTableBody: document.getElementById('ticketsTableBody'),
     openRaiseTicket: document.getElementById('openRaiseTicket'),
     ticketModal: document.getElementById('ticketModal'),
     ticketForm: document.getElementById('ticketForm'),
@@ -123,6 +124,7 @@ function collectEls() {
     closeTicketModal: document.getElementById('closeTicketModal'),
     cancelTicketModal: document.getElementById('cancelTicketModal'),
     myLeavesList: document.getElementById('myLeavesList'),
+    myLeavesTableBody: document.getElementById('myLeavesTableBody'),
     openApplyLeave: document.getElementById('openApplyLeave'),
     leaveModal: document.getElementById('leaveModal'),
     leaveForm: document.getElementById('leaveForm'),
@@ -134,8 +136,8 @@ function collectEls() {
     closeLeaveModal: document.getElementById('closeLeaveModal'),
     cancelLeaveModal: document.getElementById('cancelLeaveModal'),
     leaveApprovalsList: document.getElementById('leaveApprovalsList'),
-    leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),
-    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
+    leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
+    leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
     rejectLeaveForm: document.getElementById('rejectLeaveForm'),
     rejectLeaveFormMsg: document.getElementById('rejectLeaveFormMsg'),
     rejectLeaveReason: document.getElementById('reject-leave-reason'),
@@ -496,7 +498,10 @@ export async function mountTaskflowApp(opts = {}) {
   }
   bindAuthControls();
 
-  // ─── sidebar toggle (mobile) ─────────────────────────────────────────────────
+  // ─── sidebar toggle ─────────────────────────────────────────────────────────
+  function isMobileNav() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
   function closeSidebar() {
     els.sidebar?.classList.remove('open');
     if (els.sidebarOverlay) {
@@ -507,29 +512,52 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function openSidebar() {
     els.sidebar?.classList.add('open');
-    if (els.sidebarOverlay) {
+    if (els.sidebarOverlay && isMobileNav()) {
       els.sidebarOverlay.hidden = false;
       els.sidebarOverlay.removeAttribute('hidden');
+    } else if (els.sidebarOverlay) {
+      els.sidebarOverlay.hidden = true;
+      els.sidebarOverlay.setAttribute('hidden', '');
     }
     document.body.classList.add('sidebar-open');
   }
   if (els.menuToggle) {
     els.menuToggle.addEventListener('click', (e) => {
+      e.preventDefault();
       e.stopPropagation();
       if (els.sidebar?.classList.contains('open')) closeSidebar();
       else openSidebar();
     });
   }
   if (els.sidebarOverlay) {
-    els.sidebarOverlay.addEventListener('click', closeSidebar);
+    els.sidebarOverlay.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSidebar();
+    });
   }
-  // Tap main content / topbar brand area to dismiss drawer on mobile
+  // Tap main content to dismiss drawer on mobile only
   const mainContent = document.getElementById('mainContent');
   mainContent?.addEventListener('click', () => {
-    if (els.sidebar?.classList.contains('open')) closeSidebar();
+    if (isMobileNav() && els.sidebar?.classList.contains('open')) closeSidebar();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSidebar();
+  });
+  window.addEventListener('resize', () => {
+    if (!isMobileNav()) {
+      // Keep desktop default open; hide overlay
+      if (els.sidebarOverlay) {
+        els.sidebarOverlay.hidden = true;
+        els.sidebarOverlay.setAttribute('hidden', '');
+      }
+      document.body.classList.remove('sidebar-open');
+      if (els.sidebar && !els.sidebar.classList.contains('open')) {
+        // leave user choice; do nothing
+      }
+    } else if (els.sidebar?.classList.contains('open')) {
+      openSidebar(); // ensure overlay shows
+    }
   });
   
   // ─── app shell ───────────────────────────────────────────────────────────────
@@ -538,6 +566,9 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.userName) els.userName.textContent = state.user.full_name;
     if (els.userRoleTag) els.userRoleTag.textContent = state.user.role;
     buildNav();
+    // Desktop: sidebar open by default; mobile: closed
+    if (isMobileNav()) closeSidebar();
+    else openSidebar();
     if (state.user.role === 'admin') {
       await loadMasterData(); switchView('add');
     } else {
@@ -2666,6 +2697,9 @@ export async function mountTaskflowApp(opts = {}) {
     if (titleEl) titleEl.textContent = '🎫 Tickets';
     if (subEl)   subEl.textContent   = 'Raise and track support issues.';
     els.ticketsList.innerHTML = '<div class="empty-state">Loading tickets…</div>';
+    if (els.ticketsTableBody) {
+      els.ticketsTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading tickets…</td></tr>';
+    }
     try {
       const tickets = await api('/tickets');
       renderTicketsList(tickets);
@@ -2682,6 +2716,9 @@ export async function mountTaskflowApp(opts = {}) {
       : 'All resolved / closed tickets.';
   
     els.ticketsList.innerHTML = `<div class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</div>`;
+    if (els.ticketsTableBody) {
+      els.ticketsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</td></tr>`;
+    }
     try {
       const tickets = await api('/tickets');
       const filtered = tickets.filter(t => t.status === statusFilter);
@@ -2690,28 +2727,36 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   function renderTicketsList(tickets, statusFilter) {
-    if (!tickets.length) {
-      const msg = statusFilter === 'Open' ? '🟠 No open tickets right now'
+    const emptyMsg = statusFilter === 'Open' ? '🟠 No open tickets right now'
                 : statusFilter === 'Resolved' ? '✅ No resolved tickets yet'
                 : '🎫 No tickets yet';
-      els.ticketsList.innerHTML = `<div class="empty-state"><span class="emoji">🎫</span>${msg}</div>`;
+    if (!tickets.length) {
+      if (els.ticketsList) {
+        els.ticketsList.innerHTML = `<div class="empty-state"><span class="emoji">🎫</span>${emptyMsg}</div>`;
+      }
+      if (els.ticketsTableBody) {
+        els.ticketsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">${emptyMsg}</td></tr>`;
+      }
       return;
     }
-    els.ticketsList.innerHTML = '';
-  
-    const isMisOrAdmin = state.user.role === 'admin'
-      || !!state.user.can_resolve_tickets
-      || !!state.user.is_mis_executive;
-  
-    //const canSolve = state.user.role === 'admin' || !!state.user.can_resolve_tickets;
+    if (els.ticketsList) els.ticketsList.innerHTML = '';
+    if (els.ticketsTableBody) els.ticketsTableBody.innerHTML = '';
+
     const canSolve = state.user.role === 'admin' || !!state.user.can_resolve_tickets || !!state.user.is_mis_executive;
-  
-    tickets.forEach((ticket) => {
+
+    tickets.forEach((ticket, idx) => {
+      const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
+      const raisedBy = ticket.raised_by_user?.full_name ?? '—';
+      const descShort = ticket.description.length > 100
+        ? `${ticket.description.slice(0, 100)}…`
+        : ticket.description;
+      const taskRef = ticket.task
+        ? `${ticket.task.project?.name ? `${ticket.task.project.name} · ` : ''}Task: ${ticket.task.description.slice(0, 60)}${ticket.task.description.length > 60 ? '…' : ''}`
+        : '';
+
+      // Mobile card
       const card = document.createElement('div');
       card.className = 'ticket-card';
-  
-      const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
-  
       card.innerHTML = `
         <div class="ticket-top">
           <div class="ticket-top-left">
@@ -2720,24 +2765,16 @@ export async function mountTaskflowApp(opts = {}) {
           </div>
           <div class="row-actions"></div>
         </div>
-  
-        ${ticket.task ? `
-          <div class="ticket-task-ref">
-            🔗 ${ticket.task.project?.name ? `<strong>${escapeHtml(ticket.task.project.name)}</strong> · ` : ''}Task: <em>${escapeHtml(ticket.task.description.slice(0,80))}${ticket.task.description.length > 80 ? '…' : ''}</em>
-          </div>` : ''}
-  
+        ${taskRef ? `<div class="ticket-task-ref">🔗 ${escapeHtml(taskRef)}</div>` : ''}
         <p class="ticket-desc">${escapeHtml(ticket.description)}</p>
-  
         ${ticket.attachment_url ? `
           <div class="ticket-media-row">
             <a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ticket-media-link">📎 Screenshot / Recording</a>
           </div>` : ''}
-  
         <div class="ticket-meta">
-          Raised by <strong>${escapeHtml(ticket.raised_by_user?.full_name ?? '—')}</strong>
+          Raised by <strong>${escapeHtml(raisedBy)}</strong>
           · ${fmtDate(ticket.created_at)}
         </div>
-  
         ${ticket.solution ? `
           <div class="ticket-solution-box">
             <div class="ticket-solution-header">💡 Solution</div>
@@ -2748,19 +2785,44 @@ export async function mountTaskflowApp(opts = {}) {
             </div>
           </div>` : ''}
       `;
-  
-      const actionsCell = card.querySelector('.row-actions');
-  
-      // Admin/resolver: show Solution button on open tickets
+      const cardActions = card.querySelector('.row-actions');
       if (canSolve && ticket.status === 'Open') {
         const solveBtn = document.createElement('button');
         solveBtn.className = 'action-btn action-verify';
         solveBtn.textContent = '💡 Solution';
         solveBtn.addEventListener('click', () => openSolutionModal(ticket));
-        actionsCell.appendChild(solveBtn);
+        cardActions.appendChild(solveBtn);
       }
-  
-      els.ticketsList.appendChild(card);
+      els.ticketsList?.appendChild(card);
+
+      // Desktop table row
+      if (els.ticketsTableBody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-sr">${idx + 1}</td>
+          <td>
+            <div class="cell-primary">${escapeHtml(descShort)}</div>
+            ${taskRef ? `<div class="cell-muted">${escapeHtml(taskRef)}</div>` : ''}
+            ${ticket.attachment_url ? `<a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ticket-media-link">📎 Attachment</a>` : ''}
+            ${ticket.solution ? `<div class="cell-muted" style="margin-top:4px">💡 ${escapeHtml(ticket.solution.slice(0, 80))}${ticket.solution.length > 80 ? '…' : ''}</div>` : ''}
+          </td>
+          <td>${escapeHtml(catLabel || '—')}</td>
+          <td>${escapeHtml(raisedBy)}<div class="cell-muted">${fmtDate(ticket.created_at)}</div></td>
+          <td class="col-status"><span class="pill ${ticket.status === 'Open' ? 'pill-Pending' : 'pill-Completed'}">${ticket.status}</span></td>
+          <td class="col-actions"><div class="row-actions"></div></td>
+        `;
+        const rowActions = tr.querySelector('.row-actions');
+        if (canSolve && ticket.status === 'Open') {
+          const solveBtn = document.createElement('button');
+          solveBtn.className = 'action-btn action-verify';
+          solveBtn.textContent = '💡 Solution';
+          solveBtn.addEventListener('click', () => openSolutionModal(ticket));
+          rowActions.appendChild(solveBtn);
+        } else {
+          rowActions.textContent = '—';
+        }
+        els.ticketsTableBody.appendChild(tr);
+      }
     });
   }
   
@@ -2793,6 +2855,9 @@ export async function mountTaskflowApp(opts = {}) {
   
   async function loadMyLeaves() {
     els.myLeavesList.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
+    if (els.myLeavesTableBody) {
+      els.myLeavesTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading your leave requests…</td></tr>';
+    }
     try {
       const leaves = await api('/leaves/my');
       renderMyLeavesList(leaves);
@@ -2814,11 +2879,18 @@ export async function mountTaskflowApp(opts = {}) {
   
   function renderMyLeavesList(leaves) {
     if (!leaves.length) {
-      els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
+      if (els.myLeavesList) {
+        els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
+      }
+      if (els.myLeavesTableBody) {
+        els.myLeavesTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests yet</td></tr>`;
+      }
       return;
     }
-    els.myLeavesList.innerHTML = '';
-    leaves.forEach((leave) => {
+    if (els.myLeavesList) els.myLeavesList.innerHTML = '';
+    if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
+
+    leaves.forEach((leave, idx) => {
       const card = document.createElement('div');
       card.className = 'ticket-card';
       card.innerHTML = `
@@ -2848,13 +2920,48 @@ export async function mountTaskflowApp(opts = {}) {
         });
         actionsCell.appendChild(cancelBtn);
       }
-      els.myLeavesList.appendChild(card);
+      els.myLeavesList?.appendChild(card);
+
+      if (els.myLeavesTableBody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-sr">${idx + 1}</td>
+          <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
+          <td>
+            <div class="cell-primary">${escapeHtml(leave.reason)}</div>
+            ${leave.decision_note ? `<div class="cell-muted">Note: ${escapeHtml(leave.decision_note)}</div>` : ''}
+          </td>
+          <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
+          <td>${fmtDate(leave.created_at)}</td>
+          <td class="col-actions"><div class="row-actions"></div></td>
+        `;
+        const rowActions = tr.querySelector('.row-actions');
+        if (leave.status === 'Pending') {
+          const cancelBtn = document.createElement('button');
+          cancelBtn.className = 'action-btn action-reject';
+          cancelBtn.textContent = '✕ Cancel';
+          cancelBtn.addEventListener('click', async () => {
+            if (!confirm('Cancel this leave request?')) return;
+            try {
+              await api(`/leaves/${leave.id}`, { method: 'DELETE' });
+              showToast('Leave request cancelled', 'success'); loadMyLeaves();
+            } catch (err) { showToast(err.message, 'error'); }
+          });
+          rowActions.appendChild(cancelBtn);
+        } else {
+          rowActions.textContent = '—';
+        }
+        els.myLeavesTableBody.appendChild(tr);
+      }
     });
   }
   
   // ─── Leave: approvals (admin) ──────────────────────────────────────────────────
   async function loadLeaveApprovals() {
     els.leaveApprovalsList.innerHTML = '<div class="empty-state">Loading leave requests…</div>';
+    if (els.leaveApprovalsTableBody) {
+      els.leaveApprovalsTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading leave requests…</td></tr>';
+    }
     try {
       const status = els.leaveApprovalsStatusFilter.value;
       const leaves = await api(`/leaves/all${status ? `?status=${encodeURIComponent(status)}` : ''}`);
@@ -2865,11 +2972,19 @@ export async function mountTaskflowApp(opts = {}) {
   
   function renderLeaveApprovalsList(leaves) {
     if (!leaves.length) {
-      els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
+      if (els.leaveApprovalsList) {
+        els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
+      }
+      if (els.leaveApprovalsTableBody) {
+        els.leaveApprovalsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests found</td></tr>`;
+      }
       return;
     }
-    els.leaveApprovalsList.innerHTML = '';
-    leaves.forEach((leave) => {
+    if (els.leaveApprovalsList) els.leaveApprovalsList.innerHTML = '';
+    if (els.leaveApprovalsTableBody) els.leaveApprovalsTableBody.innerHTML = '';
+
+    leaves.forEach((leave, idx) => {
+      const empName = leave.user?.full_name ?? '—';
       const card = document.createElement('div');
       card.className = 'ticket-card';
       card.innerHTML = `
@@ -2877,7 +2992,7 @@ export async function mountTaskflowApp(opts = {}) {
           <span class="pill ${leavePillClass(leave.status)}">${leave.status}</span>
           <div class="row-actions"></div>
         </div>
-        <div class="ticket-desc"><strong>${escapeHtml(leave.user?.full_name ?? '—')}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+        <div class="ticket-desc"><strong>${escapeHtml(empName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
         <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
         ${leave.decision_note ? `<div class="ticket-meta">Decision note: ${escapeHtml(leave.decision_note)}</div>` : ''}
         <div class="ticket-meta">
@@ -2887,7 +3002,6 @@ export async function mountTaskflowApp(opts = {}) {
       `;
       if (leave.status === 'Pending') {
         const actionsCell = card.querySelector('.row-actions');
-  
         const approveBtn = document.createElement('button');
         approveBtn.className = 'action-btn action-complete';
         approveBtn.textContent = '✅ Approve';
@@ -2897,16 +3011,50 @@ export async function mountTaskflowApp(opts = {}) {
             showToast('Leave approved ✅', 'success'); loadLeaveApprovals();
           } catch (err) { showToast(err.message, 'error'); }
         });
-  
         const rejectBtn = document.createElement('button');
         rejectBtn.className = 'action-btn action-reject';
         rejectBtn.textContent = '✕ Reject';
         rejectBtn.addEventListener('click', () => openRejectLeaveModal(leave.id));
-  
         actionsCell.appendChild(approveBtn);
         actionsCell.appendChild(rejectBtn);
       }
-      els.leaveApprovalsList.appendChild(card);
+      els.leaveApprovalsList?.appendChild(card);
+
+      if (els.leaveApprovalsTableBody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-sr">${idx + 1}</td>
+          <td>${escapeHtml(empName)}</td>
+          <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
+          <td>
+            <div class="cell-primary">${escapeHtml(leave.reason)}</div>
+            ${leave.decision_note ? `<div class="cell-muted">${escapeHtml(leave.decision_note)}</div>` : ''}
+          </td>
+          <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
+          <td class="col-actions"><div class="row-actions"></div></td>
+        `;
+        const rowActions = tr.querySelector('.row-actions');
+        if (leave.status === 'Pending') {
+          const approveBtn = document.createElement('button');
+          approveBtn.className = 'action-btn action-complete';
+          approveBtn.textContent = '✅ Approve';
+          approveBtn.addEventListener('click', async () => {
+            try {
+              await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
+              showToast('Leave approved ✅', 'success'); loadLeaveApprovals();
+            } catch (err) { showToast(err.message, 'error'); }
+          });
+          const rejectBtn = document.createElement('button');
+          rejectBtn.className = 'action-btn action-reject';
+          rejectBtn.textContent = '✕ Reject';
+          rejectBtn.addEventListener('click', () => openRejectLeaveModal(leave.id));
+          rowActions.appendChild(approveBtn);
+          rowActions.appendChild(rejectBtn);
+        } else {
+          rowActions.textContent = '—';
+        }
+        els.leaveApprovalsTableBody.appendChild(tr);
+      }
     });
   }
   

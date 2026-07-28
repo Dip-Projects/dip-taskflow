@@ -91,27 +91,23 @@ export function isHead(user) {
   return !!(user?.is_head || user?.can_access_site);
 }
 
-/** Site portal head/incharge (oversight of team submissions) */
+/** Site portal oversight (team submissions) */
 export function isSiteHead(user) {
   if (!user) return false;
   if (user.is_head || user.can_access_site) return true;
   const role = (user.role || '').toLowerCase().trim();
   if (role === 'admin') return true;
-  const desig = (user.designation || user.site_role || user.role || '').toLowerCase().trim();
-  return (
-    desig === 'project head' ||
-    desig === 'site incharge' ||
-    desig.includes('head') ||
-    desig.includes('incharge')
-  );
+  const desig = (user.designation || user.site_role || '').toLowerCase().trim();
+  return desig === 'project head' || desig === 'site incharge';
 }
 
 export function canToggleSite(user) {
   // Pure site engineers stay on /site only.
-  // Admin, is_head, and Project Head / Site Incharge get Office ↔ Site toggle.
+  // Admin / is_head / Project Head / Site Incharge only (exact designation).
   if (!user || isSiteEngineer(user)) return false;
-  if (isHead(user)) return true;
+  if (user.is_head || user.can_access_site) return true;
   const role = (user.role || '').toLowerCase().trim();
   if (role === 'admin') return true;
-  return isSiteHead(user);
+  const desig = (user.designation || '').toLowerCase().trim();
+  return desig === 'project head' || desig === 'site incharge';
 }
