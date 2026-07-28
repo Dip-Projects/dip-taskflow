@@ -45,11 +45,21 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 
-// SPA fallback for React Router
+// SPA fallback for React Router (local :4000). On Vercel, static + SPA rewrite
+// come from vercel.json outputDirectory — this still helps if public is present.
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/legacy')) return next();
-  res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
-    if (err) next();
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error('SPA index missing:', indexPath, err.message);
+      res
+        .status(500)
+        .type('text')
+        .send(
+          'Frontend build missing (public/index.html). On Vercel: Root Directory must be "backend", and build must run frontend npm run build.'
+        );
+    }
   });
 });
 
