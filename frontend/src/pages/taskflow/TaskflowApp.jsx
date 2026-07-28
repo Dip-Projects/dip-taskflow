@@ -1,9 +1,8 @@
-import { useEffect, useState, memo } from 'react';
+import { useEffect, memo } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import TaskflowDom from './TaskflowDom';
 import { mountTaskflowApp } from './mountTaskflowApp';
-import TaskflowReactShell from './react/TaskflowReactShell';
 import './taskflow.css';
 import '../SurfaceToggle.css';
 
@@ -11,15 +10,14 @@ import '../SurfaceToggle.css';
 const StableTaskflowDom = memo(TaskflowDom, () => true);
 
 /**
- * Office TaskFlow: React phase-1 shell by default; Classic (legacy) on demand.
+ * Office TaskFlow: Classic UI (same look as before).
  */
 export default function TaskflowApp() {
   const { user, token, isAuthenticated, logout, canToggleSite } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState('react'); // 'react' | 'classic'
 
   useEffect(() => {
-    if (!isAuthenticated || mode !== 'classic') return;
+    if (!isAuthenticated) return;
 
     let cancelled = false;
     let tries = 0;
@@ -60,7 +58,7 @@ export default function TaskflowApp() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, mode, token, user, logout, navigate]);
+  }, [isAuthenticated, token, user, logout, navigate]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
@@ -104,18 +102,7 @@ export default function TaskflowApp() {
         className="tf-legacy-frame"
         style={{ overflow: 'auto', height: '100%' }}
       >
-        {mode === 'react' ? (
-          <TaskflowReactShell onOpenClassic={() => setMode('classic')} />
-        ) : (
-          <>
-            <div style={{ padding: '8px 12px', background: '#fff7ed', borderBottom: '1px solid #fed7aa' }}>
-              <button type="button" onClick={() => setMode('react')}>
-                ← Back to React TaskFlow
-              </button>
-            </div>
-            <StableTaskflowDom />
-          </>
-        )}
+        <StableTaskflowDom />
       </div>
     </div>
   );
