@@ -1,0 +1,21 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+**/.env
+!**/.env.example
+
+# Dependencies
+node_modules/
+
+# Build output (built on Vercel / locally via npm run build)
+frontend/dist/
+backend/public/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log

@@ -1,7 +1,15 @@
 {
   "version": 2,
+  "installCommand": "npm install && cd ../frontend && npm install",
+  "buildCommand": "cd ../frontend && npm run build",
   "builds": [
-    { "src": "index.js", "use": "@vercel/node" }
+    {
+      "src": "index.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["public/**", "legacy/**", "routes/**", "middleware/**", "lib/**"]
+      }
+    }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "index.js" }

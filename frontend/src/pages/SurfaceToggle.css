@@ -1,0 +1,74 @@
+.tf-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #1c1410;
+}
+.tf-surface-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: #2a1f18;
+  color: #f5ebe0;
+  flex-shrink: 0;
+  z-index: 20;
+}
+.tf-surface-label {
+  font-size: 0.8rem;
+  opacity: 0.75;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tf-surface-toggle {
+  display: inline-flex;
+  background: #1c1410;
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.tf-surface-toggle button {
+  border: none;
+  background: transparent;
+  color: #c4b5a5;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tf-surface-toggle button.active,
+.tf-surface-toggle button:hover:not(:disabled) {
+  background: #c45c26;
+  color: #fff;
+}
+.tf-surface-toggle button:disabled.active {
+  cursor: default;
+}
+.tf-surface-logout {
+  margin-left: auto;
+  border: 1px solid #5a4638;
+  background: transparent;
+  color: #f5ebe0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.tf-legacy-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  min-height: 0;
+}
+.site-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.site-shell-body {
+  flex: 1;
+  min-height: 0;
+}

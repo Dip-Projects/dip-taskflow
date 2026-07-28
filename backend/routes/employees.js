@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, created_at, reporting_head_id')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, created_at, reporting_head_id, is_head, site_name, site_names')
       .order('created_at', { ascending: true });
     if (error) throw error;
     res.json(await attachReportingHead(data));
@@ -85,7 +85,10 @@ router.get('/', async (req, res) => {
 // ----------------------------- add employee -----------------------------
 router.post('/', async (req, res) => {
   try {
-    const { full_name, department, designation, role, reporting_head_id } = req.body || {};
+    const {
+      full_name, department, designation, role, reporting_head_id,
+      is_head, site_name, site_names, password: customPassword
+    } = req.body || {};
 
     if (!full_name || !department || !designation || !role) {
       return res.status(400).json({ error: 'Please fill in all required fields' });
@@ -95,16 +98,21 @@ router.post('/', async (req, res) => {
     }
 
     const username = await generateUniqueUsername(full_name);
-    const password = generatePassword();
+    const password = customPassword && String(customPassword).trim()
+      ? String(customPassword).trim()
+      : generatePassword();
     const password_hash = await bcrypt.hash(password, 10);
 
     const { data, error } = await supabase
       .from('users')
       .insert({
         username, password_hash, full_name, department, designation, role, is_active: true,
-        reporting_head_id: reporting_head_id || null // optional — left blank means "no reporting head / top level"
+        reporting_head_id: reporting_head_id || null,
+        is_head: !!is_head,
+        site_name: site_name || null,
+        site_names: site_names || null
       })
-      .select('id, username, full_name, department, designation, role, is_active, reporting_head_id')
+      .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names')
       .single();
 
     if (error) throw error;
@@ -123,12 +131,19 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, reporting_head_id } = req.body || {};
+    const {
+      full_name, department, designation, role, is_active, can_verify,
+      is_mis_executive, can_add_site, can_add_employee, reporting_head_id,
+      is_head, site_name, site_names
+    } = req.body || {};
 
     const updates = {};
     if (full_name !== undefined) updates.full_name = full_name;
     if (department !== undefined) updates.department = department;
     if (designation !== undefined) updates.designation = designation;
+    if (is_head !== undefined) updates.is_head = !!is_head;
+    if (site_name !== undefined) updates.site_name = site_name;
+    if (site_names !== undefined) updates.site_names = site_names;
     if (role !== undefined) {
       if (!['admin', 'employee'].includes(role)) {
         return res.status(400).json({ error: 'Role must be admin or employee' });

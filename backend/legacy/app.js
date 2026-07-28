@@ -1,4 +1,5 @@
-const API_BASE = 'https://dip-taskflow-v2.vercel.app/api';
+const API_BASE = '/api';
+// Absolute path so /legacy iframe still hits the Express API, not /legacy/api.
 // =====================================================================
 
 const els = {

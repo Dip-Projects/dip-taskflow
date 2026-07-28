@@ -7,7 +7,8 @@
     "start": "node index.js",
     "dev": "node index.js",
     "seed": "node scripts/seed.js",
-    "add-employee": "node scripts/addEmployee.js"
+    "add-employee": "node scripts/addEmployee.js",
+    "build:frontend": "cd ../frontend && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
