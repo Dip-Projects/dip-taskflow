@@ -12,6 +12,16 @@ const USER_SELECT_BASIC =
   'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, department, department_id, designation';
 
 function toPayload(user) {
+  const role = (user.role || '').toLowerCase();
+  const desig = (user.designation || '').toLowerCase();
+  const isHeadFlag =
+    !!user.is_head ||
+    role === 'admin' ||
+    desig === 'project head' ||
+    desig === 'site incharge' ||
+    desig.includes('head') ||
+    desig.includes('incharge');
+
   return {
     id: user.id,
     username: user.username,
@@ -20,8 +30,8 @@ function toPayload(user) {
     department: user.department,
     department_id: user.department_id,
     designation: user.designation || '',
-    is_head: !!user.is_head,
-    can_access_site: !!user.is_head,
+    is_head: !!user.is_head || isHeadFlag,
+    can_access_site: isHeadFlag,
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     can_verify: !!user.can_verify,

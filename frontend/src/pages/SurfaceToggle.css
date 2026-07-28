@@ -8,16 +8,19 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: #2a1f18;
   color: #f5ebe0;
   flex-shrink: 0;
-  z-index: 20;
+  z-index: 30;
+  position: sticky;
+  top: 0;
+  border-bottom: 2px solid #c45c26;
 }
 .tf-surface-label {
   font-size: 0.8rem;
-  opacity: 0.75;
-  font-weight: 600;
+  opacity: 0.9;
+  font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -27,15 +30,16 @@
   border-radius: 999px;
   padding: 3px;
   gap: 2px;
+  border: 1px solid #5a4638;
 }
 .tf-surface-toggle button {
   border: none;
   background: transparent;
-  color: #c4b5a5;
-  padding: 6px 14px;
+  color: #e8d5c4;
+  padding: 8px 16px;
   border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.9rem;
+  font-weight: 700;
   cursor: pointer;
 }
 .tf-surface-toggle button.active,
