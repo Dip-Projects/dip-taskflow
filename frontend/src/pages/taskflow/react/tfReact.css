@@ -233,6 +233,60 @@
   letter-spacing: 0.03em;
   color: #7a6558;
 }
+.tfr-master-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.tfr-master-grid .tfr-card h3 {
+  margin: 0 0 12px;
+}
+.tfr-inline {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.tfr-inline input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d4c4b5;
+}
+.tfr-inline button {
+  border: none;
+  background: #c45c26;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tfr-plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+.tfr-plain-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0e6dc;
+  font-size: 0.9rem;
+}
+.tfr-table a {
+  margin-right: 8px;
+  color: #9a3412;
+}
+.tfr-actions .ghost,
+button.ghost {
+  border: 1px solid #c96a10;
+  background: #fff;
+  color: #7a2e00;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
 @media (max-width: 768px) {
   .tfr-shell {
     flex-direction: column;
