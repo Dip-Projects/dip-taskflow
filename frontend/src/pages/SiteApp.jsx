@@ -34,13 +34,13 @@ export default function SiteApp() {
     <div className="site-shell">
       {canToggleSite && (
         <div className="tf-surface-bar">
-          <span className="tf-surface-label">Head view</span>
+          <span className="tf-surface-label">Switch view</span>
           <div className="tf-surface-toggle">
             <button type="button" onClick={goApp}>
-              TaskFlow
+              Switch to Office
             </button>
             <button type="button" className="active" disabled>
-              Site Engineer
+              Site
             </button>
           </div>
           <button type="button" className="tf-surface-logout" onClick={doLogout}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
@@ -15,7 +15,7 @@ import "./SitePortal.css";
 import { computeMonthlyLeaveBalance, isMonthlyLeaveRole } from "./leaveUtils.js";
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
-import { syncSiteUser } from '../../lib/api';
+import { syncSiteUser, isSiteHead } from '../../lib/api';
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
 
@@ -427,34 +427,49 @@ const Ico = {
 };
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
-const NAV = [
-  { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
-  { key: "calendar", label: "Attendance", icon: Ico.cal },
-  {
-    section: "leave",
-    label: "Leave",
-    children: [
-      { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
-      { key: "my-leave", label: "My Leave", icon: Ico.leave },
-    ],
-  },
-  {
-    section: "reports",
-    label: "Reports",
-    children: [
-      { key: "daily-report", label: "Daily Report", icon: Ico.report },
-      { key: "wpr-generator", label: "Weekly Report", icon: Ico.weekly },
-      { key: "site-report", label: "Site Visit Report", icon: Ico.site },
-      { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
-      { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
-    ],
-  },
-];
+/** Base Site Engineer menu + Head oversight items when isSiteHead */
+function buildNav(user) {
+  const leaveChildren = [
+    { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
+    { key: "my-leave", label: "My Leave", icon: Ico.leave },
+  ];
+  if (isSiteHead(user) || user?._isApprover) {
+    leaveChildren.push({
+      key: "leave-approvals",
+      label: "Leave Approvals",
+      icon: Ico.leave,
+    });
+  }
 
-const ALL_ITEMS = [
-  ...NAV.flatMap((n) => (n.children ? n.children : [n])),
-  { key: "profile", label: "Profile & Settings", icon: Ico.profile },
-];
+  const reportChildren = [
+    { key: "daily-report", label: "Daily Report (DPR)", icon: Ico.report },
+    { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
+    { key: "site-report", label: "Site Visit Report", icon: Ico.site },
+    { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
+    { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
+  ];
+  if (isSiteHead(user)) {
+    reportChildren.push({
+      key: "report-submissions",
+      label: "Team Submissions",
+      icon: Ico.myRpt,
+    });
+  }
+
+  return [
+    { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
+    { key: "calendar", label: "Attendance", icon: Ico.cal },
+    { section: "leave", label: "Leave", children: leaveChildren },
+    { section: "reports", label: "Reports", children: reportChildren },
+  ];
+}
+
+function buildAllItems(user) {
+  return [
+    ...buildNav(user).flatMap((n) => (n.children ? n.children : [n])),
+    { key: "profile", label: "Profile & Settings", icon: Ico.profile },
+  ];
+}
 
 function DateField({
   value,
@@ -1756,8 +1771,7 @@ const markLeavesSeen = useCallback(async (u) => {
     navigate("/login", { replace: true });
   };
   const fetchSiteReports = useCallback(async (u) => {
-    const role = u?.role?.toLowerCase().trim();
-    if (!u || (role !== "project head" && role !== "site incharge")) return;
+    if (!u || !isSiteHead(u)) return;
     setLoadingReports(true);
 
     const sites =
@@ -1768,6 +1782,7 @@ const markLeavesSeen = useCallback(async (u) => {
           : [];
 
     if (!sites.length) {
+      setSiteReports([]);
       setLoadingReports(false);
       return;
     }
@@ -1789,6 +1804,13 @@ const markLeavesSeen = useCallback(async (u) => {
       )
       .order("created_at", { ascending: false });
 
+    const { data: wprData } = await supabase
+      .from("wpr_reports")
+      .select(
+        "id, site_name, engineer_name, report_date, report_number, presentation_url, status, submitted_by, created_at",
+      )
+      .order("created_at", { ascending: false });
+
     const normalized = [
       ...(dprData || [])
         .filter(
@@ -1804,13 +1826,28 @@ const markLeavesSeen = useCallback(async (u) => {
         .map((r) => ({
           id: r.id,
           site: r.site_name,
-          engineer: r.reporter_name,
+          engineer: r.reporter_name || r.submitted_by_name,
           report_type: "site_visit",
           date: r.visit_date,
           pdf_url: r.pdf_url,
           created_at: r.created_at,
           source: "svr",
           progress_of_work: r.progress_of_work,
+        })),
+      ...(wprData || [])
+        .filter((r) =>
+          sitesLower.includes((r.site_name || "").toLowerCase().trim()),
+        )
+        .map((r) => ({
+          id: r.id,
+          site: r.site_name,
+          engineer: r.engineer_name || r.submitted_by,
+          report_type: "wpr",
+          date: r.report_date,
+          pdf_url: r.presentation_url,
+          created_at: r.created_at,
+          source: "wpr",
+          report_number: r.report_number,
         })),
     ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -1868,6 +1905,10 @@ useEffect(() => {
           .maybeSingle();
         if (error) {
           console.warn("site_user_details refresh failed", error.message);
+          fetchSiteReports(parsed);
+          checkLeaveUpdates(parsed);
+          checkApprovalsPending(parsed);
+          checkIsApprover(parsed);
           return;
         }
         if (data) {
@@ -1877,6 +1918,7 @@ useEffect(() => {
             site_names:
               data.site_names ?? (parsed.site_name ? [parsed.site_name] : []),
             department: data.department ?? parsed.department,
+            is_head: parsed.is_head,
           };
           setUser(updated);
           localStorage.setItem("user", JSON.stringify(updated)); // keep localStorage fresh
@@ -1884,7 +1926,6 @@ useEffect(() => {
           checkLeaveUpdates(updated);
           checkApprovalsPending(updated);
           checkIsApprover(updated);
-       
 
           const site = updated.site_names?.[0] || updated.site_name || "";
           if (site) {
@@ -1896,6 +1937,11 @@ useEffect(() => {
                 .eq("status", "received");
             } catch { /* table optional */ }
           }
+        } else {
+          fetchSiteReports(parsed);
+          checkLeaveUpdates(parsed);
+          checkApprovalsPending(parsed);
+          checkIsApprover(parsed);
         }
         } catch (err) {
           console.warn("site user refresh error", err);
@@ -1931,7 +1977,6 @@ useEffect(() => {
         mainRef.current.scrollTo({ top: 0, behavior: "smooth" });
     }, 0);
   };
-  const activeItem = ALL_ITEMS.find((i) => i.key === activeTab);
 
   if (!userReady)
     return (
@@ -1942,6 +1987,11 @@ useEffect(() => {
     );
 
   if (!user) return <Navigate to="/login" replace />;
+
+  const navUser = { ...user, _isApprover: isApprover };
+  const NAV = buildNav(navUser);
+  const ALL_ITEMS = buildAllItems(navUser);
+  const activeItem = ALL_ITEMS.find((i) => i.key === activeTab);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -1985,8 +2035,7 @@ useEffect(() => {
           />
         );
       case "report-submissions": {
-        const role = user?.role?.toLowerCase().trim();
-        if (role !== "project head" && role !== "site incharge") return null;
+        if (!isSiteHead(user)) return null;
 
         const fmtD = (d) =>
           d
@@ -2879,7 +2928,7 @@ useEffect(() => {
                 );
               })}
 
-              {/* Report Submissions removed — not in Site Engineer image scope */}
+              {/* Head: Team Submissions + Leave Approvals are in buildNav() */}
             </nav>
 
             {/* Settings pinned to bottom */}

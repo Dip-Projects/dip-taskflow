@@ -34,6 +34,7 @@ export function syncSiteUser(user) {
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     designation: user.designation || user.department || '',
+    is_head: !!(user.is_head || user.can_access_site),
   };
   localStorage.setItem('user', JSON.stringify(siteUser));
 }
@@ -88,6 +89,14 @@ export function isSiteEngineer(user) {
 
 export function isHead(user) {
   return !!(user?.is_head || user?.can_access_site);
+}
+
+/** Site portal head/incharge (oversight of team submissions) */
+export function isSiteHead(user) {
+  if (!user) return false;
+  if (user.is_head || user.can_access_site) return true;
+  const role = (user.role || user.designation || '').toLowerCase().trim();
+  return role === 'project head' || role === 'site incharge';
 }
 
 export function canToggleSite(user) {
