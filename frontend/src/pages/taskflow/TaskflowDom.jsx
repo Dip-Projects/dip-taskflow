@@ -29,7 +29,7 @@ export default function TaskflowDom() {
       <aside id="sidebar" className="sidebar">
         <nav id="navList" className="nav-list"></nav>
       </aside>
-      <div id="sidebarOverlay" className="sidebar-overlay" hidden={true}></div>
+      <div id="sidebarOverlay" className="sidebar-overlay" hidden></div>
 
       <main id="mainContent" className="main-content">
 

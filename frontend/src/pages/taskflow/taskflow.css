@@ -240,16 +240,25 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
 .sidebar-overlay {
   position: fixed; inset: var(--topbar-h) 0 0 0;
   background: rgba(15,17,35,.45); z-index: 14; backdrop-filter: blur(2px);
+  cursor: pointer;
 }
-.sidebar-overlay[hidden] { display: none; }
+.sidebar-overlay[hidden] { display: none !important; }
 
 @media (max-width: 768px) {
-  .sidebar { position: fixed; left: 0; top: var(--topbar-h); transform: translateX(-100%); }
+  .sidebar {
+    position: fixed; left: 0; top: var(--topbar-h);
+    transform: translateX(-100%);
+    z-index: 16;
+    box-shadow: 8px 0 24px rgba(0,0,0,.18);
+  }
   .sidebar.open { transform: translateX(0); }
   .main-content { padding: 16px 14px 40px; }
+  .icon-btn { display: inline-flex !important; }
 }
 @media (min-width: 769px) {
-  .icon-btn { display: none; }
+  .icon-btn#menuToggle { display: none !important; }
+  .sidebar { transform: none !important; }
+  .sidebar-overlay { display: none !important; }
 }
 
 /* ================================================================
@@ -321,16 +330,25 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
   overflow-x: auto;
 }
 
-/* Desktop = table, mobile = cards (used for "All delegated tasks",
-   "My tasks", and "Manage employees"), so nobody has to deal with a
-   cramped, side-scrolling table on a phone. !important guards against
-   any other display rule (e.g. .employee-card-list, .task-list)
-   winning the fight. */
+/* Desktop = table, mobile = cards */
 .view-mobile-only { display: none !important; }
 .view-desktop-only { display: block !important; }
 @media (max-width: 768px) {
   .view-desktop-only { display: none !important; }
-  .view-mobile-only { display: flex !important; }
+  .view-mobile-only { display: flex !important; flex-direction: column; }
+}
+/* Hard lock: never show card lists on desktop widths */
+@media (min-width: 769px) {
+  .view-mobile-only,
+  #employeesCards,
+  .employee-card-list.view-mobile-only,
+  .task-list.view-mobile-only {
+    display: none !important;
+  }
+  .table-card.view-desktop-only,
+  .view-desktop-only {
+    display: block !important;
+  }
 }
 
 .perm-col { text-align: center; }
@@ -548,6 +566,22 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
 .card-menu-item:disabled:hover { background: none; }
 
 /* Employee table specific */
+@media (min-width: 769px) {
+  #view-employees .table-card.view-desktop-only {
+    display: block !important;
+  }
+  #view-employees .data-table {
+    display: table !important;
+    width: 100%;
+    min-width: 900px;
+  }
+  #view-employees .data-table thead { display: table-header-group !important; }
+  #view-employees .data-table tbody { display: table-row-group !important; }
+  #view-employees .data-table tr { display: table-row !important; }
+  #view-employees .data-table th,
+  #view-employees .data-table td { display: table-cell !important; }
+  #employeesCards { display: none !important; }
+}
 .status-toggle {
   border: none; border-radius: 999px; padding: 4px 12px;
   font-size: 0.68rem; font-weight: 700; text-transform: uppercase; cursor: pointer;

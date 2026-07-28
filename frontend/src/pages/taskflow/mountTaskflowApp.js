@@ -497,19 +497,40 @@ export async function mountTaskflowApp(opts = {}) {
   bindAuthControls();
 
   // ─── sidebar toggle (mobile) ─────────────────────────────────────────────────
+  function closeSidebar() {
+    els.sidebar?.classList.remove('open');
+    if (els.sidebarOverlay) {
+      els.sidebarOverlay.hidden = true;
+      els.sidebarOverlay.setAttribute('hidden', '');
+    }
+    document.body.classList.remove('sidebar-open');
+  }
+  function openSidebar() {
+    els.sidebar?.classList.add('open');
+    if (els.sidebarOverlay) {
+      els.sidebarOverlay.hidden = false;
+      els.sidebarOverlay.removeAttribute('hidden');
+    }
+    document.body.classList.add('sidebar-open');
+  }
   if (els.menuToggle) {
-    els.menuToggle?.addEventListener('click', () => {
-      els.sidebar?.classList.add('open');
-      if (els.sidebarOverlay) els.sidebarOverlay.hidden = false;
+    els.menuToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (els.sidebar?.classList.contains('open')) closeSidebar();
+      else openSidebar();
     });
   }
   if (els.sidebarOverlay) {
-    els.sidebarOverlay?.addEventListener('click', closeSidebar);
+    els.sidebarOverlay.addEventListener('click', closeSidebar);
   }
-  function closeSidebar() {
-    els.sidebar?.classList.remove('open');
-    if (els.sidebarOverlay) els.sidebarOverlay.hidden = true;
-  }
+  // Tap main content / topbar brand area to dismiss drawer on mobile
+  const mainContent = document.getElementById('mainContent');
+  mainContent?.addEventListener('click', () => {
+    if (els.sidebar?.classList.contains('open')) closeSidebar();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSidebar();
+  });
   
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
