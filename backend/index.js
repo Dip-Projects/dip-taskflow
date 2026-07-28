@@ -31,37 +31,38 @@ app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));
 app.get('/api/health', (_, res) => res.json({ status: 'ok' }));
 
-// Legacy vanilla TaskFlow UI (embedded in React /app iframe)
+// Legacy vanilla TaskFlow UI
 app.use('/legacy', express.static(path.join(__dirname, 'legacy'), {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   }
 }));
 
-// React build (frontend/dist → public via build script)
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-  }
-}));
-
-// SPA fallback for React Router (local :4000). On Vercel, static + SPA rewrite
-// come from vercel.json outputDirectory — this still helps if public is present.
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/legacy')) return next();
-  const indexPath = path.join(__dirname, 'public', 'index.html');
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error('SPA index missing:', indexPath, err.message);
-      res
-        .status(500)
-        .type('text')
-        .send(
-          'Frontend build missing (public/index.html). On Vercel: Root Directory must be "backend", and build must run frontend npm run build.'
-        );
+// React static files — local :4000 only.
+// On Vercel, frontend/dist is served by the CDN (outputDirectory). Do NOT
+// serve public/*.js from this Node function or Vercel rewrites them to CJS
+// ("exports is not defined" blank page).
+if (!process.env.VERCEL) {
+  app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
+  }));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/legacy')) return next();
+    const indexPath = path.join(__dirname, 'public', 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error('SPA index missing:', indexPath, err.message);
+        res
+          .status(500)
+          .type('text')
+          .send('Frontend build missing (public/index.html). Run: cd frontend && npm run build');
+      }
+    });
   });
-});
+}
 
 const PORT = process.env.PORT || 4000;
 
