@@ -1,0 +1,5 @@
+{
+  "name": "dip-taskflow",
+  "private": true,
+  "description": "DIP TaskFlow — Vercel deploys from repo root (see vercel.json)"
+}

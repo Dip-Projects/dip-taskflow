@@ -11,6 +11,7 @@ node_modules/
 # Build output (built on Vercel / locally via npm run build)
 frontend/dist/
 backend/public/
+/public/
 
 # OS / editor
 .DS_Store

@@ -62,6 +62,23 @@ if (!process.env.VERCEL) {
       }
     });
   });
+} else {
+  // If Root Directory is wrongly set to "backend", static CDN is skipped and
+  // Express receives "/". Point operators at the correct Vercel setting.
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/legacy')) return next();
+    res
+      .status(503)
+      .type('html')
+      .send(
+        '<!doctype html><meta charset=utf-8><title>DIP TaskFlow</title>' +
+          '<body style="font-family:sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">' +
+          '<h1>Deploy config</h1>' +
+          '<p>UI is not being served. In Vercel → Settings → General → <b>Root Directory</b>, clear it (use repo root), then Redeploy.</p>' +
+          '<p>API is up: <a href="/api/health">/api/health</a></p>' +
+          '</body>'
+      );
+  });
 }
 
 const PORT = process.env.PORT || 4000;

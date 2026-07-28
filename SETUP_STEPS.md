@@ -110,22 +110,14 @@ Jab upar sab chal jaye, tab dip-projects Supabase se tables export/import karo
 
 Repo: `https://github.com/DivyankaOp/dip-taskflow`
 
-1. Vercel project **dip-taskflow** → **Settings** → **General** → **Root Directory**
-   - **Clear / empty** (repo root `.`) — **NOT** `backend`
-2. **Build & Development** → Output Directory empty (comes from root `vercel.json` → `frontend/dist`)
-3. **Environment Variables** (Production + Preview; Build ke liye bhi):
-
-| Name | Where from |
-|------|------------|
-| `SUPABASE_URL` | backend `.env` |
-| `SUPABASE_SERVICE_ROLE_KEY` | backend `.env` (service_role only) |
-| `SUPABASE_ANON_KEY` | backend `.env` |
-| `JWT_SECRET` | backend `.env` |
-| `VITE_SUPABASE_URL` | frontend `.env` |
-| `VITE_SUPABASE_ANON_KEY` | frontend `.env` |
-| `VITE_API_BASE` | `/api` |
-
-4. **Redeploy** → `https://dip-taskflow.vercel.app` pe login page (not blank / `exports is not defined`)
+1. Vercel → **Settings → General → Root Directory**
+   - **Empty / clear** (repo root) — **NOT** `backend`
+   - Save
+2. **Settings → Build & Development**
+   - Framework: Other / override off
+   - Output Directory: **empty** (root `public/` use hota hai)
+3. Env vars (already set): `SUPABASE_*`, `JWT_SECRET`, `VITE_*`
+4. **Redeploy** → open site — login page aani chahiye
 
 **Note:** `SUPABASE_SERVICE_ROLE_KEY` kabhi `VITE_*` mein mat dalna.  
 Large PPT uploads Hobby plan pe ~4.5MB limit se fail ho sakte hain.

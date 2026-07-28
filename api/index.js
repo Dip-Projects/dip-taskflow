@@ -1,6 +1,6 @@
 /**
  * Vercel serverless entry (repo root).
- * Static React files are served from frontend/dist via vercel.json outputDirectory.
- * This function only handles /api/*, /config.js, and /legacy/*.
+ * Handles /api/*, /config.js, /legacy/* only.
+ * React UI is served from /public (CDN) — not from this function.
  */
 module.exports = require('../backend/index.js');

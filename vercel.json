@@ -1,15 +1,11 @@
 {
-  "buildCommand": "cd backend && npm install && cd ../frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/index.js": {
-      "includeFiles": "backend/{legacy/**,routes/**,middleware/**,lib/**}"
-    }
-  },
+  "framework": null,
+  "installCommand": "cd backend && npm install && cd ../frontend && npm install",
+  "buildCommand": "cd frontend && npm run build && node scripts/copy-to-vercel-public.mjs",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/config.js", "destination": "/api" },
     { "source": "/legacy/(.*)", "destination": "/api" },
-    { "source": "/((?!api/|legacy/|assets/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|legacy/).*)", "destination": "/index.html" }
   ]
 }
