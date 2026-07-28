@@ -870,6 +870,7 @@ export default function TaskflowDom() {
           <select id="emp-role" required>
             <option value="">Select role</option>
             <option value="employee">Employee</option>
+            <option value="head">Head</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -921,6 +922,7 @@ export default function TaskflowDom() {
           <label htmlFor="edit-emp-role">Role <span className="req">*</span></label>
           <select id="edit-emp-role" required>
             <option value="employee">Employee</option>
+            <option value="head">Head</option>
             <option value="admin">Admin</option>
           </select>
         </div>

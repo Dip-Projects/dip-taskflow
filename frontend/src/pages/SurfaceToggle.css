@@ -7,8 +7,8 @@
 .tf-surface-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 12px;
+  gap: 8px;
+  padding: 3px 10px;
   background: #2a1f18;
   color: #f5ebe0;
   flex-shrink: 0;
@@ -16,30 +16,30 @@
   position: sticky;
   top: 0;
   border-bottom: 1px solid #5a4638;
-  min-height: 36px;
+  min-height: 28px;
 }
 .tf-surface-label {
-  font-size: 0.65rem;
-  opacity: 0.75;
+  font-size: 0.58rem;
+  opacity: 0.7;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .tf-surface-toggle {
   display: inline-flex;
   background: #1c1410;
   border-radius: 999px;
-  padding: 2px;
-  gap: 1px;
+  padding: 1px;
+  gap: 0;
   border: 1px solid #5a4638;
 }
 .tf-surface-toggle button {
   border: none;
   background: transparent;
   color: #d4c4b5;
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
   cursor: pointer;
   line-height: 1.2;
@@ -57,10 +57,10 @@
   border: 1px solid #5a4638;
   background: transparent;
   color: #f5ebe0;
-  border-radius: 6px;
-  padding: 3px 8px;
+  border-radius: 5px;
+  padding: 2px 7px;
   cursor: pointer;
-  font-size: 0.7rem;
+  font-size: 0.62rem;
   font-weight: 600;
 }
 .tf-legacy-frame {

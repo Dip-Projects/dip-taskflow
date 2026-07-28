@@ -146,7 +146,7 @@
   box-shadow:0 2px 0 rgba(255,255,255,.04);
 }
 
-[data-theme="dark"] .sidebar {
+[data-theme="dark"] .site-sidebar {
   background:#1a1815;
   border-color:#2e2b27;
 }
@@ -527,8 +527,8 @@
 
   /* ── Layout ── */
   .body{display:flex;min-height:calc(100vh - 58px);}
-  /* FIND and REPLACE the existing .sidebar rule */
-  .sidebar {
+  /* FIND and REPLACE the existing .site-sidebar rule */
+  .site-sidebar {
     width: 248px;
     min-width: 248px;
     background: var(--surface);
@@ -537,10 +537,16 @@
     top: 58px;
     height: calc(100vh - 58px);
     overflow-y: auto;
-    transition: width .22s, min-width .22s, opacity .18s;
+    transition: width .22s, min-width .22s, opacity .18s, transform .22s;
     display: flex;
     flex-direction: column;
     z-index: 999;
+  }
+  .site-sidebar.open {
+    width: 248px;
+    min-width: 248px;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   /* ADD this for the bottom settings button container */
@@ -550,9 +556,9 @@
     border-bottom: 1px solid var(--line);
     flex-shrink: 0;
   }
-  .sidebar.closed{width:0;min-width:0;opacity:0;pointer-events:none;overflow:hidden;}
-  .sidebar::-webkit-scrollbar{width:3px;}
-  .sidebar::-webkit-scrollbar-thumb{background:var(--line2);border-radius:2px;}
+  .site-sidebar.closed{width:0;min-width:0;opacity:0;pointer-events:none;overflow:hidden;}
+  .site-sidebar::-webkit-scrollbar{width:3px;}
+  .site-sidebar::-webkit-scrollbar-thumb{background:var(--line2);border-radius:2px;}
   .main{flex:1;padding:28px 32px;overflow:auto;min-width:0;}
 
   /* ── Sidebar nav ── */
@@ -721,8 +727,8 @@
   /* ── Mobile ── */
   .sb-backdrop{display:none;}
   @media(max-width:768px){
-    .sidebar{position:relative;top:58px;left:0;z-index:200;height:calc(100vh - 58px);width:min(85vw,270px);min-width:0;transform:translateX(0);box-shadow:12px 0 32px rgba(0,0,0,.18);}
-    .sidebar.closed{width:min(85vw,270px);min-width:0;transform:translateX(-110%);opacity:0;}
+    .site-sidebar{position:relative;top:58px;left:0;z-index:200;height:calc(100vh - 58px);width:min(85vw,270px);min-width:0;transform:translateX(0);box-shadow:12px 0 32px rgba(0,0,0,.18);}
+    .site-sidebar.closed{width:min(85vw,270px);min-width:0;transform:translateX(-110%);opacity:0;}
 
     .sb-backdrop{display:block;position:fixed;inset:0;top:58px;z-index:190;background:rgba(15,13,10,.4);border:none;padding:0;}
     .main{padding:16px 14px 32px;}
@@ -733,7 +739,7 @@
   }
     @media(max-width:999px){
 
-  .sidebar{
+  .site-sidebar{
     position:fixed;
     top:58px;
     left:0;
@@ -752,7 +758,7 @@
     box-shadow:12px 0 32px rgba(0,0,0,.18);
   }
 
-  .sidebar.closed{
+  .site-sidebar.closed{
     transform:translateX(-110%);
     opacity:0;
   }
@@ -776,3 +782,18 @@
   .spinner{width:20px;height:20px;border:2.5px solid var(--line2);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
   @keyframes slideUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+
+/* Offset Site drawer when Office/Site switch bar is present */
+.site-shell:has(.tf-surface-bar) .site-sidebar {
+  top: calc(58px + 28px);
+  height: calc(100vh - 58px - 28px);
+}
+@media (max-width: 999px) {
+  .site-shell:has(.tf-surface-bar) .site-sidebar {
+    top: calc(58px + 28px);
+    height: calc(100dvh - 58px - 28px);
+  }
+  .site-shell:has(.tf-surface-bar) .sb-backdrop {
+    top: calc(58px + 28px);
+  }
+}

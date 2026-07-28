@@ -14,11 +14,11 @@ const USER_SELECT_BASIC =
 function toPayload(user) {
   const role = (user.role || '').toLowerCase();
   const desig = (user.designation || '').toLowerCase().trim();
-  // Strict: admin, DB is_head, or exact Project Head / Site Incharge only.
-  // Do NOT use desig.includes('head') — that leaked Site toggle to employees.
+  // Admin, Head role, DB is_head, or exact Project Head / Site Incharge.
   const canAccessSite =
     !!user.is_head ||
     role === 'admin' ||
+    role === 'head' ||
     desig === 'project head' ||
     desig === 'site incharge';
 
@@ -30,7 +30,7 @@ function toPayload(user) {
     department: user.department,
     department_id: user.department_id,
     designation: user.designation || '',
-    is_head: !!user.is_head || canAccessSite,
+    is_head: !!user.is_head || role === 'head' || canAccessSite,
     can_access_site: canAccessSite,
     site_name: user.site_name || '',
     site_names: user.site_names || null,

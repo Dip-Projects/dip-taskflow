@@ -93,8 +93,8 @@ router.post('/', async (req, res) => {
     if (!full_name || !department || !designation || !role) {
       return res.status(400).json({ error: 'Please fill in all required fields' });
     }
-    if (!['admin', 'employee'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin or employee' });
+    if (!['admin', 'employee', 'head'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin, employee, or head' });
     }
 
     const username = await generateUniqueUsername(full_name);
@@ -103,12 +103,15 @@ router.post('/', async (req, res) => {
       : generatePassword();
     const password_hash = await bcrypt.hash(password, 10);
 
+    // Head = employee-level TaskFlow access + Office/Site toggle (is_head)
+    const headFlag = role === 'head' ? true : !!is_head;
+
     const { data, error } = await supabase
       .from('users')
       .insert({
         username, password_hash, full_name, department, designation, role, is_active: true,
         reporting_head_id: reporting_head_id || null,
-        is_head: !!is_head,
+        is_head: headFlag,
         site_name: site_name || null,
         site_names: site_names || null
       })
@@ -141,15 +144,19 @@ router.patch('/:id', async (req, res) => {
     if (full_name !== undefined) updates.full_name = full_name;
     if (department !== undefined) updates.department = department;
     if (designation !== undefined) updates.designation = designation;
+    if (role !== undefined) {
+      if (!['admin', 'employee', 'head'].includes(role)) {
+        return res.status(400).json({ error: 'Role must be admin, employee, or head' });
+      }
+      updates.role = role;
+      // Keep is_head in sync with Head role unless explicitly overridden below
+      if (is_head === undefined) {
+        updates.is_head = role === 'head';
+      }
+    }
     if (is_head !== undefined) updates.is_head = !!is_head;
     if (site_name !== undefined) updates.site_name = site_name;
     if (site_names !== undefined) updates.site_names = site_names;
-    if (role !== undefined) {
-      if (!['admin', 'employee'].includes(role)) {
-        return res.status(400).json({ error: 'Role must be admin or employee' });
-      }
-      updates.role = role;
-    }
     if (is_active !== undefined) updates.is_active = is_active;
     if (can_verify !== undefined) updates.can_verify = can_verify;
     if (is_mis_executive !== undefined) updates.is_mis_executive = is_mis_executive;

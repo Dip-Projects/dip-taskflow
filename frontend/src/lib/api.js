@@ -96,18 +96,19 @@ export function isSiteHead(user) {
   if (!user) return false;
   if (user.is_head || user.can_access_site) return true;
   const role = (user.role || '').toLowerCase().trim();
-  if (role === 'admin') return true;
+  if (role === 'admin' || role === 'head') return true;
   const desig = (user.designation || user.site_role || '').toLowerCase().trim();
   return desig === 'project head' || desig === 'site incharge';
 }
 
 export function canToggleSite(user) {
-  // Pure site engineers stay on /site only.
-  // Admin / is_head / Project Head / Site Incharge only (exact designation).
-  if (!user || isSiteEngineer(user)) return false;
-  if (user.is_head || user.can_access_site) return true;
+  // Head / admin get Office ↔ Site toggle (even if dept is Site Engineer).
+  // Pure site engineers (employee role) stay on /site only.
+  if (!user) return false;
   const role = (user.role || '').toLowerCase().trim();
-  if (role === 'admin') return true;
+  if (role === 'admin' || role === 'head') return true;
+  if (user.is_head || user.can_access_site) return true;
+  if (isSiteEngineer(user)) return false;
   const desig = (user.designation || '').toLowerCase().trim();
   return desig === 'project head' || desig === 'site incharge';
 }

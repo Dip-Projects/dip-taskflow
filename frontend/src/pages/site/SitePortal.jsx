@@ -2853,7 +2853,7 @@ useEffect(() => {
 
           {/* Sidebar */}
           <aside
-            className={`sidebar${sidebarOpen ? "" : " closed"}`}
+            className={`site-sidebar${sidebarOpen ? " open" : " closed"}`}
             onTouchMove={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
           >

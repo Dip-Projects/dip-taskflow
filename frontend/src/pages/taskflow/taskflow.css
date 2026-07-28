@@ -219,7 +219,8 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
    SIDEBAR
    ================================================================ */
 .app-body { display: flex; min-height: calc(100vh - var(--topbar-h)); }
-.sidebar {
+/* Scoped to #appScreen so Site portal .sidebar is never crushed by these rules */
+#appScreen .sidebar {
   width: var(--sidebar-w); flex-shrink: 0;
   background: var(--surface); border-right: 1px solid var(--border);
   padding: 14px 10px 28px;
@@ -230,9 +231,9 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
   z-index: 42;
   box-shadow: 8px 0 24px rgba(0,0,0,.18);
 }
-.sidebar.open { transform: translateX(0); }
-.sidebar::-webkit-scrollbar { width: 4px; }
-.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+#appScreen .sidebar.open { transform: translateX(0); }
+#appScreen .sidebar::-webkit-scrollbar { width: 4px; }
+#appScreen .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
 .nav-list { display: flex; flex-direction: column; gap: 2px; }
 .nav-section-label {
@@ -241,13 +242,13 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
   padding: 16px 12px 6px;
 }
 .nav-btn-old-placeholder { display: none; } /* merged into nav badge section below */
-.sidebar-overlay {
+#appScreen .sidebar-overlay {
   position: fixed; inset: var(--topbar-h) 0 0 0;
   background: rgba(15,17,35,.45); z-index: 40; backdrop-filter: blur(2px);
   cursor: pointer;
 }
-.sidebar-overlay[hidden] { display: none !important; }
-.icon-btn#menuToggle {
+#appScreen .sidebar-overlay[hidden] { display: none !important; }
+#appScreen .icon-btn#menuToggle {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -257,19 +258,19 @@ input,select,textarea,button { font-family: var(--font-body); font-size: 0.875re
 body.sidebar-open { overflow: hidden; }
 
 @media (max-width: 768px) {
-  .main-content { padding: 16px 14px 40px; }
-  .icon-btn { display: inline-flex !important; }
+  #appScreen .main-content { padding: 16px 14px 40px; }
+  #appScreen .icon-btn { display: inline-flex !important; }
 }
 /* Desktop: when open, reserve space so content isn't covered */
 @media (min-width: 769px) {
-  .sidebar {
+  #appScreen .sidebar {
     position: sticky;
     top: var(--topbar-h);
     transform: none;
     box-shadow: none;
     margin-left: 0;
   }
-  .sidebar:not(.open) {
+  #appScreen .sidebar:not(.open) {
     width: 0 !important;
     min-width: 0 !important;
     padding-left: 0 !important;
@@ -280,12 +281,12 @@ body.sidebar-open { overflow: hidden; }
     pointer-events: none;
     overflow: hidden;
   }
-  .sidebar.open {
+  #appScreen .sidebar.open {
     width: var(--sidebar-w);
     opacity: 1;
     pointer-events: auto;
   }
-  .sidebar-overlay { display: none !important; }
+  #appScreen .sidebar-overlay { display: none !important; }
   body.sidebar-open { overflow: auto; }
 }
 
@@ -293,15 +294,15 @@ body.sidebar-open { overflow: hidden; }
 .tf-shell:has(.tf-surface-bar) {
   --drawer-top: calc(36px + var(--topbar-h));
 }
-.tf-shell:has(.tf-surface-bar) .sidebar {
+.tf-shell:has(.tf-surface-bar) #appScreen .sidebar {
   top: var(--drawer-top, var(--topbar-h));
   height: calc(100vh - var(--drawer-top, var(--topbar-h)));
 }
-.tf-shell:has(.tf-surface-bar) .sidebar-overlay {
+.tf-shell:has(.tf-surface-bar) #appScreen .sidebar-overlay {
   inset: var(--drawer-top, var(--topbar-h)) 0 0 0;
 }
 @media (min-width: 769px) {
-  .tf-shell:has(.tf-surface-bar) .sidebar {
+  .tf-shell:has(.tf-surface-bar) #appScreen .sidebar {
     top: var(--topbar-h);
     height: calc(100vh - var(--topbar-h));
   }
@@ -647,6 +648,7 @@ body.sidebar-open { overflow: hidden; }
 }
 .role-pill.admin    { background: var(--rose-lt);  color: #991B1B; border: 1px solid var(--rose-bd); }
 .role-pill.employee { background: var(--blue-lt);  color: #1E40AF; border: 1px solid var(--blue-bd); }
+.role-pill.head     { background: #FEF3C7; color: #92400E; border: 1px solid #F59E0B; }
 
 /* ================================================================
    EMPLOYEE CARDS (mobile — "Manage employees")
