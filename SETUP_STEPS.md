@@ -110,10 +110,8 @@ Jab upar sab chal jaye, tab dip-projects Supabase se tables export/import karo
 
 Repo: `https://github.com/DivyankaOp/dip-taskflow`
 
-1. [vercel.com](https://vercel.com) → **Add New Project** → Import **dip-taskflow**
-2. **Root Directory** → Edit → select **`backend`**
-3. Framework: **Other** (install/build `backend/vercel.json` se aate hain)
-4. **Environment Variables** (Production + Preview):
+1. Vercel project **dip-taskflow** → **Settings** → **Root Directory** = **`backend`** (Save)
+2. **Environment Variables** (Production + Preview; Build ke liye bhi enable):
 
 | Name | Where from |
 |------|------------|
@@ -125,8 +123,7 @@ Repo: `https://github.com/DivyankaOp/dip-taskflow`
 | `VITE_SUPABASE_ANON_KEY` | frontend `.env` |
 | `VITE_API_BASE` | `/api` |
 
-5. **Deploy** → open `*.vercel.app`
-6. Test: login → `/site` → logout
+3. Naya code push / **Redeploy** → `https://dip-taskflow.vercel.app` pe login page aani chahiye (not `Cannot GET /`)
 
 **Note:** `SUPABASE_SERVICE_ROLE_KEY` kabhi `VITE_*` mein mat dalna.  
 Large PPT uploads Hobby plan pe ~4.5MB limit se fail ho sakte hain.
