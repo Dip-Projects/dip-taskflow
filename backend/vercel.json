@@ -1,11 +1,12 @@
 {
   "installCommand": "npm install && cd ../frontend && npm install",
   "buildCommand": "cd ../frontend && npm run build && test -f public/index.html",
-  "outputDirectory": "public",
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "{public/**,legacy/**,routes/**,middleware/**,lib/**}"
+    }
+  },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/config.js", "destination": "/api" },
-    { "source": "/legacy/(.*)", "destination": "/api" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/api" }
   ]
 }
