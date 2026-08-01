@@ -31,6 +31,7 @@ app.use('/api/leaves',          require('./routes/leaves'));
 app.use('/api/tickets',         require('./routes/tickets'));
 app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));
+app.use('/api/mis-report',      require('./routes/mis_report'));
 app.get('/api/health', (_, res) => res.json({ status: 'ok' }));
 
 // Legacy vanilla TaskFlow UI

@@ -854,6 +854,24 @@ export default function TaskflowDom() {
           <div id="drptBody" style={{marginTop: 20}}></div>
         </section>
 
+        {/* MIS REPORT (admin) — week-wise employee completion */}
+        <section id="view-mis-report" className="view" hidden={true}>
+          <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">📊 MIS Report</h2>
+              <p className="view-sub">Week-wise task performance (regular + recurring). Week 1 may include days from the previous month.</p>
+            </div>
+            <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap'}}>
+              <input type="month" id="misMonth" style={{padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem'}} />
+              <select id="misWeek" style={{padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem'}}>
+                <option value="">All weeks</option>
+              </select>
+              <button id="misGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+            </div>
+          </div>
+          <div id="misReportBody" style={{marginTop: 20}}></div>
+        </section>
+
       </main>
     </div>
   </section>

@@ -23,6 +23,10 @@ const RT_SELECT = `
 // is plenty to catch a genuinely missed day or two without going overboard.
 const BACKFILL_DAYS = 30;
 
+function isInstanceClosed(status) {
+  return status === 'Completed' || status === 'NotApplicable';
+}
+
 // Date-agnostic version of "should this task fire on this particular day" —
 // lets us check any day in the backfill window, not just today.
 function shouldFireOn(task, date) {
@@ -249,7 +253,7 @@ router.get('/all', requireAdmin, async (req, res) => {
         const fireDates = getFireDates(task, today);
         const instances = await getOrCreateInstances(task.id, fireDates);
         const overdueInstances = instances.filter(
-          i => i.status !== 'Completed' && i.due_date < todayOnly.toISOString().slice(0, 10)
+          i => !isInstanceClosed(i.status) && i.due_date < todayOnly.toISOString().slice(0, 10)
         );
         if (overdueInstances.length) {
           // instances come back oldest → newest already
@@ -298,7 +302,9 @@ router.get('/my', async (req, res) => {
         // A day that's already been completed just disappears — except
         // today's, which stays visible (as "Completed") until the page
         // is next refreshed, so the checkmark doesn't vanish instantly.
-        if (inst.status === 'Completed' && inst.due_date !== todayStr) continue;
+        // Completed / Not Applicable past days drop off; today's stay visible.
+        // N/A only clears THIS due date — next weekly fire still appears.
+        if (isInstanceClosed(inst.status) && inst.due_date !== todayStr) continue;
 
         result.push({
           ...task,
@@ -447,6 +453,48 @@ router.post('/instances/:instanceId/complete', async (req, res) => {
   } catch (err) {
     console.error('Complete instance error:', err.message);
     res.status(500).json({ error: err.message || 'Could not mark task as done' });
+  }
+});
+
+// ─── Employee: mark this due date Not Applicable (does NOT stop next week) ──
+// POST /recurring-tasks/instances/:instanceId/not-applicable
+router.post('/instances/:instanceId/not-applicable', async (req, res) => {
+  try {
+    const { instanceId } = req.params;
+
+    const { data: inst, error: instErr } = await supabase
+      .from('recurring_task_instances')
+      .select('id, status, recurring_task_id, due_date')
+      .eq('id', instanceId)
+      .single();
+    if (instErr) throw instErr;
+
+    if (isInstanceClosed(inst.status)) {
+      return res.status(400).json({ error: 'This day is already closed' });
+    }
+
+    const { data: rt, error: rtErr } = await supabase
+      .from('recurring_tasks')
+      .select('assigned_to')
+      .eq('id', inst.recurring_task_id)
+      .single();
+    if (rtErr) throw rtErr;
+    if (rt.assigned_to !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Not your task' });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('recurring_task_instances')
+      .update({ status: 'NotApplicable', completed_at: new Date().toISOString() })
+      .eq('id', instanceId)
+      .select('id, status, completed_at, due_date')
+      .single();
+    if (updateErr) throw updateErr;
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Not applicable error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not mark as not applicable' });
   }
 });
 

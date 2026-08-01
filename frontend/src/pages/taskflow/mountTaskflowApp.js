@@ -613,6 +613,7 @@ export async function mountTaskflowApp(opts = {}) {
         els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
         els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
         els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
+        els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
       }
     }
   
@@ -717,7 +718,10 @@ export async function mountTaskflowApp(opts = {}) {
         // My recurring tasks — count of instances still outstanding (today's
         // due instance plus any backlog that hasn't been marked Completed yet)
         const myRecurring = await api('/recurring-tasks/my').catch(() => []);
-        const recurringPending = myRecurring.filter(t => t.instance?.status !== 'Completed').length;
+        const recurringPending = myRecurring.filter(t => {
+          const st = t.instance?.status;
+          return st !== 'Completed' && st !== 'NotApplicable';
+        }).length;
         setNavBadge('recurring', recurringPending);
   
         // Open tickets
@@ -811,6 +815,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'drawings-add')  renderDrawingAddView();
     if (viewKey === 'drawings-all')  loadAllDrawings();
     if (viewKey === 'daily-report')  loadDailyReport();
+    if (viewKey === 'mis-report')    loadMisReport();
   }
   
   // ─── master data (admin) ─────────────────────────────────────────────────────
@@ -1616,12 +1621,17 @@ export async function mountTaskflowApp(opts = {}) {
       const completedIds = inst
         ? (inst.recurring_task_checkpoint_completions || []).map((c) => c.checkpoint_id)
         : [];
-      const isCompleted = inst?.status === 'Completed';
+      const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+      const isNa = inst?.status === 'NotApplicable';
       const isOverdue = !task.is_today && !isCompleted;
-      const statusText = isCompleted ? 'Completed'
+      const statusText = isNa ? 'Not Applicable'
+        : isCompleted ? 'Completed'
         : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
         : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
-      const pillClass = isCompleted ? 'pill-Completed' : isOverdue ? 'pill-Rejected' : 'pill-InProgress';
+      const pillClass = isNa ? 'pill-InProgress'
+        : isCompleted ? 'pill-Completed'
+        : isOverdue ? 'pill-Rejected'
+        : 'pill-InProgress';
   
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${tasks.length + i + 1}</span>`;
@@ -1656,11 +1666,7 @@ export async function mountTaskflowApp(opts = {}) {
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       if (!isCompleted) {
-        const doneBtn = document.createElement('button');
-        doneBtn.className = 'action-btn action-accept';
-        doneBtn.textContent = '✅ Done';
-        doneBtn.addEventListener('click', () => openRecurringDoneFlow(task, inst, checkpoints, loadMyTasks));
-        tdActions.appendChild(doneBtn);
+        appendRecurringActionButtons(tdActions, task, inst, checkpoints, loadMyTasks);
       }
   
       tr.append(tdSr, tdDetails, tdDate, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
@@ -4204,13 +4210,16 @@ export async function mountTaskflowApp(opts = {}) {
         ? (inst.recurring_task_checkpoint_completions || []).map((c) => c.checkpoint_id)
         : [];
       const allDone = checkpoints.length > 0 && completedIds.length === checkpoints.length;
-      const isCompleted = inst?.status === 'Completed';
+      const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+      const isNa = inst?.status === 'NotApplicable';
       const isOverdue = !task.is_today && !isCompleted;
       const canAct = !isCompleted;
-      const statusText = isCompleted ? 'Completed'
+      const statusText = isNa ? 'Not Applicable'
+        : isCompleted ? 'Completed'
         : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
         : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
-      const pillClass = isCompleted ? 'pill-Completed'
+      const pillClass = isNa ? 'pill-InProgress'
+        : isCompleted ? 'pill-Completed'
         : isOverdue ? 'pill-Rejected'
         : 'pill-InProgress';
   
@@ -4233,13 +4242,13 @@ export async function mountTaskflowApp(opts = {}) {
       const tdStatus = document.createElement('td');
       tdStatus.innerHTML = `<span class="pill ${pillClass}">${escapeHtml(statusText)}</span>`;
       if (canAct) {
-        tdStatus.innerHTML += `
-          <div style="margin-top:6px">
-            <button class="action-btn action-accept done-btn">✅ Done</button>
-          </div>`;
-        tdStatus.querySelector('.done-btn').addEventListener('click', () => {
-          openRecurringDoneFlow(task, inst, checkpoints, refreshFn);
-        });
+        const actions = document.createElement('div');
+        actions.style.marginTop = '6px';
+        actions.style.display = 'flex';
+        actions.style.gap = '6px';
+        actions.style.flexWrap = 'wrap';
+        appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
+        tdStatus.appendChild(actions);
       }
   
       tr.append(tdTask, tdFreq, tdDate, tdStatus);
@@ -4247,6 +4256,35 @@ export async function mountTaskflowApp(opts = {}) {
     });
   }
   
+  // Shared "Done" / "Not Applicable" buttons for recurring instances
+  function appendRecurringActionButtons(container, task, inst, checkpoints, refreshFn) {
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'action-btn action-accept';
+    doneBtn.textContent = '✅ Done';
+    doneBtn.addEventListener('click', () => openRecurringDoneFlow(task, inst, checkpoints, refreshFn));
+    container.appendChild(doneBtn);
+
+    const naBtn = document.createElement('button');
+    naBtn.className = 'action-btn action-reject';
+    naBtn.textContent = '⊘ Not Applicable';
+    naBtn.title = 'Not applicable for this due date only — next week still appears';
+    naBtn.addEventListener('click', () => markRecurringNotApplicable(inst, refreshFn));
+    container.appendChild(naBtn);
+  }
+
+  async function markRecurringNotApplicable(inst, refresh = refreshMainRecurringView) {
+    if (!inst) return;
+    if (!confirm('Mark Not Applicable for this due date only?\n\nNext weekly occurrence will still appear.')) return;
+    try {
+      await api(`/recurring-tasks/instances/${inst.id}/not-applicable`, { method: 'POST' });
+      await refresh();
+      showToast('Marked Not Applicable for this date ⊘', 'success');
+      refreshNavBadges();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
   // Shared "Done" flow for a recurring task instance, used by both the table
   // and card views. If the task has no checkpoints, completes immediately.
   // If it has checkpoints, opens a modal to tick them off, then Submit saves
@@ -4373,14 +4411,17 @@ export async function mountTaskflowApp(opts = {}) {
       ? (inst.recurring_task_checkpoint_completions || []).map(c => c.checkpoint_id)
       : [];
     const allDone = checkpoints.length > 0 && completedIds.length === checkpoints.length;
-    const isCompleted = inst?.status === 'Completed';
+    const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+    const isNa = inst?.status === 'NotApplicable';
     const isOverdue = !task.is_today && !isCompleted;
     const canAct = !isCompleted;
-    const status = isCompleted ? 'Completed'
+    const status = isNa ? 'Not Applicable'
+      : isCompleted ? 'Completed'
       : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
       : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
   
-    const pillClass = isCompleted ? 'pill-Completed'
+    const pillClass = isNa ? 'pill-InProgress'
+      : isCompleted ? 'pill-Completed'
       : isOverdue ? 'pill-Rejected'
       : 'pill-In-Progress';
   
@@ -4395,15 +4436,12 @@ export async function mountTaskflowApp(opts = {}) {
         ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
         <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDateOnly(task.due_date))}</div>
       </div>
-      ${canAct ? `
-      <div class="task-card-actions">
-        <button class="action-btn action-accept done-btn">✅ Done</button>
-      </div>` : ''}
+      ${canAct ? `<div class="task-card-actions" style="display:flex;gap:8px;flex-wrap:wrap"></div>` : ''}
     `;
   
-    const doneBtn = card.querySelector('.done-btn');
-    if (doneBtn) {
-      doneBtn.addEventListener('click', () => openRecurringDoneFlow(task, inst, checkpoints, refreshFn));
+    if (canAct) {
+      const actions = card.querySelector('.task-card-actions');
+      appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
     }
   
     return card;
@@ -5068,6 +5106,150 @@ export async function mountTaskflowApp(opts = {}) {
     win.document.close();
   }
 
+  // ─── MIS Report (admin, week-wise) ────────────────────────────────────────────
+  function misPill(n, kind) {
+    const colors = {
+      total: '#2563eb',
+      done: '#16a34a',
+      ontime: '#15803d',
+      delayed: '#dc2626',
+      pending: '#d97706',
+      na: '#7c3aed',
+    };
+    const c = colors[kind] || '#64748b';
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:36px;padding:4px 10px;border-radius:999px;background:${c};color:#fff;font-weight:700;font-size:12px">${n}</span>`;
+  }
+
+  async function loadMisReport() {
+    const body = document.getElementById('misReportBody');
+    const monthEl = document.getElementById('misMonth');
+    const weekEl = document.getElementById('misWeek');
+    const genBtn = document.getElementById('misGenBtn');
+    if (!body || !monthEl) return;
+
+    const now = new Date();
+    if (!monthEl.value) {
+      monthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    async function run() {
+      body.innerHTML = '<div class="empty-state">Loading MIS report…</div>';
+      try {
+        const [y, m] = monthEl.value.split('-').map(Number);
+        const week = weekEl?.value || '';
+        const qs = new URLSearchParams({ year: String(y), month: String(m) });
+        if (week) qs.set('week', week);
+        const data = await api(`/mis-report?${qs}`);
+
+        // Refresh week dropdown from full month (when All weeks)
+        if (!week) {
+          const prev = weekEl.value;
+          weekEl.innerHTML = '<option value="">All weeks</option>';
+          (data.weeks || []).forEach((w) => {
+            const opt = document.createElement('option');
+            opt.value = String(w.week);
+            opt.textContent = w.label;
+            weekEl.appendChild(opt);
+          });
+          weekEl.value = prev;
+        }
+
+        if (!data.weeks?.length) {
+          body.innerHTML = '<div class="empty-state">No weeks in this month</div>';
+          return;
+        }
+
+        body.innerHTML = '';
+        data.weeks.forEach((w) => {
+          const section = document.createElement('div');
+          section.style.marginBottom = '28px';
+          section.innerHTML = `
+            <div style="font-weight:700;font-size:0.95rem;margin-bottom:10px;color:var(--ink)">
+              ${escapeHtml(w.label)}
+              <span style="font-weight:500;color:var(--slate);font-size:0.8rem"> · ${w.employee_count} employees</span>
+            </div>
+          `;
+          const tableWrap = document.createElement('div');
+          tableWrap.className = 'table-card';
+          tableWrap.innerHTML = `
+            <div class="table-scroll">
+              <table class="data-table" style="min-width:920px">
+                <thead>
+                  <tr style="background:linear-gradient(90deg,#4c1d95,#1d4ed8);color:#fff">
+                    <th>Employee</th>
+                    <th>Total</th>
+                    <th>Done</th>
+                    <th>On-Time</th>
+                    <th>Delayed done</th>
+                    <th>Delayed</th>
+                    <th>Pending</th>
+                    <th>N/A</th>
+                    <th>Completion %</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          `;
+          const tbody = tableWrap.querySelector('tbody');
+          if (!w.employees.length) {
+            tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No tasks due this week</td></tr>`;
+          } else {
+            w.employees.forEach((e) => {
+              const tr = document.createElement('tr');
+              const pctColor = e.completion_pct >= 80 ? '#16a34a' : e.completion_pct >= 50 ? '#d97706' : '#dc2626';
+              tr.innerHTML = `
+                <td>
+                  <strong style="font-weight:600">${escapeHtml(e.name)}</strong>
+                  <div style="font-size:11px;color:#888">${escapeHtml(e.username || '')}${e.department ? ` · ${escapeHtml(e.department)}` : ''}</div>
+                </td>
+                <td>${misPill(e.total, 'total')}</td>
+                <td>${misPill(e.done, 'done')}</td>
+                <td>${misPill(e.on_time, 'ontime')}<div style="font-size:11px;color:#666;margin-top:4px">${e.on_time_pct}%</div></td>
+                <td>${misPill(e.delayed_done || 0, 'delayed')}</td>
+                <td>${misPill(e.delayed || e.delayed_not_done || 0, 'delayed')}</td>
+                <td>${misPill(e.pending, 'pending')}</td>
+                <td>${misPill(e.na, 'na')}</td>
+                <td><strong style="color:${pctColor}">${e.completion_pct}%</strong></td>
+              `;
+              tbody.appendChild(tr);
+            });
+            const t = w.totals || {};
+            const tr = document.createElement('tr');
+            tr.style.background = '#f1f5f9';
+            tr.innerHTML = `
+              <td><strong>Grand Total (${w.employee_count} Employees)</strong></td>
+              <td>${misPill(t.total || 0, 'total')}</td>
+              <td>${misPill(t.done || 0, 'done')}</td>
+              <td>${misPill(t.on_time || 0, 'ontime')}<div style="font-size:11px;color:#666;margin-top:4px">${t.on_time_pct || 0}%</div></td>
+              <td>${misPill(t.delayed_done || 0, 'delayed')}</td>
+              <td>${misPill(t.delayed || t.delayed_not_done || 0, 'delayed')}</td>
+              <td>${misPill(t.pending || 0, 'pending')}</td>
+              <td>${misPill(t.na || 0, 'na')}</td>
+              <td><strong style="color:#1d4ed8">${t.completion_pct || 0}%</strong></td>
+            `;
+            tbody.appendChild(tr);
+          }
+          section.appendChild(tableWrap);
+          body.appendChild(section);
+        });
+      } catch (err) {
+        body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+        showToast(err.message, 'error');
+      }
+    }
+
+    if (!monthEl._misBound) {
+      monthEl._misBound = true;
+      genBtn?.addEventListener('click', run);
+      monthEl.addEventListener('change', () => {
+        if (weekEl) weekEl.value = '';
+        run();
+      });
+      weekEl?.addEventListener('change', run);
+    }
+    run();
+  }
 
   __tfReadyFns.forEach((fn) => {
     try { fn(); } catch (e) { console.error(e); }
