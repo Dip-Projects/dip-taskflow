@@ -70,13 +70,14 @@ export function useMaterialUnseenCount(user) {
     for (const s of sites) {
       const lastSeenReceived = getLastSeen(user, s, "received");
       const lastSeenRejected = getLastSeen(user, s, "rejected");
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("material_requirements")
         .select("status, created_at, received_at")
         .eq("site_name", s)
         .eq("requested_by", user.name)
         .in("status", ["received", "rejected"]);
-      (data || []).forEach(r => {
+      if (error) continue;
+      (data || []).forEach((r) => {
         const changedAt = r.received_at || r.created_at;
         if (!changedAt) return;
         if (r.status === "received" && new Date(changedAt) > new Date(lastSeenReceived)) received++;

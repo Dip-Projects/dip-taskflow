@@ -1778,15 +1778,22 @@ async function getAllCategories() {
 
 // REPLACE getEngineersForSite
 async function getEngineersForSite(site) {
-  const { data } = await supabase
-    .from("user_site_assignments")
-    .select("user_details(name)")
-    .eq("site_name", site);
-  return (data || [])
-    .map((r) => r.user_details?.name)
-    .filter(Boolean)
-    .map(titleCase)
-    .sort();
+  if (!site) return [];
+  try {
+    const { data, error } = await supabase
+      .from("user_site_assignments")
+      .select("user_name, full_name")
+      .eq("site_name", site);
+    if (!error && data?.length) {
+      return data
+        .map((r) => titleCase(r.full_name || r.user_name || ""))
+        .filter(Boolean)
+        .sort();
+    }
+  } catch {
+    /* table optional */
+  }
+  return [];
 }
 async function checkExists(table, col, val) {
   const { data } = await supabase
