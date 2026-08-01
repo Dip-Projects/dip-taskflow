@@ -556,7 +556,15 @@
     border-bottom: 1px solid var(--line);
     flex-shrink: 0;
   }
-  .site-sidebar.closed{width:0;min-width:0;opacity:0;pointer-events:none;overflow:hidden;}
+  .site-sidebar.closed{width:0;min-width:0;opacity:0;pointer-events:none;overflow:hidden;border:none;padding:0;}
+  .site-sidebar.open {
+    width: 248px;
+    min-width: 248px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Desktop: show backdrop only when drawer is over content (tablet) */
+  .sb-backdrop{display:none;}
   .site-sidebar::-webkit-scrollbar{width:3px;}
   .site-sidebar::-webkit-scrollbar-thumb{background:var(--line2);border-radius:2px;}
   .main{flex:1;padding:28px 32px;overflow:auto;min-width:0;}

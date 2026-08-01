@@ -321,5 +321,5 @@
         }
           
         @media (min-width: 901px) {
-          .navbar-ham { display: none; }
+          .navbar-ham { display: flex !important; }
         }

@@ -1652,17 +1652,21 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   const canSwitchToAdmin = canAccessPortal(user, "admin");
   const checkIsApprover = useCallback(async (u) => {
     if (!u?.user_name) return;
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from("site_leaves")
       .select("id", { count: "exact", head: true })
       .or(
         `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
       );
+    if (error) {
+      setIsApprover(false);
+      return;
+    }
     setIsApprover((count || 0) > 0);
   }, []);
   const checkApprovalsPending = useCallback(async (u) => {
     if (!u?.user_name) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("site_leaves")
       .select(
         "id, level_approver_user_name, level_approved, head_approver_user_name, head_approved",
@@ -1670,7 +1674,10 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
       .or(
         `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
       );
-    if (!data) return;
+    if (error || !data) {
+      setApprovalsPendingCount(0);
+      return;
+    }
     const count = data.filter(
       (l) =>
         (l.level_approver_user_name === u.user_name &&
@@ -1967,7 +1974,7 @@ useEffect(() => {
   const nav = (key) => {
     setActiveTab(key);
     if (key === "my-leave") markLeavesSeen(user);
-    if (window.innerWidth <= 768) setSidebarOpen(false);
+    if (window.innerWidth <= 999) setSidebarOpen(false);
 
     setTimeout(() => {
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -2838,7 +2845,7 @@ useEffect(() => {
         />
 
         <div className="body">
-          {sidebarOpen && window.innerWidth <= 768 && (
+          {sidebarOpen && window.innerWidth <= 999 && (
             <button
               className="sb-backdrop"
               onClick={() => setSidebarOpen(false)}
