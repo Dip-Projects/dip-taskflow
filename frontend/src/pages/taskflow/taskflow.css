@@ -1447,3 +1447,202 @@ body.sidebar-open { overflow: hidden; }
     gap: 6px;
   }
 }
+
+/* ── MIS Report ─────────────────────────────────────────────────────────── */
+.mis-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.mis-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--slate);
+}
+.mis-field input,
+.mis-field select {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--surface);
+  min-width: 140px;
+}
+.mis-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.mis-kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.mis-kpi-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--slate);
+  margin-bottom: 6px;
+}
+.mis-kpi-value {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.mis-kpi-sub {
+  font-size: 0.72rem;
+  color: var(--slate);
+  margin-top: 4px;
+}
+.mis-kpi.total .mis-kpi-value { color: #2563eb; }
+.mis-kpi.done .mis-kpi-value { color: #16a34a; }
+.mis-kpi.ontime .mis-kpi-value { color: #15803d; }
+.mis-kpi.delayed .mis-kpi-value { color: #dc2626; }
+.mis-kpi.pending .mis-kpi-value { color: #d97706; }
+.mis-kpi.na .mis-kpi-value { color: #7c3aed; }
+.mis-kpi.completion .mis-kpi-value { color: #1d4ed8; }
+
+.mis-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 0.75rem;
+  color: var(--slate);
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.mis-legend strong { color: var(--ink); font-weight: 600; }
+
+.mis-week-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.mis-week-tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mis-week-tab.active {
+  background: #1e3a5f;
+  border-color: #1e3a5f;
+  color: #fff;
+}
+.mis-week-tab .mis-week-hint {
+  opacity: .75;
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.mis-week-card {
+  margin-bottom: 22px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.mis-week-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  background: linear-gradient(90deg, #1e3a5f, #2563eb);
+  color: #fff;
+}
+.mis-week-head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.mis-week-meta {
+  font-size: 0.75rem;
+  opacity: .9;
+}
+.mis-table thead th {
+  background: #f1f5f9 !important;
+  color: #334155 !important;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.mis-table tbody tr:hover td {
+  background: #f8fafc;
+}
+.mis-table .mis-total-row td {
+  background: #eef2ff !important;
+  font-weight: 700;
+}
+.mis-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 38px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.mis-pill.total { background: #2563eb; }
+.mis-pill.done { background: #16a34a; }
+.mis-pill.ontime { background: #15803d; }
+.mis-pill.delayed-done { background: #ea580c; }
+.mis-pill.delayed { background: #dc2626; }
+.mis-pill.pending { background: #d97706; }
+.mis-pill.na { background: #7c3aed; }
+.mis-pct-wrap {
+  min-width: 88px;
+}
+.mis-pct-bar {
+  height: 6px;
+  background: #e2e8f0;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+.mis-pct-fill {
+  height: 100%;
+  border-radius: 99px;
+}
+.mis-emp-name { font-weight: 650; color: var(--ink); }
+.mis-emp-meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.mis-split {
+  font-size: 10px;
+  color: #64748b;
+  margin-top: 4px;
+}
+@media (max-width: 768px) {
+  .mis-field input,
+  .mis-field select { min-width: 0; width: 100%; }
+  .mis-toolbar { width: 100%; }
+  .mis-toolbar .primary-btn,
+  .mis-toolbar .ghost-btn { width: 100%; }
+}
+

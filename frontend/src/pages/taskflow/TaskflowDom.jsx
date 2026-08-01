@@ -859,17 +859,38 @@ export default function TaskflowDom() {
           <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">📊 MIS Report</h2>
-              <p className="view-sub">Week-wise task performance (regular + recurring). Week 1 may include days from the previous month.</p>
+              <p className="view-sub">Week-wise performance for delegated + recurring tasks. Week 1 can include previous-month days.</p>
             </div>
-            <div style={{display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap'}}>
-              <input type="month" id="misMonth" style={{padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem'}} />
-              <select id="misWeek" style={{padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem'}}>
-                <option value="">All weeks</option>
-              </select>
+            <div className="mis-toolbar">
+              <label className="mis-field">
+                <span>Month</span>
+                <input type="month" id="misMonth" />
+              </label>
+              <label className="mis-field">
+                <span>Week</span>
+                <select id="misWeek">
+                  <option value="">All weeks</option>
+                </select>
+              </label>
+              <label className="mis-field">
+                <span>Department</span>
+                <select id="misDept">
+                  <option value="">All departments</option>
+                </select>
+              </label>
+              <label className="mis-field">
+                <span>Sort</span>
+                <select id="misSort">
+                  <option value="name">Name A–Z</option>
+                  <option value="completion">Completion %</option>
+                  <option value="delayed">Most delayed</option>
+                </select>
+              </label>
               <button id="misGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+              <button id="misCsvBtn" className="ghost-btn" type="button">⬇️ CSV</button>
             </div>
           </div>
-          <div id="misReportBody" style={{marginTop: 20}}></div>
+          <div id="misReportBody" className="mis-body" style={{marginTop: 16}}></div>
         </section>
 
       </main>

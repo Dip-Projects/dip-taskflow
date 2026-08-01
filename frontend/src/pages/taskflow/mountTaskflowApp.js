@@ -5107,24 +5107,145 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   // ─── MIS Report (admin, week-wise) ────────────────────────────────────────────
-  function misPill(n, kind) {
-    const colors = {
-      total: '#2563eb',
-      done: '#16a34a',
-      ontime: '#15803d',
-      delayed: '#dc2626',
-      pending: '#d97706',
-      na: '#7c3aed',
-    };
-    const c = colors[kind] || '#64748b';
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:36px;padding:4px 10px;border-radius:999px;background:${c};color:#fff;font-weight:700;font-size:12px">${n}</span>`;
+  let _misLastData = null;
+
+  function misPill(n, kind, icon = '') {
+    return `<span class="mis-pill ${kind}">${icon ? `${icon} ` : ''}${n}</span>`;
+  }
+
+  function misPctCell(pct) {
+    const color = pct >= 80 ? '#16a34a' : pct >= 50 ? '#d97706' : '#dc2626';
+    const w = Math.max(0, Math.min(100, pct));
+    return `
+      <div class="mis-pct-wrap">
+        <strong style="color:${color}">${pct}%</strong>
+        <div class="mis-pct-bar"><div class="mis-pct-fill" style="width:${w}%;background:${color}"></div></div>
+      </div>`;
+  }
+
+  function misKpiRow(summary, monthLabel, asOf) {
+    return `
+      <div class="mis-kpis">
+        <div class="mis-kpi total"><div class="mis-kpi-label">Total tasks</div><div class="mis-kpi-value">${summary.total || 0}</div><div class="mis-kpi-sub">${monthLabel || ''}</div></div>
+        <div class="mis-kpi done"><div class="mis-kpi-label">Done</div><div class="mis-kpi-value">${summary.done || 0}</div><div class="mis-kpi-sub">Completed / verified</div></div>
+        <div class="mis-kpi ontime"><div class="mis-kpi-label">On-time</div><div class="mis-kpi-value">${summary.on_time || 0}</div><div class="mis-kpi-sub">${summary.on_time_pct || 0}% of done</div></div>
+        <div class="mis-kpi delayed"><div class="mis-kpi-label">Delayed open</div><div class="mis-kpi-value">${summary.delayed || summary.delayed_not_done || 0}</div><div class="mis-kpi-sub">Past due, not done</div></div>
+        <div class="mis-kpi pending"><div class="mis-kpi-label">Pending</div><div class="mis-kpi-value">${summary.pending || 0}</div><div class="mis-kpi-sub">Still within due</div></div>
+        <div class="mis-kpi na"><div class="mis-kpi-label">N/A</div><div class="mis-kpi-value">${summary.na || 0}</div><div class="mis-kpi-sub">Not applicable</div></div>
+        <div class="mis-kpi completion"><div class="mis-kpi-label">Completion</div><div class="mis-kpi-value">${summary.completion_pct || 0}%</div><div class="mis-kpi-sub">Done ÷ (Total − N/A)</div></div>
+      </div>
+      <div class="mis-legend">
+        <span><strong>On-time</strong> = done on/before due</span>
+        <span><strong>Delayed done</strong> = finished after due</span>
+        <span><strong>Delayed</strong> = overdue &amp; still open</span>
+        <span><strong>N/A</strong> = recurring marked not applicable (excluded from completion %)</span>
+        <span>As of <strong>${escapeHtml(asOf || '—')}</strong></span>
+      </div>`;
+  }
+
+  function misEmployeeRow(e, isTotal = false) {
+    const nameHtml = isTotal
+      ? `<strong>Grand Total (${e.employee_count || 0} employees)</strong>`
+      : `<div class="mis-emp-name">${escapeHtml(e.name)}</div>
+         <div class="mis-emp-meta">${escapeHtml(e.username || '')}${e.department ? ` · ${escapeHtml(e.department)}` : ''}</div>
+         <div class="mis-split">Delegated ${e.regular_total || 0} · Recurring ${e.recurring_total || 0}</div>`;
+    return `
+      <tr class="${isTotal ? 'mis-total-row' : ''}">
+        <td>${nameHtml}</td>
+        <td>${misPill(e.total || 0, 'total')}</td>
+        <td>${misPill(e.done || 0, 'done', '✓')}</td>
+        <td>${misPill(e.on_time || 0, 'ontime')}<div class="mis-emp-meta">${e.on_time_pct || 0}%</div></td>
+        <td>${misPill(e.delayed_done || 0, 'delayed-done')}</td>
+        <td>${misPill(e.delayed || e.delayed_not_done || 0, 'delayed')}</td>
+        <td>${misPill(e.pending || 0, 'pending', '⏳')}</td>
+        <td>${misPill(e.na || 0, 'na')}</td>
+        <td>${misPctCell(e.completion_pct || 0)}</td>
+      </tr>`;
+  }
+
+  function renderMisWeekCard(w) {
+    const hint = w.spans_prev_month
+      ? ' · includes previous month'
+      : w.spans_next_month
+        ? ' · includes next month'
+        : '';
+    let rowsHtml = '';
+    if (!w.employees?.length) {
+      rowsHtml = `<tr><td colspan="9" class="empty-state">No tasks due this week</td></tr>`;
+    } else {
+      rowsHtml = w.employees.map((e) => misEmployeeRow(e)).join('');
+      rowsHtml += misEmployeeRow({ ...w.totals, employee_count: w.employee_count }, true);
+    }
+    return `
+      <div class="mis-week-card" data-week="${w.week}">
+        <div class="mis-week-head">
+          <h3>${escapeHtml(w.label)}${hint ? `<span class="mis-week-meta">${hint}</span>` : ''}</h3>
+          <div class="mis-week-meta">${w.employee_count} employees · ${w.totals?.total || 0} tasks · ${w.totals?.completion_pct || 0}% complete</div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table mis-table" style="min-width:960px">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Total</th>
+                <th>Done</th>
+                <th>On-time</th>
+                <th>Delayed done</th>
+                <th>Delayed</th>
+                <th>Pending</th>
+                <th>N/A</th>
+                <th>Completion %</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function downloadMisCsv(data) {
+    if (!data?.weeks?.length) {
+      showToast('Nothing to export', 'error');
+      return;
+    }
+    const headers = [
+      'Week', 'From', 'To', 'Employee', 'Username', 'Department',
+      'Total', 'Done', 'OnTime', 'DelayedDone', 'Delayed', 'Pending', 'NA',
+      'CompletionPct', 'Regular', 'Recurring',
+    ];
+    const lines = [headers.join(',')];
+    data.weeks.forEach((w) => {
+      (w.employees || []).forEach((e) => {
+        const cells = [
+          w.week, w.from, w.to,
+          `"${(e.name || '').replace(/"/g, '""')}"`,
+          e.username || '',
+          `"${(e.department || '').replace(/"/g, '""')}"`,
+          e.total, e.done, e.on_time, e.delayed_done || 0,
+          e.delayed || e.delayed_not_done || 0, e.pending, e.na,
+          e.completion_pct, e.regular_total || 0, e.recurring_total || 0,
+        ];
+        lines.push(cells.join(','));
+      });
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MIS-${data.year}-${String(data.month).padStart(2, '0')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV downloaded ✅', 'success');
   }
 
   async function loadMisReport() {
     const body = document.getElementById('misReportBody');
     const monthEl = document.getElementById('misMonth');
     const weekEl = document.getElementById('misWeek');
+    const deptEl = document.getElementById('misDept');
+    const sortEl = document.getElementById('misSort');
     const genBtn = document.getElementById('misGenBtn');
+    const csvBtn = document.getElementById('misCsvBtn');
     if (!body || !monthEl) return;
 
     const now = new Date();
@@ -5133,105 +5254,72 @@ export async function mountTaskflowApp(opts = {}) {
     }
 
     async function run() {
-      body.innerHTML = '<div class="empty-state">Loading MIS report…</div>';
+      body.innerHTML = '<div class="empty-state">Building MIS report…</div>';
       try {
         const [y, m] = monthEl.value.split('-').map(Number);
-        const week = weekEl?.value || '';
         const qs = new URLSearchParams({ year: String(y), month: String(m) });
-        if (week) qs.set('week', week);
-        const data = await api(`/mis-report?${qs}`);
+        if (weekEl?.value) qs.set('week', weekEl.value);
+        if (deptEl?.value) qs.set('department', deptEl.value);
+        if (sortEl?.value) qs.set('sort', sortEl.value);
 
-        // Refresh week dropdown from full month (when All weeks)
-        if (!week) {
+        const data = await api(`/mis-report?${qs}`);
+        _misLastData = data;
+
+        // Week options
+        if (weekEl) {
           const prev = weekEl.value;
           weekEl.innerHTML = '<option value="">All weeks</option>';
-          (data.weeks || []).forEach((w) => {
+          (data.week_options || data.weeks || []).forEach((w) => {
             const opt = document.createElement('option');
             opt.value = String(w.week);
-            opt.textContent = w.label;
+            opt.textContent = w.label + (w.spans_prev_month ? ' *' : '');
             weekEl.appendChild(opt);
           });
-          weekEl.value = prev;
+          if ([...weekEl.options].some((o) => o.value === prev)) weekEl.value = prev;
+        }
+
+        // Department options
+        if (deptEl) {
+          const prev = deptEl.value;
+          deptEl.innerHTML = '<option value="">All departments</option>';
+          (data.departments || []).forEach((d) => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            deptEl.appendChild(opt);
+          });
+          if ([...deptEl.options].some((o) => o.value === prev)) deptEl.value = prev;
         }
 
         if (!data.weeks?.length) {
-          body.innerHTML = '<div class="empty-state">No weeks in this month</div>';
+          body.innerHTML = `${misKpiRow(data.summary || {}, data.month_label, data.as_of)}
+            <div class="empty-state">No weeks / tasks for this selection</div>`;
           return;
         }
 
-        body.innerHTML = '';
-        data.weeks.forEach((w) => {
-          const section = document.createElement('div');
-          section.style.marginBottom = '28px';
-          section.innerHTML = `
-            <div style="font-weight:700;font-size:0.95rem;margin-bottom:10px;color:var(--ink)">
-              ${escapeHtml(w.label)}
-              <span style="font-weight:500;color:var(--slate);font-size:0.8rem"> · ${w.employee_count} employees</span>
-            </div>
-          `;
-          const tableWrap = document.createElement('div');
-          tableWrap.className = 'table-card';
-          tableWrap.innerHTML = `
-            <div class="table-scroll">
-              <table class="data-table" style="min-width:920px">
-                <thead>
-                  <tr style="background:linear-gradient(90deg,#4c1d95,#1d4ed8);color:#fff">
-                    <th>Employee</th>
-                    <th>Total</th>
-                    <th>Done</th>
-                    <th>On-Time</th>
-                    <th>Delayed done</th>
-                    <th>Delayed</th>
-                    <th>Pending</th>
-                    <th>N/A</th>
-                    <th>Completion %</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          `;
-          const tbody = tableWrap.querySelector('tbody');
-          if (!w.employees.length) {
-            tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No tasks due this week</td></tr>`;
-          } else {
-            w.employees.forEach((e) => {
-              const tr = document.createElement('tr');
-              const pctColor = e.completion_pct >= 80 ? '#16a34a' : e.completion_pct >= 50 ? '#d97706' : '#dc2626';
-              tr.innerHTML = `
-                <td>
-                  <strong style="font-weight:600">${escapeHtml(e.name)}</strong>
-                  <div style="font-size:11px;color:#888">${escapeHtml(e.username || '')}${e.department ? ` · ${escapeHtml(e.department)}` : ''}</div>
-                </td>
-                <td>${misPill(e.total, 'total')}</td>
-                <td>${misPill(e.done, 'done')}</td>
-                <td>${misPill(e.on_time, 'ontime')}<div style="font-size:11px;color:#666;margin-top:4px">${e.on_time_pct}%</div></td>
-                <td>${misPill(e.delayed_done || 0, 'delayed')}</td>
-                <td>${misPill(e.delayed || e.delayed_not_done || 0, 'delayed')}</td>
-                <td>${misPill(e.pending, 'pending')}</td>
-                <td>${misPill(e.na, 'na')}</td>
-                <td><strong style="color:${pctColor}">${e.completion_pct}%</strong></td>
-              `;
-              tbody.appendChild(tr);
-            });
-            const t = w.totals || {};
-            const tr = document.createElement('tr');
-            tr.style.background = '#f1f5f9';
-            tr.innerHTML = `
-              <td><strong>Grand Total (${w.employee_count} Employees)</strong></td>
-              <td>${misPill(t.total || 0, 'total')}</td>
-              <td>${misPill(t.done || 0, 'done')}</td>
-              <td>${misPill(t.on_time || 0, 'ontime')}<div style="font-size:11px;color:#666;margin-top:4px">${t.on_time_pct || 0}%</div></td>
-              <td>${misPill(t.delayed_done || 0, 'delayed')}</td>
-              <td>${misPill(t.delayed || t.delayed_not_done || 0, 'delayed')}</td>
-              <td>${misPill(t.pending || 0, 'pending')}</td>
-              <td>${misPill(t.na || 0, 'na')}</td>
-              <td><strong style="color:#1d4ed8">${t.completion_pct || 0}%</strong></td>
-            `;
-            tbody.appendChild(tr);
-          }
-          section.appendChild(tableWrap);
-          body.appendChild(section);
+        const tabs = `
+          <div class="mis-week-tabs" id="misWeekTabs">
+            <button type="button" class="mis-week-tab active" data-week="">All weeks</button>
+            ${(data.week_options || data.weeks).map((w) => `
+              <button type="button" class="mis-week-tab ${String(weekEl?.value) === String(w.week) ? 'active' : ''}" data-week="${w.week}">
+                W${w.week}${w.spans_prev_month ? '<span class="mis-week-hint">+prev</span>' : ''}
+              </button>`).join('')}
+          </div>`;
+
+        body.innerHTML =
+          misKpiRow(data.summary || {}, data.month_label, data.as_of) +
+          tabs +
+          data.weeks.map(renderMisWeekCard).join('');
+
+        body.querySelectorAll('#misWeekTabs .mis-week-tab').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            if (weekEl) weekEl.value = btn.dataset.week || '';
+            run();
+          });
+        });
+        // Sync active tab with current week filter
+        body.querySelectorAll('#misWeekTabs .mis-week-tab').forEach((btn) => {
+          btn.classList.toggle('active', (btn.dataset.week || '') === (weekEl?.value || ''));
         });
       } catch (err) {
         body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
@@ -5242,11 +5330,14 @@ export async function mountTaskflowApp(opts = {}) {
     if (!monthEl._misBound) {
       monthEl._misBound = true;
       genBtn?.addEventListener('click', run);
+      csvBtn?.addEventListener('click', () => downloadMisCsv(_misLastData));
       monthEl.addEventListener('change', () => {
         if (weekEl) weekEl.value = '';
         run();
       });
       weekEl?.addEventListener('change', run);
+      deptEl?.addEventListener('change', run);
+      sortEl?.addEventListener('change', run);
     }
     run();
   }
