@@ -137,41 +137,49 @@ async function transferTasksToBuddy(leave) {
   return { transferred };
 }
 
+function normDept(d) {
+  return String(d || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 // ----------------------------- buddy picker (any logged-in user) -----------------------------
 router.get('/buddies', async (req, res) => {
   try {
+    // Fresh department from DB (JWT may be stale)
+    const { data: me, error: meErr } = await supabase
+      .from('users')
+      .select('id, department, department_id')
+      .eq('id', req.user.id)
+      .maybeSingle();
+    if (meErr) throw meErr;
+
+    const myDept = normDept(me?.department || req.user.department);
+    const myDeptId = me?.department_id || req.user.department_id || null;
+
+    if (!myDept && !myDeptId) {
+      return res.json([]);
+    }
+
     const { data, error } = await supabase
       .from('users')
-      .select('id, full_name, department, designation, role, is_active')
+      .select('id, full_name, department, department_id, designation, role, is_active')
       .eq('is_active', true)
       .order('full_name', { ascending: true });
     if (error) throw error;
 
-    const myDept = String(req.user.department || '').trim().toLowerCase();
-    const rows = (data || [])
-      .filter((u) => {
-        if (String(u.id) === String(req.user.id)) return false;
-        const role = String(u.role || '').toLowerCase();
-        if (role === 'client') return false;
+    // Strict same-department only (MDO OFFICE → MDO OFFICE only, Engg → Engg only)
+    const rows = (data || []).filter((u) => {
+      if (String(u.id) === String(req.user.id)) return false;
+      if (String(u.role || '').toLowerCase() === 'client') return false;
+      if (myDeptId && u.department_id && String(u.department_id) === String(myDeptId)) {
         return true;
-      })
-      .map((u) => ({
-        ...u,
-        _sameDept: myDept && String(u.department || '').trim().toLowerCase() === myDept,
-      }))
-      .sort((a, b) => {
-        // Same department (e.g. Engineering) first, then A–Z
-        if (a._sameDept !== b._sameDept) return a._sameDept ? -1 : 1;
-        return String(a.full_name || '').localeCompare(String(b.full_name || ''));
-      })
-      .map(({ _sameDept, ...u }) => u);
+      }
+      return myDept && normDept(u.department) === myDept;
+    });
 
-    // Prefer same-department colleagues (Engineering sees Engineering, etc.)
-    const sameDept = myDept
-      ? rows.filter((u) => String(u.department || '').trim().toLowerCase() === myDept)
-      : [];
-
-    res.json(sameDept.length ? sameDept : rows);
+    res.json(rows);
   } catch (err) {
     console.error('Buddy list error:', err.message);
     res.status(500).json({ error: 'Could not load buddy list' });
@@ -203,13 +211,13 @@ router.post('/', async (req, res) => {
     {
       const { data: buddyUser, error: buddyErr } = await supabase
         .from('users')
-        .select('id, full_name, whatsapp_number, is_active, role')
+        .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
         .eq('id', buddy_id)
         .maybeSingle();
       if (buddyErr && isBuddySchemaError(buddyErr)) {
         const retry = await supabase
           .from('users')
-          .select('id, full_name, is_active, role')
+          .select('id, full_name, is_active, role, department, department_id')
           .eq('id', buddy_id)
           .maybeSingle();
         if (retry.error) throw retry.error;
@@ -225,6 +233,25 @@ router.post('/', async (req, res) => {
     }
     if ((buddy.role || '').toLowerCase() === 'client') {
       return res.status(400).json({ error: 'Client users cannot be leave buddies' });
+    }
+
+    // Buddy must be same department (MDO with MDO, Engg with Engg, …)
+    {
+      const { data: me } = await supabase
+        .from('users')
+        .select('department, department_id')
+        .eq('id', req.user.id)
+        .maybeSingle();
+      const myDept = normDept(me?.department || req.user.department);
+      const myDeptId = me?.department_id || req.user.department_id || null;
+      const buddyDept = normDept(buddy.department);
+      const sameById = myDeptId && buddy.department_id && String(myDeptId) === String(buddy.department_id);
+      const sameByName = myDept && buddyDept && myDept === buddyDept;
+      if (!sameById && !sameByName) {
+        return res.status(400).json({
+          error: 'Buddy must be from your own department (e.g. MDO OFFICE → MDO OFFICE only)',
+        });
+      }
     }
 
     const insertPayload = {

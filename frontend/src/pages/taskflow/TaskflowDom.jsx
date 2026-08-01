@@ -436,7 +436,7 @@ export default function TaskflowDom() {
         <section id="view-permissions" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Permissions</h2>
-            <p className="view-sub">Decide what each employee is allowed to do, without making them a full admin.</p>
+            <p className="view-sub">Decide what each employee is allowed to do — including who gets the Office ↔ Site switch — without making them a full admin.</p>
           </div>
           <div className="table-card">
             <div className="table-scroll">
@@ -450,6 +450,7 @@ export default function TaskflowDom() {
                     <th className="perm-col">Resolve tickets</th>
                     <th className="perm-col">Verify tasks</th>
                     <th className="perm-col">MIS Executive</th>
+                    <th className="perm-col">Office ↔ Site</th>
                   </tr>
                 </thead>
                 <tbody id="permissionsTableBody"></tbody>
@@ -1224,7 +1225,7 @@ export default function TaskflowDom() {
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
-            Your open tasks due in this leave window will move to this buddy after they say Yes and leave is approved.
+            Your open tasks due in this leave window will move to this buddy after they say Yes and leave is approved. Buddy list shows only your department (e.g. MDO OFFICE → MDO only).
           </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>

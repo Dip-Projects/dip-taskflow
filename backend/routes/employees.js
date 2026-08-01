@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .order('created_at', { ascending: true });
     if (error) throw error;
     res.json(await attachReportingHead(data));
@@ -142,7 +142,8 @@ router.patch('/:id', async (req, res) => {
     const { id } = req.params;
     const {
       full_name, department, designation, role, is_active, can_verify,
-      is_mis_executive, can_add_site, can_add_employee, reporting_head_id,
+      is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets,
+      can_switch_office_site, reporting_head_id,
       is_head, site_name, site_names, whatsapp_number
     } = req.body || {};
 
@@ -174,6 +175,8 @@ router.patch('/:id', async (req, res) => {
     if (is_mis_executive !== undefined) updates.is_mis_executive = is_mis_executive;
     if (can_add_site !== undefined) updates.can_add_site = can_add_site;
     if (can_add_employee !== undefined) updates.can_add_employee = can_add_employee;
+    if (can_resolve_tickets !== undefined) updates.can_resolve_tickets = !!can_resolve_tickets;
+    if (can_switch_office_site !== undefined) updates.can_switch_office_site = !!can_switch_office_site;
     // reporting_head_id is optional — '' / null clears it back to "no head / top level".
     // Can't be your own reporting head — guard against that here too (frontend already excludes it).
     if (reporting_head_id !== undefined) {
@@ -191,7 +194,7 @@ router.patch('/:id', async (req, res) => {
       .from('users')
       .update(updates)
       .eq('id', id)
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, reporting_head_id')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .single();
 
     if (error) throw error;

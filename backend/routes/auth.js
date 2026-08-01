@@ -7,17 +7,18 @@ const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
 const USER_SELECT_FULL =
-  'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, department, department_id, designation, is_head, site_name, site_names';
+  'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, department, department_id, designation, is_head, site_name, site_names';
 const USER_SELECT_BASIC =
   'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, department, department_id, designation';
 
 function toPayload(user) {
   const role = (user.role || '').toLowerCase();
   const desig = (user.designation || '').toLowerCase().trim();
-  // Clients never get Office/Site toggle.
+  // Auto roles + Permissions toggle "Office ↔ Site"
   const canAccessSite =
     role !== 'client' &&
-    (!!user.is_head ||
+    (!!user.can_switch_office_site ||
+      !!user.is_head ||
       role === 'admin' ||
       role === 'head' ||
       desig === 'project head' ||
@@ -33,12 +34,14 @@ function toPayload(user) {
     designation: user.designation || '',
     is_head: role === 'client' ? false : (!!user.is_head || role === 'head' || canAccessSite),
     can_access_site: canAccessSite,
+    can_switch_office_site: !!user.can_switch_office_site,
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     can_verify: !!user.can_verify,
     is_mis_executive: !!user.is_mis_executive,
     can_add_site: !!user.can_add_site,
-    can_add_employee: !!user.can_add_employee
+    can_add_employee: !!user.can_add_employee,
+    can_resolve_tickets: !!user.can_resolve_tickets,
   };
 }
 
@@ -49,7 +52,7 @@ async function loadUserByUsername(username) {
     .eq('username', username)
     .maybeSingle();
 
-  if (error && /is_head|site_name|site_names/i.test(error.message || '')) {
+  if (error && /is_head|site_name|site_names|can_switch_office_site|can_resolve_tickets/i.test(error.message || '')) {
     ({ data, error } = await supabase
       .from('users')
       .select(USER_SELECT_BASIC)
@@ -67,7 +70,7 @@ async function loadUserById(id) {
     .eq('id', id)
     .maybeSingle();
 
-  if (error && /is_head|site_name|site_names/i.test(error.message || '')) {
+  if (error && /is_head|site_name|site_names|can_switch_office_site|can_resolve_tickets/i.test(error.message || '')) {
     ({ data, error } = await supabase
       .from('users')
       .select(

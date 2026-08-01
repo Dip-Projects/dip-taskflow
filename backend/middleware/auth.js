@@ -17,13 +17,15 @@ function signToken(user) {
     department_id: user.department_id,
     designation: user.designation || '',
     is_head: !!user.is_head,
-    can_access_site: !!(user.is_head || user.can_access_site),
+    can_access_site: !!(user.is_head || user.can_access_site || user.can_switch_office_site),
+    can_switch_office_site: !!user.can_switch_office_site,
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     can_verify: !!user.can_verify,
     is_mis_executive: !!user.is_mis_executive,
     can_add_site: !!user.can_add_site,
-    can_add_employee: !!user.can_add_employee
+    can_add_employee: !!user.can_add_employee,
+    can_resolve_tickets: !!user.can_resolve_tickets,
   };
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: TOKEN_LIFETIME });
 }

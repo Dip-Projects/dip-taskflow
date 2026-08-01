@@ -110,11 +110,11 @@ export function isSiteHead(user) {
 }
 
 export function canToggleSite(user) {
-  // Clients never toggle; Head / admin get Office ↔ Site.
+  // Clients never toggle. Admin / Head / permission toggle / known site roles.
   if (!user || isClient(user)) return false;
   const role = (user.role || '').toLowerCase().trim();
   if (role === 'admin' || role === 'head') return true;
-  if (user.is_head || user.can_access_site) return true;
+  if (user.can_switch_office_site || user.is_head || user.can_access_site) return true;
   if (isSiteEngineer(user)) return false;
   const desig = (user.designation || '').toLowerCase().trim();
   return desig === 'project head' || desig === 'site incharge';

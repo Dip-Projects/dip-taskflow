@@ -2847,7 +2847,12 @@ export async function mountTaskflowApp(opts = {}) {
         .filter((e) => e.is_active !== false && e.id !== state.user.id && (e.role || '').toLowerCase() !== 'client')
         .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
       if (!list.length) {
-        sel.innerHTML = '<option value="">No colleagues available</option>';
+        sel.innerHTML = '<option value="">No colleagues in your department</option>';
+        if (els.leaveFormMsg) {
+          els.leaveFormMsg.textContent =
+            'No buddy found in your department. Check that colleagues have the same department name (e.g. MDO OFFICE).';
+          els.leaveFormMsg.hidden = false;
+        }
         return;
       }
       list.forEach((e) => {
@@ -3584,7 +3589,7 @@ export async function mountTaskflowApp(opts = {}) {
   });
   // ─── Permissions (admin only) ──────────────────────────────────────────────────
   async function loadPermissions() {
-    els.permissionsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Loading employees…</td></tr>`;
+    els.permissionsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading employees…</td></tr>`;
     try {
       const employees = await api('/employees');
       renderPermissionsTable(employees);
@@ -3592,7 +3597,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function renderPermissionsTable(employees) {
     if (!employees.length) {
-      els.permissionsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No employees yet</td></tr>`;
+      els.permissionsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No employees yet</td></tr>`;
       return;
     }
     els.permissionsTableBody.innerHTML = '';
@@ -3608,17 +3613,26 @@ export async function mountTaskflowApp(opts = {}) {
         ['can_add_employee', 'Add employee'],
         ['can_resolve_tickets', 'Resolve tickets'],
         ['can_verify', 'Verify tasks'],
-        ['is_mis_executive', 'MIS Executive']
+        ['is_mis_executive', 'MIS Executive'],
+        ['can_switch_office_site', 'Office ↔ Site'],
       ];
       flags.forEach(([flag, label]) => {
         const td = document.createElement('td');
         td.className = 'perm-col';
         const btn = document.createElement('button');
-        const checked = isAdminRow || !!emp[flag];
+        // Office↔Site also shows Yes when Head role / is_head already grants it
+        const autoSite =
+          flag === 'can_switch_office_site' &&
+          (emp.role === 'head' || !!emp.is_head);
+        const checked = isAdminRow || autoSite || !!emp[flag];
         btn.className = `status-toggle ${checked ? 'active' : 'inactive'}`;
         btn.textContent = checked ? 'Yes' : 'No';
-        btn.title = isAdminRow ? 'Admins already have full access' : `Toggle "${label}" for ${emp.full_name}`;
-        if (isAdminRow) {
+        btn.title = isAdminRow
+          ? 'Admins already have full access'
+          : autoSite
+            ? 'Head role already has Office ↔ Site'
+            : `Toggle "${label}" for ${emp.full_name}`;
+        if (isAdminRow || autoSite) {
           btn.disabled = true;
         } else {
           btn.addEventListener('click', () => togglePermission(emp, flag));
