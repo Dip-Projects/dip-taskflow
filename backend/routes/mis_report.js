@@ -92,7 +92,7 @@ function completionPct(s) {
 
 function classifyRegular(task, asOfYmd) {
   const due = task.target_date ? String(task.target_date).slice(0, 10) : null;
-  const doneAt = task.verified_at || task.completed_at || task.sent_for_verification_at || null;
+  const doneAt = task.verified_at || task.sent_for_verification_at || null;
   const doneDay = doneAt ? String(doneAt).slice(0, 10) : null;
   const isDone =
     task.status === 'Completed' ||
@@ -237,7 +237,7 @@ router.get('/', async (req, res) => {
     const { data: tasks, error: taskErr } = await supabase
       .from('tasks')
       .select(
-        'id, assigned_to, status, target_date, completed_at, verified_at, sent_for_verification_at, verification_status'
+        'id, assigned_to, status, target_date, verified_at, sent_for_verification_at, verification_status'
       )
       .gte('target_date', `${rangeFrom}T00:00:00.000Z`)
       .lte('target_date', `${rangeTo}T23:59:59.999Z`);
