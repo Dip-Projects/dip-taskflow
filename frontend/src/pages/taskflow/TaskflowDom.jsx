@@ -871,6 +871,7 @@ export default function TaskflowDom() {
             <option value="">Select role</option>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
+            <option value="client">Client</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -885,7 +886,7 @@ export default function TaskflowDom() {
           <select id="emp-site">
             <option value="">— None —</option>
           </select>
-          <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers — Clock In / reports use this site.</p>
+          <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers and Clients — Clock In / client portal use this site.</p>
         </div>
         <p className="form-note">Username and password will be auto-generated after submission.</p>
         <p id="employeeFormMsg" className="form-error" hidden={true}></p>
@@ -923,6 +924,7 @@ export default function TaskflowDom() {
           <select id="edit-emp-role" required>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
+            <option value="client">Client</option>
             <option value="admin">Admin</option>
           </select>
         </div>

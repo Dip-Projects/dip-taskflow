@@ -3,6 +3,12 @@
   "installCommand": "cd backend && npm install && cd ../frontend && npm install",
   "buildCommand": "cd frontend && npm run build && node scripts/copy-to-vercel-public.mjs && test -f public/index.html && ls public | head",
   "outputDirectory": "public",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/config.js", "destination": "/api" },
@@ -11,6 +17,8 @@
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/(.*)", "destination": "/index.html" },
     { "source": "/site", "destination": "/index.html" },
-    { "source": "/site/(.*)", "destination": "/index.html" }
+    { "source": "/site/(.*)", "destination": "/index.html" },
+    { "source": "/client", "destination": "/index.html" },
+    { "source": "/client/(.*)", "destination": "/index.html" }
   ]
 }

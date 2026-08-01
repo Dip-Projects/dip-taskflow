@@ -14,13 +14,14 @@ const USER_SELECT_BASIC =
 function toPayload(user) {
   const role = (user.role || '').toLowerCase();
   const desig = (user.designation || '').toLowerCase().trim();
-  // Admin, Head role, DB is_head, or exact Project Head / Site Incharge.
+  // Clients never get Office/Site toggle.
   const canAccessSite =
-    !!user.is_head ||
-    role === 'admin' ||
-    role === 'head' ||
-    desig === 'project head' ||
-    desig === 'site incharge';
+    role !== 'client' &&
+    (!!user.is_head ||
+      role === 'admin' ||
+      role === 'head' ||
+      desig === 'project head' ||
+      desig === 'site incharge');
 
   return {
     id: user.id,
@@ -30,7 +31,7 @@ function toPayload(user) {
     department: user.department,
     department_id: user.department_id,
     designation: user.designation || '',
-    is_head: !!user.is_head || role === 'head' || canAccessSite,
+    is_head: role === 'client' ? false : (!!user.is_head || role === 'head' || canAccessSite),
     can_access_site: canAccessSite,
     site_name: user.site_name || '',
     site_names: user.site_names || null,

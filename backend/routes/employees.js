@@ -93,8 +93,8 @@ router.post('/', async (req, res) => {
     if (!full_name || !department || !designation || !role) {
       return res.status(400).json({ error: 'Please fill in all required fields' });
     }
-    if (!['admin', 'employee', 'head'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin, employee, or head' });
+    if (!['admin', 'employee', 'head', 'client'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin, employee, head, or client' });
     }
 
     const username = await generateUniqueUsername(full_name);
@@ -104,12 +104,17 @@ router.post('/', async (req, res) => {
     const password_hash = await bcrypt.hash(password, 10);
 
     // Head = employee-level TaskFlow access + Office/Site toggle (is_head)
+    // Client = portal login only (no is_head)
     const headFlag = role === 'head' ? true : !!is_head;
+    const departmentFinal =
+      role === 'client' && !(department || '').trim()
+        ? 'Client'
+        : department;
 
     const { data, error } = await supabase
       .from('users')
       .insert({
-        username, password_hash, full_name, department, designation, role, is_active: true,
+        username, password_hash, full_name, department: departmentFinal, designation, role, is_active: true,
         reporting_head_id: reporting_head_id || null,
         is_head: headFlag,
         site_name: site_name || null,
@@ -145,13 +150,16 @@ router.patch('/:id', async (req, res) => {
     if (department !== undefined) updates.department = department;
     if (designation !== undefined) updates.designation = designation;
     if (role !== undefined) {
-      if (!['admin', 'employee', 'head'].includes(role)) {
-        return res.status(400).json({ error: 'Role must be admin, employee, or head' });
+      if (!['admin', 'employee', 'head', 'client'].includes(role)) {
+        return res.status(400).json({ error: 'Role must be admin, employee, head, or client' });
       }
       updates.role = role;
       // Keep is_head in sync with Head role unless explicitly overridden below
       if (is_head === undefined) {
         updates.is_head = role === 'head';
+      }
+      if (role === 'client' && department === undefined && updates.department === undefined) {
+        updates.department = 'Client';
       }
     }
     if (is_head !== undefined) updates.is_head = !!is_head;

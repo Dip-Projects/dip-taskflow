@@ -649,6 +649,7 @@ body.sidebar-open { overflow: hidden; }
 .role-pill.admin    { background: var(--rose-lt);  color: #991B1B; border: 1px solid var(--rose-bd); }
 .role-pill.employee { background: var(--blue-lt);  color: #1E40AF; border: 1px solid var(--blue-bd); }
 .role-pill.head     { background: #FEF3C7; color: #92400E; border: 1px solid #F59E0B; }
+.role-pill.client   { background: #ECFDF5; color: #065F46; border: 1px solid #34D399; }
 
 /* ================================================================
    EMPLOYEE CARDS (mobile — "Manage employees")

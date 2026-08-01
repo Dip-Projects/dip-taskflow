@@ -19,6 +19,10 @@ function sanitizeBucketName(site) {
 
 let _sharedReady = false;
 
+async function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export async function ensureSiteBucket(site) {
   const prefix = sanitizeBucketName(site);
   if (_sharedReady) {
@@ -51,42 +55,72 @@ export async function ensureSiteBucket(site) {
   return { bucket: SITE_FILES_BUCKET, prefix, created: !!data.created };
 }
 
-/** Upload via backend (service_role) — avoids Storage RLS blocking anon. */
-export async function uploadViaApi({ path, dataUrl, blob, contentType, bucket = SITE_FILES_BUCKET }) {
+async function dataUrlToBlob(dataUrl) {
+  const res = await fetch(dataUrl);
+  return res.blob();
+}
+
+/**
+ * Upload via backend (service_role) — always multipart FormData.
+ * Avoids huge JSON base64 bodies that trigger ERR_CONNECTION_RESET on Vercel.
+ */
+export async function uploadViaApi({
+  path,
+  dataUrl,
+  blob,
+  contentType,
+  bucket = SITE_FILES_BUCKET,
+  retries = 3,
+}) {
   const token = getToken();
   if (!token) throw new Error('Please log in again — missing session for file upload.');
 
   await ensureSiteBucket(path.split('/')[0] || 'site');
 
-  let body;
-  let headers = { Authorization: `Bearer ${token}` };
+  let fileBlob = blob;
+  let type = contentType || 'application/octet-stream';
 
-  if (dataUrl) {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify({ path, dataUrl, contentType, bucket });
-  } else if (blob) {
-    const fd = new FormData();
-    fd.append('file', blob, path.split('/').pop() || 'file');
-    fd.append('path', path);
-    fd.append('bucket', bucket);
-    if (contentType) fd.append('contentType', contentType);
-    body = fd;
-  } else {
-    throw new Error('uploadViaApi: need dataUrl or blob');
+  if (!fileBlob && dataUrl) {
+    fileBlob = await dataUrlToBlob(dataUrl);
+    type = fileBlob.type || type || 'image/jpeg';
+  }
+  if (!fileBlob) throw new Error('uploadViaApi: need dataUrl or blob');
+
+  const fileName = path.split('/').pop() || 'file';
+  let lastErr;
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const fd = new FormData();
+      fd.append('file', fileBlob, fileName);
+      fd.append('path', path);
+      fd.append('bucket', bucket);
+      if (type) fd.append('contentType', type);
+
+      const res = await fetch(`${API_BASE}/storage/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Upload failed (${res.status})`);
+      }
+      if (!data.publicUrl) throw new Error('Upload succeeded but no public URL returned');
+      return data.publicUrl;
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || err || '');
+      const retryable =
+        /Failed to fetch|NetworkError|CONNECTION_RESET|timeout|502|503|504/i.test(msg) ||
+        err?.name === 'TypeError';
+      if (!retryable || attempt === retries) break;
+      await sleep(400 * attempt);
+    }
   }
 
-  const res = await fetch(`${API_BASE}/storage/upload`, {
-    method: 'POST',
-    headers,
-    body,
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `Upload failed (${res.status})`);
-  }
-  if (!data.publicUrl) throw new Error('Upload succeeded but no public URL returned');
-  return data.publicUrl;
+  throw lastErr || new Error('Upload failed');
 }
 
 export { sanitizeBucketName };

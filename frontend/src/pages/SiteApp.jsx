@@ -19,6 +19,9 @@ export default function SiteApp() {
   if (!isSiteEngineer && !canToggleSite) {
     return <Navigate to="/app" replace />;
   }
+  if ((user?.role || '').toLowerCase() === 'client' || (user?.department || '').toLowerCase() === 'client') {
+    return <Navigate to="/client" replace />;
+  }
 
   const goApp = () => {
     localStorage.setItem('tf_surface', 'app');

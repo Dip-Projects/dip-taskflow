@@ -5,7 +5,9 @@ const cors    = require('cors');
 const app     = express();
 
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+// Large enough for multipart fields; prefer FormData uploads (not giant JSON).
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Runtime config for React build on :4000 (anon key not baked / stale in old builds)
 app.get('/config.js', (_req, res) => {

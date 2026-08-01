@@ -14,7 +14,7 @@ create table if not exists users (
   full_name text not null,
   department text,
   designation text,
-  role text not null check (role in ('admin', 'employee', 'head')),
+  role text not null check (role in ('admin', 'employee', 'head', 'client')),
   is_active boolean not null default true,
   can_verify boolean not null default false,
   created_at timestamptz not null default now()

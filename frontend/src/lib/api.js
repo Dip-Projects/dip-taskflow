@@ -78,9 +78,17 @@ export async function login(username, password) {
 
 /** Where should this user land after login? */
 export function postLoginPath(user) {
+  if (isClient(user)) return '/client';
   const dept = (user.department || '').trim().toLowerCase();
   if (dept === 'site engineer') return '/site';
   return '/app';
+}
+
+export function isClient(user) {
+  if (!user) return false;
+  const role = (user.role || '').toLowerCase().trim();
+  const dept = (user.department || '').trim().toLowerCase();
+  return role === 'client' || dept === 'client';
 }
 
 export function isSiteEngineer(user) {
@@ -102,9 +110,8 @@ export function isSiteHead(user) {
 }
 
 export function canToggleSite(user) {
-  // Head / admin get Office ↔ Site toggle (even if dept is Site Engineer).
-  // Pure site engineers (employee role) stay on /site only.
-  if (!user) return false;
+  // Clients never toggle; Head / admin get Office ↔ Site.
+  if (!user || isClient(user)) return false;
   const role = (user.role || '').toLowerCase().trim();
   if (role === 'admin' || role === 'head') return true;
   if (user.is_head || user.can_access_site) return true;

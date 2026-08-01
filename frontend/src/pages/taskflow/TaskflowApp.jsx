@@ -66,6 +66,9 @@ export default function TaskflowApp() {
   if (dept === 'site engineer' && !canToggleSite) {
     return <Navigate to="/site" replace />;
   }
+  if ((user?.role || '').toLowerCase() === 'client' || dept === 'client') {
+    return <Navigate to="/client" replace />;
+  }
 
   const goSite = () => {
     localStorage.setItem('tf_surface', 'site');

@@ -3235,9 +3235,11 @@ export async function mountTaskflowApp(opts = {}) {
     e.preventDefault(); els.employeeFormMsg.hidden = true;
     const siteName = (document.getElementById('emp-site')?.value || '').trim();
     const role = document.getElementById('emp-role').value;
+    let department = document.getElementById('emp-department').value.trim();
+    if (role === 'client' && !department) department = 'Client';
     const body = {
       full_name:   document.getElementById('emp-fullname').value.trim(),
-      department:  document.getElementById('emp-department').value.trim(),
+      department,
       designation: document.getElementById('emp-designation').value.trim(),
       role,
       is_head: role === 'head',
@@ -3301,12 +3303,15 @@ export async function mountTaskflowApp(opts = {}) {
       els.editEmployeeFormMsg.hidden = false;
       return;
     }
+    const role = els.editEmpRole.value;
+    let department = els.editEmpDepartment.value.trim();
+    if (role === 'client' && !department) department = 'Client';
     const body = {
       full_name:   els.editEmpFullname.value.trim(),
-      department:  els.editEmpDepartment.value.trim(),
+      department,
       designation: els.editEmpDesignation.value.trim(),
-      role:        els.editEmpRole.value,
-      is_head:     els.editEmpRole.value === 'head',
+      role,
+      is_head:     role === 'head',
       reporting_head_id: els.editEmpReportingHead.value || null, // optional — blank clears it
       is_active:   els.editEmpStatusToggle.dataset.active === 'true'
     };

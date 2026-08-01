@@ -1874,9 +1874,10 @@ async function uploadPdfToSupabase(blob, fileName, site, date) {
 async function uploadPhotoToSupabase(dataUrl, site, storagePath) {
   const { prefix } = await ensureSiteBucket(site);
   const path = `${prefix}/${storagePath}`.replace(/\/+/g, "/");
+  const blob = await dataUrlToBlob(dataUrl);
   return uploadViaApi({
     path,
-    dataUrl,
+    blob,
     contentType: "image/jpeg",
     bucket: SITE_FILES_BUCKET,
   });
@@ -4267,7 +4268,7 @@ function DprForm({ user }) {
     }
     setSubmitting(false);
   };
-async function uploadBatch(items, uploadFn, concurrency = 4) {
+async function uploadBatch(items, uploadFn, concurrency = 2) {
   const results = new Array(items.length);
   let cursor = 0;
   async function worker() {
