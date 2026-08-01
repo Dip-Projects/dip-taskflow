@@ -137,6 +137,47 @@ async function transferTasksToBuddy(leave) {
   return { transferred };
 }
 
+// ----------------------------- buddy picker (any logged-in user) -----------------------------
+router.get('/buddies', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, full_name, department, designation, role, is_active')
+      .eq('is_active', true)
+      .order('full_name', { ascending: true });
+    if (error) throw error;
+
+    const myDept = String(req.user.department || '').trim().toLowerCase();
+    const rows = (data || [])
+      .filter((u) => {
+        if (String(u.id) === String(req.user.id)) return false;
+        const role = String(u.role || '').toLowerCase();
+        if (role === 'client') return false;
+        return true;
+      })
+      .map((u) => ({
+        ...u,
+        _sameDept: myDept && String(u.department || '').trim().toLowerCase() === myDept,
+      }))
+      .sort((a, b) => {
+        // Same department (e.g. Engineering) first, then A–Z
+        if (a._sameDept !== b._sameDept) return a._sameDept ? -1 : 1;
+        return String(a.full_name || '').localeCompare(String(b.full_name || ''));
+      })
+      .map(({ _sameDept, ...u }) => u);
+
+    // Prefer same-department colleagues (Engineering sees Engineering, etc.)
+    const sameDept = myDept
+      ? rows.filter((u) => String(u.department || '').trim().toLowerCase() === myDept)
+      : [];
+
+    res.json(sameDept.length ? sameDept : rows);
+  } catch (err) {
+    console.error('Buddy list error:', err.message);
+    res.status(500).json({ error: 'Could not load buddy list' });
+  }
+});
+
 // ----------------------------- apply for leave -----------------------------
 router.post('/', async (req, res) => {
   try {
@@ -406,7 +447,7 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
     }
     if (existing.buddy_id && existing.buddy_status === 'Declined') {
       return res.status(400).json({
-        error: 'Buddy declined. Ask the employee to pick another buddy first.',
+        error: 'Buddy declined — tasks will not transfer. Ask the employee to pick another buddy first.',
       });
     }
 

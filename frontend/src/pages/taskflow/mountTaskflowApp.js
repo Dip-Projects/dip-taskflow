@@ -2833,20 +2833,40 @@ export async function mountTaskflowApp(opts = {}) {
   async function fillLeaveBuddySelect() {
     const sel = els.leaveBuddy || document.getElementById('leave-buddy');
     if (!sel) return;
-    sel.innerHTML = '<option value="">Select buddy…</option>';
+    sel.innerHTML = '<option value="">Loading buddies…</option>';
+    sel.disabled = true;
     try {
-      const employees = await api('/employees');
-      (employees || [])
+      // Dedicated endpoint (any employee). Prefer same department (e.g. Engineering).
+      let employees = await api('/leaves/buddies').catch(() => null);
+      if (!employees) {
+        // Fallback for older deploys
+        employees = await api('/master/employees');
+      }
+      sel.innerHTML = '<option value="">Select buddy…</option>';
+      const list = (employees || [])
         .filter((e) => e.is_active !== false && e.id !== state.user.id && (e.role || '').toLowerCase() !== 'client')
-        .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))
-        .forEach((e) => {
-          const opt = document.createElement('option');
-          opt.value = e.id;
-          opt.textContent = `${e.full_name}${e.department ? ` · ${e.department}` : ''}`;
-          sel.appendChild(opt);
-        });
+        .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+      if (!list.length) {
+        sel.innerHTML = '<option value="">No colleagues available</option>';
+        return;
+      }
+      list.forEach((e) => {
+        const opt = document.createElement('option');
+        opt.value = e.id;
+        const dept = e.department ? ` · ${e.department}` : '';
+        const desig = e.designation ? ` (${e.designation})` : '';
+        opt.textContent = `${e.full_name}${dept}${desig}`;
+        sel.appendChild(opt);
+      });
     } catch (err) {
       console.warn('buddy list', err.message);
+      sel.innerHTML = '<option value="">Could not load buddies</option>';
+      if (els.leaveFormMsg) {
+        els.leaveFormMsg.textContent = err.message || 'Could not load buddy list';
+        els.leaveFormMsg.hidden = false;
+      }
+    } finally {
+      sel.disabled = false;
     }
   }
 

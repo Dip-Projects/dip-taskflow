@@ -46,7 +46,7 @@ router.post('/task-types', requireAdmin, async (req, res) => {
 router.get('/employees', async (req, res) => {
   const { data, error } = await supabase
     .from('users')
-    .select('id, full_name, role')
+    .select('id, full_name, role, department, designation')
     .eq('is_active', true)
     .order('full_name');
   if (error) return res.status(500).json({ error: error.message });
