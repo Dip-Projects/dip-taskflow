@@ -32,10 +32,38 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       emptyOutDir: true,
       target: 'es2020',
-      // Browser ES modules (Vercel/Vite 8 rolldown was emitting CJS → blank page)
+      chunkSizeWarningLimit: 1800,
+      // Login must stay light — do not preload Site/Taskflow/Client/heic chunks.
+      modulePreload: {
+        resolveDependencies: (_filename, deps) =>
+          deps.filter(
+            (d) =>
+              !/site-portal|taskflow|client-portal|SiteApp|Taskflow|ClientApp|heic2any|jspdf|html2canvas|pptxgen|xlsx|exceljs/i.test(
+                d
+              )
+          ),
+      },
       rollupOptions: {
         output: {
           format: 'es',
+          manualChunks(id) {
+            if (id.includes('heic2any')) return 'heic2any';
+            // Keep React shared for login; leave other node_modules with the
+            // page that imports them (avoids a 1.5–2.5MB vendor on /login).
+            if (
+              id.includes('node_modules/react-dom') ||
+              id.includes('node_modules/react-router') ||
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules\\react-dom') ||
+              id.includes('node_modules\\react-router') ||
+              id.includes('node_modules\\react\\')
+            ) {
+              return 'react-vendor';
+            }
+            if (id.includes('/pages/client/')) return 'client-portal';
+            if (id.includes('/pages/site/')) return 'site-portal';
+            if (id.includes('/pages/taskflow/')) return 'taskflow';
+          },
         },
       },
     },
