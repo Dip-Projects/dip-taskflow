@@ -514,12 +514,15 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function openSidebar() {
     els.sidebar?.classList.add('open');
-    if (els.sidebarOverlay && isMobileNav()) {
-      els.sidebarOverlay.hidden = false;
-      els.sidebarOverlay.removeAttribute('hidden');
-    } else if (els.sidebarOverlay) {
-      els.sidebarOverlay.hidden = true;
-      els.sidebarOverlay.setAttribute('hidden', '');
+    // Mobile: dimmed overlay on the right. Desktop: no block — click main to close.
+    if (els.sidebarOverlay) {
+      if (isMobileNav()) {
+        els.sidebarOverlay.hidden = false;
+        els.sidebarOverlay.removeAttribute('hidden');
+      } else {
+        els.sidebarOverlay.hidden = true;
+        els.sidebarOverlay.setAttribute('hidden', '');
+      }
     }
     document.body.classList.add('sidebar-open');
   }
@@ -538,28 +541,13 @@ export async function mountTaskflowApp(opts = {}) {
       closeSidebar();
     });
   }
-  // Tap main content to dismiss drawer on mobile only
+  // Desktop: click anywhere on the right (main) to close. Mobile uses overlay.
   const mainContent = document.getElementById('mainContent');
   mainContent?.addEventListener('click', () => {
-    if (isMobileNav() && els.sidebar?.classList.contains('open')) closeSidebar();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeSidebar();
+    if (!isMobileNav() && els.sidebar?.classList.contains('open')) closeSidebar();
   });
   window.addEventListener('resize', () => {
-    if (!isMobileNav()) {
-      // Keep desktop default open; hide overlay
-      if (els.sidebarOverlay) {
-        els.sidebarOverlay.hidden = true;
-        els.sidebarOverlay.setAttribute('hidden', '');
-      }
-      document.body.classList.remove('sidebar-open');
-      if (els.sidebar && !els.sidebar.classList.contains('open')) {
-        // leave user choice; do nothing
-      }
-    } else if (els.sidebar?.classList.contains('open')) {
-      openSidebar(); // ensure overlay shows
-    }
+    if (els.sidebar?.classList.contains('open')) openSidebar();
   });
   
   // ─── app shell ───────────────────────────────────────────────────────────────
@@ -628,11 +616,12 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
   
-    // Leave section — everyone can apply; admin also gets the approvals queue.
+    // Leave section — apply leave; buddy cover in its own sidebar item; admin approvals.
     const leaveLabel = document.createElement('div');
     leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
     els.navList.appendChild(leaveLabel);
     els.navList.appendChild(makeNavButton('applyleave', '🌴 Apply Leave'));
+    els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
     if (isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
   
     // Corrections section — visible to all employees (admin doesn't get corrections, they assign them)
@@ -675,7 +664,12 @@ export async function mountTaskflowApp(opts = {}) {
       bdg.textContent = badge > 99 ? '99+' : badge;
       btn.appendChild(bdg);
     }
-    btn.addEventListener('click', () => { switchView(key); closeSidebar(); });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchView(key);
+      // Mobile drawer: close after pick. Desktop: keep open until toggle / right-side click.
+      if (isMobileNav()) closeSidebar();
+    });
     return btn;
   }
   
@@ -730,6 +724,9 @@ export async function mountTaskflowApp(opts = {}) {
         const tickets = await api('/tickets');
         const openTickets = tickets.filter(t => t.status === 'Open').length;
         setNavBadge('tickets-open', openTickets);
+
+        const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
+        setNavBadge('buddyrequests', buddyReqs.length);
       } else {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
@@ -773,6 +770,9 @@ export async function mountTaskflowApp(opts = {}) {
         // Pending leave requests awaiting approval
         const pendingLeaves = await api('/leaves/all?status=Pending').catch(() => []);
         setNavBadge('leaveapprovals', pendingLeaves.length);
+
+        const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
+        setNavBadge('buddyrequests', buddyReqs.length);
       }
     } catch(e) { /* silently fail — badges are non-critical */ }
   }
@@ -805,7 +805,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'corrections')   loadCorrections();
     if (viewKey === 'updations')     loadUpdations();
     if (viewKey === 'recurring')     loadRecurringView();
-    if (viewKey === 'applyleave')      { loadMyLeaves(); loadBuddyRequests(); }
+    if (viewKey === 'applyleave')      loadMyLeaves();
+    if (viewKey === 'buddyrequests')  loadBuddyRequests();
     if (viewKey === 'leaveapprovals')  loadLeaveApprovals();
     if (viewKey === 'drawings-add')  renderDrawingAddView();
     if (viewKey === 'drawings-all')  loadAllDrawings();
@@ -2885,7 +2886,9 @@ export async function mountTaskflowApp(opts = {}) {
       });
       showToast('Leave request submitted — waiting for buddy Yes/No ✅', 'success');
       els.leaveModal.hidden = true;
-      if (state.activeView === 'applyleave') { loadMyLeaves(); loadBuddyRequests(); }
+      if (state.activeView === 'applyleave') loadMyLeaves();
+      if (state.activeView === 'buddyrequests') loadBuddyRequests();
+      refreshNavBadges();
     } catch (err) { els.leaveFormMsg.textContent = err.message; els.leaveFormMsg.hidden = false; }
   });
 
@@ -2920,7 +2923,8 @@ export async function mountTaskflowApp(opts = {}) {
           try {
             await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
             showToast('You accepted buddy cover ✅', 'success');
-            loadBuddyRequests(); loadMyLeaves();
+            loadBuddyRequests();
+            refreshNavBadges();
           } catch (err) { showToast(err.message, 'error'); }
         });
         const noBtn = document.createElement('button');
@@ -2932,6 +2936,7 @@ export async function mountTaskflowApp(opts = {}) {
             await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
             showToast('Buddy request declined', 'success');
             loadBuddyRequests();
+            refreshNavBadges();
           } catch (err) { showToast(err.message, 'error'); }
         });
         actions.appendChild(yesBtn);

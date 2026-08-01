@@ -521,16 +521,10 @@ export default function TaskflowDom() {
           <div className="view-header-row">
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">🌴 Apply Leave</h2>
-              <p className="view-sub">Submit a leave request, pick a buddy, and track approval status.</p>
+              <p className="view-sub">Submit a leave request, pick a buddy in the form, and track approval status.</p>
             </div>
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
           </div>
-
-          <div className="view-heading" style={{marginTop: 24, marginBottom: 10}}>
-            <h3 className="subsection-title">🤝 Buddy requests for you</h3>
-            <p className="view-sub">Accept or decline when a teammate asks you to cover their tasks.</p>
-          </div>
-          <div id="buddyRequestsList" className="ticket-list" style={{marginBottom: 24}}></div>
 
           <div className="table-card view-desktop-only" style={{marginTop: 12}}>
             <div className="table-scroll">
@@ -551,6 +545,15 @@ export default function TaskflowDom() {
             </div>
           </div>
           <div id="myLeavesList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
+        </section>
+
+        {/* BUDDY REQUESTS (sidebar) */}
+        <section id="view-buddyrequests" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">🤝 Buddy requests</h2>
+            <p className="view-sub">Accept or decline when a teammate asks you to cover their tasks during leave.</p>
+          </div>
+          <div id="buddyRequestsList" className="ticket-list"></div>
         </section>
 
         {/* LEAVE APPROVALS (admin) */}

@@ -286,6 +286,7 @@ body.sidebar-open { overflow: hidden; }
     opacity: 1;
     pointer-events: auto;
   }
+  /* Desktop: no dim overlay — close via ☰ or clicking main content */
   #appScreen .sidebar-overlay { display: none !important; }
   body.sidebar-open { overflow: auto; }
 }

@@ -6,14 +6,56 @@ const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
 
-const LEAVE_SELECT = `
+const LEAVE_SELECT_BASIC = `
   id, from_date, to_date, is_half_day, reason, status,
   decision_note, created_at, decided_at,
-  buddy_id, buddy_status, buddy_responded_at, buddy_note,
   user:users!leaves_user_id_fkey ( id, full_name ),
-  decided_by_user:users!leaves_decided_by_fkey ( id, full_name ),
+  decided_by_user:users!leaves_decided_by_fkey ( id, full_name )
+`;
+
+const LEAVE_SELECT = `
+  ${LEAVE_SELECT_BASIC.trim()},
+  buddy_id, buddy_status, buddy_responded_at, buddy_note,
   buddy:users!leaves_buddy_id_fkey ( id, full_name )
 `;
+
+function isBuddySchemaError(err) {
+  const m = String(err?.message || err?.details || err?.hint || '').toLowerCase();
+  return (
+    m.includes('buddy_id') ||
+    m.includes('buddy_status') ||
+    m.includes('buddy_note') ||
+    m.includes('buddy_responded') ||
+    m.includes('leaves_buddy_id_fkey') ||
+    m.includes('leave_cover') ||
+    m.includes('whatsapp_number') ||
+    (m.includes('column') && m.includes('buddy'))
+  );
+}
+
+function withBuddyDefaults(rows) {
+  return (rows || []).map((row) => ({
+    ...row,
+    buddy_id: row.buddy_id ?? null,
+    buddy_status: row.buddy_status ?? 'None',
+    buddy_responded_at: row.buddy_responded_at ?? null,
+    buddy_note: row.buddy_note ?? null,
+    buddy: row.buddy ?? null,
+  }));
+}
+
+/** Run a leaves select with buddy columns; fall back if SQL not migrated yet. */
+async function selectLeaves(applyFilters) {
+  const full = await applyFilters(supabase.from('leaves').select(LEAVE_SELECT));
+  if (!full.error) return withBuddyDefaults(full.data);
+
+  if (!isBuddySchemaError(full.error)) throw full.error;
+
+  console.warn('Leave buddy columns missing — using basic select. Run backend/sql/add_leave_buddy.sql');
+  const basic = await applyFilters(supabase.from('leaves').select(LEAVE_SELECT_BASIC));
+  if (basic.error) throw basic.error;
+  return withBuddyDefaults(basic.data);
+}
 
 async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
   const numbers = new Set();
@@ -56,7 +98,6 @@ async function transferTasksToBuddy(leave) {
   }
   const fromDay = String(leave.from_date).slice(0, 10);
   const toDay = String(leave.to_date).slice(0, 10);
-  // Open tasks due in the leave window → reassign to buddy
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('id, assigned_to, target_date, status')
@@ -65,7 +106,10 @@ async function transferTasksToBuddy(leave) {
     .gte('target_date', `${fromDay}T00:00:00.000Z`)
     .lte('target_date', `${toDay}T23:59:59.999Z`);
 
-  if (error) throw error;
+  if (error) {
+    if (isBuddySchemaError(error)) return { transferred: 0 };
+    throw error;
+  }
   if (!tasks?.length) return { transferred: 0 };
 
   let transferred = 0;
@@ -80,6 +124,15 @@ async function transferTasksToBuddy(leave) {
       .eq('id', t.id)
       .eq('assigned_to', leave.user_id);
     if (!upErr) transferred += 1;
+    else if (!isBuddySchemaError(upErr)) {
+      // Fallback: reassign without leave_cover columns
+      const { error: up2 } = await supabase
+        .from('tasks')
+        .update({ assigned_to: leave.buddy_id })
+        .eq('id', t.id)
+        .eq('assigned_to', leave.user_id);
+      if (!up2) transferred += 1;
+    }
   }
   return { transferred };
 }
@@ -105,34 +158,57 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'You cannot select yourself as buddy' });
     }
 
-    const { data: buddyUser, error: buddyErr } = await supabase
-      .from('users')
-      .select('id, full_name, whatsapp_number, is_active, role')
-      .eq('id', buddy_id)
-      .maybeSingle();
-    if (buddyErr) throw buddyErr;
-    if (!buddyUser || buddyUser.is_active === false) {
+    let buddy = null;
+    {
+      const { data: buddyUser, error: buddyErr } = await supabase
+        .from('users')
+        .select('id, full_name, whatsapp_number, is_active, role')
+        .eq('id', buddy_id)
+        .maybeSingle();
+      if (buddyErr && isBuddySchemaError(buddyErr)) {
+        const retry = await supabase
+          .from('users')
+          .select('id, full_name, is_active, role')
+          .eq('id', buddy_id)
+          .maybeSingle();
+        if (retry.error) throw retry.error;
+        buddy = retry.data ? { ...retry.data, whatsapp_number: null } : null;
+      } else if (buddyErr) {
+        throw buddyErr;
+      } else {
+        buddy = buddyUser;
+      }
+    }
+    if (!buddy || buddy.is_active === false) {
       return res.status(400).json({ error: 'Selected buddy is not available' });
     }
-    if ((buddyUser.role || '').toLowerCase() === 'client') {
+    if ((buddy.role || '').toLowerCase() === 'client') {
       return res.status(400).json({ error: 'Client users cannot be leave buddies' });
     }
 
-    const { data, error } = await supabase
+    const insertPayload = {
+      user_id: req.user.id,
+      from_date,
+      to_date,
+      is_half_day: !!is_half_day,
+      reason: reason.trim(),
+      status: 'Pending',
+      buddy_id,
+      buddy_status: 'Pending',
+    };
+
+    let { data, error } = await supabase
       .from('leaves')
-      .insert({
-        user_id: req.user.id,
-        from_date,
-        to_date,
-        is_half_day: !!is_half_day,
-        reason: reason.trim(),
-        status: 'Pending',
-        buddy_id,
-        buddy_status: 'Pending',
-      })
+      .insert(insertPayload)
       .select(LEAVE_SELECT)
       .single();
 
+    if (error && isBuddySchemaError(error)) {
+      return res.status(503).json({
+        error:
+          'Leave buddy setup is not ready in the database yet. Ask admin to run add_leave_buddy.sql in Supabase, then try again.',
+      });
+    }
     if (error) throw error;
 
     await notifyLeaveStakeholders({
@@ -143,9 +219,9 @@ router.post('/', async (req, res) => {
       applicantId: req.user.id,
     });
 
-    if (buddyUser.whatsapp_number) {
-      sendWhatsAppTemplate(buddyUser.whatsapp_number, 'leave_buddy_request', [
-        buddyUser.full_name,
+    if (buddy.whatsapp_number) {
+      sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
+        buddy.full_name,
         req.user.full_name,
         from_date,
         to_date,
@@ -163,32 +239,35 @@ router.post('/', async (req, res) => {
 // ----------------------------- my leave requests -----------------------------
 router.get('/my', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('leaves')
-      .select(LEAVE_SELECT)
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
+    const data = await selectLeaves((q) =>
+      q.eq('user_id', req.user.id).order('created_at', { ascending: false })
+    );
     res.json(data);
   } catch (err) {
     console.error('List my leaves error:', err.message);
-    res.status(500).json({ error: 'Could not load your leave requests' });
+    res.status(500).json({ error: err.message || 'Could not load your leave requests' });
   }
 });
 
 // ----------------------------- buddy requests for me -----------------------------
 router.get('/buddy-requests', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('leaves')
-      .select(LEAVE_SELECT)
-      .eq('buddy_id', req.user.id)
-      .eq('buddy_status', 'Pending')
-      .order('created_at', { ascending: false });
-    if (error) throw error;
+    // If buddy columns are missing, there are no buddy requests yet
+    const probe = await supabase.from('leaves').select('buddy_id').limit(1);
+    if (probe.error && isBuddySchemaError(probe.error)) {
+      return res.json([]);
+    }
+
+    const data = await selectLeaves((q) =>
+      q
+        .eq('buddy_id', req.user.id)
+        .eq('buddy_status', 'Pending')
+        .order('created_at', { ascending: false })
+    );
     res.json(data);
   } catch (err) {
     console.error('Buddy requests error:', err.message);
+    if (isBuddySchemaError(err)) return res.json([]);
     res.status(500).json({ error: 'Could not load buddy requests' });
   }
 });
@@ -204,7 +283,14 @@ router.patch('/:id/buddy-respond', async (req, res) => {
       .select('id, buddy_id, buddy_status, status, user_id, from_date, to_date, reason')
       .eq('id', id)
       .maybeSingle();
-    if (fetchErr) throw fetchErr;
+    if (fetchErr) {
+      if (isBuddySchemaError(fetchErr)) {
+        return res.status(503).json({
+          error: 'Leave buddy setup is not ready. Run add_leave_buddy.sql in Supabase.',
+        });
+      }
+      throw fetchErr;
+    }
     if (!existing) return res.status(404).json({ error: 'Leave request not found' });
     if (String(existing.buddy_id) !== String(req.user.id)) {
       return res.status(403).json({ error: 'Only the selected buddy can respond' });
@@ -229,7 +315,6 @@ router.patch('/:id/buddy-respond', async (req, res) => {
       .single();
     if (error) throw error;
 
-    // If leave already approved and buddy just accepted → transfer now
     if (accept && existing.status === 'Approved') {
       await transferTasksToBuddy({ ...existing, buddy_id: req.user.id, buddy_status: 'Accepted' });
     }
@@ -259,11 +344,11 @@ router.patch('/:id/buddy-respond', async (req, res) => {
 // ----------------------------- all leave requests (admin) -----------------------------
 router.get('/all', requireAdmin, async (req, res) => {
   try {
-    let query = supabase.from('leaves').select(LEAVE_SELECT).order('created_at', { ascending: false });
-    if (req.query.status) query = query.eq('status', req.query.status);
-
-    const { data, error } = await query;
-    if (error) throw error;
+    const data = await selectLeaves((q) => {
+      let filtered = q;
+      if (req.query.status) filtered = filtered.eq('status', req.query.status);
+      return filtered.order('created_at', { ascending: false });
+    });
     res.json(data);
   } catch (err) {
     console.error('List all leaves error:', err.message);
@@ -281,7 +366,35 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
       .select('id, status, user_id, buddy_id, buddy_status, from_date, to_date')
       .eq('id', id)
       .maybeSingle();
-    if (fetchErr) throw fetchErr;
+    if (fetchErr) {
+      if (isBuddySchemaError(fetchErr)) {
+        // Approve without buddy checks if schema not ready
+        const { data: basic, error: bErr } = await supabase
+          .from('leaves')
+          .select('id, status, user_id, from_date, to_date')
+          .eq('id', id)
+          .maybeSingle();
+        if (bErr) throw bErr;
+        if (!basic) return res.status(404).json({ error: 'Leave request not found' });
+        if (basic.status !== 'Pending') {
+          return res.status(400).json({ error: 'This request has already been decided' });
+        }
+        const { data, error } = await supabase
+          .from('leaves')
+          .update({
+            status: 'Approved',
+            decided_by: req.user.id,
+            decided_at: new Date().toISOString(),
+            decision_note: null,
+          })
+          .eq('id', id)
+          .select(LEAVE_SELECT_BASIC)
+          .single();
+        if (error) throw error;
+        return res.json({ ...withBuddyDefaults([data])[0], tasks_transferred: 0 });
+      }
+      throw fetchErr;
+    }
     if (!existing) return res.status(404).json({ error: 'Leave request not found' });
     if (existing.status !== 'Pending') {
       return res.status(400).json({ error: 'This request has already been decided' });
@@ -336,7 +449,7 @@ router.patch('/:id/reject', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'This request has already been decided' });
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('leaves')
       .update({
         status: 'Rejected',
@@ -348,6 +461,22 @@ router.patch('/:id/reject', requireAdmin, async (req, res) => {
       .select(LEAVE_SELECT)
       .single();
 
+    if (error && isBuddySchemaError(error)) {
+      const retry = await supabase
+        .from('leaves')
+        .update({
+          status: 'Rejected',
+          decided_by: req.user.id,
+          decided_at: new Date().toISOString(),
+          decision_note: reason && reason.trim() ? reason.trim() : null,
+        })
+        .eq('id', id)
+        .select(LEAVE_SELECT_BASIC)
+        .single();
+      if (retry.error) throw retry.error;
+      data = withBuddyDefaults([retry.data])[0];
+      error = null;
+    }
     if (error) throw error;
     res.json(data);
   } catch (err) {
