@@ -81,11 +81,17 @@ function addStats(target, row) {
 
 function enrichStats(s) {
   const denom = Math.max(0, (s.total || 0) - (s.na || 0));
+  const open = Math.max(0, denom - (s.done || 0));
+  // 0 when all done; else % still open (e.g. 2/6 open → 33.33)
+  const open_pct = denom ? Math.round((open / denom) * 10000) / 100 : 0;
   return {
     ...s,
     delayed: s.delayed_not_done || 0,
-    on_time_pct: s.done ? Math.round((s.on_time / s.done) * 100) : 0,
-    completion_pct: denom ? Math.round(((s.done || 0) / denom) * 1000) / 10 : 0,
+    on_time_pct: s.done ? Math.round((s.on_time / s.done) * 10000) / 100 : 0,
+    // Kept for UI: "Completion %" column now shows open/incomplete % (0 = all done)
+    completion_pct: open_pct,
+    open_pct,
+    open,
   };
 }
 
@@ -322,6 +328,7 @@ router.get('/', async (req, res) => {
         .map((e) => enrichStats(e));
 
       if (sort === 'completion') {
+        // Higher open % first (more still open = worse)
         rows.sort((a, b) => b.completion_pct - a.completion_pct || a.name.localeCompare(b.name));
       } else if (sort === 'delayed') {
         rows.sort(

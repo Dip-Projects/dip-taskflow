@@ -5114,13 +5114,23 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function misPctCell(pct) {
-    const color = pct >= 80 ? '#16a34a' : pct >= 50 ? '#d97706' : '#dc2626';
+    // 0 = all done (good). Higher = more still open.
+    const color = pct <= 0 ? '#16a34a' : pct <= 33.33 ? '#d97706' : '#dc2626';
     const w = Math.max(0, Math.min(100, pct));
+    const text = formatMisPct(pct);
     return `
       <div class="mis-pct-wrap">
-        <strong style="color:${color}">${pct}%</strong>
+        <strong style="color:${color}">${text}%</strong>
         <div class="mis-pct-bar"><div class="mis-pct-fill" style="width:${w}%;background:${color}"></div></div>
       </div>`;
+  }
+
+  function formatMisPct(pct) {
+    const n = Number(pct) || 0;
+    if (n === 0) return '0';
+    // Up to 2 decimals (33.33, 44.7)
+    const rounded = Math.round(n * 100) / 100;
+    return String(rounded);
   }
 
   function misKpiRow(summary, monthLabel, asOf) {
@@ -5128,17 +5138,17 @@ export async function mountTaskflowApp(opts = {}) {
       <div class="mis-kpis">
         <div class="mis-kpi total"><div class="mis-kpi-label">Total tasks</div><div class="mis-kpi-value">${summary.total || 0}</div><div class="mis-kpi-sub">${monthLabel || ''}</div></div>
         <div class="mis-kpi done"><div class="mis-kpi-label">Done</div><div class="mis-kpi-value">${summary.done || 0}</div><div class="mis-kpi-sub">Completed / verified</div></div>
-        <div class="mis-kpi ontime"><div class="mis-kpi-label">On-time</div><div class="mis-kpi-value">${summary.on_time || 0}</div><div class="mis-kpi-sub">${summary.on_time_pct || 0}% of done</div></div>
+        <div class="mis-kpi ontime"><div class="mis-kpi-label">On-time</div><div class="mis-kpi-value">${summary.on_time || 0}</div><div class="mis-kpi-sub">${formatMisPct(summary.on_time_pct || 0)}% of done</div></div>
         <div class="mis-kpi delayed"><div class="mis-kpi-label">Delayed open</div><div class="mis-kpi-value">${summary.delayed || summary.delayed_not_done || 0}</div><div class="mis-kpi-sub">Past due, not done</div></div>
         <div class="mis-kpi pending"><div class="mis-kpi-label">Pending</div><div class="mis-kpi-value">${summary.pending || 0}</div><div class="mis-kpi-sub">Still within due</div></div>
         <div class="mis-kpi na"><div class="mis-kpi-label">N/A</div><div class="mis-kpi-value">${summary.na || 0}</div><div class="mis-kpi-sub">Not applicable</div></div>
-        <div class="mis-kpi completion"><div class="mis-kpi-label">Completion</div><div class="mis-kpi-value">${summary.completion_pct || 0}%</div><div class="mis-kpi-sub">Done ÷ (Total − N/A)</div></div>
+        <div class="mis-kpi completion"><div class="mis-kpi-label">Open %</div><div class="mis-kpi-value">${formatMisPct(summary.completion_pct || 0)}%</div><div class="mis-kpi-sub">0% = all done</div></div>
       </div>
       <div class="mis-legend">
         <span><strong>On-time</strong> = done on/before due</span>
         <span><strong>Delayed done</strong> = finished after due</span>
         <span><strong>Delayed</strong> = overdue &amp; still open</span>
-        <span><strong>N/A</strong> = recurring marked not applicable (excluded from completion %)</span>
+        <span><strong>Open %</strong> = still open ÷ (Total − N/A). <strong>0%</strong> means all completed. Example: 2 of 6 open → 33.33%</span>
         <span>As of <strong>${escapeHtml(asOf || '—')}</strong></span>
       </div>`;
   }
@@ -5180,7 +5190,7 @@ export async function mountTaskflowApp(opts = {}) {
       <div class="mis-week-card" data-week="${w.week}">
         <div class="mis-week-head">
           <h3>${escapeHtml(w.label)}${hint ? `<span class="mis-week-meta">${hint}</span>` : ''}</h3>
-          <div class="mis-week-meta">${w.employee_count} employees · ${w.totals?.total || 0} tasks · ${w.totals?.completion_pct || 0}% complete</div>
+          <div class="mis-week-meta">${w.employee_count} employees · ${w.totals?.total || 0} tasks · Open ${formatMisPct(w.totals?.completion_pct || 0)}%</div>
         </div>
         <div class="table-scroll">
           <table class="data-table mis-table" style="min-width:960px">
@@ -5194,7 +5204,7 @@ export async function mountTaskflowApp(opts = {}) {
                 <th>Delayed</th>
                 <th>Pending</th>
                 <th>N/A</th>
-                <th>Completion %</th>
+                <th>Open % (0=all done)</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>

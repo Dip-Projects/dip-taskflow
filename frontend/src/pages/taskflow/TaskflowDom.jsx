@@ -882,7 +882,7 @@ export default function TaskflowDom() {
                 <span>Sort</span>
                 <select id="misSort">
                   <option value="name">Name A–Z</option>
-                  <option value="completion">Completion %</option>
+                  <option value="completion">Open % (high → low)</option>
                   <option value="delayed">Most delayed</option>
                 </select>
               </label>
