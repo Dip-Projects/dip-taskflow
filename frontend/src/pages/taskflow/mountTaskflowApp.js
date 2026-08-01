@@ -133,10 +133,12 @@ function collectEls() {
     leaveTo: document.getElementById('leave-to'),
     leaveHalfDay: document.getElementById('leave-halfday'),
     leaveReason: document.getElementById('leave-reason'),
+    leaveBuddy: document.getElementById('leave-buddy'),
     closeLeaveModal: document.getElementById('closeLeaveModal'),
     cancelLeaveModal: document.getElementById('cancelLeaveModal'),
     leaveApprovalsList: document.getElementById('leaveApprovalsList'),
     leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
+    buddyRequestsList: document.getElementById('buddyRequestsList'),
     leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
     rejectLeaveForm: document.getElementById('rejectLeaveForm'),
     rejectLeaveFormMsg: document.getElementById('rejectLeaveFormMsg'),
@@ -803,7 +805,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'corrections')   loadCorrections();
     if (viewKey === 'updations')     loadUpdations();
     if (viewKey === 'recurring')     loadRecurringView();
-    if (viewKey === 'applyleave')      loadMyLeaves();
+    if (viewKey === 'applyleave')      { loadMyLeaves(); loadBuddyRequests(); }
     if (viewKey === 'leaveapprovals')  loadLeaveApprovals();
     if (viewKey === 'drawings-add')  renderDrawingAddView();
     if (viewKey === 'drawings-all')  loadAllDrawings();
@@ -2827,9 +2829,36 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Leave: apply (everyone) ───────────────────────────────────────────────────
+  async function fillLeaveBuddySelect() {
+    const sel = els.leaveBuddy || document.getElementById('leave-buddy');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select buddy…</option>';
+    try {
+      const employees = await api('/employees');
+      (employees || [])
+        .filter((e) => e.is_active !== false && e.id !== state.user.id && (e.role || '').toLowerCase() !== 'client')
+        .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))
+        .forEach((e) => {
+          const opt = document.createElement('option');
+          opt.value = e.id;
+          opt.textContent = `${e.full_name}${e.department ? ` · ${e.department}` : ''}`;
+          sel.appendChild(opt);
+        });
+    } catch (err) {
+      console.warn('buddy list', err.message);
+    }
+  }
+
+  function buddyStatusLabel(leave) {
+    const name = leave.buddy?.full_name || '—';
+    const st = leave.buddy_status || 'None';
+    return `${name} (${st})`;
+  }
+
   function openLeaveModal() {
     els.leaveFormMsg.hidden = true;
     els.leaveForm.reset();
+    fillLeaveBuddySelect();
     els.leaveModal.hidden = false;
   }
   els.openApplyLeave?.addEventListener('click', openLeaveModal);
@@ -2837,6 +2866,12 @@ export async function mountTaskflowApp(opts = {}) {
   els.cancelLeaveModal?.addEventListener('click', () => { els.leaveModal.hidden = true; });
   els.leaveForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.leaveFormMsg.hidden = true;
+    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
+    if (!buddyId) {
+      els.leaveFormMsg.textContent = 'Please choose a buddy to cover your tasks';
+      els.leaveFormMsg.hidden = false;
+      return;
+    }
     try {
       await api('/leaves', {
         method: 'POST',
@@ -2844,46 +2879,101 @@ export async function mountTaskflowApp(opts = {}) {
           from_date: els.leaveFrom.value,
           to_date: els.leaveTo.value,
           is_half_day: els.leaveHalfDay.checked,
-          reason: els.leaveReason.value.trim()
+          reason: els.leaveReason.value.trim(),
+          buddy_id: buddyId,
         }
       });
-      showToast('Leave request submitted ✅', 'success');
+      showToast('Leave request submitted — waiting for buddy Yes/No ✅', 'success');
       els.leaveModal.hidden = true;
-      if (state.activeView === 'applyleave') loadMyLeaves();
+      if (state.activeView === 'applyleave') { loadMyLeaves(); loadBuddyRequests(); }
     } catch (err) { els.leaveFormMsg.textContent = err.message; els.leaveFormMsg.hidden = false; }
   });
-  
+
+  async function loadBuddyRequests() {
+    const wrap = els.buddyRequestsList || document.getElementById('buddyRequestsList');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="empty-state">Loading buddy requests…</div>';
+    try {
+      const rows = await api('/leaves/buddy-requests');
+      if (!rows.length) {
+        wrap.innerHTML = `<div class="empty-state"><span class="emoji">🤝</span>No pending buddy requests</div>`;
+        return;
+      }
+      wrap.innerHTML = '';
+      rows.forEach((leave) => {
+        const card = document.createElement('div');
+        card.className = 'ticket-card';
+        card.innerHTML = `
+          <div class="ticket-top">
+            <span class="pill pill-Pending">Buddy request</span>
+            <div class="row-actions"></div>
+          </div>
+          <div class="ticket-desc"><strong>${escapeHtml(leave.user?.full_name || 'Colleague')}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+          <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
+          <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
+        `;
+        const actions = card.querySelector('.row-actions');
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'action-btn action-complete';
+        yesBtn.textContent = '✅ Yes, I\'ll cover';
+        yesBtn.addEventListener('click', async () => {
+          try {
+            await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
+            showToast('You accepted buddy cover ✅', 'success');
+            loadBuddyRequests(); loadMyLeaves();
+          } catch (err) { showToast(err.message, 'error'); }
+        });
+        const noBtn = document.createElement('button');
+        noBtn.className = 'action-btn action-reject';
+        noBtn.textContent = '✕ No';
+        noBtn.addEventListener('click', async () => {
+          if (!confirm('Decline this buddy request?')) return;
+          try {
+            await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
+            showToast('Buddy request declined', 'success');
+            loadBuddyRequests();
+          } catch (err) { showToast(err.message, 'error'); }
+        });
+        actions.appendChild(yesBtn);
+        actions.appendChild(noBtn);
+        wrap.appendChild(card);
+      });
+    } catch (err) {
+      wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
   async function loadMyLeaves() {
     els.myLeavesList.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
     if (els.myLeavesTableBody) {
-      els.myLeavesTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading your leave requests…</td></tr>';
+      els.myLeavesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Loading your leave requests…</td></tr>';
     }
     try {
       const leaves = await api('/leaves/my');
       renderMyLeavesList(leaves);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   function leavePillClass(status) {
     if (status === 'Approved') return 'pill-Completed';
     if (status === 'Rejected') return 'pill-Rejected';
     return 'pill-Pending';
   }
-  
+
   function leaveDateRangeLabel(leave) {
     const from = fmtDateOnly(leave.from_date);
     const to = fmtDateOnly(leave.to_date);
     const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
     return leave.is_half_day ? `${range} (Half day)` : range;
   }
-  
+
   function renderMyLeavesList(leaves) {
     if (!leaves.length) {
       if (els.myLeavesList) {
         els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
       }
       if (els.myLeavesTableBody) {
-        els.myLeavesTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests yet</td></tr>`;
+        els.myLeavesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No leave requests yet</td></tr>`;
       }
       return;
     }
@@ -2900,6 +2990,7 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="ticket-desc"><strong>${escapeHtml(leaveDateRangeLabel(leave))}</strong></div>
         <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
+        <div class="ticket-meta">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></div>
         ${leave.decision_note ? `<div class="ticket-meta">Admin's note: ${escapeHtml(leave.decision_note)}</div>` : ''}
         <div class="ticket-meta">
           Applied ${fmtDate(leave.created_at)}
@@ -2931,6 +3022,7 @@ export async function mountTaskflowApp(opts = {}) {
             <div class="cell-primary">${escapeHtml(leave.reason)}</div>
             ${leave.decision_note ? `<div class="cell-muted">Note: ${escapeHtml(leave.decision_note)}</div>` : ''}
           </td>
+          <td>${escapeHtml(buddyStatusLabel(leave))}</td>
           <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
           <td>${fmtDate(leave.created_at)}</td>
           <td class="col-actions"><div class="row-actions"></div></td>
@@ -2994,6 +3086,7 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="ticket-desc"><strong>${escapeHtml(empName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
         <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
+        <div class="ticket-meta">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></div>
         ${leave.decision_note ? `<div class="ticket-meta">Decision note: ${escapeHtml(leave.decision_note)}</div>` : ''}
         <div class="ticket-meta">
           Applied ${fmtDate(leave.created_at)}
@@ -3007,8 +3100,10 @@ export async function mountTaskflowApp(opts = {}) {
         approveBtn.textContent = '✅ Approve';
         approveBtn.addEventListener('click', async () => {
           try {
-            await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
-            showToast('Leave approved ✅', 'success'); loadLeaveApprovals();
+            const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
+            const n = res.tasks_transferred || 0;
+            showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+            loadLeaveApprovals();
           } catch (err) { showToast(err.message, 'error'); }
         });
         const rejectBtn = document.createElement('button');
@@ -3030,6 +3125,7 @@ export async function mountTaskflowApp(opts = {}) {
             <div class="cell-primary">${escapeHtml(leave.reason)}</div>
             ${leave.decision_note ? `<div class="cell-muted">${escapeHtml(leave.decision_note)}</div>` : ''}
           </td>
+          <td>${escapeHtml(buddyStatusLabel(leave))}</td>
           <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
           <td class="col-actions"><div class="row-actions"></div></td>
         `;
@@ -3040,8 +3136,10 @@ export async function mountTaskflowApp(opts = {}) {
           approveBtn.textContent = '✅ Approve';
           approveBtn.addEventListener('click', async () => {
             try {
-              await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
-              showToast('Leave approved ✅', 'success'); loadLeaveApprovals();
+              const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
+              const n = res.tasks_transferred || 0;
+              showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+              loadLeaveApprovals();
             } catch (err) { showToast(err.message, 'error'); }
           });
           const rejectBtn = document.createElement('button');
@@ -3245,7 +3343,8 @@ export async function mountTaskflowApp(opts = {}) {
       is_head: role === 'head',
       reporting_head_id: els.empReportingHead.value || null,
       site_name: siteName || null,
-      site_names: siteName ? [siteName] : null
+      site_names: siteName ? [siteName] : null,
+      whatsapp_number: (document.getElementById('emp-whatsapp')?.value || '').trim() || null
     };
     try {
       const created = await api('/employees', { method: 'POST', body });
@@ -3275,6 +3374,8 @@ export async function mountTaskflowApp(opts = {}) {
     });
     const editSiteEl = els.editEmpSite || document.getElementById('edit-emp-site');
     if (editSiteEl) editSiteEl.value = emp.site_name || '';
+    const waEl = document.getElementById('edit-emp-whatsapp');
+    if (waEl) waEl.value = emp.whatsapp_number || '';
     setEditStatusToggle(emp.is_active !== false);
     els.editEmpPassword.value = '';
     els.editEmployeeModal.hidden = false;
@@ -3318,6 +3419,7 @@ export async function mountTaskflowApp(opts = {}) {
     const siteName = (els.editEmpSite || document.getElementById('edit-emp-site'))?.value?.trim() || '';
     body.site_name = siteName || null;
     body.site_names = siteName ? [siteName] : null;
+    body.whatsapp_number = (document.getElementById('edit-emp-whatsapp')?.value || '').trim() || null;
     if (newPassword) body.new_password = newPassword;
     try {
       await api(`/employees/${els.editEmpId.value}`, { method: 'PATCH', body });

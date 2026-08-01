@@ -790,6 +790,28 @@ router.post('/:id/reschedule-request', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Notify Chirag Sir on every reschedule request
+    try {
+      const { data: chirag } = await supabase
+        .from('users')
+        .select('whatsapp_number')
+        .eq('username', 'chirag.s')
+        .maybeSingle();
+      if (chirag?.whatsapp_number) {
+        sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          req.user.full_name,
+          reason && reason.trim() ? reason.trim() : 'Reschedule requested',
+          data.target_date || '—',
+          requested_date,
+        ]).catch(() => {});
+      }
+    } catch (waErr) {
+      console.warn('Reschedule WhatsApp skip:', waErr.message);
+    }
+
     res.status(201).json(data);
   } catch (err) {
     console.error('Reschedule request error:', err.message);

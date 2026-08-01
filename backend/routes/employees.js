@@ -72,7 +72,7 @@ router.get('/', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, created_at, reporting_head_id, is_head, site_name, site_names')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .order('created_at', { ascending: true });
     if (error) throw error;
     res.json(await attachReportingHead(data));
@@ -87,7 +87,7 @@ router.post('/', async (req, res) => {
   try {
     const {
       full_name, department, designation, role, reporting_head_id,
-      is_head, site_name, site_names, password: customPassword
+      is_head, site_name, site_names, whatsapp_number, password: customPassword
     } = req.body || {};
 
     if (!full_name || !department || !designation || !role) {
@@ -118,9 +118,10 @@ router.post('/', async (req, res) => {
         reporting_head_id: reporting_head_id || null,
         is_head: headFlag,
         site_name: site_name || null,
-        site_names: site_names || null
+        site_names: site_names || null,
+        whatsapp_number: whatsapp_number ? String(whatsapp_number).trim() : null
       })
-      .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names')
+      .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .single();
 
     if (error) throw error;
@@ -142,13 +143,16 @@ router.patch('/:id', async (req, res) => {
     const {
       full_name, department, designation, role, is_active, can_verify,
       is_mis_executive, can_add_site, can_add_employee, reporting_head_id,
-      is_head, site_name, site_names
+      is_head, site_name, site_names, whatsapp_number
     } = req.body || {};
 
     const updates = {};
     if (full_name !== undefined) updates.full_name = full_name;
     if (department !== undefined) updates.department = department;
     if (designation !== undefined) updates.designation = designation;
+    if (whatsapp_number !== undefined) {
+      updates.whatsapp_number = whatsapp_number ? String(whatsapp_number).trim() : null;
+    }
     if (role !== undefined) {
       if (!['admin', 'employee', 'head', 'client'].includes(role)) {
         return res.status(400).json({ error: 'Role must be admin, employee, head, or client' });

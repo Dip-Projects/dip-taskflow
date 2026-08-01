@@ -521,18 +521,26 @@ export default function TaskflowDom() {
           <div className="view-header-row">
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">🌴 Apply Leave</h2>
-              <p className="view-sub">Submit a leave request and track its approval status.</p>
+              <p className="view-sub">Submit a leave request, pick a buddy, and track approval status.</p>
             </div>
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
           </div>
-          <div className="table-card view-desktop-only" style={{marginTop: 20}}>
+
+          <div className="view-heading" style={{marginTop: 24, marginBottom: 10}}>
+            <h3 className="subsection-title">🤝 Buddy requests for you</h3>
+            <p className="view-sub">Accept or decline when a teammate asks you to cover their tasks.</p>
+          </div>
+          <div id="buddyRequestsList" className="ticket-list" style={{marginBottom: 24}}></div>
+
+          <div className="table-card view-desktop-only" style={{marginTop: 12}}>
             <div className="table-scroll">
-              <table className="data-table" style={{minWidth: 720}}>
+              <table className="data-table" style={{minWidth: 820}}>
                 <thead>
                   <tr>
                     <th className="col-sr">Sr</th>
                     <th>Dates</th>
                     <th>Reason</th>
+                    <th>Buddy</th>
                     <th className="col-status">Status</th>
                     <th>Applied</th>
                     <th className="col-actions">Actions</th>
@@ -573,6 +581,7 @@ export default function TaskflowDom() {
                     <th>Employee</th>
                     <th>Dates</th>
                     <th>Reason</th>
+                    <th>Buddy</th>
                     <th className="col-status">Status</th>
                     <th className="col-actions">Actions</th>
                   </tr>
@@ -888,6 +897,11 @@ export default function TaskflowDom() {
           </select>
           <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers and Clients — Clock In / client portal use this site.</p>
         </div>
+        <div className="field">
+          <label htmlFor="emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+          <input id="emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
+          <p className="form-note" style={{marginTop: 6}}>Used for task / leave / verification WhatsApp alerts.</p>
+        </div>
         <p className="form-note">Username and password will be auto-generated after submission.</p>
         <p id="employeeFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
@@ -939,6 +953,10 @@ export default function TaskflowDom() {
           <select id="edit-emp-site">
             <option value="">— None —</option>
           </select>
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+          <input id="edit-emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
         </div>
         <div className="field">
           <label>Status</label>
@@ -1196,6 +1214,15 @@ export default function TaskflowDom() {
         <div className="field">
           <label htmlFor="leave-reason">Reason <span className="req">*</span></label>
           <textarea id="leave-reason" rows={3} placeholder="Why are you taking leave..." required></textarea>
+        </div>
+        <div className="field">
+          <label htmlFor="leave-buddy">Buddy (task cover) <span className="req">*</span></label>
+          <select id="leave-buddy" required>
+            <option value="">Select buddy…</option>
+          </select>
+          <p className="form-note" style={{marginTop: 6}}>
+            Your open tasks due in this leave window will move to this buddy after they say Yes and leave is approved.
+          </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
