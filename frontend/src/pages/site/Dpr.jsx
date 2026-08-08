@@ -1033,14 +1033,15 @@ async function fetchPendingMaterials(site) {
   return data || [];
 }
 
-// High-urgency styled section — always renders (even with 0 rows, per spec),
-// shown at the very end of the report just before the Thank You page.
+// Pending materials section — only render when there are pending rows.
+// Empty → "" so PDF generation skips this section entirely (no blank page/file).
 function buildPendingMaterialsHtml(rows) {
   const list = rows || [];
-  const rowsHtml = list.length
-    ? list
-        .map(
-          (r) => `
+  if (!list.length) return "";
+
+  const rowsHtml = list
+    .map(
+      (r) => `
       <tr>
         <td class="pm-mat-name">${esc(r.material_name)}</td>
         <td class="pm-qty">${esc(String(r.quantity))}</td>
@@ -1048,9 +1049,8 @@ function buildPendingMaterialsHtml(rows) {
         <td class="td-left">${esc(r.requested_by || "—")}</td>
         <td class="td-left">${esc(fmtDate((r.created_at || "").slice(0, 10)))}</td>
       </tr>`,
-        )
-        .join("")
-    : `<tr><td colspan="5" class="pm-empty">No pending material requests for this site at the time of report generation.</td></tr>`;
+    )
+    .join("");
 
   return `<div class="pm-section-wrap">
     <div class="pm-header" style="background:linear-gradient(135deg,#7f1d1d,#b91c1c,#dc2626);">
