@@ -383,15 +383,31 @@ body.sidebar-open { overflow: hidden; }
 .view-desktop-only { display: block !important; }
 @media (max-width: 768px) {
   .view-desktop-only { display: none !important; }
-  .view-mobile-only { display: flex !important; flex-direction: column; }
+  .view-mobile-only {
+    display: flex !important;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
 }
-/* Hard lock: never show card lists on desktop widths */
+/* Hard lock: never show card lists on desktop/laptop widths */
 @media (min-width: 769px) {
   .view-mobile-only,
   #employeesCards,
   #ticketsList,
   #myLeavesList,
   #leaveApprovalsList,
+  #allTasksCards,
+  #overdueTasksCards,
+  #overdueRecurringCards,
+  #myTasksList,
+  #otherPendingVerificationsList,
+  #verificationsList,
+  #reschedRequestsList,
+  #correctionsList,
+  #adminRecurringCards,
+  #employeeRecurringList,
+  #buddyRequestsList,
   .employee-card-list.view-mobile-only,
   .task-list.view-mobile-only,
   .ticket-list.view-mobile-only {
@@ -400,6 +416,12 @@ body.sidebar-open { overflow: hidden; }
   .table-card.view-desktop-only,
   .view-desktop-only {
     display: block !important;
+  }
+  .table-card.view-desktop-only .table-scroll {
+    display: block !important;
+  }
+  .table-card.view-desktop-only .data-table {
+    display: table !important;
   }
 }
 
@@ -1645,4 +1667,307 @@ body.sidebar-open { overflow: hidden; }
   .mis-toolbar .primary-btn,
   .mis-toolbar .ghost-btn { width: 100%; }
 }
+
+/* ================================================================
+   RESPONSIVE POLISH — desktop/laptop tables, mobile cards
+   ================================================================ */
+
+/* Table scroll chrome (laptop + desktop) */
+.table-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.table-scroll::-webkit-scrollbar { height: 8px; }
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 99px;
+}
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* Laptop: slightly tighter padding, tables stay tables */
+@media (min-width: 769px) and (max-width: 1100px) {
+  #appScreen .main-content { padding: 20px 18px 44px; }
+  .data-table { font-size: 0.8rem; min-width: 820px; }
+  .data-table th,
+  .data-table td { padding: 12px 12px; }
+  .filter-field select,
+  .filter-field input[type="date"] { min-width: 120px; }
+}
+
+@media (min-width: 1101px) {
+  #appScreen .main-content { padding: 26px 28px 52px; }
+  .table-card {
+    overflow: hidden;
+  }
+  .data-table {
+    width: 100%;
+  }
+}
+
+/* Mobile layout polish */
+@media (max-width: 768px) {
+  #appScreen .main-content {
+    padding: 14px 12px 36px;
+  }
+  .view-title { font-size: 1.05rem; }
+  .view-sub { font-size: 0.78rem; }
+
+  .filter-panel { padding: 12px 12px; margin-bottom: 14px; }
+  .filter-row { gap: 10px; }
+  .filter-field { flex: 1 1 100%; min-width: 0; }
+  .filter-field select,
+  .filter-field input[type="date"] {
+    width: 100%;
+    min-width: 0;
+    font-size: 16px; /* no iOS zoom */
+  }
+
+  .field-grid { grid-template-columns: 1fr !important; gap: 12px; }
+  .task-form {
+    padding: 16px 14px;
+    max-width: 100%;
+    border-radius: var(--r-md);
+  }
+  .field input,
+  .field select,
+  .field textarea {
+    font-size: 16px;
+  }
+
+  .my-tasks-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0;
+  }
+  .my-tasks-tab-btn {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Card lists */
+  .task-list,
+  .ticket-list,
+  .employee-card-list {
+    gap: 12px;
+  }
+  .task-card,
+  .ticket-card,
+  .employee-card {
+    border-radius: 12px;
+    padding: 14px 14px 12px 18px;
+    box-shadow: var(--sh-sm);
+  }
+  .task-card:hover { transform: none; }
+  .task-card-project { font-size: 0.9rem; }
+  .task-card-desc { font-size: 0.82rem; }
+  .task-card-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .task-actions,
+  .ticket-card .row-actions,
+  .employee-card-actions {
+    width: 100%;
+  }
+  .task-actions .action-btn,
+  .ticket-card .row-actions .action-btn,
+  .employee-card-actions .action-btn,
+  .employee-card-actions button {
+    flex: 1 1 auto;
+    text-align: center;
+    justify-content: center;
+  }
+
+  .primary-btn,
+  .ghost-btn {
+    min-height: 44px;
+  }
+
+  /* Tables without dedicated card UIs → stacked “cards” on phone */
+  .table-card--stack {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .table-card--stack .table-scroll {
+    overflow: visible;
+  }
+  .table-card--stack .data-table {
+    min-width: 0 !important;
+    width: 100%;
+    table-layout: auto;
+    border-collapse: separate;
+    border-spacing: 0 12px;
+  }
+  .table-card--stack .data-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+  }
+  .table-card--stack .data-table tbody tr {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh-sm);
+    padding: 4px 0;
+    margin: 0;
+  }
+  .table-card--stack .data-table tbody tr:nth-child(even) td {
+    background: transparent;
+  }
+  .table-card--stack .data-table tbody tr:hover td {
+    background: transparent;
+  }
+  .table-card--stack .data-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100% !important;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-soft);
+    text-align: right;
+    word-break: break-word;
+  }
+  .table-card--stack .data-table tbody td:last-child {
+    border-bottom: none;
+  }
+  .table-card--stack .data-table tbody td::before {
+    content: attr(data-label);
+    flex: 0 0 40%;
+    max-width: 42%;
+    text-align: left;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--muted);
+    padding-top: 2px;
+  }
+  .table-card--stack .data-table tbody td .row-actions {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .table-card--stack .data-table .empty-state {
+    display: block;
+    text-align: center;
+    padding: 24px 12px;
+  }
+  .table-card--stack .data-table tbody td.empty-state,
+  .table-card--stack .data-table tbody td[colspan] {
+    display: block;
+    text-align: center;
+  }
+  .table-card--stack .data-table tbody td.empty-state::before,
+  .table-card--stack .data-table tbody td[colspan]::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  /* Known stacked tables — column labels (when data-label not set) */
+  #sitesTable td:nth-child(1)::before { content: "Site"; }
+  #sitesTable td:nth-child(2)::before { content: "Client"; }
+  #sitesTable td:nth-child(3)::before { content: "Location"; }
+  #sitesTable td:nth-child(4)::before { content: "Type"; }
+  #sitesTable td:nth-child(5)::before { content: "Status"; }
+  #sitesTable td:nth-child(6)::before { content: "Team lead"; }
+  #sitesTable td:nth-child(7)::before { content: "Actions"; }
+
+  #permissionsTable td:nth-child(1)::before { content: "Name"; }
+  #permissionsTable td:nth-child(2)::before { content: "Role"; }
+  #permissionsTable td:nth-child(3)::before { content: "Add site"; }
+  #permissionsTable td:nth-child(4)::before { content: "Add emp"; }
+  #permissionsTable td:nth-child(5)::before { content: "Tickets"; }
+  #permissionsTable td:nth-child(6)::before { content: "Verify"; }
+  #permissionsTable td:nth-child(7)::before { content: "MIS"; }
+  #permissionsTable td:nth-child(8)::before { content: "Office↔Site"; }
+
+  #drawingsTable td:nth-child(1)::before { content: "SR"; }
+  #drawingsTable td:nth-child(2)::before { content: "Project"; }
+  #drawingsTable td:nth-child(3)::before { content: "Category"; }
+  #drawingsTable td:nth-child(4)::before { content: "Sub 1"; }
+  #drawingsTable td:nth-child(5)::before { content: "Sub 2"; }
+  #drawingsTable td:nth-child(6)::before { content: "Sub 3"; }
+  #drawingsTable td:nth-child(7)::before { content: "Date"; }
+  #drawingsTable td:nth-child(8)::before { content: "Head"; }
+  #drawingsTable td:nth-child(9)::before { content: "Rev"; }
+  #drawingsTable td:nth-child(10)::before { content: "Remarks"; }
+  #drawingsTable td:nth-child(11)::before { content: "Preview"; }
+  #drawingsTable td:nth-child(12)::before { content: "Added by"; }
+  #drawingsTable td:nth-child(13)::before { content: "Actions"; }
+
+  /* Simple 1-col master tables stay compact cards */
+  #view-masterdata .table-card {
+    overflow: hidden;
+  }
+  #view-masterdata .data-table {
+    min-width: 0 !important;
+  }
+
+  /* MIS / daily report: keep horizontal scroll, not broken columns */
+  .mis-table,
+  .drpt-table {
+    min-width: 720px;
+  }
+  .table-wrap,
+  .drpt-pms-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+  }
+
+  .topbar-name { font-size: 0.88rem; }
+  .topbar-user-info { max-width: 42vw; }
+  .topbar-user-namerow strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    max-width: 28vw;
+  }
+}
+
+/* Desktop/laptop: ensure stack tables stay normal tables */
+@media (min-width: 769px) {
+  .table-card--stack .data-table {
+    display: table !important;
+    min-width: 720px;
+  }
+  .table-card--stack .data-table thead {
+    position: sticky;
+    width: auto;
+    height: auto;
+    clip: auto;
+    margin: 0;
+    overflow: visible;
+  }
+  .table-card--stack .data-table tbody tr {
+    display: table-row;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+  }
+  .table-card--stack .data-table tbody td {
+    display: table-cell;
+    text-align: left;
+    width: auto !important;
+  }
+  .table-card--stack .data-table tbody td::before {
+    content: none !important;
+  }
+}
+
 

@@ -373,9 +373,9 @@ export default function TaskflowDom() {
             </div>
             <button id="openAddSite" className="primary-btn primary-btn-inline">+ Add site</button>
           </div>
-          <div className="table-card" style={{marginTop: 20}}>
+          <div className="table-card table-card--stack" style={{marginTop: 20}}>
             <div className="table-scroll">
-              <table className="data-table">
+              <table className="data-table" id="sitesTable">
                 <thead>
                   <tr>
                     <th>Site name</th><th>Client</th><th>Location</th>
@@ -438,7 +438,7 @@ export default function TaskflowDom() {
             <h2 className="view-title">Permissions</h2>
             <p className="view-sub">Decide what each employee is allowed to do — including who gets the Office ↔ Site switch — without making them a full admin.</p>
           </div>
-          <div className="table-card">
+          <div className="table-card table-card--stack">
             <div className="table-scroll">
               <table className="data-table" id="permissionsTable">
                 <thead>
@@ -801,29 +801,31 @@ export default function TaskflowDom() {
               </select>
             </div>
           </div>
-          <div className="table-wrap" style={{marginTop: 18}}>
-            <table className="data-table" id="drawingsTable">
-              <thead>
-                <tr>
-                  <th className="col-sr">SR</th>
-                  <th>Project</th>
-                  <th>Category</th>
-                  <th>Sub Cat 1</th>
-                  <th>Sub Cat 2</th>
-                  <th>Sub Cat 3</th>
-                  <th className="col-date">Date</th>
-                  <th>Head</th>
-                  <th style={{textAlign: 'center'}}>Rev</th>
-                  <th>Remarks</th>
-                  <th style={{textAlign: 'center'}}>Preview</th>
-                  <th>Added By</th>
-                  <th className="col-actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="drawingsTableBody">
-                <tr><td colspan="13" className="empty-state">Loading…</td></tr>
-              </tbody>
-            </table>
+          <div className="table-card table-card--stack" style={{marginTop: 18}}>
+            <div className="table-scroll">
+              <table className="data-table" id="drawingsTable">
+                <thead>
+                  <tr>
+                    <th className="col-sr">SR</th>
+                    <th>Project</th>
+                    <th>Category</th>
+                    <th>Sub Cat 1</th>
+                    <th>Sub Cat 2</th>
+                    <th>Sub Cat 3</th>
+                    <th className="col-date">Date</th>
+                    <th>Head</th>
+                    <th style={{textAlign: 'center'}}>Rev</th>
+                    <th>Remarks</th>
+                    <th style={{textAlign: 'center'}}>Preview</th>
+                    <th>Added By</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="drawingsTableBody">
+                  <tr><td colspan="13" className="empty-state">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
 
