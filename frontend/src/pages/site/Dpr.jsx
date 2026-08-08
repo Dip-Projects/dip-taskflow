@@ -1036,13 +1036,18 @@ async function fetchPendingMaterials(site) {
     console.error("fetchPendingMaterials error:", error.message);
     return [];
   }
-  return data || [];
+  // Only real rows count — blank/placeholder rows must not force the PDF section
+  return (data || []).filter(
+    (r) => r && String(r.material_name || "").trim() && String(r.quantity ?? "").trim() !== "",
+  );
 }
 
-// Pending materials section — only render when there are pending rows.
-// Empty → "" so PDF generation skips this section entirely (no blank page/file).
+// Pending materials section — ONLY when there are real pending rows.
+// Empty → "" so PDF generation skips this section completely (no header, no empty table).
 function buildPendingMaterialsHtml(rows) {
-  const list = rows || [];
+  const list = (rows || []).filter(
+    (r) => r && String(r.material_name || "").trim(),
+  );
   if (!list.length) return "";
 
   const rowsHtml = list
@@ -1070,7 +1075,7 @@ function buildPendingMaterialsHtml(rows) {
       </div>
       <span class="pm-badge">Action Required</span>
     </div>
-    <div class="pm-subtitle">Materials requested for this site that have not yet been eceived. Please take action at the earliest.</div>
+    <div class="pm-subtitle">Materials requested for this site that have not yet been received. Please take action at the earliest.</div>
     <div class="pm-body">
       <table class="pm-table">
         <thead>
@@ -1485,7 +1490,8 @@ async function generateEveningPdf(payload, onProgress) {
     ["EQUIPMENT ON SITE", buildEquipmentHtml(payload.equipment)],
     ["CEMENT STOCK", buildCementHtml(payload)],
     ["CONCRETE CONSUMPTION", buildConcreteHtml(payload)],
-    ["MATERIAL REQUIREMENT", pmHtml],
+    // Only include when there is real pending material data (never an empty placeholder page)
+    ...(pmHtml ? [["MATERIAL REQUIREMENT", pmHtml]] : []),
     ["MATERIAL USED / RECEIVED", buildMaterialHtml(payload.material)],
     ["CUBE TEST RESULTS", buildCubeHtml(payload.cube)],
     ["SITE VISIT & INSTRUCTIONS", buildVisitorsHtml(payload.visitors)],
