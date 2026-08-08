@@ -722,7 +722,7 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('recurring', recurringPending);
   
         // Open tickets
-        const tickets = await api('/tickets');
+        const tickets = await api('/tickets').catch(() => []);
         const openTickets = tickets.filter(t => t.status === 'Open').length;
         setNavBadge('tickets-open', openTickets);
 
@@ -764,7 +764,7 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('reschedule-requests', reschedReqs.length);
   
         // Open tickets
-        const tickets = await api('/tickets');
+        const tickets = await api('/tickets').catch(() => []);
         const openTickets = tickets.filter(t => t.status === 'Open').length;
         setNavBadge('tickets-open', openTickets);
   

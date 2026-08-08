@@ -59,6 +59,9 @@ export async function api(path, options = {}) {
   if (newToken) localStorage.setItem('tf_token', newToken);
 
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== '/auth/login') {
+    clearSession();
+  }
   if (!res.ok) {
     const err = new Error(data.error || 'Request failed');
     err.status = res.status;
