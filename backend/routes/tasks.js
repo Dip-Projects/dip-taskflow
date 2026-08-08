@@ -137,30 +137,23 @@ if (!isMdoOffice && !project_id) {
     //   console.error('Create task error:', err.message);
       if (error) throw error;
 
-      // Assignee ko WhatsApp par notification bhejo (best-effort — fail hone
-      // par bhi task creation fail nahi hona chahiye)
+      // Assignee WhatsApp (best-effort)
       const { data: assigneeUser } = await supabase
         .from('users')
         .select('whatsapp_number, full_name')
         .eq('id', assigned_to)
         .maybeSingle();
 
-      // if (assigneeUser?.whatsapp_number) {
-      //   sendWhatsAppTemplate(assigneeUser.whatsapp_number, 'task_notification_v2', [
-      //     assigneeUser.full_name,
-      //     data.project?.name || '—',
-      //     target_date,
-      //     priority || 'Medium'
-      //   ]).catch(() => {});
-      // }
-if (assigneeUser?.whatsapp_number) {
+      if (assigneeUser?.whatsapp_number) {
         sendWhatsAppTemplate(assigneeUser.whatsapp_number, 'task_notification_v2', [
-          assigneeUser.full_name,
-          description,
+          assigneeUser.full_name || 'Team member',
+          (description || 'New task').slice(0, 200),
           data.project?.name || '—',
-          target_date,
-          priority || 'Medium'
+          String(target_date || '—').slice(0, 10),
+          priority || 'Medium',
         ]).catch(() => {});
+      } else {
+        console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
       }
       res.status(201).json(data);
     } catch (err) {
@@ -525,10 +518,12 @@ router.patch(
 
       if (verifierUser?.whatsapp_number) {
         sendWhatsAppTemplate(verifierUser.whatsapp_number, 'task_verification_request', [
-          verifierUser.full_name,
-          data.description,
-          data.project?.name || '—'
+          verifierUser.full_name || 'Verifier',
+          (data.description || 'Task').slice(0, 200),
+          data.project?.name || '—',
         ]).catch(() => {});
+      } else {
+        console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
       }
 
       res.json(data);

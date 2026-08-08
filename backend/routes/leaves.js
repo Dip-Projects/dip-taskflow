@@ -62,24 +62,33 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
 
   const { data: chirag } = await supabase
     .from('users')
-    .select('whatsapp_number')
+    .select('whatsapp_number, full_name')
     .eq('username', 'chirag.s')
     .maybeSingle();
   if (chirag?.whatsapp_number) numbers.add(chirag.whatsapp_number);
+  else console.warn('Leave WA: chirag.s has no whatsapp_number');
 
   const { data: applicant } = await supabase
     .from('users')
-    .select('reporting_head_id')
+    .select('reporting_head_id, full_name')
     .eq('id', applicantId)
     .maybeSingle();
 
   if (applicant?.reporting_head_id) {
     const { data: head } = await supabase
       .from('users')
-      .select('whatsapp_number')
+      .select('whatsapp_number, full_name')
       .eq('id', applicant.reporting_head_id)
       .maybeSingle();
     if (head?.whatsapp_number) numbers.add(head.whatsapp_number);
+    else console.warn('Leave WA: reporting head has no whatsapp_number', applicant.reporting_head_id);
+  } else {
+    console.warn('Leave WA: applicant has no reporting_head_id', applicantId);
+  }
+
+  if (!numbers.size) {
+    console.warn('Leave WA: nobody to notify (no numbers)');
+    return;
   }
 
   for (const num of numbers) {
