@@ -32,13 +32,19 @@ app.use('/api/tickets',         require('./routes/tickets'));
 app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));
 app.use('/api/mis-report',      require('./routes/mis_report'));
-app.get('/api/health', (_, res) =>
+app.get('/api/health', (_, res) => {
+  const phoneId = !!(process.env.META_PHONE_NUMBER_ID && String(process.env.META_PHONE_NUMBER_ID).trim());
+  const accessToken = !!(process.env.META_ACCESS_TOKEN && String(process.env.META_ACCESS_TOKEN).trim());
   res.json({
     status: 'ok',
-    // true only if Vercel/server env has Meta creds (backend/.env is local-only)
-    whatsappConfigured: !!(process.env.META_PHONE_NUMBER_ID && process.env.META_ACCESS_TOKEN),
-  })
-);
+    whatsappConfigured: phoneId && accessToken,
+    // booleans only — helps spot missing/typo’d Vercel env names (no secrets)
+    whatsappEnv: {
+      META_PHONE_NUMBER_ID: phoneId,
+      META_ACCESS_TOKEN: accessToken,
+    },
+  });
+});
 
 // Legacy vanilla TaskFlow UI
 app.use('/legacy', express.static(path.join(__dirname, 'legacy'), {
