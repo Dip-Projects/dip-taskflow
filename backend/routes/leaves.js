@@ -16,6 +16,7 @@ const LEAVE_SELECT_BASIC = `
 const LEAVE_SELECT = `
   ${LEAVE_SELECT_BASIC.trim()},
   buddy_id, buddy_status, buddy_responded_at, buddy_note,
+  cover_needed, cover_resolved_at,
   buddy:users!leaves_buddy_id_fkey ( id, full_name )
 `;
 
@@ -28,8 +29,11 @@ function isBuddySchemaError(err) {
     m.includes('buddy_responded') ||
     m.includes('leaves_buddy_id_fkey') ||
     m.includes('leave_cover') ||
+    m.includes('cover_needed') ||
+    m.includes('cover_resolved') ||
     m.includes('whatsapp_number') ||
-    (m.includes('column') && m.includes('buddy'))
+    (m.includes('column') && m.includes('buddy')) ||
+    (m.includes('column') && m.includes('cover_'))
   );
 }
 
@@ -40,6 +44,8 @@ function withBuddyDefaults(rows) {
     buddy_status: row.buddy_status ?? 'None',
     buddy_responded_at: row.buddy_responded_at ?? null,
     buddy_note: row.buddy_note ?? null,
+    cover_needed: row.cover_needed ?? false,
+    cover_resolved_at: row.cover_resolved_at ?? null,
     buddy: row.buddy ?? null,
   }));
 }
@@ -103,25 +109,76 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
   );
 }
 
-async function transferTasksToBuddy(leave) {
-  if (!leave?.buddy_id || leave.buddy_status !== 'Accepted') {
-    return { transferred: 0 };
+/** WhatsApp Chirag + reporting head (deduped). Reuses leave_application_notification. */
+async function notifyHeadAndChirag(applicantId, reasonText, from_date, to_date) {
+  const { data: applicant } = await supabase
+    .from('users')
+    .select('full_name, reporting_head_id')
+    .eq('id', applicantId)
+    .maybeSingle();
+  if (!applicant) return;
+
+  const numbers = new Set();
+  const { data: chirag } = await supabase
+    .from('users')
+    .select('whatsapp_number')
+    .eq('username', 'chirag.s')
+    .maybeSingle();
+  if (chirag?.whatsapp_number) numbers.add(chirag.whatsapp_number);
+
+  if (applicant.reporting_head_id) {
+    const { data: head } = await supabase
+      .from('users')
+      .select('whatsapp_number')
+      .eq('id', applicant.reporting_head_id)
+      .maybeSingle();
+    if (head?.whatsapp_number) numbers.add(head.whatsapp_number);
   }
+
+  await Promise.all(
+    [...numbers].map((num) =>
+      sendWhatsAppTemplate(num, 'leave_application_notification', [
+        applicant.full_name || 'Employee',
+        String(from_date || '—').slice(0, 10),
+        String(to_date || '—').slice(0, 10),
+        String(reasonText || '—').slice(0, 500),
+      ])
+    )
+  );
+}
+
+async function fetchLeaveWindowTasks(leave) {
   const fromDay = String(leave.from_date).slice(0, 10);
   const toDay = String(leave.to_date).slice(0, 10);
   const { data: tasks, error } = await supabase
     .from('tasks')
-    .select('id, assigned_to, target_date, status')
+    .select('id, description, assigned_to, target_date, status, priority')
     .eq('assigned_to', leave.user_id)
     .in('status', ['Pending', 'In Progress'])
     .gte('target_date', `${fromDay}T00:00:00.000Z`)
     .lte('target_date', `${toDay}T23:59:59.999Z`);
-
   if (error) {
-    if (isBuddySchemaError(error)) return { transferred: 0 };
+    if (isBuddySchemaError(error)) return [];
     throw error;
   }
-  if (!tasks?.length) return { transferred: 0 };
+  return tasks || [];
+}
+
+async function setCoverNeeded(leaveId, needed) {
+  const patch = needed
+    ? { cover_needed: true, cover_resolved_at: null }
+    : { cover_needed: false, cover_resolved_at: new Date().toISOString() };
+  const { error } = await supabase.from('leaves').update(patch).eq('id', leaveId);
+  if (error && !isBuddySchemaError(error)) throw error;
+  return !error;
+}
+
+async function transferTasksToBuddy(leave) {
+  if (!leave?.buddy_id || leave.buddy_status !== 'Accepted') {
+    return { transferred: 0 };
+  }
+  const tasks = await fetchLeaveWindowTasks(leave);
+  if (!tasks.length) return { transferred: 0 };
 
   let transferred = 0;
   for (const t of tasks) {
@@ -136,7 +193,6 @@ async function transferTasksToBuddy(leave) {
       .eq('assigned_to', leave.user_id);
     if (!upErr) transferred += 1;
     else if (!isBuddySchemaError(upErr)) {
-      // Fallback: reassign without leave_cover columns
       const { error: up2 } = await supabase
         .from('tasks')
         .update({ assigned_to: leave.buddy_id })
@@ -145,6 +201,7 @@ async function transferTasksToBuddy(leave) {
       if (!up2) transferred += 1;
     }
   }
+  if (transferred > 0) await setCoverNeeded(leave.id, false);
   return { transferred };
 }
 
@@ -395,7 +452,27 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     if (error) throw error;
 
     if (accept && existing.status === 'Approved') {
-      await transferTasksToBuddy({ ...existing, buddy_id: req.user.id, buddy_status: 'Accepted' });
+      const transfer = await transferTasksToBuddy({
+        ...existing,
+        buddy_id: req.user.id,
+        buddy_status: 'Accepted',
+      });
+      if (transfer.transferred > 0) {
+        await notifyHeadAndChirag(
+          existing.user_id,
+          `${transfer.transferred} task(s) transferred to buddy ${req.user.full_name} for leave cover`,
+          existing.from_date,
+          existing.to_date
+        );
+      }
+    } else if (!accept && existing.status === 'Approved') {
+      await setCoverNeeded(id, true);
+      await notifyHeadAndChirag(
+        existing.user_id,
+        `Buddy ${req.user.full_name} declined cover. Please reschedule dates or reassign leave-window tasks in TaskFlow.`,
+        existing.from_date,
+        existing.to_date
+      );
     }
 
     const { data: applicant } = await supabase
@@ -417,6 +494,151 @@ router.patch('/:id/buddy-respond', async (req, res) => {
   } catch (err) {
     console.error('Buddy respond error:', err.message);
     res.status(500).json({ error: err.message || 'Could not save buddy response' });
+  }
+});
+
+// ----------------------------- unresolved leave covers (head / admin) -----------------------------
+router.get('/unresolved-covers', async (req, res) => {
+  try {
+    const probe = await supabase.from('leaves').select('cover_needed').eq('cover_needed', true).limit(1);
+    if (probe.error && isBuddySchemaError(probe.error)) {
+      return res.json([]);
+    }
+
+    let query = supabase
+      .from('leaves')
+      .select(
+        `id, from_date, to_date, reason, status, buddy_status, cover_needed, user_id,
+         user:users!leaves_user_id_fkey ( id, full_name, reporting_head_id ),
+         buddy:users!leaves_buddy_id_fkey ( id, full_name )`
+      )
+      .eq('status', 'Approved')
+      .eq('cover_needed', true)
+      .order('from_date', { ascending: true });
+
+    const { data: leaves, error } = await query;
+    if (error) {
+      if (isBuddySchemaError(error)) return res.json([]);
+      throw error;
+    }
+
+    const isAdmin = req.user.role === 'admin';
+    const filtered = (leaves || []).filter((lv) => {
+      if (isAdmin) return true;
+      return String(lv.user?.reporting_head_id || '') === String(req.user.id);
+    });
+
+    const { data: assignees } = await supabase
+      .from('users')
+      .select('id, full_name')
+      .eq('is_active', true)
+      .order('full_name', { ascending: true });
+
+    const out = [];
+    for (const lv of filtered) {
+      const tasks = await fetchLeaveWindowTasks({
+        user_id: lv.user_id,
+        from_date: lv.from_date,
+        to_date: lv.to_date,
+      });
+      out.push({
+        leave: withBuddyDefaults([lv])[0],
+        applicant: lv.user,
+        buddy: lv.buddy,
+        tasks,
+        assignees: assignees || [],
+      });
+    }
+    res.json(out);
+  } catch (err) {
+    console.error('Unresolved covers error:', err.message);
+    res.status(500).json({ error: 'Could not load unresolved leave covers' });
+  }
+});
+
+router.post('/:id/resolve-cover', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, assignee_id, target_date, task_ids } = req.body || {};
+    if (!['reassign', 'reschedule'].includes(action)) {
+      return res.status(400).json({ error: 'Choose reassign or reschedule' });
+    }
+    if (action === 'reassign' && !assignee_id) {
+      return res.status(400).json({ error: 'Pick who should take the tasks' });
+    }
+    if (action === 'reschedule' && !target_date) {
+      return res.status(400).json({ error: 'Pick the new target date' });
+    }
+
+    const { data: leave, error: fetchErr } = await supabase
+      .from('leaves')
+      .select('id, user_id, from_date, to_date, status, cover_needed')
+      .eq('id', id)
+      .maybeSingle();
+    if (fetchErr) {
+      if (isBuddySchemaError(fetchErr)) {
+        return res.status(503).json({ error: 'Run add_leave_cover_needed.sql in Supabase first' });
+      }
+      throw fetchErr;
+    }
+    if (!leave) return res.status(404).json({ error: 'Leave not found' });
+    if (leave.status !== 'Approved') {
+      return res.status(400).json({ error: 'Leave is not approved' });
+    }
+
+    const { data: applicant } = await supabase
+      .from('users')
+      .select('id, full_name, reporting_head_id')
+      .eq('id', leave.user_id)
+      .maybeSingle();
+
+    const isAdmin = req.user.role === 'admin';
+    const isHead = applicant && String(applicant.reporting_head_id) === String(req.user.id);
+    if (!isAdmin && !isHead) {
+      return res.status(403).json({ error: 'Only the reporting head or admin can resolve cover' });
+    }
+
+    let tasks = await fetchLeaveWindowTasks(leave);
+    if (Array.isArray(task_ids) && task_ids.length) {
+      const want = new Set(task_ids.map(String));
+      tasks = tasks.filter((t) => want.has(String(t.id)));
+    }
+    if (!tasks.length) {
+      await setCoverNeeded(id, false);
+      return res.json({ ok: true, updated: 0, message: 'No open tasks left — cover cleared' });
+    }
+
+    let updated = 0;
+    for (const t of tasks) {
+      const patch =
+        action === 'reassign'
+          ? {
+              assigned_to: assignee_id,
+              leave_cover_id: leave.id,
+              leave_cover_from: leave.user_id,
+            }
+          : { target_date };
+      let { error: upErr } = await supabase.from('tasks').update(patch).eq('id', t.id);
+      if (upErr && isBuddySchemaError(upErr) && action === 'reassign') {
+        ({ error: upErr } = await supabase
+          .from('tasks')
+          .update({ assigned_to: assignee_id })
+          .eq('id', t.id));
+      }
+      if (!upErr) updated += 1;
+    }
+
+    await setCoverNeeded(id, false);
+    const note =
+      action === 'reassign'
+        ? `${updated} leave-window task(s) reassigned by ${req.user.full_name}`
+        : `${updated} leave-window task(s) rescheduled to ${String(target_date).slice(0, 10)} by ${req.user.full_name}`;
+    await notifyHeadAndChirag(leave.user_id, note, leave.from_date, leave.to_date);
+
+    res.json({ ok: true, updated, action });
+  } catch (err) {
+    console.error('Resolve cover error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not resolve leave cover' });
   }
 });
 
@@ -483,28 +705,76 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
         error: 'Buddy has not responded yet. Wait for Yes/No before approving.',
       });
     }
-    if (existing.buddy_id && existing.buddy_status === 'Declined') {
-      return res.status(400).json({
-        error: 'Buddy declined — tasks will not transfer. Ask the employee to pick another buddy first.',
-      });
+
+    const coverNeeded = !!(existing.buddy_id && existing.buddy_status === 'Declined');
+    const updatePayload = {
+      status: 'Approved',
+      decided_by: req.user.id,
+      decided_at: new Date().toISOString(),
+      decision_note: null,
+    };
+    // Prefer writing cover flags when column exists
+    if (coverNeeded) {
+      updatePayload.cover_needed = true;
+      updatePayload.cover_resolved_at = null;
+    } else if (existing.buddy_status === 'Accepted') {
+      updatePayload.cover_needed = false;
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('leaves')
-      .update({
-        status: 'Approved',
-        decided_by: req.user.id,
-        decided_at: new Date().toISOString(),
-        decision_note: null,
-      })
+      .update(updatePayload)
       .eq('id', id)
       .select(LEAVE_SELECT)
       .single();
 
+    if (error && isBuddySchemaError(error) && (coverNeeded || existing.buddy_status === 'Accepted')) {
+      // cover_* columns may be missing — approve without them
+      ({ data, error } = await supabase
+        .from('leaves')
+        .update({
+          status: 'Approved',
+          decided_by: req.user.id,
+          decided_at: new Date().toISOString(),
+          decision_note: null,
+        })
+        .eq('id', id)
+        .select(LEAVE_SELECT_BASIC)
+        .single());
+      if (!error) data = withBuddyDefaults([data])[0];
+    }
+
     if (error) throw error;
 
-    const transfer = await transferTasksToBuddy(existing);
-    res.json({ ...data, tasks_transferred: transfer.transferred });
+    let transferred = 0;
+    if (existing.buddy_status === 'Accepted') {
+      const transfer = await transferTasksToBuddy(existing);
+      transferred = transfer.transferred;
+      if (transferred > 0) {
+        const { data: buddy } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', existing.buddy_id)
+          .maybeSingle();
+        await notifyHeadAndChirag(
+          existing.user_id,
+          `${transferred} task(s) transferred to buddy ${buddy?.full_name || 'cover'} for leave dates`,
+          existing.from_date,
+          existing.to_date
+        );
+      }
+    } else if (coverNeeded) {
+      await setCoverNeeded(id, true);
+      const openTasks = await fetchLeaveWindowTasks(existing);
+      await notifyHeadAndChirag(
+        existing.user_id,
+        `Leave approved but buddy declined. ${openTasks.length} open task(s) need reschedule or reassign in TaskFlow.`,
+        existing.from_date,
+        existing.to_date
+      );
+    }
+
+    res.json({ ...data, tasks_transferred: transferred, cover_needed: coverNeeded });
   } catch (err) {
     console.error('Approve leave error:', err.message);
     res.status(500).json({ error: err.message || 'Could not approve leave request' });

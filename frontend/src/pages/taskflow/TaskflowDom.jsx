@@ -1297,6 +1297,26 @@ export default function TaskflowDom() {
     </div>
   </div>
 
+  {/* Leave cover unresolved — buddy declined after / with approval */}
+  <div id="leaveCoverModal" className="modal-backdrop" hidden={true}>
+    <div className="modal modal-wide">
+      <div className="modal-header">
+        <h3>Leave tasks need cover</h3>
+        <button className="modal-close" id="closeLeaveCoverModal" type="button">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p id="leaveCoverIntro" className="cell-muted" style={{marginTop:0}}>
+          Buddy declined. Reschedule these tasks or transfer them to someone else.
+        </p>
+        <div id="leaveCoverList"></div>
+        <p id="leaveCoverFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="laterLeaveCoverModal">Remind me later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   {/* Recurring Task Checkpoint Modal (employee: tick checkpoints, then Submit) */}
   <div id="checkpointModal" className="modal-backdrop" hidden={true}>
     <div className="modal">

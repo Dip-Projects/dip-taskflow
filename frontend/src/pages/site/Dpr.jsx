@@ -1360,40 +1360,52 @@ async function generateEveningPdf(payload, onProgress) {
   // ── helper: add one canvas to PDF, paginating if too tall ─────────────────
   let cursorY = MARGIN; // current Y position on current page
   let pageNum = 1;
+  const MIN_SLICE_PX = 3; // ignore float leftovers that become blank pages
 
-  async function addCanvasToPdf(canvas, label) {
-    const PX_PER_MM = canvas.width / CONTENT_W;
-    const totalHeightMM = canvas.height / PX_PER_MM;
+  function startPdfPage() {
+    addWatermark(pdf, logoBase64);
+    pdf.addPage();
+    pageNum++;
+    pdf.setFontSize(8);
+    pdf.setTextColor(100);
+    pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
+      align: "center",
+    });
+    cursorY = MARGIN;
+  }
+
+  /** Only open a new page when real content still needs space. */
+  function ensureSpaceFor(neededMM) {
     const MAX_H = A4_H - MARGIN * 2;
+    if (cursorY > MARGIN && cursorY + neededMM > A4_H - MARGIN - 8) {
+      startPdfPage();
+    } else if (MAX_H - cursorY < 12 && neededMM > 0) {
+      startPdfPage();
+    }
+  }
 
+  async function addCanvasToPdf(canvas) {
+    if (!canvas?.height || !canvas?.width) return;
+    const PX_PER_MM = canvas.width / CONTENT_W;
     let srcY = 0;
 
-    while (srcY < canvas.height) {
-      const remainingPageMM = MAX_H - cursorY;
-      const remainingPagePX = remainingPageMM * PX_PER_MM;
+    while (srcY < canvas.height - MIN_SLICE_PX) {
+      const availableMM = A4_H - cursorY - MARGIN;
+      const availablePX = availableMM * PX_PER_MM;
 
-      // If less than 20mm left on page, start new page
-      if (remainingPageMM < 20) {
-        addWatermark(pdf, logoBase64);
-        pdf.addPage();
-        pageNum++;
-        pdf.setFontSize(8);
-        pdf.setTextColor(100);
-        pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
-          align: "center",
-        });
-        cursorY = MARGIN;
+      // Not enough room for a meaningful slice → new page (only if content remains)
+      if (availablePX < MIN_SLICE_PX || availableMM < 12) {
+        startPdfPage();
+        continue;
       }
 
-      const sliceHeightPX = Math.min(
-        canvas.height - srcY,
-        (A4_H - cursorY - MARGIN) * PX_PER_MM,
-      );
-      const sliceHeightMM = sliceHeightPX / PX_PER_MM;
+      const sliceHeightPX = Math.min(canvas.height - srcY, availablePX);
+      if (sliceHeightPX < MIN_SLICE_PX) break;
 
+      const sliceHeightMM = sliceHeightPX / PX_PER_MM;
       const slice = document.createElement("canvas");
       slice.width = canvas.width;
-      slice.height = Math.ceil(sliceHeightPX);
+      slice.height = Math.max(1, Math.floor(sliceHeightPX));
       slice
         .getContext("2d")
         .drawImage(
@@ -1401,11 +1413,11 @@ async function generateEveningPdf(payload, onProgress) {
           0,
           srcY,
           canvas.width,
-          Math.ceil(sliceHeightPX),
+          slice.height,
           0,
           0,
           canvas.width,
-          Math.ceil(sliceHeightPX),
+          slice.height,
         );
 
       pdf.addImage(
@@ -1418,19 +1430,11 @@ async function generateEveningPdf(payload, onProgress) {
       );
 
       cursorY += sliceHeightMM + 4; // 4mm gap between sections
-      srcY += Math.ceil(sliceHeightPX);
+      srcY += slice.height;
 
-      // If content continues and not enough room, new page
-      if (srcY < canvas.height) {
-        addWatermark(pdf, logoBase64);
-        pdf.addPage();
-        pageNum++;
-        pdf.setFontSize(8);
-        pdf.setTextColor(100);
-        pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
-          align: "center",
-        });
-        cursorY = MARGIN;
+      // Continue on a new page only when real pixels remain
+      if (srcY < canvas.height - MIN_SLICE_PX) {
+        startPdfPage();
       }
     }
   }
@@ -1519,19 +1523,8 @@ async function generateEveningPdf(payload, onProgress) {
       onProgress("Rendering material requirement…");
       const pmCanvas = await renderChunk(body);
       const PX_PER_MM = pmCanvas.width / CONTENT_W;
-      const pmHeightMM = pmCanvas.height / PX_PER_MM;
-      if (cursorY + pmHeightMM > A4_H - MARGIN - 10) {
-        addWatermark(pdf, logoBase64);
-        pdf.addPage();
-        pageNum++;
-        pdf.setFontSize(8);
-        pdf.setTextColor(100);
-        pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
-          align: "center",
-        });
-        cursorY = MARGIN;
-      }
-      await addCanvasToPdf(pmCanvas, "material requirement");
+      ensureSpaceFor(pmCanvas.height / PX_PER_MM);
+      await addCanvasToPdf(pmCanvas);
       continue;
     }
 
@@ -1565,23 +1558,9 @@ async function generateEveningPdf(payload, onProgress) {
             : `<div>${pairBody}</div>`;
 
         const pairCanvas = await renderChunk(chunkHtml);
-
-        // Pre-check: if this chunk won't fit, start a new page first
-        const PX_PER_MM = pairCanvas.width / (A4_W - MARGIN * 2);
-        const pairHeightMM = pairCanvas.height / PX_PER_MM;
-        if (cursorY + pairHeightMM > A4_H - MARGIN - 10) {
-          addWatermark(pdf, logoBase64);
-          pdf.addPage();
-          pageNum++;
-          pdf.setFontSize(8);
-          pdf.setTextColor(100);
-          pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
-            align: "center",
-          });
-          cursorY = MARGIN;
-        }
-
-        await addCanvasToPdf(pairCanvas, `photo pair ${pi + 1}`);
+        const PX_PER_MM = pairCanvas.width / CONTENT_W;
+        ensureSpaceFor(pairCanvas.height / PX_PER_MM);
+        await addCanvasToPdf(pairCanvas);
       }
     } else if (isManpower) {
       // Parse out each manpower group + the trailing total bar, and render/paginate
@@ -1617,24 +1596,9 @@ async function generateEveningPdf(payload, onProgress) {
             : `<div>${groupBody}</div>`;
 
         const groupCanvas = await renderChunk(chunkHtml);
-
-        // Pre-check: if this whole group won't fit on the current page,
-        // start a fresh page first rather than slicing mid-group.
-        const PX_PER_MM = groupCanvas.width / (A4_W - MARGIN * 2);
-        const groupHeightMM = groupCanvas.height / PX_PER_MM;
-        if (cursorY + groupHeightMM > A4_H - MARGIN - 10) {
-          addWatermark(pdf, logoBase64);
-          pdf.addPage();
-          pageNum++;
-          pdf.setFontSize(8);
-          pdf.setTextColor(100);
-          pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, {
-            align: "center",
-          });
-          cursorY = MARGIN;
-        }
-
-        await addCanvasToPdf(groupCanvas, `manpower group ${gi + 1}`);
+        const PX_PER_MM = groupCanvas.width / CONTENT_W;
+        ensureSpaceFor(groupCanvas.height / PX_PER_MM);
+        await addCanvasToPdf(groupCanvas);
       }
     } else {
       // ── All other sections: render as one chunk ──────────────────────────────
@@ -1650,14 +1614,12 @@ async function generateEveningPdf(payload, onProgress) {
     </div>`;
       onProgress(`Rendering: ${title}…`);
       const canvas = await renderChunk(secHtml);
-      await addCanvasToPdf(canvas, title);
+      await addCanvasToPdf(canvas);
     }
   }
 
-  // Thank you page — always starts on a new page
-  addWatermark(pdf, logoBase64);
-  pdf.addPage();
-  pageNum++;
+  // Thank you page — only if we actually rendered report content beyond cover
+  startPdfPage();
   onProgress("Building thank you page…");
   const tyHtml = `
   <div class="ty-page" style="min-height:900px;">

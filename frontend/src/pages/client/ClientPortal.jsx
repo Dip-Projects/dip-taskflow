@@ -1246,9 +1246,15 @@ function officeViewerUrl(url) {
   return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(url)}`;
 }
 
+function officeEmbedPreviewUrl(url) {
+  if (!url) return url;
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}`;
+}
+
 function resolveViewUrl(url, isOffice) {
   if (!isOffice) return url;
-  return officeViewerUrl(url); // always wrap office docs — mobile browsers can't render pptx directly either
+  // Desktop embed preview; mobile full Office viewer
+  return isMobileDevice() ? officeViewerUrl(url) : officeEmbedPreviewUrl(url);
 }
 function ActivityTrendChart({ series, onSelectMonth, selectedMonth }) {
   const W = 960,

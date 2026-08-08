@@ -139,12 +139,19 @@ function collectEls() {
     leaveApprovalsList: document.getElementById('leaveApprovalsList'),
     leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
     buddyRequestsList: document.getElementById('buddyRequestsList'),
-    leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
+    leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),
+    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
     rejectLeaveForm: document.getElementById('rejectLeaveForm'),
     rejectLeaveFormMsg: document.getElementById('rejectLeaveFormMsg'),
     rejectLeaveReason: document.getElementById('reject-leave-reason'),
     closeRejectLeaveModal: document.getElementById('closeRejectLeaveModal'),
     cancelRejectLeaveModal: document.getElementById('cancelRejectLeaveModal'),
+    leaveCoverModal: document.getElementById('leaveCoverModal'),
+    leaveCoverList: document.getElementById('leaveCoverList'),
+    leaveCoverIntro: document.getElementById('leaveCoverIntro'),
+    leaveCoverFormMsg: document.getElementById('leaveCoverFormMsg'),
+    closeLeaveCoverModal: document.getElementById('closeLeaveCoverModal'),
+    laterLeaveCoverModal: document.getElementById('laterLeaveCoverModal'),
     correctionsList: document.getElementById('correctionsList'),
     correctionsTableBody: document.getElementById('correctionsTableBody'),
     correctionModal: document.getElementById('correctionModal'),
@@ -568,6 +575,8 @@ export async function mountTaskflowApp(opts = {}) {
     refreshNavBadges();
     if (window._badgeInterval) clearInterval(window._badgeInterval);
     window._badgeInterval = setInterval(refreshNavBadges, 60000);
+    // Head/admin: unresolved leave covers (buddy declined) — popup until resolved
+    checkLeaveCoverAlerts();
   }
   
   function buildNav() {
@@ -3138,7 +3147,12 @@ export async function mountTaskflowApp(opts = {}) {
           try {
             const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
             const n = res.tasks_transferred || 0;
-            showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+            if (res.cover_needed) {
+              showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
+              checkLeaveCoverAlerts();
+            } else {
+              showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+            }
             loadLeaveApprovals();
           } catch (err) { showToast(err.message, 'error'); }
         });
@@ -3174,7 +3188,12 @@ export async function mountTaskflowApp(opts = {}) {
             try {
               const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
               const n = res.tasks_transferred || 0;
-              showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+              if (res.cover_needed) {
+                showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
+                checkLeaveCoverAlerts();
+              } else {
+                showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+              }
               loadLeaveApprovals();
             } catch (err) { showToast(err.message, 'error'); }
           });
@@ -3191,6 +3210,119 @@ export async function mountTaskflowApp(opts = {}) {
       }
     });
   }
+
+  // ─── Leave cover alerts (buddy declined, leave approved) ─────────────────────
+  let _leaveCoverItems = [];
+  async function checkLeaveCoverAlerts() {
+    try {
+      const items = await api('/leaves/unresolved-covers');
+      _leaveCoverItems = Array.isArray(items) ? items : [];
+      if (!_leaveCoverItems.length) {
+        if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+        return;
+      }
+      renderLeaveCoverModal(_leaveCoverItems);
+    } catch (err) {
+      console.warn('Leave cover check:', err.message);
+    }
+  }
+
+  function renderLeaveCoverModal(items) {
+    if (!els.leaveCoverModal || !els.leaveCoverList) return;
+    els.leaveCoverFormMsg.hidden = true;
+    els.leaveCoverList.innerHTML = '';
+    items.forEach((item, idx) => {
+      const leave = item.leave || {};
+      const name = item.applicant?.full_name || 'Employee';
+      const block = document.createElement('div');
+      block.className = 'ticket-card';
+      block.style.marginBottom = '12px';
+      const taskLines = (item.tasks || [])
+        .map((t) => `<li>${escapeHtml((t.description || 'Task').slice(0, 120))} · ${escapeHtml(String(t.target_date || '').slice(0, 10))}</li>`)
+        .join('');
+      const assigneeOpts = (item.assignees || [])
+        .map((u) => `<option value="${u.id}">${escapeHtml(u.full_name)}</option>`)
+        .join('');
+      block.innerHTML = `
+        <div class="ticket-desc"><strong>${escapeHtml(name)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+        <div class="ticket-meta">Buddy: <strong>${escapeHtml(item.buddy?.full_name || '—')}</strong> (declined)</div>
+        <ul style="margin:8px 0;padding-left:18px;">${taskLines || '<li>No open tasks in leave window</li>'}</ul>
+        <div class="field">
+          <label>Transfer all to</label>
+          <select class="leave-cover-assignee" data-idx="${idx}">
+            <option value="">Select employee…</option>
+            ${assigneeOpts}
+          </select>
+        </div>
+        <div class="field">
+          <label>Or reschedule all to</label>
+          <input type="date" class="leave-cover-date" data-idx="${idx}" />
+        </div>
+        <div class="row-actions" style="margin-top:8px;gap:8px;display:flex;flex-wrap:wrap;"></div>
+      `;
+      const actions = block.querySelector('.row-actions');
+      const transferBtn = document.createElement('button');
+      transferBtn.type = 'button';
+      transferBtn.className = 'action-btn action-complete';
+      transferBtn.textContent = 'Transfer tasks';
+      transferBtn.addEventListener('click', async () => {
+        const sel = block.querySelector('.leave-cover-assignee');
+        const assignee_id = sel?.value;
+        if (!assignee_id) {
+          els.leaveCoverFormMsg.textContent = 'Select an employee to transfer to';
+          els.leaveCoverFormMsg.hidden = false;
+          return;
+        }
+        try {
+          const res = await api(`/leaves/${leave.id}/resolve-cover`, {
+            method: 'POST',
+            body: { action: 'reassign', assignee_id },
+          });
+          showToast(`Transferred ${res.updated || 0} task(s)`, 'success');
+          checkLeaveCoverAlerts();
+        } catch (err) {
+          els.leaveCoverFormMsg.textContent = err.message;
+          els.leaveCoverFormMsg.hidden = false;
+        }
+      });
+      const reschedBtn = document.createElement('button');
+      reschedBtn.type = 'button';
+      reschedBtn.className = 'action-btn';
+      reschedBtn.textContent = 'Reschedule dates';
+      reschedBtn.addEventListener('click', async () => {
+        const dateEl = block.querySelector('.leave-cover-date');
+        const target_date = dateEl?.value;
+        if (!target_date) {
+          els.leaveCoverFormMsg.textContent = 'Pick a new target date';
+          els.leaveCoverFormMsg.hidden = false;
+          return;
+        }
+        try {
+          const res = await api(`/leaves/${leave.id}/resolve-cover`, {
+            method: 'POST',
+            body: { action: 'reschedule', target_date },
+          });
+          showToast(`Rescheduled ${res.updated || 0} task(s)`, 'success');
+          checkLeaveCoverAlerts();
+        } catch (err) {
+          els.leaveCoverFormMsg.textContent = err.message;
+          els.leaveCoverFormMsg.hidden = false;
+        }
+      });
+      actions.appendChild(transferBtn);
+      actions.appendChild(reschedBtn);
+      els.leaveCoverList.appendChild(block);
+    });
+    els.leaveCoverModal.hidden = false;
+  }
+
+  els.closeLeaveCoverModal?.addEventListener('click', () => {
+    if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+  });
+  els.laterLeaveCoverModal?.addEventListener('click', () => {
+    if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+    showToast('Reminder will show again next time you open TaskFlow', '');
+  });
   
   function openRejectLeaveModal(leaveId) {
     state.pendingLeaveId = leaveId;
