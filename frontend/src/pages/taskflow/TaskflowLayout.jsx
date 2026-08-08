@@ -28,7 +28,7 @@ export default function TaskflowLayout({
 
   const handleNav = (key) => {
     onNavigate?.(key);
-    closeSidebar();
+    // Sidebar closes only via ☰ — not on nav / outside click
   };
 
   return (
@@ -114,7 +114,6 @@ export default function TaskflowLayout({
             id="sidebarOverlay"
             className="sidebar-overlay"
             hidden={!sidebarOpen}
-            onClick={closeSidebar}
           />
           <main id="mainContent" className="main-content">
             {children}

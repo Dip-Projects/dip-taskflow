@@ -521,7 +521,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function openSidebar() {
     els.sidebar?.classList.add('open');
-    // Mobile: dimmed overlay on the right. Desktop: no block — click main to close.
+    // Overlay is visual-only on mobile; close only via ☰ (menuToggle).
     if (els.sidebarOverlay) {
       if (isMobileNav()) {
         els.sidebarOverlay.hidden = false;
@@ -541,22 +541,11 @@ export async function mountTaskflowApp(opts = {}) {
       else openSidebar();
     });
   }
-  if (els.sidebarOverlay) {
-    els.sidebarOverlay.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      closeSidebar();
-    });
-  }
-  // Desktop: click anywhere on the right (main) to close. Mobile uses overlay.
-  const mainContent = document.getElementById('mainContent');
-  mainContent?.addEventListener('click', () => {
-    if (!isMobileNav() && els.sidebar?.classList.contains('open')) closeSidebar();
-  });
+  // Do not close on overlay / outside / main clicks — only ☰ toggles.
   window.addEventListener('resize', () => {
     if (els.sidebar?.classList.contains('open')) openSidebar();
   });
-  
+ 
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
     if (els.appScreen) els.appScreen.hidden = false;
@@ -677,8 +666,7 @@ export async function mountTaskflowApp(opts = {}) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       switchView(key);
-      // Mobile drawer: close after pick. Desktop: keep open until toggle / right-side click.
-      if (isMobileNav()) closeSidebar();
+      // Keep sidebar open until user taps ☰ — do not auto-close on nav item.
     });
     return btn;
   }
@@ -828,6 +816,73 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── master data (admin) ─────────────────────────────────────────────────────
+  function normDeptName(s) {
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  /** Employees whose users.department text matches the selected departments.name */
+  function employeesForDepartmentId(deptId) {
+    const all = state.master.employees || [];
+    if (!deptId) return [];
+    const dept = (state.master.departments || []).find((d) => d.id === deptId);
+    if (!dept) return [];
+    const target = normDeptName(dept.name);
+    return all.filter((e) => normDeptName(e.department) === target);
+  }
+
+  function syncTaskEmployeeDropdown() {
+    if (!els.fEmployee) return;
+    const deptId = els.fDepartment?.value || '';
+    const list = employeesForDepartmentId(deptId);
+    const prev = els.fEmployee.value;
+    fillSelect(els.fEmployee, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'Select employee'
+          : 'No employees in this department'
+        : 'Select department first',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) els.fEmployee.value = prev;
+  }
+
+  function syncFilterEmployeeDropdown() {
+    if (!els.filterEmployee) return;
+    const deptId = els.filterDepartment?.value || '';
+    const list = deptId ? employeesForDepartmentId(deptId) : state.master.employees || [];
+    const prev = els.filterEmployee.value;
+    fillSelect(els.filterEmployee, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'All employees in dept'
+          : 'No employees in this department'
+        : 'All employees',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) els.filterEmployee.value = prev;
+  }
+
+  function syncRecurringEmployeeDropdown() {
+    const empSel = recEls.employee?.();
+    const deptSel = recEls.department?.();
+    if (!empSel) return;
+    const deptId = deptSel?.value || '';
+    const list = employeesForDepartmentId(deptId);
+    const prev = empSel.value;
+    fillSelect(empSel, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'Select Employee'
+          : 'No employees in this department'
+        : 'Select department first',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) empSel.value = prev;
+  }
+
   async function loadMasterData() {
     try {
       const [departments, projects, taskTypes, employees] = await Promise.all([
@@ -836,14 +891,14 @@ export async function mountTaskflowApp(opts = {}) {
       ]);
       state.master = { departments, projects, taskTypes, employees };
       fillSelect(els.fDepartment, departments, { placeholder: 'Select department' });
-      fillSelect(els.fEmployee, employees, { placeholder: 'Select employee', labelKey: 'full_name' });
       fillSelect(els.fProject, projects, { placeholder: 'Select project' });
       fillSelect(els.fTaskType, taskTypes, { placeholder: 'Select task type' });
       fillSelect(els.filterDepartment, departments, { placeholder: 'All departments' });
-      fillSelect(els.filterEmployee, employees, { placeholder: 'All employees', labelKey: 'full_name' });
       fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
       fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
+      syncTaskEmployeeDropdown();
+      syncFilterEmployeeDropdown();
       fillRecurringDropdowns();
     } catch (err) { showToast(err.message, 'error'); }
   }
@@ -854,6 +909,11 @@ export async function mountTaskflowApp(opts = {}) {
     els.fProject.required = !isMdoOffice;
     const reqStar = document.getElementById('f-project-req');
     if (reqStar) reqStar.style.display = isMdoOffice ? 'none' : 'inline';
+    syncTaskEmployeeDropdown();
+  });
+
+  els.filterDepartment?.addEventListener('change', () => {
+    syncFilterEmployeeDropdown();
   });
   
   
@@ -861,12 +921,12 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const employees = await api('/master/employees');
       state.master.employees = employees;
-      fillSelect(els.fEmployee, employees, { placeholder: 'Select employee', labelKey: 'full_name' });
-      fillSelect(els.filterEmployee, employees, { placeholder: 'All employees', labelKey: 'full_name' });
+      syncTaskEmployeeDropdown();
+      syncFilterEmployeeDropdown();
+      syncRecurringEmployeeDropdown();
       fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
       fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
-      fillSelect(recEls.employee(), employees, { placeholder: 'Select Employee', labelKey: 'full_name' });
       // Reporting Head — optional field on the employee form. Add form shows everyone;
       // Edit form additionally excludes the employee being edited (can't report to self).
       fillSelect(els.empReportingHead, employees, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
@@ -4592,12 +4652,17 @@ export async function mountTaskflowApp(opts = {}) {
   function fillRecurringDropdowns() {
     if (!state.master) return;
     fillSelect(recEls.department(), state.master.departments, { placeholder: 'Select Department' });
-    fillSelect(recEls.employee(), state.master.employees, { placeholder: 'Select Employee', labelKey: 'full_name' });
     fillSelect(recEls.taskType(), state.master.taskTypes, {
       placeholder: 'Select Task Type',
       extraOption: { value: '__add_new__', label: '+ Add new task type…' }
     });
     fillSelect(recEls.project(), state.master.projects, { placeholder: 'Select Project' });
+    syncRecurringEmployeeDropdown();
+    const deptSel = recEls.department();
+    if (deptSel && !deptSel.dataset.deptFilterBound) {
+      deptSel.dataset.deptFilterBound = '1';
+      deptSel.addEventListener('change', syncRecurringEmployeeDropdown);
+    }
   }
   // ═══════════════════════════════════════════════════════════════════
   // ─── DRAWINGS MODULE ───────────────────────────────────────────────
