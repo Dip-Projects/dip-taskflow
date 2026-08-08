@@ -91,14 +91,16 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
     return;
   }
 
-  for (const num of numbers) {
-    sendWhatsAppTemplate(num, 'leave_application_notification', [
-      applicantName,
-      from_date,
-      to_date,
-      reason,
-    ]).catch(() => {});
-  }
+  await Promise.all(
+    [...numbers].map((num) =>
+      sendWhatsAppTemplate(num, 'leave_application_notification', [
+        applicantName,
+        from_date,
+        to_date,
+        reason,
+      ])
+    )
+  );
 }
 
 async function transferTasksToBuddy(leave) {
@@ -297,13 +299,13 @@ router.post('/', async (req, res) => {
     });
 
     if (buddy.whatsapp_number) {
-      sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
+      await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
         buddy.full_name,
         req.user.full_name,
         from_date,
         to_date,
         reason.trim(),
-      ]).catch(() => {});
+      ]);
     }
 
     res.status(201).json(data);
@@ -402,13 +404,13 @@ router.patch('/:id/buddy-respond', async (req, res) => {
       .eq('id', existing.user_id)
       .maybeSingle();
     if (applicant?.whatsapp_number) {
-      sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_buddy_response', [
+      await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_buddy_response', [
         applicant.full_name,
         req.user.full_name,
         accept ? 'accepted' : 'declined',
         existing.from_date,
         existing.to_date,
-      ]).catch(() => {});
+      ]);
     }
 
     res.json(data);

@@ -145,13 +145,14 @@ if (!isMdoOffice && !project_id) {
         .maybeSingle();
 
       if (assigneeUser?.whatsapp_number) {
-        sendWhatsAppTemplate(assigneeUser.whatsapp_number, 'task_notification_v2', [
+        // Must await on Vercel — fire-and-forget is killed after the response.
+        await sendWhatsAppTemplate(assigneeUser.whatsapp_number, 'task_notification_v2', [
           assigneeUser.full_name || 'Team member',
           (description || 'New task').slice(0, 200),
           data.project?.name || '—',
           String(target_date || '—').slice(0, 10),
           priority || 'Medium',
-        ]).catch(() => {});
+        ]);
       } else {
         console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
       }
@@ -517,11 +518,11 @@ router.patch(
         .maybeSingle();
 
       if (verifierUser?.whatsapp_number) {
-        sendWhatsAppTemplate(verifierUser.whatsapp_number, 'task_verification_request', [
+        await sendWhatsAppTemplate(verifierUser.whatsapp_number, 'task_verification_request', [
           verifierUser.full_name || 'Verifier',
           (data.description || 'Task').slice(0, 200),
           data.project?.name || '—',
-        ]).catch(() => {});
+        ]);
       } else {
         console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
       }
@@ -711,14 +712,14 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
       //   existing.target_date || '—',
       //   target_date
       // ]).catch(() => {}); 17th july  chg
-      sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+      await sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
         data.description,
         data.project?.name || '—',
         req.user.full_name,
         reason && reason.trim() ? reason.trim() : 'No reason given',
         existing.target_date || '—',
         target_date
-      ]).catch(() => {});
+      ]);
     }
 
     res.json(data);
@@ -794,14 +795,14 @@ router.post('/:id/reschedule-request', async (req, res) => {
         .eq('username', 'chirag.s')
         .maybeSingle();
       if (chirag?.whatsapp_number) {
-        sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+        await sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
           data.description || 'Task',
           data.project?.name || '—',
           req.user.full_name,
           reason && reason.trim() ? reason.trim() : 'Reschedule requested',
           data.target_date || '—',
           requested_date,
-        ]).catch(() => {});
+        ]);
       }
     } catch (waErr) {
       console.warn('Reschedule WhatsApp skip:', waErr.message);
