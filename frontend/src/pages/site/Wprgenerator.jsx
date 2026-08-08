@@ -341,18 +341,50 @@ function rederExcel(excelFile) {
 async function parseExcel(file) {
   const XLSX = await loadXlsx();
   const ab = await file.arrayBuffer();
-  const wb = XLSX.read(ab, { type: "array" });
+  const wb = XLSX.read(ab, { type: "array", cellDates: true }); // cellDates lets SheetJS give us real Date objects for date-formatted cells
   const sheets = {};
+
   wb.SheetNames.forEach((name) => {
     const ws = wb.Sheets[name];
-    const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+    const raw = [];
+
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      const row = [];
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        row.push(formatCellValue(ws[addr]));
+      }
+      raw.push(row);
+    }
+
     const merges = (ws["!merges"] || []).map((m) => ({
       s: { r: m.s.r, c: m.s.c },
       e: { r: m.e.r, c: m.e.c },
     }));
     sheets[name] = { raw, merges };
   });
+
   return { sheetNames: wb.SheetNames, sheets };
+}
+
+function formatCellValue(cell) {
+  if (!cell || cell.v === undefined || cell.v === null) return "";
+  const v = cell.v;
+
+  if (v instanceof Date && !isNaN(v)) {
+    const d = String(v.getDate()).padStart(2, "0");
+    const m = String(v.getMonth() + 1).padStart(2, "0");
+    const y = v.getFullYear();
+    return `${d}-${m}-${y}`;
+  }
+
+  if (typeof v === "number") {
+    const rounded = Math.round(v * 100) / 100;
+    return String(rounded);
+  }
+
+  return String(v);
 }
 
 // Convert col index (0-based) → letter (A, B, …, Z, AA, …)
@@ -750,7 +782,7 @@ function ExcelRangeCapture({
   const [selStart, setSelStart] = useState(null);
   const [selEnd, setSelEnd] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [rowsPerImage, setRowsPerImage] = useState(8);
+  const [rowsPerImage, setRowsPerImage] = useState(14);
   const [zoom, setZoom] = useState(1);
   const pinchRef = useRef({ active: false, startDist: 0, startZoom: 1 });
   const photoRef = useRef();
@@ -844,15 +876,14 @@ function ExcelRangeCapture({
       TH = 30,
       LH = 50,
       PAD = 14;
-    const BASE_CH = 40,
-      LINE_H = 18,
+    const BASE_CH = 44,
+      LINE_H = 20,
       MAX_LINES = 6;
     const mc = document.createElement("canvas");
     const mctx = mc.getContext("2d");
 
     const colWidths = cols.map((ci) => {
       let maxW = 70;
-      mctx.font = "bold 13px Arial,sans-serif";
       labelRows.forEach((ri) => {
         const t = String((sheetData[ri] || [])[ci] ?? "");
         maxW = Math.max(
@@ -860,7 +891,7 @@ function ExcelRangeCapture({
           measureWrappedWidth(
             mctx,
             t,
-            "bold 13px Arial,sans-serif",
+            "bold 15px Arial,sans-serif",
             2,
             70,
             260,
@@ -868,7 +899,7 @@ function ExcelRangeCapture({
           ),
         );
       });
-      mctx.font = "14px Arial,sans-serif";
+      mctx.font = "16px Arial,sans-serif";
       dataSlice.forEach((row) => {
         const t = String(row[ci] ?? "");
         maxW = Math.max(maxW, mctx.measureText(t).width + 18);
@@ -896,7 +927,7 @@ function ExcelRangeCapture({
 
     // data rows
     // ── pre-calculate each row's wrapped lines and height ──
-    const FONT_DATA = "13px Arial,sans-serif";
+    const FONT_DATA = "15px Arial,sans-serif";
     ctx.font = FONT_DATA;
 
     const rowWrapped = dataSlice.map((row) => {
@@ -958,7 +989,7 @@ function ExcelRangeCapture({
     ctx.fillStyle = grad2;
     ctx.fillRect(0, y, W, BH);
     ctx.fillStyle = "#fff";
-    ctx.font = "bold 16px Arial,sans-serif";
+    ctx.font = "bold 18px Arial,sans-serif";
     ctx.textBaseline = "middle";
     ctx.fillText(headerText || sectionLabel, PAD, y + BH / 2);
     y += BH;
@@ -972,7 +1003,7 @@ function ExcelRangeCapture({
       ctx.lineWidth = 0.75;
       ctx.strokeRect(0, y, W, TH);
       ctx.fillStyle = "#7a2e00";
-      ctx.font = "bold 15px Arial,sans-serif";
+      ctx.font = "bold 17px Arial,sans-serif";
       ctx.textBaseline = "middle";
       cols.forEach((ci) => {
         if (isMergeCont(ri, ci)) return;
@@ -997,7 +1028,7 @@ function ExcelRangeCapture({
           const x = colX[xi],
             cw = colWidths[xi];
           ctx.fillStyle = "#3d1200";
-          ctx.font = "bold 12.5px Arial,sans-serif";
+          ctx.font = "bold 14.5px Arial,sans-serif";
           ctx.textBaseline = "middle";
           const lines = wrapTextToLines(ctx, String(row[ci] ?? ""), cw - 14, 2);
           const lh = 15,
@@ -1006,15 +1037,15 @@ function ExcelRangeCapture({
             ctx.fillText(line, x + 6, startY + li * lh),
           );
           if (xi > 0) {
-            ctx.strokeStyle = "rgba(201,106,16,0.3)";
-            ctx.lineWidth = 0.5;
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x, y);
             ctx.lineTo(x, y + LH);
             ctx.stroke();
           }
         });
-        ctx.strokeStyle = "#c96a10";
+        ctx.strokeStyle = "#000000";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(0, y + LH);
@@ -1047,10 +1078,12 @@ function ExcelRangeCapture({
     dataSlice.forEach((row, ri) => {
       const rh = rowHeights[ri];
       const ry = y;
-      ctx.fillStyle = ri % 2 === 0 ? "#ffffff" : "#fdf9f4";
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, ry, W, rh);
-      ctx.strokeStyle = "rgba(201,106,16,0.18)";
-      ctx.lineWidth = 0.5;
+
+      // Bottom border of row — black
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, ry + rh);
       ctx.lineTo(W, ry + rh);
@@ -1072,14 +1105,13 @@ function ExcelRangeCapture({
           ctx.fillText(line, x + 6, startY + li * LINE_H);
         });
 
-        if (xi > 0) {
-          ctx.strokeStyle = "rgba(201,106,16,0.15)";
-          ctx.lineWidth = 0.5;
-          ctx.beginPath();
-          ctx.moveTo(x, ry);
-          ctx.lineTo(x, ry + rh);
-          ctx.stroke();
-        }
+        // Left border of cell — black
+        ctx.strokeStyle = "#000000";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, ry);
+        ctx.lineTo(x, ry + rh);
+        ctx.stroke();
       });
 
       y += rh;
@@ -2220,6 +2252,10 @@ export default function WprGenerator({ user, supabase }) {
   const [checklistPhotos, setChecklistPhotos] = useState([]);
   const [delayPoints, setDelayPoints] = useState([]);
   const [plans, setPlans] = useState([]);
+
+  const [visitorMode, setVisitorMode] = useState("manual"); // "manual" | "photo"
+  const [visitorPhotos, setVisitorPhotos] = useState([]);
+
   const [sections, setSections] = useState(() =>
     STANDARD_SECTIONS.map((title) => ({
       key: title,
@@ -2265,6 +2301,7 @@ export default function WprGenerator({ user, supabase }) {
     }));
   const lbNext = () =>
     setLightbox((p) => ({ ...p, idx: (p.idx + 1) % p.images.length }));
+  const displayReportNo = zp(reportNum);
   const uploadWprRef = useRef();
   const showToast = (msg, type = "info", ms = 3000) => {
     setToast({ msg, type });
@@ -2381,6 +2418,7 @@ export default function WprGenerator({ user, supabase }) {
     if (drawingData.length > 0) return true;
     if (visitors.filter((v) => v.name).length > 0) return true;
     if (drawDecision.filter((d) => d.drawingName).length > 0) return true;
+    if (visitorPhotos.filter((v) => v.dataUrl).length > 0) return true;
     if (location.trim()) return true;
     return false;
   }, [
@@ -2391,6 +2429,7 @@ export default function WprGenerator({ user, supabase }) {
     drawingData,
     visitors,
     drawDecision,
+    visitorPhotos,
     location,
   ]);
 
@@ -2429,6 +2468,7 @@ export default function WprGenerator({ user, supabase }) {
     n += barchartItems.filter((i) => i.dataUrl).length;
     n += cubeItems.filter((i) => i.dataUrl).length;
     n += momItems.filter((i) => i.dataUrl).length;
+    n += visitorPhotos.filter((i) => i.dataUrl).length;
     return n;
   };
 
@@ -2460,6 +2500,8 @@ export default function WprGenerator({ user, supabase }) {
       visitor_register_data: visitors,
       drawing_decision_data: drawDecision,
       delay_points: delayPoints,
+      visitor_photos: visitorPhotos,
+      visitor_mode: visitorMode,
       report_sections: sections.map((s) => ({
         title: s.title,
         isStandard: s.isStandard,
@@ -2514,6 +2556,8 @@ export default function WprGenerator({ user, supabase }) {
     if (data.report_date) setReportDate(data.report_date);
     if (data.location !== undefined) setLocation(data.location ?? "");
     if (data.report_number) setReportNum(data.report_number);
+    if (Array.isArray(data.visitor_photos)) setVisitorPhotos(data.visitor_photos);
+    if (data.visitor_mode) setVisitorMode(data.visitor_mode);
     if (Array.isArray(data.activities))
       setActivities(
         data.activities.map((a) => ({
@@ -2608,6 +2652,7 @@ export default function WprGenerator({ user, supabase }) {
         graphicalImages,
         sitePhotos,
         siteImage,
+        visitorPhotos,
         plans,
         drawingHeaders,
         drawingData,
@@ -2719,6 +2764,7 @@ export default function WprGenerator({ user, supabase }) {
         barchartItems,
         cubeItems,
         momItems,
+        visitorPhotos,
         ...activities.map((a) => a.progressImages || []),
       ].reduce((sum, arr) => sum + arr.filter((i) => i.dataUrl).length, 0);
 
@@ -2778,6 +2824,7 @@ export default function WprGenerator({ user, supabase }) {
       await uploadBatch(barchartItems, "barchart", "barchart", "barchart");
       await uploadBatch(cubeItems, "cube_testing", "cube_testing", "cube");
       await uploadBatch(momItems, "mom_review", "mom_review", "mom");
+      await uploadBatch(visitorPhotos, "visitor_register", "visitor_register", "visitor");
       for (let ai = 0; ai < activities.length; ai++) {
         const imgs = activities[ai].progressImages || [];
         if (imgs.length)
@@ -3288,18 +3335,22 @@ export default function WprGenerator({ user, supabase }) {
                   letterSpacing: ".06em",
                 }}
               >
-                Report Number
-              </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "rgba(255,207,160,0.75)",
-                  marginTop: 3,
+                Report Number:
+                  <span
+                  style={{
+                  fontSize: 18,
+                  color: "rgb(2, 2, 2)",
+                  marginLeft: 35,
+                  borderRadius:"50px",
+                  padding: "8px",
+                  background:"rgb(255, 207, 160)",
                   fontFamily: "var(--mono)",
                 }}
               >
-                {jobNo || "—"}
+                {displayReportNo}
+              </span>
               </div>
+             
             </div>
           </div>
           <div className="wpr-fg">
@@ -4039,16 +4090,48 @@ export default function WprGenerator({ user, supabase }) {
           }
           title="Visitor Register"
           sub={
-            visitors.filter((v) => v.name).length
-              ? `${visitors.filter((v) => v.name).length} visitors`
-              : "Record site visitors"
+            visitorMode === "manual"
+              ? visitors.filter((v) => v.name).length
+                ? `${visitors.filter((v) => v.name).length} visitors`
+                : "Record site visitors"
+              : visitorPhotos.filter((p) => p.dataUrl).length
+                ? `${visitorPhotos.filter((p) => p.dataUrl).length} photos`
+                : "Photo of visitor register"
           }
           open={openSec.visitor}
           onToggle={() => toggle("visitor")}
         >
-          {visitors.map((row, i) => (
-            <div key={i} className="wpr-vis-card">
-              <div
+          {/* Mode tabs */}
+          <div className="wpr-xl-tabs">
+            <button
+              className={`wpr-xl-tab${visitorMode === "manual" ? " active" : ""}`}
+              onClick={() => setVisitorMode("manual")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+              </svg>
+              Type Details
+            </button>
+            <button
+              className={`wpr-xl-tab${visitorMode === "photo" ? " active" : ""}`}
+              onClick={() => setVisitorMode("photo")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+              Upload Photo
+            </button>
+          </div>
+
+          {/* ── Manual entry mode (existing UI, unchanged) ── */}
+          {visitorMode === "manual" && (
+            <>
+              {visitors.map((row, i) => (
+                <div key={i} className="wpr-vis-card">
+                  <div
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -4127,17 +4210,55 @@ export default function WprGenerator({ user, supabase }) {
                   />
                 </div>
               </div>
-            </div>
-          ))}
-          <BtnAdd
-            label="Add Visitor"
-            onClick={() =>
-              setVisitors((p) => [
-                ...p,
-                { type: VISITOR_TYPES[0], name: "", instruction: "" },
-              ])
-            }
-          />
+
+                </div>
+              ))}
+              <BtnAdd
+                label="Add Visitor"
+                onClick={() =>
+                  setVisitors((p) => [
+                    ...p,
+                    { type: VISITOR_TYPES[0], name: "", instruction: "" },
+                  ])
+                }
+              />
+            </>
+          )}
+
+          {/* ── Photo mode ── */}
+          {visitorMode === "photo" && (
+            <>
+              <div className="wpr-hint">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c96a10" strokeWidth="2" strokeLinecap="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                Upload photo(s) of the physical visitor register page instead of typing entries.
+              </div>
+              <PhotoGrid
+                photos={visitorPhotos}
+                onRemove={(i) => setVisitorPhotos((p) => p.filter((_, x) => x !== i))}
+                onCaption={(i, v) =>
+                  setVisitorPhotos((p) =>
+                    p.map((ph, x) => (x === i ? { ...ph, label: v } : ph)),
+                  )
+                }
+                onAdd={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  const imgs = await Promise.all(
+                    files.map((f) =>
+                      readFileAsDataUrl(f).then((d) => ({ dataUrl: d, label: "" })),
+                    ),
+                  );
+                  setVisitorPhotos((p) => [...p, ...imgs]);
+                  e.target.value = "";
+                }}
+                label="Upload Visitor Register Photo"
+                onLightbox={(imgs, idx) => openLightbox(imgs, idx)}
+              />
+            </>
+          )}
         </Acc>
 
         {/* ⑨ DRAWING & DECISION PENDING */}

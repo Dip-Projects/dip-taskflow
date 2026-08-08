@@ -427,10 +427,10 @@ const IcoChart = () => (
     <line x1="6" y1="20" x2="6" y2="14" />
   </svg>
 );
-const IcoDocBars = () => (
+const IcoDocBars = ({ w = 13, h = 13 }) => (
   <svg
-    width="13"
-    height="13"
+    width={w}
+    height={h}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -695,7 +695,7 @@ function MediaFolderTree({ siteName, activeDate, onSelectDate }) {
   useEffect(() => {
     if (!siteName) return;
     (async () => {
-      const [{ data: dprRows }, { data: wprRows }] = await Promise.all([
+      const [{ data: dprRows }, { data: wprRows }, { data: drawingRows }] = await Promise.all([
         supabase
           .from("dpr_reports")
           .select("id, date, payload")
@@ -703,6 +703,10 @@ function MediaFolderTree({ siteName, activeDate, onSelectDate }) {
         supabase
           .from("wpr_reports")
           .select("id, report_date")
+          .ilike("site_name", siteName),
+        supabase
+          .from("drawings")
+          .select("id, date, file_urls")
           .ilike("site_name", siteName),
       ]);
       const wprIds = (wprRows || []).map((w) => w.id);
@@ -725,11 +729,17 @@ function MediaFolderTree({ siteName, activeDate, onSelectDate }) {
         return photos.length ? photos.map(() => r.date) : [];
       });
 
+      const drawingDates = (drawingRows || []).flatMap((d) => {
+        const files = Array.isArray(d.file_urls) ? d.file_urls : [];
+        return files.length ? files.map(() => d.date) : [];
+      });
+
       const allDates = [
         ...(dprRows || []).map((r) => r.date),
         ...(wprRows || []).map((r) => r.report_date),
         ...imgDates,
         ...dprPhotoDates,
+        ...drawingDates,
       ];
       const t = buildDateTree(allDates);
       setTree(t);
@@ -1498,6 +1508,12 @@ function MediaSkeletonGrid({ count = 8 }) {
     </div>
   );
 }
+function isImageFile(url) {
+  if (!url) return false;
+  const clean = url.split("?")[0].split("#")[0];
+  const ext = clean.split(".").pop().toLowerCase();
+  return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(ext);
+}
 function isOfficeFile(url) {
   if (!url) return false;
   const clean = url.split("?")[0].split("#")[0];
@@ -1592,12 +1608,32 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         storage_path: photo.storagePath || photo.storage_path || null,
         caption: photo.caption || "",
         created_at: report.date || report.created_at,
+        actual_created_at: report.created_at || report.date,
         source: "dpr",
         image_type: "photos",
       }));
     });
 
-    setPhotos([...wprPhotoRows, ...dprPhotoRows]);
+    const { data: drawingData, error: drawErr } = await supabase
+      .from("drawings")
+      .select("id, site_name, date, file_urls, uploaded_by, created_at")
+      .ilike("site_name", siteName)
+      .order("date", { ascending: false });
+    if (drawErr) console.error("drawings error:", drawErr);
+
+    const drawingPhotoRows = (drawingData || []).flatMap((d) => {
+      const files = Array.isArray(d.file_urls) ? d.file_urls : [];
+      return files.map((f, i) => ({
+        id: `drw-${d.id}-${i}`,
+        public_url: f.url || f.publicUrl || null,
+        caption: f.name || "Drawing",
+        created_at: d.date || d.created_at,
+        source: "drawing",
+        image_type: "graphical",
+      }));
+    });
+
+    setPhotos([...wprPhotoRows, ...dprPhotoRows, ...drawingPhotoRows]);
 
     setLoading(false);
   }, [siteName]);
@@ -1629,21 +1665,27 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
   kind: "doc",
   isOffice: isOfficeFile(r.presentation_url),
 })),
-    ...photos.map((p) => ({
-      type: p.image_type === "graphical" ? "graphical" : "photo",
-      date: p.created_at,
-      title:
-        p.caption ||
-        (p.image_type === "graphical" ? "Graphical Drawing" : "Site Photo"),
-      meta:
-        p.image_type === "graphical"
-          ? "Weekly Report"
-          : p.source === "dpr"
-            ? "Daily Report"
-            : "Weekly Report",
-      url: p.public_url,
-      kind: "image",
-    })),
+    ...photos.map((p) => {
+      const isGraphical = p.image_type === "graphical";
+      const isActualImage = !isGraphical || isImageFile(p.public_url);
+      return {
+        type: isGraphical ? "graphical" : "photo",
+        date: p.created_at,
+        displayDate: p.actual_created_at || p.created_at,
+        title:
+          p.caption ||
+          (isGraphical ? "Graphical Drawing" : "Site Photo"),
+        meta:
+          isGraphical
+            ? "Weekly Report"
+            : p.source === "dpr"
+              ? "Daily Report"
+              : "Weekly Report",
+        url: p.public_url,
+        kind: isActualImage ? "image" : "doc",
+        isOffice: isOfficeFile(p.public_url),
+      };
+    }),
   ].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
   const dateScoped = jumpDate
     ? unified.filter((it) => it.date && it.date.slice(0, 10) === jumpDate)
@@ -1741,12 +1783,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         </div>
       )}
 
-      <div className="cp-section-head">
-        <button className="cp-refresh-btn" onClick={load}>
-          <IcoRefresh /> Refresh
-        </button>
-      </div>
-
       <div className="cp-filter-bar">
         <button
           type="button"
@@ -1837,6 +1873,9 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                 {f.icon} {f.label}
               </button>
             ))}
+            <button className="cp-refresh-btn" onClick={load}>
+              <IcoRefresh /> Refresh
+            </button>
           </div>
         </div>
       </div>
@@ -1887,7 +1926,79 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                         <IcoImg />
                       </div>
                     )
-                  ) : null}
+                  ) : it.url ? (
+                    it.isOffice ? (
+                      <div
+                        className="cp-media-photo"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: "#fdbca396",
+                          color: "#af3404",
+                          cursor: "pointer",
+                        }}
+                        onClick={() =>
+                          window.open(
+                            resolveViewUrl(it.url, it.isOffice),
+                            "_blank",
+                          )
+                        }
+                      >
+                        <IcoDocBars w={32} h={32} />
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>
+                          Open Presentation
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="cp-media-photo cp-media-doc-preview"
+                        style={{
+                          position: "relative",
+                          overflow: "hidden",
+                          cursor: "pointer",
+                        }}
+                        onClick={() =>
+                          window.open(
+                            resolveViewUrl(it.url, it.isOffice),
+                            "_blank",
+                          )
+                        }
+                      >
+                        <iframe
+                          src={`${it.url}#toolbar=0&navpanel=0&scrollbar=0&view=FitH`}
+                          title={it.title}
+                          loading="lazy"
+                          scrolling="no"
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            left: -20,
+                            width: "calc(100% + 40px)",
+                            height: "260%",
+                            border: "none",
+                            pointerEvents: "none",
+                            transform: "scale(1)",
+                            transformOrigin: "top center",
+                          }}
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <div
+                      className="cp-media-photo"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#ccc",
+                      }}
+                    >
+                      <IcoDoc />
+                    </div>
+                  )}
                   <div className="cp-media-body">
                     <span className={`cp-media-badge ${it.type}`}>
                       {it.type === "dpr" ? (

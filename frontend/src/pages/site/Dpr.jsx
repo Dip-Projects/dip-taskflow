@@ -617,6 +617,9 @@ table tbody tr:nth-child(even) td{background:#f8fafc;}
 .bullet-item{display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px solid #f1f5f9;}
 .bullet-item:last-child{border-bottom:none;}
 .bullet-arrow{color:#800000;font-weight:700;font-size:12px;margin-top:4px;flex-shrink:0;}
+.bullet-item.bullet-sub{padding-left:26px;}
+.bullet-arrow-sub{color:#c8641a;font-size:9px;}
+.bullet-item.bullet-sub .bullet-text{font-size:14px;color:#334155;}
 .bullet-text{font-size:15px;color:#0f172a;line-height:1.45;}
 .summary-cat-body{border:1.5px solid #cbd5e1;border-top:none;border-radius:0 0 4px 4px;padding:8px 16px;background:#fff;margin-bottom:10px;}
 .section-wrap{margin-bottom:14px;border:1.5px solid #cbd5e1;page-break-inside:avoid;break-inside:avoid;}
@@ -731,23 +734,24 @@ function bulletBlock(txt) {
 
 function buildSummaryHtml(summary) {
   if (!summary?.trim()) return "";
-  const lines = summary
-    .replace(/\n{2,}/g, "\n")
-    .split("\n")
-    .filter((l) => l.trim());
+  const lines = summary.replace(/\n{2,}/g, "\n").split("\n").filter((l) => l.trim());
   let html = "";
   let currentCat = "";
-  let bullets = [];
+  let bullets = []; // { text, sub }
 
   function flush() {
     if (!currentCat && !bullets.length) return;
     const bHtml = bullets
-      .map(
-        (b) =>
-          `<div class="bullet-item">
-        <span class="bullet-arrow">&#9658;</span>
-        <span class="bullet-text">${esc(b.replace(/^[•\-*]\s*/, "").trim())}</span>
-      </div>`,
+      .map((b) =>
+        b.sub
+          ? `<div class="bullet-item bullet-sub">
+              <span class="bullet-arrow bullet-arrow-sub">&#8226;</span>
+              <span class="bullet-text">${esc(b.text)}</span>
+            </div>`
+          : `<div class="bullet-item">
+              <span class="bullet-arrow">&#9658;</span>
+              <span class="bullet-text">${esc(b.text)}</span>
+            </div>`,
       )
       .join("");
     if (currentCat) {
@@ -760,12 +764,14 @@ function buildSummaryHtml(summary) {
   }
 
   lines.forEach((line) => {
-    const raw = line.trim();
-    if (raw.startsWith("*") && raw.endsWith("*") && raw.length > 2) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("*") && trimmed.endsWith("*") && trimmed.length > 2) {
       flush();
-      currentCat = raw;
+      currentCat = trimmed;
     } else {
-      bullets.push(raw);
+      const isSub = /^\s*◦/.test(line) || /^ {2,}/.test(line);
+      const cleanText = line.replace(/^\s*[•◦]\s*/, "").trim();
+      bullets.push({ text: cleanText, sub: isSub });
     }
   });
   flush();
@@ -2273,10 +2279,7 @@ function ManpowerSection({ list, setList, showToast }) {
         },
       ]);
     }
-    setMpType("");
-    setGender("");
-    setSkill("");
-    setCount("");
+    setCount(""); // only reset count — keep type/gender/skill for fast repeat entry
   };
 
   return (
@@ -3975,6 +3978,7 @@ function DprForm({ user }) {
   // Add near the top of DprForm, alongside other refs
   const draftOpenedRef = useRef(false);
   const autoSaveTimerRef = useRef(null);
+  const summaryRef = useRef(null);
 
   const [summary, setSummary] = useState("");
   const [manpower, setManpower] = useState([]);
@@ -4138,6 +4142,64 @@ function DprForm({ user }) {
       setLoadingSites(false);
     })();
   }, [user]);
+
+  const handleSummaryKeyDown = (e) => {
+    const textarea = e.target;
+    const { selectionStart, selectionEnd, value } = textarea;
+
+    // Enter, then Space right after a fresh bullet marker → demote to sub-bullet
+    if (e.key === " ") {
+      const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+      const currentLine = value.slice(lineStart, selectionStart);
+      if (currentLine === "• " && selectionStart === selectionEnd) {
+        e.preventDefault();
+        const newValue =
+          value.slice(0, lineStart) + "    ◦ " + value.slice(selectionStart);
+        setSummary(newValue);
+        const newPos = lineStart + "    ◦ ".length;
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = newPos;
+        });
+      }
+      return;
+    }
+
+    if (e.key !== "Enter") return;
+
+    const lineStart = value.lastIndexOf("\n", selectionStart - 1) + 1;
+    const currentLine = value.slice(lineStart, selectionStart);
+    const bulletMatch = currentLine.match(/^(\s*)(•|◦)\s?/);
+    e.preventDefault();
+
+    if (bulletMatch && currentLine.slice(bulletMatch[0].length).trim() === "") {
+      // empty bullet/sub-bullet → remove it and exit the list
+      const newValue = value.slice(0, lineStart) + value.slice(selectionEnd);
+      setSummary(newValue);
+      requestAnimationFrame(() => {
+        textarea.selectionStart = textarea.selectionEnd = lineStart;
+      });
+      return;
+    }
+
+    const isSub = /^\s*◦/.test(currentLine);
+    const insertion = isSub ? "\n    ◦ " : "\n• ";
+    const newValue =
+      value.slice(0, selectionStart) + insertion + value.slice(selectionEnd);
+    setSummary(newValue);
+    const newPos = selectionStart + insertion.length;
+    requestAnimationFrame(() => {
+      textarea.selectionStart = textarea.selectionEnd = newPos;
+    });
+  };
+
+  const handleSummaryFocus = (e) => {
+    if (!summary) {
+      setSummary("• ");
+      requestAnimationFrame(() => {
+        e.target.selectionStart = e.target.selectionEnd = 2;
+      });
+    }
+  };
 
   const collectPayload = () => ({
     site,
@@ -4400,8 +4462,8 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
   };
 
   function buildWhatsAppText(payload) {
-    const LINE = "─".repeat(20);
-    const RULE = "━".repeat(20);
+    const LINE = "─".repeat(10);
+    const RULE = "━".repeat(10);
 
     let msg = "";
 
@@ -4422,7 +4484,9 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         .split("\n")
         .filter((l) => l.trim())
         .forEach((l) => {
-          msg += `${l.replace(/^[•\-]\s*/, "").trim()}\n`;
+          const isSub = /^\s*◦/.test(l) || /^ {2,}/.test(l);
+          const clean = l.replace(/^\s*[•◦]\s*/, "").trim();
+          msg += isSub ? `    ◦ ${clean}\n` : `• ${clean}\n`;
         });
     }
 
@@ -4871,10 +4935,13 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
 
       <SectionBlock title="1. Today's Work Summary" defaultOpen>
         <textarea
+          ref={summaryRef}
           className="finput"
           rows={4}
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
+          onKeyDown={handleSummaryKeyDown}
+          onFocus={handleSummaryFocus}
           placeholder="Describe completed work activities…"
         />
       </SectionBlock>

@@ -670,8 +670,16 @@ async function buildOfficeActivitySlide(pres, fd, hidden = false) {
 }
 
 // ── Visitor Register ──────────────────────────────────────────────────────────
-// REPLACE buildVisitorRegisterSlide entirely:
 async function buildVisitorRegisterSlide(pres, fd, hidden = false) {
+  const photos = (fd.visitorPhotos || []).filter(p => p && p.dataUrl);
+
+  // Photo mode — render like MOM/Cube/Barchart range-captured images
+  if (photos.length) {
+    await buildRangeCaptureSlides(pres, fd, photos, 'Visitor Register', hidden);
+    return;
+  }
+
+  // Manual mode — existing typed-table rendering
   const rows = (fd.visitorRegisterData || []).filter(r => r.name || r.type);
   if (!rows.length) return;
 
@@ -949,7 +957,7 @@ async function generatePPT({
   activities, graphicalImages, sitePhotos, siteImage,
   plans, drawingHeaders, drawingData, officeItems, visitors,
   drawDecision, delayPoints, checklistPhotos, sections,
-  barchartItems, cubeItems, momItems,
+  barchartItems, cubeItems, momItems, visitorPhotos,
 }) {
   const PptxGenJS = window.PptxGenJS;
   if (!PptxGenJS) throw new Error('PptxGenJS not loaded');
@@ -979,6 +987,7 @@ async function generatePPT({
     drawingRegisterData:  drawingData || [],
     officeActivityItems:  officeItems || [],
     visitorRegisterData:  visitors || [],
+    visitorPhotos:        visitorPhotos || [],
     drawingDecisionData:  drawDecision || [],
     delayPoints:          delayPoints || [],
     weeklyChecklistPhotos: checklistPhotos || [],
@@ -1007,7 +1016,7 @@ const activeSections = (sections || []).filter(sec => {
     if (title === 'office activity')
       return (officeItems||[]).filter(Boolean).length > 0;
     if (title === 'visitor register')
-      return (visitors||[]).some(v => v.name);
+      return (visitors||[]).some(v => v.name) || (visitorPhotos||[]).some(p => p.dataUrl);
     if (title === 'drawing & decision pending')
       return (drawDecision||[]).some(d => d.drawingName);
     if (title === 'weekly site checklist')
