@@ -30,6 +30,7 @@ create table if not exists public.chat_room_members (
   room_id uuid not null references public.chat_rooms(id) on delete cascade,
   user_id uuid not null references public.users(id) on delete cascade,
   joined_at timestamptz default now(),
+  last_read_at timestamptz default now(),
   primary key (room_id, user_id)
 );
 
@@ -39,6 +40,8 @@ create table if not exists public.chat_messages (
   sender_id uuid references public.users(id) on delete set null,
   body text not null,
   is_bot boolean default false,
+  msg_type text not null default 'text',
+  meeting_url text,
   created_at timestamptz default now()
 );
 

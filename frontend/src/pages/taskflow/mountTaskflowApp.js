@@ -545,13 +545,19 @@ export async function mountTaskflowApp(opts = {}) {
   window.addEventListener('resize', () => {
     if (els.sidebar?.classList.contains('open')) openSidebar();
   });
- 
+  
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
     if (els.appScreen) els.appScreen.hidden = false;
     if (els.userName) els.userName.textContent = state.user.full_name;
     if (els.userRoleTag) els.userRoleTag.textContent = state.user.role;
     buildNav();
+    setupTopbarQuick();
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch (_) {}
     // Desktop: sidebar open by default; mobile: closed
     if (isMobileNav()) closeSidebar();
     else openSidebar();
@@ -626,13 +632,8 @@ export async function mountTaskflowApp(opts = {}) {
     els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
     if (isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
 
-    // DIP Bot + Team chat — everyone
-    const botLabel = document.createElement('div');
-    botLabel.className = 'nav-section-label'; botLabel.textContent = 'DIP Bot';
-    els.navList.appendChild(botLabel);
-    els.navList.appendChild(makeNavButton('ai-bot', '🤖 AI Bot'));
-    els.navList.appendChild(makeNavButton('team-chat', '💬 Team chat'));
-  
+    // DIP Bot + Team chat live in topbar (near logout), not sidebar
+
     // Corrections section — visible to all employees (admin doesn't get corrections, they assign them)
     if (!isAdmin) {
       const corrLabel = document.createElement('div');
@@ -683,6 +684,18 @@ export async function mountTaskflowApp(opts = {}) {
   
   // Updates badge on an existing nav button (or creates one if missing)
   function setNavBadge(viewKey, count) {
+    if (viewKey === 'team-chat') {
+      const top = document.getElementById('topChatBadge');
+      if (top) {
+        if (!count || count <= 0) {
+          top.hidden = true;
+          top.textContent = '';
+        } else {
+          top.hidden = false;
+          top.textContent = count > 99 ? '99+' : String(count);
+        }
+      }
+    }
     const btn = document.querySelector(`.nav-btn[data-view="${viewKey}"]`);
     if (!btn) return;
     let bdg = btn.querySelector('.nav-badge');
@@ -696,6 +709,24 @@ export async function mountTaskflowApp(opts = {}) {
       btn.appendChild(bdg);
     }
     bdg.textContent = count > 99 ? '99+' : count;
+  }
+
+  function setupTopbarQuick() {
+    const isAdmin = state.user?.role === 'admin';
+    const dip = document.getElementById('topDipBotBtn');
+    const chat = document.getElementById('topChatBtn');
+    const mom = document.getElementById('topMomBtn');
+    const cal = document.getElementById('topCalBtn');
+    if (dip) {
+      dip.hidden = !isAdmin;
+      dip.onclick = () => switchView('ai-bot');
+    }
+    if (chat) chat.onclick = () => switchView('team-chat');
+    if (mom) mom.onclick = () => switchView('meetings');
+    if (cal) {
+      cal.hidden = !!isAdmin; // employees get calendar; admin uses all-tasks
+      cal.onclick = () => switchView('calendar');
+    }
   }
   
   // Poll badge counts from the API and update nav
@@ -738,6 +769,9 @@ export async function mountTaskflowApp(opts = {}) {
 
         const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
         setNavBadge('buddyrequests', buddyReqs.length);
+
+        const chatUnreadEmp = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnreadEmp?.total || 0);
       } else {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
@@ -784,11 +818,19 @@ export async function mountTaskflowApp(opts = {}) {
 
         const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
         setNavBadge('buddyrequests', buddyReqs.length);
+
+        const chatUnreadAdmin = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnreadAdmin?.total || 0);
       }
     } catch(e) { /* silently fail — badges are non-critical */ }
   }
   
   function switchView(viewKey) {
+    // DIP Bot is admin-only
+    if (viewKey === 'ai-bot' && state.user?.role !== 'admin') {
+      showToast('DIP Bot is only for admins', 'error');
+      viewKey = 'team-chat';
+    }
     state.activeView = viewKey;
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   
@@ -825,6 +867,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'mis-report')    loadMisReport();
     if (viewKey === 'ai-bot')        loadAiBot();
     if (viewKey === 'team-chat')     loadTeamChat();
+    if (viewKey === 'meetings')      loadMeetings();
+    if (viewKey === 'calendar')      loadCalendar();
     if (viewKey === 'project-mgmt')  loadProjectMgmt();
   }
   
@@ -2832,9 +2876,9 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (els.ticketsList) els.ticketsList.innerHTML = '';
     if (els.ticketsTableBody) els.ticketsTableBody.innerHTML = '';
-
+  
     const canSolve = state.user.role === 'admin' || !!state.user.can_resolve_tickets || !!state.user.is_mis_executive;
-
+  
     tickets.forEach((ticket, idx) => {
       const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
       const raisedBy = ticket.raised_by_user?.full_name ?? '—';
@@ -3060,7 +3104,7 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
   }
-
+  
   async function loadMyLeaves() {
     els.myLeavesList.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
     if (els.myLeavesTableBody) {
@@ -3071,24 +3115,24 @@ export async function mountTaskflowApp(opts = {}) {
       renderMyLeavesList(leaves);
     } catch (err) { showToast(err.message, 'error'); }
   }
-
+  
   function leavePillClass(status) {
     if (status === 'Approved') return 'pill-Completed';
     if (status === 'Rejected') return 'pill-Rejected';
     return 'pill-Pending';
   }
-
+  
   function leaveDateRangeLabel(leave) {
     const from = fmtDateOnly(leave.from_date);
     const to = fmtDateOnly(leave.to_date);
     const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
     return leave.is_half_day ? `${range} (Half day)` : range;
   }
-
+  
   function renderMyLeavesList(leaves) {
     if (!leaves.length) {
       if (els.myLeavesList) {
-        els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
+      els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
       }
       if (els.myLeavesTableBody) {
         els.myLeavesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No leave requests yet</td></tr>`;
@@ -3183,7 +3227,7 @@ export async function mountTaskflowApp(opts = {}) {
   function renderLeaveApprovalsList(leaves) {
     if (!leaves.length) {
       if (els.leaveApprovalsList) {
-        els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
+      els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
       }
       if (els.leaveApprovalsTableBody) {
         els.leaveApprovalsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests found</td></tr>`;
@@ -4489,7 +4533,7 @@ export async function mountTaskflowApp(opts = {}) {
       showToast(err.message, 'error');
     }
   }
-
+  
   // Shared "Done" flow for a recurring task instance, used by both the table
   // and card views. If the task has no checkpoints, completes immediately.
   // If it has checkpoints, opens a modal to tick them off, then Submit saves
@@ -5577,7 +5621,7 @@ export async function mountTaskflowApp(opts = {}) {
     const log = document.getElementById('botChatLog');
     if (log && !log.dataset.ready) {
       log.dataset.ready = '1';
-      appendBotBubble('bot', 'Namaste! Tasks, overdue, verification — poochho. Company-wide stats sirf admin ke liye.');
+      appendBotBubble('bot', 'Namaste! Main DIP Bot hoon. Tasks, overdue, verification — poochho.');
     }
     try {
       const alerts = await api('/bot/alerts').catch(() => []);
@@ -5616,15 +5660,128 @@ export async function mountTaskflowApp(opts = {}) {
     });
   }
 
-  // ─── Team chat ──────────────────────────────────────────────────────────────
+  // ─── Team chat (WhatsApp-style store + unread + video) ─────────────────────
   let _activeChatRoom = null;
+  let _activeChatTitle = '';
+  let _chatPollTimer = null;
+
+  function formatChatTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function previewText(msg) {
+    if (!msg) return 'No messages yet';
+    if (msg.msg_type === 'meeting' || msg.meeting_url) return '📹 Video meeting';
+    return String(msg.body || '').replace(/\s+/g, ' ').slice(0, 48);
+  }
+
+  function renderChatMessage(m) {
+    const mine = String(m.sender_id) === String(state.user.id);
+    const div = document.createElement('div');
+    div.className = `bot-bubble ${mine ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
+    const who = m.is_bot ? 'Bot' : m.sender?.full_name || (mine ? 'You' : 'User');
+    const meetUrl = m.meeting_url || (String(m.body || '').match(/https:\/\/meet\.jit\.si\/[^\s]+/) || [])[0];
+    let bodyHtml;
+    if (m.msg_type === 'meeting' || meetUrl) {
+      bodyHtml = `<div class="chat-meeting-card">
+        <div>${escapeHtml((m.body || 'Video meeting').split('\n')[0])}</div>
+        <a href="${escapeHtml(meetUrl || '#')}" target="_blank" rel="noopener noreferrer">Join video meeting</a>
+      </div>`;
+    } else {
+      bodyHtml = `<div class="bot-bubble-body">${escapeHtml(m.body).replace(/\n/g, '<br>')}</div>`;
+    }
+    div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div>${bodyHtml}<div class="chat-msg-meta">${escapeHtml(formatChatTime(m.created_at))}</div>`;
+    return div;
+  }
+
+  function stopChatPoll() {
+    if (_chatPollTimer) {
+      clearInterval(_chatPollTimer);
+      _chatPollTimer = null;
+    }
+  }
+
+  function startChatPoll() {
+    stopChatPoll();
+    _chatPollTimer = setInterval(async () => {
+      if (state.activeView !== 'team-chat' || !_activeChatRoom) return;
+      try {
+        const msgs = await api(`/bot/chats/${_activeChatRoom}/messages`);
+        const log = document.getElementById('chatMsgLog');
+        if (!log) return;
+        const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+        log.innerHTML = '';
+        (msgs || []).forEach((m) => log.appendChild(renderChatMessage(m)));
+        if (atBottom) log.scrollTop = log.scrollHeight;
+        await loadTeamChatRoomsOnly();
+        const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnread?.total || 0);
+      } catch (_) {}
+    }, 8000);
+  }
+
+  async function loadTeamChatRoomsOnly() {
+    const list = document.getElementById('chatRoomList');
+    if (!list) return;
+    try {
+      const rooms = await api('/bot/chats');
+      list.innerHTML = '';
+      if (!(rooms || []).length) {
+        list.innerHTML = '<div class="empty-state" style="padding:8px;font-size:0.82rem">No chats yet — pick a colleague and Start chat.</div>';
+        return;
+      }
+      (rooms || []).forEach((r) => {
+        const unread = Number(r.unread_count || 0);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.roomId = r.id;
+        btn.className =
+          'chat-room-btn' +
+          (_activeChatRoom === r.id ? ' active' : '') +
+          (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
+        btn.innerHTML = `
+          <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : 'DM'}</span></span>
+          ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+          <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
+        `;
+        btn.addEventListener('click', () => openChatRoom(r));
+        list.appendChild(btn);
+      });
+    } catch (_) {}
+  }
 
   async function loadTeamChat() {
+    const list = document.getElementById('chatRoomList');
+    startChatPoll();
     try {
-      const [rooms, directory] = await Promise.all([
-        api('/bot/chats').catch(() => []),
-        api('/bot/directory').catch(() => []),
-      ]);
+      let rooms = [];
+      let directory = [];
+      try {
+        rooms = await api('/bot/chats');
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (list) {
+          list.innerHTML = `<div class="empty-state" style="padding:12px;font-size:0.85rem">
+            <strong>Team chat setup pending</strong><br/>
+            Supabase pe SQL run karo:<br/>
+            <code>add_dip_bot.sql</code> then <code>add_chat_unread_meet.sql</code><br/>
+            <span style="color:var(--muted)">${escapeHtml(msg)}</span>
+          </div>`;
+        }
+        showToast('Run chat SQL in Supabase first', 'error');
+        return;
+      }
+      try {
+        directory = await api('/bot/directory');
+      } catch (_) {
+        directory = [];
+      }
       const peer = document.getElementById('chatPeerSelect');
       if (peer) {
         peer.innerHTML = '<option value="">Select colleague…</option>';
@@ -5635,19 +5792,29 @@ export async function mountTaskflowApp(opts = {}) {
           peer.appendChild(opt);
         });
       }
-      const list = document.getElementById('chatRoomList');
       if (list) {
         list.innerHTML = '';
+        if (!(rooms || []).length) {
+          list.innerHTML = '<div class="empty-state" style="padding:8px;font-size:0.82rem">No chats yet — pick a colleague and Start chat.</div>';
+        }
         (rooms || []).forEach((r) => {
+          const unread = Number(r.unread_count || 0);
           const btn = document.createElement('button');
           btn.type = 'button';
-          btn.className = 'chat-room-btn' + (_activeChatRoom === r.id ? ' active' : '');
-          btn.textContent = r.title || r.kind;
+          btn.dataset.roomId = r.id;
+          btn.className =
+            'chat-room-btn' +
+            (_activeChatRoom === r.id ? ' active' : '') +
+            (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
+          btn.innerHTML = `
+            <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : 'DM'}</span></span>
+            ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+            <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
+          `;
           btn.addEventListener('click', () => openChatRoom(r));
           list.appendChild(btn);
         });
       }
-      // ?joinChat=code
       const params = new URLSearchParams(window.location.search);
       const join = params.get('joinChat');
       if (join) {
@@ -5669,28 +5836,70 @@ export async function mountTaskflowApp(opts = {}) {
 
   async function openChatRoom(room) {
     _activeChatRoom = room.id;
+    _activeChatTitle = room.title || 'Chat';
     const title = document.getElementById('chatRoomTitle');
-    if (title) title.textContent = room.title || 'Chat';
+    if (title) title.textContent = _activeChatTitle;
     const input = document.getElementById('chatMsgInput');
     const sendBtn = document.getElementById('chatSendBtn');
+    const videoBtn = document.getElementById('chatVideoBtn');
     if (input) input.disabled = false;
     if (sendBtn) sendBtn.disabled = false;
+    if (videoBtn) videoBtn.disabled = false;
+
+    // Invite code for project groups (and any room that has one)
+    const inviteRow = document.getElementById('chatInviteRow');
+    const inviteShow = document.getElementById('chatInviteCodeShow');
+    try {
+      let full = room;
+      if (!room.invite_code && room.kind === 'project') {
+        full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: {} });
+      } else if (room.kind === 'project' && !room.invite_code) {
+        full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: { regenerate: true } });
+      }
+      if (inviteRow && inviteShow) {
+        if (full.kind === 'project' || full.invite_code) {
+          if (!full.invite_code) {
+            full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: { regenerate: true } });
+          }
+          inviteRow.hidden = false;
+          inviteShow.textContent = full.invite_code || '—';
+          _activeChatInvite = full.invite_code || '';
+        } else {
+          inviteRow.hidden = true;
+          _activeChatInvite = '';
+        }
+      }
+    } catch (_) {
+      if (inviteRow) inviteRow.hidden = true;
+    }
+
     const msgs = await api(`/bot/chats/${room.id}/messages`);
     const log = document.getElementById('chatMsgLog');
     if (!log) return;
     log.innerHTML = '';
-    (msgs || []).forEach((m) => {
-      const mine = String(m.sender_id) === String(state.user.id);
-      const div = document.createElement('div');
-      div.className = `bot-bubble ${mine ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
-      const who = m.is_bot ? 'Bot' : m.sender?.full_name || (mine ? 'You' : 'User');
-      div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div><div class="bot-bubble-body">${escapeHtml(m.body)}</div>`;
-      log.appendChild(div);
-    });
+    (msgs || []).forEach((m) => log.appendChild(renderChatMessage(m)));
     log.scrollTop = log.scrollHeight;
     document.querySelectorAll('.chat-room-btn').forEach((b) => {
-      b.classList.toggle('active', b.textContent === (room.title || room.kind));
+      b.classList.toggle('active', b.dataset.roomId === room.id);
+      if (b.dataset.roomId === room.id) b.classList.remove('has-unread');
     });
+    await api(`/bot/chats/${room.id}/read`, { method: 'POST' }).catch(() => {});
+    const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+    setNavBadge('team-chat', chatUnread?.total || 0);
+    await loadTeamChatRoomsOnly();
+  }
+
+  let _activeChatInvite = '';
+  let _calMonth = new Date();
+  let _editingMomId = null;
+
+  function fireSystemNotify(title, body) {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.ico' });
+      }
+    } catch (_) {}
+    showToast(`${title}: ${body}`, 'success');
   }
 
   if (!window._teamChatBound) {
@@ -5700,6 +5909,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (!peerId) return showToast('Select a colleague', 'error');
       try {
         const room = await api('/bot/chats/dm', { method: 'POST', body: { user_id: peerId } });
+        fireSystemNotify('Chat started', 'Peer gets WhatsApp + can open Team chat. Further msgs = unread badge only.');
         await loadTeamChat();
         await openChatRoom(room);
       } catch (err) {
@@ -5727,10 +5937,241 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         await api(`/bot/chats/${_activeChatRoom}/messages`, { method: 'POST', body: { body } });
         if (input) input.value = '';
-        await openChatRoom({ id: _activeChatRoom, title: document.getElementById('chatRoomTitle')?.textContent });
+        await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || document.getElementById('chatRoomTitle')?.textContent, kind: 'dm' });
       } catch (err) {
         showToast(err.message, 'error');
       }
+    });
+    document.getElementById('chatVideoBtn')?.addEventListener('click', async () => {
+      if (!_activeChatRoom) return showToast('Open a chat first', 'error');
+      try {
+        const res = await api(`/bot/chats/${_activeChatRoom}/meeting`, { method: 'POST', body: {} });
+        const url = res.meeting_url;
+        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        showToast(res.mom ? 'Meeting + MoM draft created — fill minutes in Meetings' : 'Video meeting started', 'success');
+        await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle, kind: 'project' });
+        if (res.mom) switchView('meetings');
+      } catch (err) {
+        showToast(err.message || 'Could not start meeting', 'error');
+      }
+    });
+    document.getElementById('chatCopyInviteBtn')?.addEventListener('click', async () => {
+      const code = document.getElementById('chatInviteCodeShow')?.textContent || _activeChatInvite;
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        showToast('Invite code copied', 'success');
+      } catch (_) {
+        showToast(code, 'success');
+      }
+    });
+    document.getElementById('chatNewInviteBtn')?.addEventListener('click', async () => {
+      if (!_activeChatRoom) return;
+      try {
+        const room = await api(`/bot/chats/${_activeChatRoom}/invite`, {
+          method: 'POST',
+          body: { regenerate: true },
+        });
+        const show = document.getElementById('chatInviteCodeShow');
+        if (show) show.textContent = room.invite_code;
+        _activeChatInvite = room.invite_code;
+        showToast('New invite code generated', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  // ─── Meetings / MoM ─────────────────────────────────────────────────────────
+  async function loadMeetings() {
+    const list = document.getElementById('momList');
+    const editor = document.getElementById('momEditor');
+    if (editor) editor.hidden = true;
+    if (!list) return;
+    try {
+      const rows = await api('/bot/meetings');
+      if (!rows.length) {
+        list.innerHTML = '<div class="empty-state">No meetings yet. Start a video call from Team chat — MoM draft is created automatically.</div>';
+        return;
+      }
+      const isAdmin = state.user.role === 'admin';
+      if (isAdmin) {
+        const byProj = {};
+        rows.forEach((m) => {
+          const key = m.project?.name || 'Other / DM meetings';
+          if (!byProj[key]) byProj[key] = [];
+          byProj[key].push(m);
+        });
+        list.innerHTML = Object.keys(byProj)
+          .sort()
+          .map((proj) => {
+            const items = byProj[proj]
+              .map(
+                (m) => `<button type="button" class="mom-card" data-mom-id="${m.id}">
+                <strong>${escapeHtml(m.title)}</strong>
+                <span class="mom-meta">${escapeHtml(m.starter?.full_name || '—')} · ${escapeHtml(formatChatTime(m.started_at))} · ${m.status}</span>
+                <pre class="mom-preview">${escapeHtml((m.mom_body || '').slice(0, 180))}</pre>
+              </button>`
+              )
+              .join('');
+            return `<div class="mom-project-block"><h3 class="mom-project-title">${escapeHtml(proj)}</h3>${items}</div>`;
+          })
+          .join('');
+      } else {
+        list.innerHTML = rows
+          .map(
+            (m) => `<button type="button" class="mom-card" data-mom-id="${m.id}">
+            <strong>${escapeHtml(m.title)}</strong>
+            <span class="mom-meta">${escapeHtml(m.project?.name || 'Chat')} · ${escapeHtml(formatChatTime(m.started_at))} · ${m.status}</span>
+            <pre class="mom-preview">${escapeHtml((m.mom_body || '').slice(0, 180))}</pre>
+          </button>`
+          )
+          .join('');
+      }
+      list.querySelectorAll('[data-mom-id]').forEach((btn) => {
+        btn.addEventListener('click', () => openMomEditor(rows.find((r) => r.id === btn.dataset.momId)));
+      });
+    } catch (err) {
+      list.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br/>Run <code>add_meeting_moms.sql</code> in Supabase.</div>`;
+    }
+  }
+
+  function openMomEditor(m) {
+    if (!m) return;
+    _editingMomId = m.id;
+    const editor = document.getElementById('momEditor');
+    if (editor) editor.hidden = false;
+    const t = document.getElementById('momTitle');
+    const b = document.getElementById('momBody');
+    if (t) t.value = m.title || '';
+    if (b) b.value = m.mom_body || '';
+    editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  if (!window._momBound) {
+    window._momBound = true;
+    document.getElementById('momSaveBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        await api(`/bot/meetings/${_editingMomId}`, {
+          method: 'PATCH',
+          body: {
+            title: document.getElementById('momTitle')?.value,
+            mom_body: document.getElementById('momBody')?.value,
+          },
+        });
+        showToast('MoM saved', 'success');
+        loadMeetings();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('momFinalBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        await api(`/bot/meetings/${_editingMomId}`, {
+          method: 'PATCH',
+          body: {
+            title: document.getElementById('momTitle')?.value,
+            mom_body: document.getElementById('momBody')?.value,
+            status: 'final',
+          },
+        });
+        showToast('MoM marked final', 'success');
+        loadMeetings();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('momCloseBtn')?.addEventListener('click', () => {
+      const editor = document.getElementById('momEditor');
+      if (editor) editor.hidden = true;
+      _editingMomId = null;
+    });
+  }
+
+  // ─── Employee calendar ──────────────────────────────────────────────────────
+  async function loadCalendar() {
+    const grid = document.getElementById('calGrid');
+    const label = document.getElementById('calMonthLabel');
+    if (!grid) return;
+    const y = _calMonth.getFullYear();
+    const m = _calMonth.getMonth();
+    if (label) {
+      label.textContent = _calMonth.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    }
+    let tasks = [];
+    try {
+      tasks = await api('/tasks/my');
+    } catch (err) {
+      grid.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const heads = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+      .map((d) => `<div class="cal-head">${d}</div>`)
+      .join('');
+    let cells = '';
+    for (let i = 0; i < firstDow; i++) cells += '<div class="cal-cell cal-empty"></div>';
+    for (let day = 1; day <= daysInMonth; day++) {
+      const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayTasks = (tasks || []).filter((t) => String(t.target_date || '').slice(0, 10) === key);
+      const chips = dayTasks
+        .slice(0, 4)
+        .map((t) => {
+          const cls = calTaskClass(t, todayKey);
+          return `<div class="cal-chip ${cls}" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || 'Task').slice(0, 28))}</div>`;
+        })
+        .join('');
+      const more = dayTasks.length > 4 ? `<div class="cal-more">+${dayTasks.length - 4}</div>` : '';
+      cells += `<button type="button" class="cal-cell${key === todayKey ? ' cal-is-today' : ''}" data-day="${key}">
+        <span class="cal-daynum">${day}</span>${chips}${more}
+      </button>`;
+    }
+    grid.innerHTML = heads + cells;
+    grid.querySelectorAll('[data-day]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.day;
+        const dayTasks = (tasks || []).filter((t) => String(t.target_date || '').slice(0, 10) === key);
+        const detail = document.getElementById('calDayDetail');
+        if (!detail) return;
+        detail.innerHTML = dayTasks.length
+          ? `<h3>${key}</h3>` +
+            dayTasks
+              .map((t) => {
+                const cls = calTaskClass(t, todayKey);
+                return `<div class="cal-detail-row ${cls}"><strong>${escapeHtml(t.description || 'Task')}</strong><span>${escapeHtml(t.status || '')} · ${escapeHtml(t.project?.name || '')}</span></div>`;
+              })
+              .join('')
+          : `<h3>${key}</h3><p class="empty-state">No tasks</p>`;
+      });
+    });
+  }
+
+  function calTaskClass(t, todayKey) {
+    const d = String(t.target_date || '').slice(0, 10);
+    const done =
+      t.status === 'Completed' ||
+      t.verification_status === 'Verified' ||
+      t.status === 'Verified';
+    if (done) return 'cal-done';
+    if (d && d < todayKey) return 'cal-overdue';
+    if (d === todayKey) return 'cal-today';
+    return 'cal-upcoming';
+  }
+
+  if (!window._calBound) {
+    window._calBound = true;
+    document.getElementById('calPrev')?.addEventListener('click', () => {
+      _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() - 1, 1);
+      loadCalendar();
+    });
+    document.getElementById('calNext')?.addEventListener('click', () => {
+      _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() + 1, 1);
+      loadCalendar();
     });
   }
 

@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { onboardUserToProjectChats } = require('../lib/projectChat');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -127,6 +128,14 @@ router.post('/', async (req, res) => {
     if (error) throw error;
     const withHead = await attachReportingHead(data);
 
+    // Site people → auto project group chat + WhatsApp
+    if (data.site_name || data.site_names) {
+      await onboardUserToProjectChats(data, {
+        notifyWa: true,
+        assignedBy: req.user?.id || null,
+      });
+    }
+
     // Plaintext password is only ever returned here, right after creation —
     // it is not retrievable again afterwards (only the hash is stored).
     res.status(201).json({ ...withHead, generated_password: password });
@@ -198,6 +207,14 @@ router.patch('/:id', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    if (site_name !== undefined || site_names !== undefined) {
+      await onboardUserToProjectChats(data, {
+        notifyWa: true,
+        assignedBy: req.user?.id || null,
+      });
+    }
+
     res.json(await attachReportingHead(data));
   } catch (err) {
     console.error('Update employee error:', err.message);

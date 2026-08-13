@@ -21,6 +21,14 @@ export default function TaskflowDom() {
           </div>
           <span className="topbar-tagline">Quality + Quantity to be delivered on time every time</span>
         </div>
+        <div className="topbar-quick" id="topbarQuick">
+          <button type="button" id="topCalBtn" className="topbar-chip" hidden title="My calendar">📅 Calendar</button>
+          <button type="button" id="topMomBtn" className="topbar-chip" title="Meeting minutes">📝 Meetings</button>
+          <button type="button" id="topChatBtn" className="topbar-chip" title="Team chat">
+            💬 Chat <span id="topChatBadge" className="topbar-chip-badge" hidden></span>
+          </button>
+          <button type="button" id="topDipBotBtn" className="topbar-chip" hidden title="DIP Bot">🤖 DIP Bot</button>
+        </div>
         <button id="logoutBtn" className="logout-btn">↩ Log out</button>
       </div>
     </header>
@@ -406,8 +414,8 @@ export default function TaskflowDom() {
         {/* DIP AI BOT */}
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
-            <h2 className="view-title">🤖 DIP AI Bot</h2>
-            <p className="view-sub">Ask about your tasks, overdue, verification queue. Admins get company-wide stats. Live data from Supabase.</p>
+            <h2 className="view-title">🤖 DIP Bot</h2>
+            <p className="view-sub">Admin only — ask about tasks, overdue, verification, company stats. Chat alerts stay in Team chat (not here).</p>
           </div>
           <div className="bot-shell">
             <div id="botChatLog" className="bot-chat-log"></div>
@@ -423,7 +431,7 @@ export default function TaskflowDom() {
         <section id="view-team-chat" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">💬 Team chat</h2>
-            <p className="view-sub">Chat with colleagues. Project discussions work like a group — members get WhatsApp + bot alerts. (Meta cannot create WhatsApp groups via API.)</p>
+            <p className="view-sub">Project group chat + individual DM (office &amp; site). Chats are saved. Unread shows only on your chats. Video meeting from any chat.</p>
           </div>
           <div className="chat-layout">
             <aside className="chat-sidebar">
@@ -440,7 +448,17 @@ export default function TaskflowDom() {
               <div id="chatRoomList" className="chat-room-list"></div>
             </aside>
             <div className="chat-main">
-              <div id="chatRoomTitle" className="chat-room-title">Select a chat</div>
+              <div className="chat-main-header">
+                <div>
+                  <div id="chatRoomTitle" className="chat-room-title">Select a chat</div>
+                  <div id="chatInviteRow" className="chat-invite-row" hidden>
+                    Invite: <code id="chatInviteCodeShow"></code>
+                    <button type="button" id="chatCopyInviteBtn" className="ghost-btn" style={{padding: '2px 8px', fontSize: '0.75rem'}}>Copy</button>
+                    <button type="button" id="chatNewInviteBtn" className="ghost-btn" style={{padding: '2px 8px', fontSize: '0.75rem'}}>New code</button>
+                  </div>
+                </div>
+                <button type="button" id="chatVideoBtn" className="ghost-btn chat-video-btn" disabled title="Start video meeting">📹 Video</button>
+              </div>
               <div id="chatMsgLog" className="chat-msg-log"></div>
               <form id="chatSendForm" className="bot-ask-form">
                 <input id="chatMsgInput" type="text" placeholder="Type a message…" autoComplete="off" disabled />
@@ -448,6 +466,51 @@ export default function TaskflowDom() {
               </form>
             </div>
           </div>
+        </section>
+
+        {/* MEETINGS / MoM */}
+        <section id="view-meetings" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">📝 Meetings &amp; MoM</h2>
+            <p className="view-sub">Video meetings and minutes. Employees see their project meetings; admin sees all, project-wise.</p>
+          </div>
+          <div id="momList" className="mom-list"></div>
+          <div id="momEditor" className="mom-editor" hidden>
+            <h3 id="momEditorTitle" className="view-title" style={{fontSize: '1rem'}}>Edit MoM</h3>
+            <div className="field">
+              <label>Title</label>
+              <input id="momTitle" type="text" />
+            </div>
+            <div className="field">
+              <label>Minutes of Meeting (structured)</label>
+              <textarea id="momBody" rows={12} placeholder={"Agenda:\n1. …\n\nDiscussion:\n- …\n\nDecisions:\n- …\n\nAction items:\n- Owner — task — due date"}></textarea>
+            </div>
+            <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
+              <button type="button" id="momSaveBtn" className="primary-btn primary-btn-inline">Save MoM</button>
+              <button type="button" id="momFinalBtn" className="ghost-btn">Mark final</button>
+              <button type="button" id="momCloseBtn" className="ghost-btn">Close</button>
+            </div>
+          </div>
+        </section>
+
+        {/* EMPLOYEE CALENDAR */}
+        <section id="view-calendar" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">📅 My task calendar</h2>
+            <p className="view-sub">
+              <span className="cal-legend cal-today">Today</span>
+              <span className="cal-legend cal-done">Completed</span>
+              <span className="cal-legend cal-overdue">Overdue</span>
+              <span className="cal-legend cal-upcoming">Upcoming</span>
+            </p>
+          </div>
+          <div className="cal-nav">
+            <button type="button" id="calPrev" className="ghost-btn">‹ Prev</button>
+            <strong id="calMonthLabel">—</strong>
+            <button type="button" id="calNext" className="ghost-btn">Next ›</button>
+          </div>
+          <div id="calGrid" className="cal-grid"></div>
+          <div id="calDayDetail" className="cal-day-detail"></div>
         </section>
 
         {/* MANAGE SITES */}

@@ -46,9 +46,6 @@ export default function SiteApp() {
               Site
             </button>
           </div>
-          <button type="button" className="tf-surface-logout" onClick={doLogout}>
-            Logout
-          </button>
         </div>
       )}
       <div className="site-shell-body">

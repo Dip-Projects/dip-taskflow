@@ -88,16 +88,6 @@ export default function TaskflowApp() {
               Site
             </button>
           </div>
-          <button
-            type="button"
-            className="tf-surface-logout"
-            onClick={() => {
-              logout();
-              navigate('/login', { replace: true });
-            }}
-          >
-            Logout
-          </button>
         </div>
       )}
       <div
