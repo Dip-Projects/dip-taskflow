@@ -605,7 +605,10 @@ export async function mountTaskflowApp(opts = {}) {
       adminLabel.className = 'nav-section-label'; adminLabel.textContent = 'Administration';
       els.navList.appendChild(adminLabel);
       if (isAdmin || canAddEmployee) els.navList.appendChild(makeNavButton('employees', '👥 Manage employees'));
-      if (isAdmin) els.navList.appendChild(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
+      if (isAdmin) {
+        els.navList.appendChild(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
+        els.navList.appendChild(makeNavButton('project-mgmt', '🗂️ Project management'));
+      }
       if (isAdmin || canAddSite)     els.navList.appendChild(makeNavButton('sites', '🏗️ Manage sites'));
       if (isAdmin) {
         els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
@@ -622,6 +625,13 @@ export async function mountTaskflowApp(opts = {}) {
     els.navList.appendChild(makeNavButton('applyleave', '🌴 Apply Leave'));
     els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
     if (isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+
+    // DIP Bot + Team chat — everyone
+    const botLabel = document.createElement('div');
+    botLabel.className = 'nav-section-label'; botLabel.textContent = 'DIP Bot';
+    els.navList.appendChild(botLabel);
+    els.navList.appendChild(makeNavButton('ai-bot', '🤖 AI Bot'));
+    els.navList.appendChild(makeNavButton('team-chat', '💬 Team chat'));
   
     // Corrections section — visible to all employees (admin doesn't get corrections, they assign them)
     if (!isAdmin) {
@@ -813,6 +823,9 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'drawings-all')  loadAllDrawings();
     if (viewKey === 'daily-report')  loadDailyReport();
     if (viewKey === 'mis-report')    loadMisReport();
+    if (viewKey === 'ai-bot')        loadAiBot();
+    if (viewKey === 'team-chat')     loadTeamChat();
+    if (viewKey === 'project-mgmt')  loadProjectMgmt();
   }
   
   // ─── master data (admin) ─────────────────────────────────────────────────────
@@ -5547,6 +5560,279 @@ export async function mountTaskflowApp(opts = {}) {
       sortEl?.addEventListener('change', run);
     }
     run();
+  }
+
+  // ─── DIP AI Bot ─────────────────────────────────────────────────────────────
+  function appendBotBubble(who, text) {
+    const log = document.getElementById('botChatLog');
+    if (!log) return;
+    const div = document.createElement('div');
+    div.className = `bot-bubble ${who === 'you' ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
+    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : 'DIP Bot'}</div><div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function loadAiBot() {
+    const log = document.getElementById('botChatLog');
+    if (log && !log.dataset.ready) {
+      log.dataset.ready = '1';
+      appendBotBubble('bot', 'Namaste! Tasks, overdue, verification — poochho. Company-wide stats sirf admin ke liye.');
+    }
+    try {
+      const alerts = await api('/bot/alerts').catch(() => []);
+      const box = document.getElementById('botAlerts');
+      if (box) {
+        const unread = (alerts || []).filter((a) => !a.is_read);
+        box.innerHTML = unread.length
+          ? `<div class="subsection-title">Alerts</div>` +
+            unread
+              .slice(0, 8)
+              .map(
+                (a) =>
+                  `<div class="ticket-card"><strong>${escapeHtml(a.title)}</strong><p class="ticket-desc">${escapeHtml(a.body)}</p></div>`
+              )
+              .join('')
+          : '';
+      }
+    } catch (_) {}
+  }
+
+  if (!window._botAskBound) {
+    window._botAskBound = true;
+    document.getElementById('botAskForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('botAskInput');
+      const q = (input?.value || '').trim();
+      if (!q) return;
+      appendBotBubble('you', q);
+      if (input) input.value = '';
+      try {
+        const res = await api('/bot/ask', { method: 'POST', body: { question: q } });
+        appendBotBubble('bot', res.answer || 'No answer');
+      } catch (err) {
+        appendBotBubble('bot', err.message || 'Error');
+      }
+    });
+  }
+
+  // ─── Team chat ──────────────────────────────────────────────────────────────
+  let _activeChatRoom = null;
+
+  async function loadTeamChat() {
+    try {
+      const [rooms, directory] = await Promise.all([
+        api('/bot/chats').catch(() => []),
+        api('/bot/directory').catch(() => []),
+      ]);
+      const peer = document.getElementById('chatPeerSelect');
+      if (peer) {
+        peer.innerHTML = '<option value="">Select colleague…</option>';
+        (directory || []).forEach((u) => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = `${u.full_name}${u.department ? ` · ${u.department}` : ''}`;
+          peer.appendChild(opt);
+        });
+      }
+      const list = document.getElementById('chatRoomList');
+      if (list) {
+        list.innerHTML = '';
+        (rooms || []).forEach((r) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'chat-room-btn' + (_activeChatRoom === r.id ? ' active' : '');
+          btn.textContent = r.title || r.kind;
+          btn.addEventListener('click', () => openChatRoom(r));
+          list.appendChild(btn);
+        });
+      }
+      // ?joinChat=code
+      const params = new URLSearchParams(window.location.search);
+      const join = params.get('joinChat');
+      if (join) {
+        try {
+          const room = await api('/bot/chats/join', { method: 'POST', body: { invite_code: join } });
+          showToast('Joined discussion', 'success');
+          await openChatRoom(room);
+          params.delete('joinChat');
+          const url = `${window.location.pathname}${params.toString() ? `?${params}` : ''}`;
+          window.history.replaceState({}, '', url);
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function openChatRoom(room) {
+    _activeChatRoom = room.id;
+    const title = document.getElementById('chatRoomTitle');
+    if (title) title.textContent = room.title || 'Chat';
+    const input = document.getElementById('chatMsgInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    if (input) input.disabled = false;
+    if (sendBtn) sendBtn.disabled = false;
+    const msgs = await api(`/bot/chats/${room.id}/messages`);
+    const log = document.getElementById('chatMsgLog');
+    if (!log) return;
+    log.innerHTML = '';
+    (msgs || []).forEach((m) => {
+      const mine = String(m.sender_id) === String(state.user.id);
+      const div = document.createElement('div');
+      div.className = `bot-bubble ${mine ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
+      const who = m.is_bot ? 'Bot' : m.sender?.full_name || (mine ? 'You' : 'User');
+      div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div><div class="bot-bubble-body">${escapeHtml(m.body)}</div>`;
+      log.appendChild(div);
+    });
+    log.scrollTop = log.scrollHeight;
+    document.querySelectorAll('.chat-room-btn').forEach((b) => {
+      b.classList.toggle('active', b.textContent === (room.title || room.kind));
+    });
+  }
+
+  if (!window._teamChatBound) {
+    window._teamChatBound = true;
+    document.getElementById('chatStartDmBtn')?.addEventListener('click', async () => {
+      const peerId = document.getElementById('chatPeerSelect')?.value;
+      if (!peerId) return showToast('Select a colleague', 'error');
+      try {
+        const room = await api('/bot/chats/dm', { method: 'POST', body: { user_id: peerId } });
+        await loadTeamChat();
+        await openChatRoom(room);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('chatJoinBtn')?.addEventListener('click', async () => {
+      const code = document.getElementById('chatJoinCode')?.value?.trim();
+      if (!code) return;
+      try {
+        const room = await api('/bot/chats/join', { method: 'POST', body: { invite_code: code } });
+        showToast('Joined', 'success');
+        await loadTeamChat();
+        await openChatRoom(room);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('chatSendForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!_activeChatRoom) return;
+      const input = document.getElementById('chatMsgInput');
+      const body = (input?.value || '').trim();
+      if (!body) return;
+      try {
+        await api(`/bot/chats/${_activeChatRoom}/messages`, { method: 'POST', body: { body } });
+        if (input) input.value = '';
+        await openChatRoom({ id: _activeChatRoom, title: document.getElementById('chatRoomTitle')?.textContent });
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  // ─── Project management ─────────────────────────────────────────────────────
+  async function loadProjectMgmt() {
+    try {
+      const data = await api('/bot/management/projects');
+      if (data.hint) showToast(data.hint, 'error');
+      const projects = data.projects || [];
+      const members = data.members || [];
+      const fill = (sel, items, ph) => {
+        const el = document.getElementById(sel);
+        if (!el) return;
+        el.innerHTML = `<option value="">${ph}</option>`;
+        items.forEach((p) => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.name || p.full_name;
+          el.appendChild(opt);
+        });
+      };
+      fill('pmg-project', projects, 'Select project');
+      fill('pmg-from', projects, 'From project');
+      fill('pmg-to', projects, 'To project');
+      const emps = state.master.employees?.length
+        ? state.master.employees
+        : await api('/master/employees').catch(() => []);
+      fill('pmg-employee', emps, 'Select employee');
+      fill('pmg-shift-emp', emps, 'Select employee');
+
+      const box = document.getElementById('pmgMembers');
+      if (box) {
+        if (!members.length) {
+          box.innerHTML = '<div class="empty-state">No project assignments yet</div>';
+        } else {
+          const byProj = {};
+          members.forEach((m) => {
+            const key = m.project_id;
+            if (!byProj[key]) byProj[key] = [];
+            byProj[key].push(m);
+          });
+          box.innerHTML = projects
+            .map((p) => {
+              const list = byProj[p.id] || [];
+              if (!list.length) return '';
+              return `<div class="ticket-card"><strong>${escapeHtml(p.name)}</strong><ul style="margin:8px 0 0;padding-left:18px">${list
+                .map((m) => `<li>${escapeHtml(m.user?.full_name || '—')}${m.role_on_project ? ` · ${escapeHtml(m.role_on_project)}` : ''}</li>`)
+                .join('')}</ul></div>`;
+            })
+            .join('');
+        }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  if (!window._pmgBound) {
+    window._pmgBound = true;
+    document.getElementById('pmgAssignBtn')?.addEventListener('click', async () => {
+      const project_id = document.getElementById('pmg-project')?.value;
+      const user_id = document.getElementById('pmg-employee')?.value;
+      if (!project_id || !user_id) return showToast('Pick project + employee', 'error');
+      try {
+        await api('/bot/management/assign', { method: 'POST', body: { project_id, user_id } });
+        showToast('Assigned', 'success');
+        loadProjectMgmt();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('pmgShiftBtn')?.addEventListener('click', async () => {
+      const user_id = document.getElementById('pmg-shift-emp')?.value;
+      const from_project_id = document.getElementById('pmg-from')?.value || null;
+      const to_project_id = document.getElementById('pmg-to')?.value;
+      if (!user_id || !to_project_id) return showToast('Pick employee + destination project', 'error');
+      try {
+        await api('/bot/management/shift', {
+          method: 'POST',
+          body: { user_id, from_project_id: from_project_id || undefined, to_project_id },
+        });
+        showToast('Shifted', 'success');
+        loadProjectMgmt();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('pmgDiscussBtn')?.addEventListener('click', async () => {
+      const project_id = document.getElementById('pmg-project')?.value;
+      if (!project_id) return showToast('Pick a project first', 'error');
+      try {
+        const room = await api(`/bot/projects/${project_id}/discussion`, { method: 'POST' });
+        const box = document.getElementById('pmgInviteBox');
+        if (box) {
+          box.hidden = false;
+          box.textContent = `Discussion ready. Invite code: ${room.invite_code} · Share path: ${room.invite_path || ''}`;
+        }
+        showToast('Discussion opened — members notified on WhatsApp', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
   }
 
   __tfReadyFns.forEach((fn) => {

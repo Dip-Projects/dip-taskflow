@@ -527,6 +527,19 @@ router.patch(
         console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
       }
 
+      try {
+        const bot = require('./bot');
+        if (typeof bot.notifyVerifierBot === 'function') {
+          await bot.notifyVerifierBot(
+            verifier_id,
+            data.description || 'Task',
+            data.project?.name || '—'
+          );
+        }
+      } catch (botErr) {
+        console.warn('Verifier bot notify skip:', botErr.message);
+      }
+
       res.json(data);
     } catch (err) {
       console.error('Send for verification error:', err.message);

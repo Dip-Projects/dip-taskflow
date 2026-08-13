@@ -9,6 +9,12 @@
       "memory": 1024
     }
   },
+  "crons": [
+    {
+      "path": "/api/bot/cron/overdue-whatsapp",
+      "schedule": "30 3 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/assets/(.*)",

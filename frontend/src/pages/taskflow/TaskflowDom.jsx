@@ -358,10 +358,96 @@ export default function TaskflowDom() {
           <div className="view-header-row">
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">Org Hierarchy</h2>
-              <p className="view-sub">Reporting structure — inactive employees are hidden={true} automatically.</p>
+              <p className="view-sub">Reporting structure — inactive employees are hidden automatically.</p>
             </div>
           </div>
           <div id="hierarchyTreeContainer" className="org-tree-container" style={{marginTop: 20}}></div>
+        </section>
+
+        {/* PROJECT MANAGEMENT — who is on which project + shift */}
+        <section id="view-project-mgmt" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">🗂️ Project management</h2>
+            <p className="view-sub">See who is on which project, shift people, and open project discussion (in-app group + WhatsApp alert).</p>
+          </div>
+          <div className="field-grid" style={{marginBottom: 16}}>
+            <div className="field">
+              <label>Project</label>
+              <select id="pmg-project"></select>
+            </div>
+            <div className="field">
+              <label>Assign employee</label>
+              <select id="pmg-employee"></select>
+            </div>
+          </div>
+          <div className="row-actions" style={{gap: 8, marginBottom: 16, display: 'flex', flexWrap: 'wrap'}}>
+            <button type="button" id="pmgAssignBtn" className="primary-btn primary-btn-inline">Assign to project</button>
+            <button type="button" id="pmgDiscussBtn" className="ghost-btn">Start / open discussion</button>
+          </div>
+          <div id="pmgInviteBox" className="form-note" hidden></div>
+          <div className="field-grid" style={{marginBottom: 16}}>
+            <div className="field">
+              <label>Shift from project</label>
+              <select id="pmg-from"></select>
+            </div>
+            <div className="field">
+              <label>Shift to project</label>
+              <select id="pmg-to"></select>
+            </div>
+          </div>
+          <div className="field" style={{maxWidth: 360}}>
+            <label>Employee to shift</label>
+            <select id="pmg-shift-emp"></select>
+          </div>
+          <button type="button" id="pmgShiftBtn" className="primary-btn primary-btn-inline" style={{marginBottom: 20}}>Shift employee</button>
+          <div id="pmgMembers" className="ticket-list"></div>
+        </section>
+
+        {/* DIP AI BOT */}
+        <section id="view-ai-bot" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">🤖 DIP AI Bot</h2>
+            <p className="view-sub">Ask about your tasks, overdue, verification queue. Admins get company-wide stats. Live data from Supabase.</p>
+          </div>
+          <div className="bot-shell">
+            <div id="botChatLog" className="bot-chat-log"></div>
+            <form id="botAskForm" className="bot-ask-form">
+              <input id="botAskInput" type="text" placeholder='e.g. "kitne overdue tasks?" or "verification pending"' autoComplete="off" />
+              <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
+            </form>
+            <div id="botAlerts" className="bot-alerts"></div>
+          </div>
+        </section>
+
+        {/* TEAM CHAT */}
+        <section id="view-team-chat" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">💬 Team chat</h2>
+            <p className="view-sub">Chat with colleagues. Project discussions work like a group — members get WhatsApp + bot alerts. (Meta cannot create WhatsApp groups via API.)</p>
+          </div>
+          <div className="chat-layout">
+            <aside className="chat-sidebar">
+              <div className="field">
+                <label>Start DM</label>
+                <select id="chatPeerSelect"><option value="">Select colleague…</option></select>
+              </div>
+              <button type="button" id="chatStartDmBtn" className="primary-btn primary-btn-inline" style={{width: '100%', marginBottom: 12}}>Start chat</button>
+              <div className="field">
+                <label>Join with invite code</label>
+                <input id="chatJoinCode" type="text" placeholder="Invite code" />
+              </div>
+              <button type="button" id="chatJoinBtn" className="ghost-btn" style={{width: '100%', marginBottom: 12}}>Join discussion</button>
+              <div id="chatRoomList" className="chat-room-list"></div>
+            </aside>
+            <div className="chat-main">
+              <div id="chatRoomTitle" className="chat-room-title">Select a chat</div>
+              <div id="chatMsgLog" className="chat-msg-log"></div>
+              <form id="chatSendForm" className="bot-ask-form">
+                <input id="chatMsgInput" type="text" placeholder="Type a message…" autoComplete="off" disabled />
+                <button type="submit" className="primary-btn primary-btn-inline" disabled id="chatSendBtn">Send</button>
+              </form>
+            </div>
+          </div>
         </section>
 
         {/* MANAGE SITES */}
