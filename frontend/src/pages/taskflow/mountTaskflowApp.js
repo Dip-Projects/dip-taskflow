@@ -586,13 +586,14 @@ export async function mountTaskflowApp(opts = {}) {
     const row = map[key];
     if (!row) return true;
     const role = (state.user?.role || '').toLowerCase();
-    const who = role === 'admin' ? 'admin' : state.user?.is_mis_executive ? 'mis' : 'employee';
+    const deptDesig = `${state.user?.department || ''} ${state.user?.designation || ''}`.toLowerCase();
+    const who = role === 'admin' ? 'admin' : (state.user?.is_mis_executive || /\bmis\b/.test(deptDesig)) ? 'mis' : 'employee';
     return row[who] !== false;
   }
 
   function buildNav() {
     const isAdmin = state.user.role === 'admin';
-    const isMis = !!state.user.is_mis_executive;
+    const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
     const canAddSite = isAdmin || !!state.user.can_add_site;
     const canAddEmployee = isAdmin || !!state.user.can_add_employee;
     const canResolveTickets = isAdmin || !!state.user.can_resolve_tickets;
@@ -632,7 +633,6 @@ export async function mountTaskflowApp(opts = {}) {
       || visOk('project-mgmt') && isAdmin
       || visOk('masterdata') && isAdmin
       || visOk('permissions') && isAdmin
-      || visOk('visibility') && (isAdmin || isMis)
       || visOk('daily-report') && (isAdmin || isMis)
       || visOk('mis-report') && (isAdmin || isMis)
       || visOk('time-dashboard') && (isAdmin || isMis);
@@ -650,13 +650,18 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('sites') && (isAdmin || canAddSite)) els.navList.appendChild(makeNavButton('sites', '🏗️ Manage sites'));
       if (visOk('masterdata') && isAdmin) els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
       if (visOk('permissions') && isAdmin) els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
-      if (visOk('visibility') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('visibility', '👁 Who sees what'));
       if (visOk('daily-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
       if (visOk('mis-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
     }
   
-    if (visOk('applyleave') || visOk('buddyrequests') || (visOk('leaveapprovals') && isAdmin)) {
+    if (isMis && state.user?.role !== 'admin') {
+      const misLabel = document.createElement('div');
+      misLabel.className = 'nav-section-label';
+      misLabel.textContent = 'MIS Support';
+      els.navList.appendChild(misLabel);
+      els.navList.appendChild(makeNavButton('visibility', '👁 Who sees what'));
+    }
       const leaveLabel = document.createElement('div');
       leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
       els.navList.appendChild(leaveLabel);
@@ -864,9 +869,14 @@ export async function mountTaskflowApp(opts = {}) {
   
   function switchView(viewKey) {
     // DIP Bot is admin-only
-    if (viewKey === 'ai-bot' && state.user?.role !== 'admin') {
-      showToast('DIP Bot is only for admins', 'error');
-      viewKey = 'team-chat';
+    if (viewKey === 'visibility') {
+      const misOnly = state.user?.role !== 'admin' && (
+        !!state.user?.is_mis_executive || /\bmis\b/i.test(`${state.user?.department || ''} ${state.user?.designation || ''}`)
+      );
+      if (!misOnly) {
+        showToast('Who sees what is only for MIS Support', 'error');
+        return;
+      }
     }
     state.activeView = viewKey;
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
@@ -2147,19 +2157,23 @@ export async function mountTaskflowApp(opts = {}) {
   
   function openCorrectionModal(taskId) {
     state.pendingTaskId = taskId;
-    els.correctionNote.value = '';
-    els.correctionFormMsg.hidden = true;
-    els.corrVoicePlayback.hidden = true;
-    els.corrVoicePlayback.src = '';
-    els.corrRecordStatus.textContent = '';
-    els.corrStartRecord.disabled = false;
-    els.corrStopRecord.disabled = true;
+    if (els.correctionNote) els.correctionNote.value = '';
+    if (els.correctionFormMsg) els.correctionFormMsg.hidden = true;
+    if (els.corrVoicePlayback) {
+      els.corrVoicePlayback.hidden = true;
+      els.corrVoicePlayback.src = '';
+    }
+    if (els.corrRecordStatus) els.corrRecordStatus.textContent = '';
+    if (els.corrStartRecord) els.corrStartRecord.disabled = false;
+    if (els.corrStopRecord) els.corrStopRecord.disabled = true;
     corrVoiceBlob = null;
     const u = document.getElementById('correction-extra-unit');
     const a = document.getElementById('correction-extra-amount');
+    const due = document.getElementById('correction-new-due');
     if (u) u.value = '';
     if (a) a.value = '';
-    els.correctionModal.hidden = false;
+    if (due) due.value = '';
+    if (els.correctionModal) els.correctionModal.hidden = false;
   }
   
   els.closeCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
@@ -2217,6 +2231,8 @@ export async function mountTaskflowApp(opts = {}) {
         formData.append('extra_unit', extraUnit);
         formData.append('extra_amount', extraAmount);
       }
+      const newDue = document.getElementById('correction-new-due')?.value || '';
+      if (newDue) formData.append('new_target_date', newDue);
       if (corrVoiceBlob) {
         formData.append('correction_voice', corrVoiceBlob, 'correction_voice.webm');
       }
@@ -2755,9 +2771,18 @@ export async function mountTaskflowApp(opts = {}) {
   // ─── Updation Modal (verifier/admin → employee: request task updation) ──────────
   function openUpdationModal(taskId) {
     state.pendingTaskId = taskId;
-    document.getElementById('updation-note').value = '';
-    document.getElementById('updationFormMsg').hidden = true;
-    document.getElementById('updationModal').hidden = false;
+    const note = document.getElementById('updation-note');
+    const msg = document.getElementById('updationFormMsg');
+    const modal = document.getElementById('updationModal');
+    const unit = document.getElementById('updation-extra-unit');
+    const amt = document.getElementById('updation-extra-amount');
+    const due = document.getElementById('updation-new-due');
+    if (note) note.value = '';
+    if (msg) msg.hidden = true;
+    if (unit) unit.value = '';
+    if (amt) amt.value = '';
+    if (due) due.value = '';
+    if (modal) modal.hidden = false;
   }
   
   document.getElementById('closeUpdationModal')?.addEventListener('click', () => {
@@ -2778,7 +2803,13 @@ export async function mountTaskflowApp(opts = {}) {
     }
     try {
       await api(`/tasks/${state.pendingTaskId}/send-updation`, {
-        method: 'PATCH', body: { note }
+        method: 'PATCH',
+        body: {
+          note,
+          extra_unit: document.getElementById('updation-extra-unit')?.value || '',
+          extra_amount: document.getElementById('updation-extra-amount')?.value || '',
+          new_target_date: document.getElementById('updation-new-due')?.value || '',
+        },
       });
       showToast('Updation request sent ✅', 'success');
       document.getElementById('updationModal').hidden = true;

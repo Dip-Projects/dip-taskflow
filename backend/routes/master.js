@@ -1,7 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { MODULES, ROLES, mergeMap, canSee } = require('../lib/navVisibility');
+const { MODULES, ROLES, mergeMap, canSee, isMisExecutive } = require('../lib/navVisibility');
 
 const router = express.Router();
 
@@ -83,18 +83,16 @@ router.get('/nav-visibility', async (req, res) => {
 
 router.put('/nav-visibility', async (req, res) => {
   try {
-    const isAdmin = req.user?.role === 'admin';
-    let isMis = !!req.user?.is_mis_executive;
-    if (!isMis && !isAdmin) {
+    const isMis = isMisExecutive(req.user) || (!!req.user?.is_mis_executive && req.user?.role !== 'admin');
+    if (!isMis) {
       const { data: me } = await supabase
         .from('users')
-        .select('is_mis_executive')
+        .select('is_mis_executive, department, designation, role')
         .eq('id', req.user.id)
         .maybeSingle();
-      isMis = !!me?.is_mis_executive;
-    }
-    if (!isAdmin && !isMis) {
-      return res.status(403).json({ error: 'Only admin or MIS executive can change who sees what' });
+      if (!isMisExecutive(me)) {
+        return res.status(403).json({ error: 'Only MIS Support / MIS executive can change who sees what' });
+      }
     }
     const map = mergeMap(req.body?.map);
     const { error } = await supabase.from('app_settings').upsert({

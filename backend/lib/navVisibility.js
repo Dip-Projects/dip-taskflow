@@ -51,7 +51,7 @@ function defaultRow(key) {
     sites: adminOnly,
     masterdata: adminOnly,
     permissions: adminOnly,
-    visibility: adminMis,
+    visibility: { admin: false, mis: true, employee: false, site: false, site_head: false },
     'daily-report': adminMis,
     'mis-report': adminMis,
     'time-dashboard': adminMis,
@@ -85,7 +85,17 @@ function mergeMap(saved) {
       base[m.key] = { ...base[m.key], ...saved[m.key] };
     }
   }
+  // Who sees what is MIS-only — never show to admin even if a saved map says so.
+  base.visibility = { admin: false, mis: true, employee: false, site: false, site_head: false };
   return base;
+}
+
+function isMisExecutive(user) {
+  if (!user) return false;
+  if (String(user.role || '').toLowerCase() === 'admin') return false;
+  if (user.is_mis_executive) return true;
+  const blob = `${user.department || ''} ${user.designation || ''}`.toLowerCase();
+  return /\bmis\b/.test(blob);
 }
 
 function viewerRole(user) {
@@ -95,7 +105,9 @@ function viewerRole(user) {
   const desig = String(user.designation || user.site_role || '').toLowerCase().trim();
   if (role === 'client' || dept === 'client') return 'client';
   if (role === 'admin') return 'admin';
-  if (user.is_mis_executive) return 'mis';
+  if (user.is_mis_executive || /\bmis\b/.test(`${user.department || ''} ${user.designation || ''}`.toLowerCase())) {
+    return 'mis';
+  }
   const blob = `${role} ${dept} ${desig}`;
   const head =
     !!user.is_head ||
@@ -115,4 +127,4 @@ function canSee(moduleKey, user, map) {
   return !!row[role];
 }
 
-module.exports = { MODULES, ROLES, defaultMap, mergeMap, viewerRole, canSee };
+module.exports = { MODULES, ROLES, defaultMap, mergeMap, viewerRole, canSee, isMisExecutive };

@@ -606,7 +606,7 @@ export default function TaskflowDom() {
         <section id="view-visibility" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Who sees what</h2>
-            <p className="view-sub">MIS executive and admin control this. Uncheck a box to hide that screen for that role — including admin. Save to apply for everyone.</p>
+            <p className="view-sub">MIS Support / MIS executive only. Uncheck a box to hide that screen for that role — including admin. Admin cannot open this page.</p>
           </div>
           <div className="table-card table-card--stack">
             <div className="table-scroll">
@@ -1390,7 +1390,22 @@ export default function TaskflowDom() {
           <label htmlFor="updation-note">Updation note <span className="req">*</span></label>
           <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
         </div>
-        <p id="updationFormMsg" className="form-error" hidden={true}></p>
+        <div className="field">
+          <label>Extra time <span className="optional">(optional)</span></label>
+          <div className="field-grid" style={{gridTemplateColumns: '1fr 1fr'}}>
+            <select id="updation-extra-unit">
+              <option value="">No extra time</option>
+              <option value="hours">Hours</option>
+              <option value="days">Days</option>
+            </select>
+            <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="updation-new-due">New due date &amp; time <span className="optional">(optional — this task only)</span></label>
+          <input id="updation-new-due" type="datetime-local" />
+          <p className="form-note">Set a new deadline for this task when sending it back for updation.</p>
+        </div>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline">📤 Send Updation</button>
@@ -1675,7 +1690,11 @@ export default function TaskflowDom() {
             </select>
             <input id="correction-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
           </div>
-          <p className="form-note">Hours add to planned hours and shift due date in office time. Days move the target date.</p>
+          <p className="form-note">Hours add to planned hours. Days move the due date. Or set an exact new due date/time below for this task only.</p>
+        </div>
+        <div className="field">
+          <label htmlFor="correction-new-due">New due date &amp; time <span className="optional">(optional — this task only)</span></label>
+          <input id="correction-new-due" type="datetime-local" />
         </div>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelCorrectionModal">Cancel</button>

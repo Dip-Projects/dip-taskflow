@@ -6,6 +6,55 @@ const { addWorkingHours, addCalendarDays } = require('../lib/workingHours');
 const router = express.Router();
 router.use(requireAuth);
 
+function applyDeadlineChange(existing, body, note) {
+  let target_date = existing.target_date;
+  let hours_to_complete = existing.hours_to_complete != null ? Number(existing.hours_to_complete) : null;
+  let extra_hours = Number(existing.extra_hours || 0);
+  let extra_days = Number(existing.extra_days || 0);
+  const extensions = Array.isArray(existing.correction_extensions) ? [...existing.correction_extensions] : [];
+  const extraUnit = String(body.extra_unit || '').toLowerCase();
+  const extraAmount = Number(body.extra_amount || 0);
+  const newDueRaw = String(body.new_target_date || '').trim();
+  let usedExplicitDue = false;
+  if (newDueRaw) {
+    const d = new Date(newDueRaw);
+    if (!Number.isNaN(d.getTime())) {
+      target_date = d.toISOString();
+      usedExplicitDue = true;
+      extensions.push({
+        at: new Date().toISOString(),
+        by: body._by || null,
+        unit: 'new_due',
+        amount: 0,
+        note: String(note || '').slice(0, 200),
+        new_target_date: target_date,
+      });
+    }
+  }
+  if (extraAmount > 0 && (extraUnit === 'hours' || extraUnit === 'days')) {
+    if (extraUnit === 'hours') {
+      extra_hours += extraAmount;
+      hours_to_complete = (hours_to_complete || 0) + extraAmount;
+      if (!usedExplicitDue && target_date) {
+        target_date = addWorkingHours(target_date, extraAmount).toISOString();
+      }
+    } else {
+      extra_days += extraAmount;
+      if (!usedExplicitDue && target_date) {
+        target_date = addCalendarDays(target_date, extraAmount).toISOString();
+      }
+    }
+    extensions.push({
+      at: new Date().toISOString(),
+      by: body._by || null,
+      unit: extraUnit,
+      amount: extraAmount,
+      note: String(note || '').slice(0, 200),
+    });
+  }
+  return { target_date, hours_to_complete, extra_hours, extra_days, extensions };
+}
+
 // Both "toast says success but the date shown afterwards is still the old
 // one" reports (direct admin reschedule AND reschedule-request approval)
 // share one thing in common: they both PATCH successfully, then immediately
@@ -617,36 +666,12 @@ router.patch(
         correction_voice_url = await uploadFile(req.file, 'correction-voices');
       }
 
-      const extraUnit = String(req.body.extra_unit || '').toLowerCase(); // hours | days
-      const extraAmount = Number(req.body.extra_amount || 0);
-      let target_date = existing.target_date;
-      let hours_to_complete = existing.hours_to_complete != null ? Number(existing.hours_to_complete) : null;
-      let extra_hours = Number(existing.extra_hours || 0);
-      let extra_days = Number(existing.extra_days || 0);
-      const extensions = Array.isArray(existing.correction_extensions) ? [...existing.correction_extensions] : [];
-
-      if (extraAmount > 0 && (extraUnit === 'hours' || extraUnit === 'days')) {
-        if (extraUnit === 'hours') {
-          extra_hours += extraAmount;
-          hours_to_complete = (hours_to_complete || 0) + extraAmount;
-          if (target_date) {
-            target_date = addWorkingHours(target_date, extraAmount).toISOString();
-          }
-        } else {
-          extra_days += extraAmount;
-          if (target_date) {
-            target_date = addCalendarDays(target_date, extraAmount).toISOString();
-          }
-        }
-        extensions.push({
-          at: new Date().toISOString(),
-          by: req.user.id,
-          by_name: req.user.full_name,
-          unit: extraUnit,
-          amount: extraAmount,
-          note: note.trim().slice(0, 200),
-        });
-      }
+      const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
+      let target_date = extra.target_date;
+      let hours_to_complete = extra.hours_to_complete;
+      let extra_hours = extra.extra_hours;
+      let extra_days = extra.extra_days;
+      const extensions = extra.extensions;
 
       const updates = {
           verification_status: 'Verification Rejected',
@@ -695,7 +720,10 @@ router.patch('/:id/send-updation', async (req, res) => {
     }
 
     const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, verifier_id').eq('id', id).maybeSingle();
+      .from('tasks')
+      .select('id, verifier_id, target_date, hours_to_complete, extra_hours, extra_days, correction_extensions')
+      .eq('id', id)
+      .maybeSingle();
     if (fetchErr) throw fetchErr;
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
@@ -704,16 +732,32 @@ router.patch('/:id/send-updation', async (req, res) => {
       return res.status(403).json({ error: 'You are not the verifier for this task' });
     }
 
-    const { data, error } = await supabase
+    const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
+    const updates = {
+      verification_status: 'Updation Required',
+      updation_note: note.trim(),
+      status: 'In Progress',
+      target_date: extra.target_date,
+      hours_to_complete: extra.hours_to_complete,
+      extra_hours: extra.extra_hours,
+      extra_days: extra.extra_days,
+      correction_extensions: extra.extensions,
+    };
+
+    let { data, error } = await supabase
       .from('tasks')
-      .update({
-        verification_status: 'Updation Required',
-        updation_note: note.trim(),
-        status: 'In Progress'
-      })
+      .update(updates)
       .eq('id', id)
       .select(TASK_SELECT)
       .single();
+    if (error && /extra_hours|extra_days|correction_extensions/i.test(error.message || '')) {
+      delete updates.extra_hours;
+      delete updates.extra_days;
+      delete updates.correction_extensions;
+      const retry = await supabase.from('tasks').update(updates).eq('id', id).select(TASK_SELECT).single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) throw error;
     res.json(data);
