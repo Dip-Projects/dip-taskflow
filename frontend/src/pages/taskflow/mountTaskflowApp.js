@@ -256,6 +256,18 @@ export async function mountTaskflowApp(opts = {}) {
     clearTimeout(showToast._t);
     showToast._t = setTimeout(() => { els.toast.hidden = true; }, 3200);
   }
+
+  function hideFormMsg(el) {
+    if (el) el.hidden = true;
+  }
+  function showFormMsg(el, text) {
+    if (!el) {
+      showToast(text, 'error');
+      return;
+    }
+    el.textContent = text;
+    el.hidden = false;
+  }
   
   async function api(path, { method = 'GET', body, isForm = false } = {}) {
     const headers = {};
@@ -1122,7 +1134,8 @@ export async function mountTaskflowApp(opts = {}) {
   updateTaskDeadlinePreview();
   
   els.addTaskForm?.addEventListener('submit', async (e) => {
-    e.preventDefault(); els.addTaskMsg.hidden = true;
+    e.preventDefault();
+    hideFormMsg(els.addTaskMsg);
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
@@ -1145,7 +1158,7 @@ export async function mountTaskflowApp(opts = {}) {
       document.getElementById('f-reschedule').value = 'false';
       updateTaskDeadlinePreview();
     } catch (err) {
-      els.addTaskMsg.textContent = err.message; els.addTaskMsg.hidden = false;
+      showFormMsg(els.addTaskMsg, err.message);
     }
   });
   
@@ -2158,19 +2171,21 @@ export async function mountTaskflowApp(opts = {}) {
   
   // ─── Send for verification ───────────────────────────────────────────────────
   async function openVerifyModal(taskId) {
-    state.pendingTaskId = taskId; els.verifyFormMsg.hidden = true;
+    state.pendingTaskId = taskId;
+    hideFormMsg(els.verifyFormMsg);
     els.verifyPerson.innerHTML = '<option value="">Loading…</option>';
     if (els.verifyFiles) els.verifyFiles.value = '';
-    els.verifyModal.hidden = false;
+    if (els.verifyModal) els.verifyModal.hidden = false;
     try {
       const verifiers = await api('/master/verifiers');
       fillSelect(els.verifyPerson, verifiers, { placeholder: 'Select a verifier', labelKey: 'full_name' });
-    } catch (err) { els.verifyFormMsg.textContent = err.message; els.verifyFormMsg.hidden = false; }
+    } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
   }
-  els.closeVerifyModal?.addEventListener('click', () => { els.verifyModal.hidden = true; });
-  els.cancelVerifyModal?.addEventListener('click', () => { els.verifyModal.hidden = true; });
+  els.closeVerifyModal?.addEventListener('click', () => { if (els.verifyModal) els.verifyModal.hidden = true; });
+  els.cancelVerifyModal?.addEventListener('click', () => { if (els.verifyModal) els.verifyModal.hidden = true; });
   els.verifyForm?.addEventListener('submit', async (e) => {
-    e.preventDefault(); els.verifyFormMsg.hidden = true;
+    e.preventDefault();
+    hideFormMsg(els.verifyFormMsg);
     try {
       const formData = new FormData();
       formData.append('verifier_id', els.verifyPerson.value);
@@ -2180,8 +2195,9 @@ export async function mountTaskflowApp(opts = {}) {
         method: 'PATCH', body: formData, isForm: true
       });
       showToast('Sent for verification ✅', 'success');
-      els.verifyModal.hidden = true; reloadCurrentTaskView();
-    } catch (err) { els.verifyFormMsg.textContent = err.message; els.verifyFormMsg.hidden = false; }
+      if (els.verifyModal) els.verifyModal.hidden = true;
+      reloadCurrentTaskView();
+    } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
   });
   
   // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
@@ -2248,16 +2264,16 @@ export async function mountTaskflowApp(opts = {}) {
         corrVoiceBlob = new Blob(chunks, { type: 'audio/webm' });
         const url = URL.createObjectURL(corrVoiceBlob);
         els.corrVoicePlayback.src = url;
-        els.corrVoicePlayback.hidden = false;
-        els.corrRecordStatus.textContent = '✅ Recording saved';
-        els.corrStartRecord.disabled = false;
-        els.corrStopRecord.disabled = true;
+        if (els.corrVoicePlayback) els.corrVoicePlayback.hidden = false;
+        if (els.corrRecordStatus) els.corrRecordStatus.textContent = '✅ Recording saved';
+        if (els.corrStartRecord) els.corrStartRecord.disabled = false;
+        if (els.corrStopRecord) els.corrStopRecord.disabled = true;
       };
       corrMediaRecorder.start();
-      els.corrStartRecord.disabled = true;
-      els.corrStopRecord.disabled = false;
-      els.corrRecordStatus.textContent = '🔴 Recording…';
-      els.corrVoicePlayback.hidden = true;
+      if (els.corrStartRecord) els.corrStartRecord.disabled = true;
+      if (els.corrStopRecord) els.corrStopRecord.disabled = false;
+      if (els.corrRecordStatus) els.corrRecordStatus.textContent = '🔴 Recording…';
+      if (els.corrVoicePlayback) els.corrVoicePlayback.hidden = true;
     } catch (err) {
       els.corrRecordStatus.textContent = '❌ Microphone access denied';
     }
@@ -6022,7 +6038,9 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return `<td>${escapeHtml(fmtDateOnly(step.planned))}</td>
       <td>${escapeHtml(step.actual ? fmtDate(step.actual) : '—')}</td>
-      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span></td>
+      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span>${
+        step.actor ? `<div class="fms-actor">${escapeHtml(step.actor)}</div>` : ''
+      }</td>
       <td>${delayText}</td>`;
   }
 
@@ -6137,7 +6155,7 @@ export async function mountTaskflowApp(opts = {}) {
       ];
       steps.forEach((s) => {
         const st = r.steps?.[s.key] || {};
-        cells.push(st.planned || '', st.actual || '', st.status || '', st.delayHrs ?? '');
+        cells.push(st.planned || '', st.actual || '', st.actor ? `${st.status || ''} (${st.actor})` : (st.status || ''), st.delayHrs ?? '');
       });
       lines.push(cells.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
     });

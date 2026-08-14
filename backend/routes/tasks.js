@@ -3,8 +3,17 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays } = require('../lib/workingHours');
+const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
+
+async function notifyWa(toNumber, templateName, bodyParams) {
+  try {
+    await sendWhatsAppTemplate(toNumber, templateName, bodyParams);
+  } catch (err) {
+    console.warn('WhatsApp skip:', templateName, err.message);
+  }
+}
 
 function applyDeadlineChange(existing, body, note) {
   let target_date = existing.target_date;
@@ -265,8 +274,7 @@ if (!isMdoOffice && !project_id) {
         .maybeSingle();
 
       if (assigneeUser?.whatsapp_number) {
-        // Must await on Vercel — fire-and-forget is killed after the response.
-        await sendWhatsAppTemplate(assigneeUser.whatsapp_number, 'task_notification_v2', [
+        await notifyWa(assigneeUser.whatsapp_number, 'task_notification_v2', [
           assigneeUser.full_name || 'Team member',
           (description || 'New task').slice(0, 200),
           data.project?.name || '—',
@@ -594,7 +602,7 @@ router.patch(
         .maybeSingle();
 
       if (verifierUser?.whatsapp_number) {
-        await sendWhatsAppTemplate(verifierUser.whatsapp_number, 'task_verification_request', [
+        await notifyWa(verifierUser.whatsapp_number, 'task_verification_request', [
           verifierUser.full_name || 'Verifier',
           (data.description || 'Task').slice(0, 200),
           data.project?.name || '—',
@@ -689,7 +697,11 @@ router.patch(
 
       let correction_voice_url = null;
       if (req.file) {
-        correction_voice_url = await uploadFile(req.file, 'correction-voices');
+        try {
+          correction_voice_url = await uploadFile(req.file, 'correction-voices');
+        } catch (upErr) {
+          console.warn('Correction voice upload skipped:', upErr.message);
+        }
       }
 
       const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
@@ -815,7 +827,7 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
       //   existing.target_date || '—',
       //   target_date
       // ]).catch(() => {}); 17th july  chg
-      await sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+      await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
         data.description,
         data.project?.name || '—',
         req.user.full_name,
@@ -898,7 +910,7 @@ router.post('/:id/reschedule-request', async (req, res) => {
         .eq('username', 'chirag.s')
         .maybeSingle();
       if (chirag?.whatsapp_number) {
-        await sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
           data.description || 'Task',
           data.project?.name || '—',
           req.user.full_name,
@@ -1348,8 +1360,14 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
 
         const steps = {
           accept: fmsStep(assigned, t.accepted_at, true),
-          submit: fmsStep(t.target_date, sentAt, true),
-          verify: fmsStep(t.target_date, decidedAt || startVerifyAt, !!sentAt),
+          submit: {
+            ...fmsStep(t.target_date, sentAt, true),
+            actor: t.verifier?.full_name || null,
+          },
+          verify: {
+            ...fmsStep(t.target_date, decidedAt || startVerifyAt, !!sentAt),
+            actor: t.verifier?.full_name || null,
+          },
         };
 
         return {

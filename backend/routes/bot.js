@@ -29,7 +29,7 @@ function isSchemaMissing(err) {
 }
 
 function schemaHint() {
-  return 'Run add_dip_bot.sql, add_chat_unread_meet.sql, and add_meeting_moms.sql in Supabase SQL Editor.';
+  return 'Run backend/sql/RUN_DIP_BOT_CHAT.sql once in Supabase SQL Editor (project members, chat, meetings).';
 }
 
 function blankCallMom() {
@@ -945,7 +945,6 @@ router.post('/management/assign', requireAdmin, async (req, res) => {
       .single();
     if (error) throw error;
 
-    // Put assignee into project discussion group + WA (site/office same)
     try {
       const crypto = require('crypto');
       let { data: room } = await supabase
@@ -978,11 +977,15 @@ router.post('/management/assign', requireAdmin, async (req, res) => {
       console.warn('project chat assign:', e.message);
     }
 
-    await notifyUserWa(user_id, {
-      desc: `Added to ${data.project?.name || 'project'} group. Open Team chat for project group + individual chats.`,
-      project: data.project?.name || 'Project',
-      priority: 'High',
-    });
+    try {
+      await notifyUserWa(user_id, {
+        desc: `Added to ${data.project?.name || 'project'} group. Open Team chat for project group + individual chats.`,
+        project: data.project?.name || 'Project',
+        priority: 'High',
+      });
+    } catch (waErr) {
+      console.warn('assign WA skip:', waErr.message);
+    }
 
     res.json(data);
   } catch (err) {
@@ -1019,11 +1022,15 @@ router.post('/management/shift', requireAdmin, async (req, res) => {
       .single();
     if (error) throw error;
 
-    await notifyUserWa(user_id, {
-      desc: `Shifted to project ${data.project?.name || ''}`,
-      project: data.project?.name || 'Project',
-      priority: 'High',
-    });
+    try {
+      await notifyUserWa(user_id, {
+        desc: `Shifted to project ${data.project?.name || ''}`,
+        project: data.project?.name || 'Project',
+        priority: 'High',
+      });
+    } catch (waErr) {
+      console.warn('shift WA skip:', waErr.message);
+    }
     res.json(data);
   } catch (err) {
     if (isSchemaMissing(err)) return res.status(503).json({ error: schemaHint() });

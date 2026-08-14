@@ -2696,6 +2696,7 @@ body.sidebar-open { overflow: hidden; }
 .fms-pill-NA { background: transparent; color: #9CA3AF; }
 .fms-delay-late { color: #B91C1C; font-weight: 600; }
 .fms-delay-early { color: #15803D; font-weight: 600; }
+.fms-actor { display: block; margin-top: 3px; font-size: 0.68rem; font-weight: 600; color: #1D4ED8; }
 
 .app-screen .main-content { background: linear-gradient(180deg, #F7F8FC 0%, #F0F2F8 120px); }
 .view-title { letter-spacing: -0.02em; }
