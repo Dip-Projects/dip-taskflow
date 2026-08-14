@@ -9,6 +9,7 @@ const {
   listOverdueTasksForWa,
   startOfToday,
 } = require('../lib/botData');
+const { onboardUserToProjectChats, ensureSiteTeamRoom } = require('../lib/projectChat');
 
 const router = express.Router();
 const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -265,6 +266,18 @@ router.patch('/alerts/:id/read', requireAuth, async (req, res) => {
 // ─── Team chat (employees ↔ employees; admin can message anyone) ─────────────
 router.get('/chats', requireAuth, async (req, res) => {
   try {
+    try {
+      const { data: me } = await supabase
+        .from('users')
+        .select('id, full_name, site_name, site_names')
+        .eq('id', req.user.id)
+        .maybeSingle();
+      if (me) {
+        await onboardUserToProjectChats(me, { notifyWa: false });
+        await ensureSiteTeamRoom(me);
+      }
+    } catch (_) { /* tables may still be missing */ }
+
     const { data: memberships, error } = await supabase
       .from('chat_room_members')
       .select('room_id, last_read_at, chat_rooms(id, kind, title, project_id, invite_code, created_at)')
@@ -1064,10 +1077,7 @@ router.get('/directory', requireAuth, async (req, res) => {
       .order('full_name');
     if (error) throw error;
     // Employees see other employees/heads (not clients); admin sees all
-    const list = (data || []).filter((u) => {
-      if (req.user.role === 'admin') return u.role !== 'client';
-      return u.role === 'employee' || u.role === 'head' || u.role === 'admin';
-    });
+    const list = (data || []).filter((u) => String(u.role || '').toLowerCase() !== 'client');
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1084,19 +1094,20 @@ async function notifyVerifierBot(verifierId, taskDesc, projectName) {
     `Please verify: ${String(taskDesc || 'Task').slice(0, 160)} (${projectName || '—'})`,
     'verifications'
   );
-  await notifyUserWa(verifierId, {
-    desc: `Verification pending: ${String(taskDesc || 'Task').slice(0, 120)}`,
-    project: projectName || 'TaskFlow',
-    priority: 'High',
-  });
+  // WhatsApp for verify is sent once from tasks.js as task_verification_request.
+  // Do not also send task_notification_v2 (that is the assign-task template).
 }
 
 // ─── Overdue WhatsApp cron ───────────────────────────────────────────────────
 async function runOverdueWhatsApp() {
   const day = startOfToday().toISOString().slice(0, 10);
+  const since = process.env.OVERDUE_WA_SINCE || '2026-08-15';
   const overdue = await listOverdueTasksForWa();
   let sent = 0;
   for (const t of overdue) {
+    const dueDay = String(t.target_date || '').slice(0, 10);
+    // Do not blast tasks that were already overdue before this rollout date.
+    if (dueDay && dueDay < since) continue;
     const wa = t.assignee?.whatsapp_number;
     if (!wa) continue;
     const { data: already } = await supabase

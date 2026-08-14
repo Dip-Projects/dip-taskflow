@@ -2106,14 +2106,14 @@ export async function mountTaskflowApp(opts = {}) {
     }
     const actionsEl = card.querySelector('.task-actions');
     if (verificationMode) {
-      if (task.verification_started_at) {
+      if (verificationHasStarted(task)) {
         startVerificationInline(task, actionsEl);
       } else {
         const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
           startBtn.disabled = true;
           try {
             await startVerification(task.id);
-            startVerificationInline(task, actionsEl);
+            await loadVerifications();
           } catch (err) {
             startBtn.disabled = false;
             showToast(err.message, 'error');
@@ -2357,6 +2357,10 @@ export async function mountTaskflowApp(opts = {}) {
   // browser storage. This is permanent — once started, it stays started for that
   // task everywhere (any tab, any device, any browser) until the task cycles back
   // through send-for-verification. See tasks.js for the server-side logic.
+  function verificationHasStarted(task) {
+    return !!(task?.verification_started_at || task?.verification_started_by);
+  }
+
   async function startVerification(taskId) {
     return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
   }
@@ -2688,7 +2692,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
   
       // Actions — "Start Verification" → then Verify or Send for Correction
-      if (task.verification_started_at) {
+      if (verificationHasStarted(task)) {
         // Already started (recorded on the task itself) — show verify/correction buttons directly
         showVerifyActions();
       } else {
@@ -2696,7 +2700,7 @@ export async function mountTaskflowApp(opts = {}) {
           startBtn.disabled = true;
           try {
             await startVerification(task.id);
-            showVerifyActions();
+            await loadVerifications();
           } catch (err) {
             startBtn.disabled = false;
             showToast(err.message, 'error');
@@ -6111,6 +6115,12 @@ export async function mountTaskflowApp(opts = {}) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
         return;
       }
+      const metaRow = (key, cls) =>
+        `<th class="fms-meta-label">${key}</th>` +
+        '<th></th><th></th><th></th><th></th><th></th>' +
+        steps.map((s, i) =>
+          `<th class="fms-meta-cell${i % 2 ? ' fms-meta-cell--alt' : ''} ${cls}" colspan="4">${escapeHtml(s[key.toLowerCase()] || s.label)}</th>`
+        ).join('');
       const stepHead = steps.map((s, i) =>
         `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
       const subHead = steps.map(() => '<th class="fms-sub-head">Planned</th><th class="fms-sub-head">Actual</th><th class="fms-sub-head">Status</th><th class="fms-sub-head">Time Delay</th>').join('');
@@ -6127,13 +6137,17 @@ export async function mountTaskflowApp(opts = {}) {
       body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
         <table class="data-table fms-table">
           <thead>
+            <tr class="fms-meta-row">${metaRow('What', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('Who', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('How', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('Why', '')}</tr>
             <tr>
-              <th class="fms-sticky fms-id-head" rowspan="2">Timestamp</th>
-              <th class="fms-id-head" rowspan="2">JOB NO.</th>
-              <th class="fms-id-head" rowspan="2">PROJECT NAME</th>
-              <th class="fms-id-head" rowspan="2">WORK TYPE</th>
-              <th class="fms-id-head" rowspan="2">PERSON</th>
-              <th class="fms-id-head" rowspan="2">LEAD TIME</th>
+              <th class="fms-sticky fms-id-head" rowspan="1">Timestamp</th>
+              <th class="fms-id-head">JOB NO.</th>
+              <th class="fms-id-head">PROJECT NAME</th>
+              <th class="fms-id-head">WORK TYPE</th>
+              <th class="fms-id-head">PERSON</th>
+              <th class="fms-id-head">LEAD TIME</th>
               ${stepHead}
             </tr>
             <tr>${subHead}</tr>
@@ -6605,7 +6619,7 @@ export async function mountTaskflowApp(opts = {}) {
           (_activeChatRoom === r.id ? ' active' : '') +
           (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
         btn.innerHTML = `
-          <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : 'DM'}</span></span>
+          <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : (r.kind === 'team' || /team group/i.test(r.title || '') ? 'Team' : 'DM')}</span></span>
           ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
           <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
         `;
@@ -6666,7 +6680,7 @@ export async function mountTaskflowApp(opts = {}) {
             (_activeChatRoom === r.id ? ' active' : '') +
             (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
           btn.innerHTML = `
-            <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : 'DM'}</span></span>
+            <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : (r.kind === 'team' || /team group/i.test(r.title || '') ? 'Team' : 'DM')}</span></span>
             ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
             <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
           `;

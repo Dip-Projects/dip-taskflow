@@ -1,5 +1,19 @@
--- Run ONCE in Supabase SQL Editor.
--- Creates project_members (admin project transfer), team chat, DIP Bot Q&A, and MoM.
+-- Run ONCE in Supabase SQL Editor (safe to re-run).
+-- Project transfer, team/project chat, DIP Bot, MoM, and FMS/start-verification timestamps.
+
+-- Task step times (Start verification must survive refresh)
+alter table public.tasks add column if not exists assigned_at timestamptz;
+alter table public.tasks add column if not exists accepted_at timestamptz;
+alter table public.tasks add column if not exists sent_for_verification_at timestamptz;
+alter table public.tasks add column if not exists verification_started_at timestamptz;
+alter table public.tasks add column if not exists verification_started_by uuid;
+alter table public.tasks add column if not exists verified_at timestamptz;
+alter table public.tasks add column if not exists rejected_at timestamptz;
+alter table public.tasks add column if not exists verification_decided_at timestamptz;
+alter table public.tasks add column if not exists first_sent_for_verification_at timestamptz;
+alter table public.tasks add column if not exists first_verification_started_at timestamptz;
+alter table public.tasks add column if not exists first_verified_at timestamptz;
+alter table public.tasks add column if not exists task_events jsonb default '[]'::jsonb;
 
 -- Who works on which project (shift people between projects)
 create table if not exists public.project_members (
@@ -17,7 +31,7 @@ create index if not exists project_members_project_idx on public.project_members
 
 create table if not exists public.chat_rooms (
   id uuid primary key default gen_random_uuid(),
-  kind text not null check (kind in ('dm', 'project', 'bot')),
+  kind text not null check (kind in ('dm', 'project', 'bot', 'team')),
   title text,
   project_id uuid references public.projects(id) on delete cascade,
   invite_code text unique,
@@ -45,6 +59,10 @@ create table if not exists public.chat_messages (
 );
 
 create index if not exists chat_messages_room_idx on public.chat_messages(room_id, created_at);
+
+alter table public.chat_rooms drop constraint if exists chat_rooms_kind_check;
+alter table public.chat_rooms add constraint chat_rooms_kind_check
+  check (kind in ('dm', 'project', 'bot', 'team'));
 
 alter table public.chat_room_members
   add column if not exists last_read_at timestamptz default now();

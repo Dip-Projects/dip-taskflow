@@ -2667,8 +2667,15 @@ body.sidebar-open { overflow: hidden; }
   font-weight: 600;
   text-align: center;
 }
-.fms-table thead tr:first-child th { top: 0; }
-.fms-table thead tr:nth-child(2) th { top: 30px; z-index: 2; }
+.fms-table thead tr.fms-meta-row th { top: auto; position: sticky; background: #D9E8EE; color: #134E4A; font-weight: 600; font-size: 0.68rem; padding: 3px 8px; white-space: normal; max-width: 220px; }
+.fms-table thead tr.fms-meta-row th.fms-meta-label { text-align: left; background: #C5DDE6; color: #115E59; }
+.fms-table thead tr.fms-meta-row th.fms-meta-cell--alt { background: #DCEBE1; color: #14532D; }
+.fms-table thead tr:nth-child(1) th { top: 0; z-index: 5; }
+.fms-table thead tr:nth-child(2) th { top: 22px; z-index: 5; }
+.fms-table thead tr:nth-child(3) th { top: 44px; z-index: 5; }
+.fms-table thead tr:nth-child(4) th { top: 66px; z-index: 5; }
+.fms-table thead tr:nth-child(5) th { top: 88px; z-index: 6; }
+.fms-table thead tr:nth-child(6) th { top: 118px; z-index: 6; }
 .fms-table th.fms-id-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head--alt { background: #DCEBE1; color: #14532D; }

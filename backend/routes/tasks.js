@@ -422,19 +422,44 @@ router.patch('/:id/start-verification', async (req, res) => {
     }
 
     // Already started this cycle — keep the original start time.
-    if (existing.verification_started_at) {
+    if (existing.verification_started_at || existing.verification_started_by) {
       const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
       if (error) throw error;
       return res.json(data);
     }
 
     const at = nowIso();
-    const data = await updateTaskTolerant(id, {
-      verification_started_by: req.user.id,
-      verification_started_at: at,
-      first_verification_started_at: firstStamp(existing, 'first_verification_started_at', at),
-      task_events: withTaskEvent(existing, 'start_verification', req.user.id),
-    }, TASK_SELECT);
+    // Stamp these two fields on their own so a missing task_events column
+    // cannot swallow the start time (that is what made the button return after refresh).
+    const { error: stampErr } = await supabase
+      .from('tasks')
+      .update({
+        verification_started_by: req.user.id,
+        verification_started_at: at,
+      })
+      .eq('id', id);
+    if (stampErr) throw stampErr;
+
+    try {
+    try {
+      await updateTaskTolerant(id, {
+        first_verification_started_at: firstStamp(existing, 'first_verification_started_at', at),
+        task_events: withTaskEvent(existing, 'start_verification', req.user.id),
+      }, 'id');
+    } catch (extraErr) {
+      console.warn('Start verification extra fields skip:', extraErr.message);
+    }
+    } catch (extraErr) {
+      console.warn('Start verification extra fields skip:', extraErr.message);
+    }
+
+    const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
+    if (error) throw error;
+    if (!data?.verification_started_at) {
+      return res.status(503).json({
+        error: 'Start verification time did not save. Run backend/sql/RUN_DIP_BOT_CHAT.sql in Supabase, then try again.',
+      });
+    }
     res.json(data);
   } catch (err) {
     console.error('Start verification error:', err.message);
@@ -1246,9 +1271,33 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
 // One row per task, each workflow step showing Planned vs Actual + delay,
 // the same way the office FMS sheet is read.
 const FMS_STEPS = [
-  { key: 'accept', label: 'Start / Accept' },
-  { key: 'submit', label: 'Send for verification' },
-  { key: 'verify', label: 'Verification' },
+  {
+    key: 'accept',
+    label: 'Start / Accept',
+    what: 'Start / accept the assigned task',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Work starts only after the person accepts',
+    when: '1',
+  },
+  {
+    key: 'submit',
+    label: 'Send for verification',
+    what: 'Send completed work for checking',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Verifier cannot check until it is sent',
+    when: '2',
+  },
+  {
+    key: 'verify',
+    label: 'Verification',
+    what: 'Verify, send correction, or request update',
+    who: 'Verifier',
+    how: 'In TaskFlow',
+    why: 'Close the task or send it back',
+    when: '3',
+  },
 ];
 
 function fmsRangeDates(range, from, to) {
@@ -1374,12 +1423,10 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
 
         const steps = {
           accept: fmsStep(assigned, t.accepted_at, true),
-          submit: {
-            ...fmsStep(t.target_date, sentAt, true),
-            actor: t.verifier?.full_name || null,
-          },
+          submit: fmsStep(t.target_date, sentAt, true),
           verify: {
-            ...fmsStep(t.target_date, decidedAt || startVerifyAt, !!sentAt),
+            // Planned = day it was sent to the verifier. Actual = verify / correction / updation.
+            ...fmsStep(sentAt, decidedAt || startVerifyAt, !!sentAt),
             actor: t.verifier?.full_name || null,
           },
         };

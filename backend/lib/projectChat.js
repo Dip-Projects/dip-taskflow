@@ -107,20 +107,28 @@ async function onboardUserToProjectChats(user, { notifyWa = true, assignedBy = n
         room = created;
       }
 
+      const { data: alreadyMem } = await supabase
+        .from('chat_room_members')
+        .select('user_id')
+        .eq('room_id', room.id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
       await supabase
         .from('chat_room_members')
         .upsert({ room_id: room.id, user_id: user.id }, { onConflict: 'room_id,user_id' });
 
-      // Welcome system line in project chat (stored history)
-      await supabase.from('chat_messages').insert({
-        room_id: room.id,
-        sender_id: user.id,
-        body: `${user.full_name || 'Member'} joined ${project.name} project group`,
-        is_bot: true,
-        msg_type: 'text',
-      });
+      if (!alreadyMem) {
+        await supabase.from('chat_messages').insert({
+          room_id: room.id,
+          sender_id: user.id,
+          body: `${user.full_name || 'Member'} joined ${project.name} project group`,
+          is_bot: true,
+          msg_type: 'text',
+        });
+      }
 
-      if (notifyWa) {
+      if (notifyWa && !alreadyMem) {
         await notifyUserWa(user.id, {
           desc: `You were added to ${project.name} project group. Open DIP TaskFlow → Team chat for group + individual chats.`,
           project: project.name,
@@ -139,8 +147,67 @@ async function onboardUserToProjectChats(user, { notifyWa = true, assignedBy = n
   return { projects: results };
 }
 
+/** One group chat for everyone on the same site (site team). */
+async function ensureSiteTeamRoom(user) {
+  const siteName = String(user?.site_name || '').trim();
+  if (!user?.id || !siteName) return null;
+  const title = `${siteName} team group`;
+  try {
+    let { data: room } = await supabase
+      .from('chat_rooms')
+      .select('*')
+      .eq('kind', 'team')
+      .eq('title', title)
+      .maybeSingle();
+    if (!room) {
+      const invite = crypto.randomBytes(6).toString('hex');
+      const created = await supabase
+        .from('chat_rooms')
+        .insert({
+          kind: 'team',
+          title,
+          invite_code: invite,
+          created_by: user.id,
+        })
+        .select('*')
+        .single();
+      if (created.error) {
+        const fallback = await supabase
+          .from('chat_rooms')
+          .insert({
+            kind: 'project',
+            title,
+            invite_code: invite,
+            created_by: user.id,
+          })
+          .select('*')
+          .single();
+        if (fallback.error) throw fallback.error;
+        room = fallback.data;
+      } else {
+        room = created.data;
+      }
+    }
+    const { data: siteUsers } = await supabase
+      .from('users')
+      .select('id')
+      .eq('is_active', true)
+      .eq('site_name', siteName);
+    for (const u of siteUsers || []) {
+      await supabase
+        .from('chat_room_members')
+        .upsert({ room_id: room.id, user_id: u.id }, { onConflict: 'room_id,user_id' });
+    }
+    return room;
+  } catch (err) {
+    if (!isSchemaMissing(err)) console.warn('ensureSiteTeamRoom:', err.message || err);
+    return null;
+  }
+}
+
 module.exports = {
   onboardUserToProjectChats,
+  ensureSiteTeamRoom,
   findProjectsForSites,
   notifyUserWa,
   isSchemaMissing,

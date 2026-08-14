@@ -260,6 +260,33 @@ async function sitePulse(ql) {
   return out;
 }
 
+function taskWhy(t) {
+  const now = new Date();
+  const due = t.target_date ? new Date(t.target_date) : null;
+  const vs = String(t.verification_status || '');
+  const st = String(t.status || '');
+  const who = t.assigned_to_user?.full_name || 'the assignee';
+  const ver = t.verifier?.full_name;
+  if (vs === 'Verified' || st === 'Completed') {
+    return `Done — ${who} finished it${ver ? `; verified by ${ver}` : ''}`;
+  }
+  if (vs === 'Pending Verification') {
+    return `Waiting on verifier${ver ? ` ${ver}` : ''} — ${who} already sent it`;
+  }
+  if (vs === 'Verification Rejected') {
+    return `Correction pending — verifier sent it back to ${who}`;
+  }
+  if (vs === 'Updation Required') {
+    return `Updation pending — verifier asked ${who} to update it`;
+  }
+  if (due && due < now && st !== 'Completed') {
+    return `Overdue — due ${fmtDate(t.target_date)} and still ${st || 'open'} for ${who}`;
+  }
+  if (st === 'Pending') return `Not started yet — still Pending with ${who}`;
+  if (st === 'In Progress') return `In progress with ${who} — not sent for verification yet`;
+  return `${st || 'Open'} — assigned to ${who}`;
+}
+
 function formatTaskBlock(t) {
   const who = t.assigned_to_user?.full_name ? `\n    Assigned: ${t.assigned_to_user.full_name}` : '';
   const ver = t.verifier?.full_name ? `\n    Verifier: ${t.verifier.full_name}` : '';
@@ -270,8 +297,50 @@ function formatTaskBlock(t) {
     `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
     `    Project: ${t.project?.name || '—'}${who}${ver}\n` +
     `    Status: ${t.status || '—'}${verify}\n` +
-    `    Due: ${fmtDate(t.target_date)}${hours}${pri}`
+    `    Due: ${fmtDate(t.target_date)}${hours}${pri}\n` +
+    `    Why: ${taskWhy(t)}`
   );
+}
+
+function formatPersonWhy(tasks, people) {
+  const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
+  const rows = tasks || [];
+  if (!rows.length) return `TASKS FOR ${names}\n  (none on record)`;
+  const now = new Date();
+  const groups = {
+    overdue: [],
+    waiting: [],
+    correction: [],
+    notStarted: [],
+    inProgress: [],
+    done: [],
+  };
+  for (const t of rows) {
+    const vs = String(t.verification_status || '');
+    const st = String(t.status || '');
+    const due = t.target_date ? new Date(t.target_date) : null;
+    if (vs === 'Verified' || st === 'Completed') groups.done.push(t);
+    else if (vs === 'Pending Verification') groups.waiting.push(t);
+    else if (vs === 'Verification Rejected' || vs === 'Updation Required') groups.correction.push(t);
+    else if (due && due < now) groups.overdue.push(t);
+    else if (st === 'Pending') groups.notStarted.push(t);
+    else groups.inProgress.push(t);
+  }
+  const section = (title, list) =>
+    list.length ? `${title} (${list.length})\n${list.map(formatTaskBlock).join('\n')}` : '';
+  return [
+    `WHOSE TASKS / WHY — ${names}`,
+    `These ${rows.length} tasks belong to ${names}. Why each one is in this state:`,
+    `Counts: overdue ${groups.overdue.length} | waiting on verifier ${groups.waiting.length} | correction/update ${groups.correction.length} | not started ${groups.notStarted.length} | in progress ${groups.inProgress.length} | done ${groups.done.length}`,
+    section('OVERDUE — due date passed, still open', groups.overdue),
+    section('WAITING ON VERIFIER', groups.waiting),
+    section('CORRECTION / UPDATION', groups.correction),
+    section('NOT STARTED', groups.notStarted),
+    section('IN PROGRESS', groups.inProgress),
+    section('COMPLETED', groups.done),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function shouldFireOn(task, date) {
@@ -711,7 +780,7 @@ async function answerFromFacts(question, facts, name) {
         {
           role: 'system',
           content:
-            'You are DIP Bot for DIP Projects TaskFlow. Understand English, Hindi and Hinglish. Answer ONLY from Facts. If Facts do not contain it, say it is not in TaskFlow data. Keep every name, date, time and count. Use SECTION HEADINGS and "• " bullets. Do not invent tasks, leaves, meetings or times. If asked what was discussed on a call / MoM, quote the MINUTES and SPOKEN ON CALL lines. Reply in clear English.',
+            'You are DIP Bot for DIP Projects TaskFlow. Understand English, Hindi and Hinglish. Answer ONLY from Facts. If Facts do not contain it, say it is not in TaskFlow data. Keep every name, date, time and count. Use SECTION HEADINGS and "• " bullets. Do not invent tasks, leaves, meetings or times. If asked whose tasks or why they are in that state, explain owner + Why for each — do not dump unrelated company totals. If asked what was discussed on a call / MoM, quote the MINUTES and SPOKEN ON CALL lines. Reply in clear English.',
         },
         {
           role: 'user',
@@ -758,7 +827,12 @@ async function gatherAdminFacts({ ql, people, intents }) {
 
 function formatAdminFacts(pack, people, intents) {
   const bits = [];
+  const named = people.length > 0;
   const c = pack.c;
+  if (named && pack.personTasks) {
+    bits.push(formatPersonWhy(pack.personTasks, people));
+    return bits.filter(Boolean).join('\n\n');
+  }
   if (c) {
     bits.push(
       `TASK COUNTS\nDelegated total ${c.total} | open ${c.open} | overdue ${c.overdue} | pending verification ${c.pendingVerify}`
@@ -829,9 +903,7 @@ function formatAdminFacts(pack, people, intents) {
     );
   }
   if (pack.personTasks?.length) {
-    bits.push(
-      `TASKS FOR ${people.map((p) => p.full_name).join(', ')}\n` + pack.personTasks.slice(0, 30).map(formatTaskBlock).join('\n')
-    );
+    bits.push(formatPersonWhy(pack.personTasks, people));
   }
   if (pack.hits?.length && !(pack.personTasks?.length)) {
     bits.push(`MATCHING TASKS\n${pack.hits.map(formatTaskBlock).join('\n')}`);

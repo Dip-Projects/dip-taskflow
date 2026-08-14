@@ -606,7 +606,7 @@ export default function TaskflowDom() {
         <section id="view-visibility" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Who sees what</h2>
-            <p className="view-sub">MIS Support / MIS executive only. Uncheck a box to hide that screen for that role — including admin. Admin cannot open this page.</p>
+            <p className="view-sub">MIS Support only. Uncheck a box to hide that screen. Team chat (office + site groups) for Site engineer / Site head is how site people see team group and project group — tick those if they cannot see chat.</p>
           </div>
           <div className="table-card table-card--stack">
             <div className="table-scroll">
@@ -1094,7 +1094,7 @@ export default function TaskflowDom() {
         <section id="view-fms" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">📑 FMS tracker</h2>
-            <p className="view-sub">Same layout as the office FMS sheet: Timestamp, JOB NO., PROJECT NAME, WORK TYPE, PERSON, LEAD TIME, then Planned / Actual / Status / Time Delay for each step. Verifier name sits inside the Verification step.</p>
+            <p className="view-sub">Same as the office FMS sheet: What / Who / How / Why on top, then Timestamp, JOB NO., PROJECT NAME, WORK TYPE, PERSON, LEAD TIME, then Planned / Actual / Status / Time Delay per step. Each step status follows that step’s planned vs actual.</p>
           </div>
           <div className="mis-toolbar" style={{marginBottom: 14}}>
             <label className="mis-field">

@@ -9,6 +9,7 @@ import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
 import WprGenerator from "./Wprgenerator.jsx";
 import MatRequirement from "./MatRequirement.jsx";
+import SiteTeamChat from "./SiteTeamChat.jsx";
 import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
 import "./SitePortal.css";
@@ -424,6 +425,11 @@ const Ico = {
       <path d="M20 6L9 17l-5-5" />
     </svg>
   ),
+  chat: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+    </svg>
+  ),
 };
 
 function visAllows(visMap, key, user) {
@@ -467,9 +473,12 @@ function buildNav(user, visMap) {
     });
   }
 
+  const showChat = visAllows(visMap, "team-chat", user);
+
   return [
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
+    ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
     { section: "leave", label: "Leave", children: leaveChildren },
     { section: "reports", label: "Reports", children: reportChildren },
   ];
@@ -2043,6 +2052,8 @@ useEffect(() => {
 
   const renderContent = () => {
     switch (activeTab) {
+      case "team-chat":
+        return <SiteTeamChat user={user} />;
       case "clock-in":
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":
