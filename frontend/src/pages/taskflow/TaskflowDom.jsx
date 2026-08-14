@@ -723,7 +723,25 @@ export default function TaskflowDom() {
             <h2 className="view-title">🤝 Buddy requests</h2>
             <p className="view-sub">Accept or decline when a teammate asks you to cover their tasks during leave.</p>
           </div>
-          <div id="buddyRequestsList" className="ticket-list"></div>
+          <div className="table-card view-desktop-only" style={{marginTop: 12}}>
+            <div className="table-scroll">
+              <table className="data-table" style={{minWidth: 720}}>
+                <thead>
+                  <tr>
+                    <th className="col-sr">Sr</th>
+                    <th>From</th>
+                    <th>Dates</th>
+                    <th>Reason</th>
+                    <th className="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="buddyRequestsTableBody">
+                  <tr><td colSpan={5} className="empty-state">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div id="buddyRequestsList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
         </section>
 
         {/* LEAVE APPROVALS (admin) */}

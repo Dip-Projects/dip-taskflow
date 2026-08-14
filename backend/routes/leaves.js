@@ -50,6 +50,22 @@ function withBuddyDefaults(rows) {
   }));
 }
 
+async function chiragWhatsAppNumber() {
+  const { data: byUser } = await supabase
+    .from('users')
+    .select('whatsapp_number')
+    .eq('username', 'chirag.s')
+    .maybeSingle();
+  if (byUser?.whatsapp_number) return byUser.whatsapp_number;
+  const { data: named } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name')
+    .eq('is_active', true)
+    .ilike('full_name', '%chirag%');
+  const hit = (named || []).find((u) => u.whatsapp_number);
+  return hit?.whatsapp_number || null;
+}
+
 /** Run a leaves select with buddy columns; fall back if SQL not migrated yet. */
 async function selectLeaves(applyFilters) {
   const full = await applyFilters(supabase.from('leaves').select(LEAVE_SELECT));
@@ -66,13 +82,9 @@ async function selectLeaves(applyFilters) {
 async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
   const numbers = new Set();
 
-  const { data: chirag } = await supabase
-    .from('users')
-    .select('whatsapp_number, full_name')
-    .eq('username', 'chirag.s')
-    .maybeSingle();
-  if (chirag?.whatsapp_number) numbers.add(chirag.whatsapp_number);
-  else console.warn('Leave WA: chirag.s has no whatsapp_number');
+  const chiragWa = await chiragWhatsAppNumber();
+  if (chiragWa) numbers.add(chiragWa);
+  else console.warn('Leave WA: Chirag has no whatsapp_number');
 
   const { data: applicant } = await supabase
     .from('users')
@@ -101,9 +113,9 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
     [...numbers].map((num) =>
       sendWhatsAppTemplate(num, 'leave_application_notification', [
         applicantName,
-        from_date,
-        to_date,
-        reason,
+        String(from_date || '—').slice(0, 10),
+        String(to_date || '—').slice(0, 10),
+        String(reason || '—').slice(0, 500),
       ])
     )
   );
@@ -119,12 +131,8 @@ async function notifyHeadAndChirag(applicantId, reasonText, from_date, to_date) 
   if (!applicant) return;
 
   const numbers = new Set();
-  const { data: chirag } = await supabase
-    .from('users')
-    .select('whatsapp_number')
-    .eq('username', 'chirag.s')
-    .maybeSingle();
-  if (chirag?.whatsapp_number) numbers.add(chirag.whatsapp_number);
+  const chiragWa = await chiragWhatsAppNumber();
+  if (chiragWa) numbers.add(chiragWa);
 
   if (applicant.reporting_head_id) {
     const { data: head } = await supabase
@@ -347,22 +355,30 @@ router.post('/', async (req, res) => {
     }
     if (error) throw error;
 
-    await notifyLeaveStakeholders({
-      applicantName: req.user.full_name,
-      from_date,
-      to_date,
-      reason: reason.trim(),
-      applicantId: req.user.id,
-    });
-
-    if (buddy.whatsapp_number) {
-      await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
-        buddy.full_name,
-        req.user.full_name,
+    try {
+      await notifyLeaveStakeholders({
+        applicantName: req.user.full_name,
         from_date,
         to_date,
-        reason.trim(),
-      ]);
+        reason: reason.trim(),
+        applicantId: req.user.id,
+      });
+    } catch (waErr) {
+      console.warn('Leave WA (head/Chirag) skip:', waErr.message);
+    }
+
+    try {
+      if (buddy.whatsapp_number) {
+        await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
+          buddy.full_name,
+          req.user.full_name,
+          from_date,
+          to_date,
+          reason.trim(),
+        ]);
+      }
+    } catch (buddyWaErr) {
+      console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
     }
 
     res.status(201).json(data);
@@ -397,7 +413,7 @@ router.get('/buddy-requests', async (req, res) => {
     const data = await selectLeaves((q) =>
       q
         .eq('buddy_id', req.user.id)
-        .eq('buddy_status', 'Pending')
+        .in('buddy_status', ['Pending', 'pending'])
         .order('created_at', { ascending: false })
     );
     res.json(data);

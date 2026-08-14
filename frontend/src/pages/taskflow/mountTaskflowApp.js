@@ -139,6 +139,7 @@ function collectEls() {
     leaveApprovalsList: document.getElementById('leaveApprovalsList'),
     leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
     buddyRequestsList: document.getElementById('buddyRequestsList'),
+    buddyRequestsTableBody: document.getElementById('buddyRequestsTableBody'),
     leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),
     rejectLeaveModal: document.getElementById('rejectLeaveModal'),
     rejectLeaveForm: document.getElementById('rejectLeaveForm'),
@@ -3255,59 +3256,83 @@ export async function mountTaskflowApp(opts = {}) {
     } catch (err) { els.leaveFormMsg.textContent = err.message; els.leaveFormMsg.hidden = false; }
   });
 
+  function attachBuddyRespondButtons(container, leave) {
+    if (!container) return;
+    const yesBtn = document.createElement('button');
+    yesBtn.className = 'action-btn action-complete';
+    yesBtn.textContent = '✅ Yes, I\'ll cover';
+    yesBtn.addEventListener('click', async () => {
+      try {
+        await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
+        showToast('You accepted buddy cover ✅', 'success');
+        loadBuddyRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+    const noBtn = document.createElement('button');
+    noBtn.className = 'action-btn action-reject';
+    noBtn.textContent = '✕ No';
+    noBtn.addEventListener('click', async () => {
+      if (!confirm('Decline this buddy request?')) return;
+      try {
+        await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
+        showToast('Buddy request declined', 'success');
+        loadBuddyRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+    container.appendChild(yesBtn);
+    container.appendChild(noBtn);
+  }
+
   async function loadBuddyRequests() {
     const wrap = els.buddyRequestsList || document.getElementById('buddyRequestsList');
-    if (!wrap) return;
-    wrap.innerHTML = '<div class="empty-state">Loading buddy requests…</div>';
+    const tbody = els.buddyRequestsTableBody || document.getElementById('buddyRequestsTableBody');
+    if (!wrap && !tbody) return;
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading buddy requests…</div>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Loading buddy requests…</td></tr>';
     try {
       const rows = await api('/leaves/buddy-requests');
       if (!rows.length) {
-        wrap.innerHTML = `<div class="empty-state"><span class="emoji">🤝</span>No pending buddy requests</div>`;
+        if (wrap) wrap.innerHTML = `<div class="empty-state"><span class="emoji">🤝</span>No pending buddy requests</div>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No pending buddy requests</td></tr>`;
         return;
       }
-      wrap.innerHTML = '';
-      rows.forEach((leave) => {
-        const card = document.createElement('div');
-        card.className = 'ticket-card';
-        card.innerHTML = `
-          <div class="ticket-top">
-            <span class="pill pill-Pending">Buddy request</span>
-            <div class="row-actions"></div>
-          </div>
-          <div class="ticket-desc"><strong>${escapeHtml(leave.user?.full_name || 'Colleague')}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
-          <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
-          <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
-        `;
-        const actions = card.querySelector('.row-actions');
-        const yesBtn = document.createElement('button');
-        yesBtn.className = 'action-btn action-complete';
-        yesBtn.textContent = '✅ Yes, I\'ll cover';
-        yesBtn.addEventListener('click', async () => {
-          try {
-            await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
-            showToast('You accepted buddy cover ✅', 'success');
-            loadBuddyRequests();
-            refreshNavBadges();
-          } catch (err) { showToast(err.message, 'error'); }
-        });
-        const noBtn = document.createElement('button');
-        noBtn.className = 'action-btn action-reject';
-        noBtn.textContent = '✕ No';
-        noBtn.addEventListener('click', async () => {
-          if (!confirm('Decline this buddy request?')) return;
-          try {
-            await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
-            showToast('Buddy request declined', 'success');
-            loadBuddyRequests();
-            refreshNavBadges();
-          } catch (err) { showToast(err.message, 'error'); }
-        });
-        actions.appendChild(yesBtn);
-        actions.appendChild(noBtn);
-        wrap.appendChild(card);
+      if (wrap) wrap.innerHTML = '';
+      if (tbody) tbody.innerHTML = '';
+      rows.forEach((leave, idx) => {
+        const fromName = leave.user?.full_name || 'Colleague';
+        if (wrap) {
+          const card = document.createElement('div');
+          card.className = 'ticket-card';
+          card.innerHTML = `
+            <div class="ticket-top">
+              <span class="pill pill-Pending">Buddy request</span>
+              <div class="row-actions"></div>
+            </div>
+            <div class="ticket-desc"><strong>${escapeHtml(fromName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+            <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
+            <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
+          `;
+          attachBuddyRespondButtons(card.querySelector('.row-actions'), leave);
+          wrap.appendChild(card);
+        }
+        if (tbody) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="col-sr">${idx + 1}</td>
+            <td>${escapeHtml(fromName)}</td>
+            <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
+            <td>${escapeHtml(leave.reason || '—')}</td>
+            <td class="col-actions"><div class="row-actions"></div></td>
+          `;
+          attachBuddyRespondButtons(tr.querySelector('.row-actions'), leave);
+          tbody.appendChild(tr);
+        }
       });
     } catch (err) {
-      wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      if (wrap) wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
     }
   }
   
@@ -5271,33 +5296,12 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const allTasks = await api('/tasks/all');
       const rDate    = new Date(reportDateStr); rDate.setHours(0,0,0,0);
-      const rDateEnd = new Date(rDate); rDateEnd.setDate(rDateEnd.getDate() + 1);
-  
-      // ── categorise tasks ───────────────────────────────────────────
-      const doneTasks      = [];
-      const pendingTasks   = [];
-      const verifyingTasks = [];
-      const overdueTasks   = [];
-  
-      allTasks.forEach(t => {
-        const isDone  = t.status === 'Completed' || t.verification_status === 'Verified';
-        const targetD = t.target_date ? parseLocalDate(t.target_date) : null;
-        if (targetD) targetD.setHours(0,0,0,0);
-  
-        if (isDone) { doneTasks.push(t); return; }
-        if (t.verification_status === 'Pending Verification') { verifyingTasks.push(t); return; }
-        if (targetD && targetD < rDateEnd) {
-          const days = Math.floor((rDate - targetD) / 86400000);
-          pendingTasks.push({ ...t, _daysLate: Math.max(0, days) });
-          if (days > 0) overdueTasks.push({ ...t, _daysLate: days });
-        }
-      });
-  
-      overdueTasks.sort((a, b) => b._daysLate - a._daysLate);
-      pendingTasks.sort((a, b) => b._daysLate - a._daysLate);
-  
+      const prevDate = new Date(rDate); prevDate.setDate(prevDate.getDate() - 1);
+
+      const allForDay = classifyDailyReportTasks(allTasks, rDate);
+
       body.innerHTML = '';
-  
+
       // ── PMS-style header (matching image format) ──
       const periodLabel = `${d.toLocaleDateString('en-IN', {day:'2-digit',month:'2-digit',year:'numeric'})}`;
       const pmsHtml = `
@@ -5306,135 +5310,107 @@ export async function mountTaskflowApp(opts = {}) {
           <div class="drpt-pms-title">PMS (${periodLabel})</div>
         </div>`;
       body.insertAdjacentHTML('beforeend', pmsHtml);
-  
-      // // ── Summary cards ──
-      // body.insertAdjacentHTML('beforeend', `
-      //   <div class="drpt-summary-row">
-      //     <div class="drpt-stat-card drpt-stat-done"><div class="drpt-stat-num">${doneTasks.length}</div><div class="drpt-stat-label">✅ Completed</div></div>
-      //     <div class="drpt-stat-card drpt-stat-pending"><div class="drpt-stat-num">${pendingTasks.length}</div><div class="drpt-stat-label">⏳ Pending</div></div>
-      //     <div class="drpt-stat-card drpt-stat-overdue"><div class="drpt-stat-num">${overdueTasks.length}</div><div class="drpt-stat-label">🔴 Overdue</div></div>
-      //     <div class="drpt-stat-card drpt-stat-verify"><div class="drpt-stat-num">${verifyingTasks.length}</div><div class="drpt-stat-label">🔎 Under Verification</div></div>
-      //   </div>`);
-  
-      // ── Main PMS table (all tasks combined, like the image) ──
-      const allForDay = [
-        ...overdueTasks.map(t => ({ ...t, _section: 'overdue' })),
-        ...pendingTasks.filter(t => t._daysLate === 0).map(t => ({ ...t, _section: 'pending' })),
-        ...verifyingTasks.map(t => ({ ...t, _section: 'verification' })),
-        ...doneTasks.map(t => ({ ...t, _section: 'done' }))
-      ];
-  
+
       if (allForDay.length) {
         body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:20px">📋 Task Status Summary</div>`);
-        const tbl = buildDrptPmsTable(allForDay);
+        const tbl = buildDrptPmsTable(allForDay, prevDate);
         body.appendChild(tbl);
+      } else {
+        body.insertAdjacentHTML('beforeend', `<div class="empty-state">No overdue, pending, or done-today tasks for this date</div>`);
       }
-  
-      // ── Overdue detail ──
-      // if (overdueTasks.length) {
-      //   body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">🔴 Overdue Tasks</div>`);
-      //   body.appendChild(buildDrptTable(
-      //     ['Sr', 'Project', 'Task', 'Assignee', 'Target Date', 'Days Overdue', 'Status', 'Remarks'],
-      //     overdueTasks.map((t, i) => ({
-      //       sr: i + 1, project: t.project?.name ?? '—', task: t.description,
-      //       assignee: t.assigned_to_user?.full_name ?? '—',
-      //       target_date: t.target_date ? fmtDate(t.target_date) : '—',
-      //       days: `<span class="drpt-overdue-badge">${t._daysLate} day${t._daysLate !== 1 ? 's' : ''}</span>`,
-      //       status: t.status, remarks: t._remarks || ''
-      //     })), true
-      //   ));
-      // }
-  
-      // // ── Pending (due today) ──
-      // const pendingNotOverdue = pendingTasks.filter(t => t._daysLate === 0);
-      // if (pendingNotOverdue.length) {
-      //   body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">⏳ Pending Tasks (Due Today)</div>`);
-      //   body.appendChild(buildDrptTable(
-      //     ['Sr', 'Project', 'Task', 'Assignee', 'Target Date', 'Status', 'Remarks'],
-      //     pendingNotOverdue.map((t, i) => ({
-      //       sr: i + 1, project: t.project?.name ?? '—', task: t.description,
-      //       assignee: t.assigned_to_user?.full_name ?? '—',
-      //       target_date: t.target_date ? fmtDate(t.target_date) : '—',
-      //       status: t.status, remarks: t._remarks || ''
-      //     })), true
-      //   ));
-      // }
-  
-      // // ── Under Verification ──
-      // if (verifyingTasks.length) {
-      //   body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">🔎 Under Verification</div>`);
-      //   body.appendChild(buildDrptTable(
-      //     ['Sr', 'Project', 'Task', 'Assignee', 'Verifier', 'Target Date', 'Status'],
-      //     verifyingTasks.map((t, i) => ({
-      //       sr: i + 1, project: t.project?.name ?? '—', task: t.description,
-      //       assignee: t.assigned_to_user?.full_name ?? '—',
-      //       verifier: t.verifier?.full_name ?? '—',
-      //       target_date: t.target_date ? fmtDate(t.target_date) : '—',
-      //       status: `<span class="pill pill-PendingVerification" style="font-size:0.72rem">⏳ Verifying</span>`
-      //     })), false
-      //   ));
-      // }
-  
-      // // ── Completed ──
-      // if (doneTasks.length) {
-      //   body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">✅ Completed Tasks</div>`);
-      //   body.appendChild(buildDrptTable(
-      //     ['Sr', 'Project', 'Task', 'Assignee', 'Target Date', 'Status'],
-      //     doneTasks.map((t, i) => ({
-      //       sr: i + 1, project: t.project?.name ?? '—', task: t.description,
-      //       assignee: t.assigned_to_user?.full_name ?? '—',
-      //       target_date: t.target_date ? fmtDate(t.target_date) : '—',
-      //       status: `<span class="pill pill-Completed" style="font-size:0.72rem">✅ Done</span>`
-      //     })), false
-      //   ));
-      // }
-  
+
       if (dlBtn) dlBtn.style.display = '';
     } catch (err) {
       body.innerHTML = `<div class="empty-state">Failed to generate report: ${escapeHtml(err.message)}</div>`;
     }
   }
-  
-  // Builds the PMS-style main table matching the image format (Sr, Date, Task, Assignee, Delay, Remarks)
-  function buildDrptPmsTable(tasks) {
+
+  function startOfLocalDay(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+
+  function taskVerifiedDay(t) {
+    const iso = t.verified_at || t.first_verified_at;
+    if (!iso) return null;
+    const d = parseLocalDate(iso);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return startOfLocalDay(d);
+  }
+
+  function isReportVerified(t) {
+    return t.verification_status === 'Verified' || (!!taskVerifiedDay(t) && t.status === 'Completed');
+  }
+
+  // Daily report rows: overdue + pending (incl. under-verification) + verified today.
+  // Yesterday-or-earlier verified tasks are omitted. Future-due and Rejected omitted.
+  function classifyDailyReportTasks(allTasks, reportDate) {
+    const rDate = startOfLocalDay(reportDate);
+    const overdue = [];
+    const pending = [];
+    const doneToday = [];
+
+    (allTasks || []).forEach((t) => {
+      if (t.status === 'Rejected') return;
+
+      const verified = isReportVerified(t);
+      const doneDay = taskVerifiedDay(t);
+
+      if (verified) {
+        if (doneDay && doneDay.getTime() === rDate.getTime()) {
+          doneToday.push({ ...t, _section: 'done', _daysLate: 0 });
+        }
+        return;
+      }
+
+      const targetD = t.target_date ? parseLocalDate(t.target_date) : null;
+      if (!targetD || Number.isNaN(targetD.getTime())) return;
+      targetD.setHours(0, 0, 0, 0);
+      if (targetD > rDate) return;
+
+      const daysLate = Math.floor((rDate - targetD) / 86400000);
+      const row = { ...t, _daysLate: Math.max(0, daysLate), _section: daysLate > 0 ? 'overdue' : 'pending' };
+      if (daysLate > 0) overdue.push(row);
+      else pending.push(row);
+    });
+
+    overdue.sort((a, b) => b._daysLate - a._daysLate);
+    return [...overdue, ...pending, ...doneToday];
+  }
+
+  // Builds the PMS-style main table (Sr, Prev. date, Target date, Task, Assignee, Delay, Remarks)
+  function buildDrptPmsTable(tasks, prevDate) {
     const wrap = document.createElement('div');
     wrap.className = 'table-wrap drpt-pms-wrap';
     const tbl  = document.createElement('table');
     tbl.className = 'data-table drpt-table drpt-pms-table';
-  
+    const prevLabel = prevDate ? fmtDateOnly(prevDate) : '—';
+
     tbl.innerHTML = `<thead><tr>
       <th class="col-sr">Sr.no</th>
-      <th>Date</th>
+      <th>Prev. date</th>
+      <th>Target date</th>
       <th>Task</th>
       <th>Assigne</th>
       <th>Delay</th>
       <th>Remarks</th>
     </tr></thead>`;
-  
+
     const tbody = document.createElement('tbody');
     tasks.forEach((t, i) => {
       const tr = document.createElement('tr');
       const isDone = t._section === 'done';
-      const isVerify = t._section === 'verification';
       const daysLate = t._daysLate ?? 0;
-  
-      // Delay cell
+
       let delayHtml;
-      if (isDone)   delayHtml = `<span class="drpt-done-badge">DONE</span>`;
-      else if (isVerify) delayHtml = `<span class="drpt-verify-badge">Under Verification</span>`;
+      if (isDone) delayHtml = `<span class="drpt-done-badge">DONE</span>`;
       else if (daysLate > 0) delayHtml = `<span class="drpt-overdue-badge">${daysLate} Days</span>`;
-      else          delayHtml = `<span class="drpt-pending-badge">Today</span>`;
-  
-      // Remarks
-      let remarksHtml;
-      if (isVerify && t.verifier) {
-        remarksHtml = `<span style="color:#6d28d9;font-size:0.8rem">Under Verification<br><strong>${escapeHtml(t.verifier.full_name)}</strong></span>`;
-      } else {
-        remarksHtml = `<input type="text" value="" placeholder="Add remark…" class="drpt-remark-input" />`;
-      }
-  
+      else delayHtml = `<span class="drpt-pending-badge">Today</span>`;
+
       tr.innerHTML = `
         <td><span class="sr-number">${i + 1}</span></td>
+        <td style="white-space:nowrap;font-size:0.82rem">${escapeHtml(prevLabel)}</td>
         <td style="white-space:nowrap;font-size:0.82rem">${t.target_date ? fmtDateOnly(t.target_date) : '—'}</td>
         <td class="drpt-task-cell">
           <div style="font-size:0.8rem;font-weight:700;color:var(--indigo,#4f46e5);text-transform:uppercase">${escapeHtml(t.project?.name ?? '')}</div>
@@ -5444,84 +5420,47 @@ export async function mountTaskflowApp(opts = {}) {
         <td>${delayHtml}</td>
         <td></td>
       `;
-      const remarksCell = tr.children[5];
-      remarksCell.innerHTML = remarksHtml;
+      const remarksCell = tr.children[6];
+      remarksCell.innerHTML = `<input type="text" value="" placeholder="Add remark…" class="drpt-remark-input" />`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
     wrap.appendChild(tbl);
     return wrap;
   }
-  
-  // Date-range report: fetches all tasks and buckets by target_date within range
+
+  // Date-range report: one table per calendar day using the same overdue / pending / done-today rules
   async function _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel) {
     try {
       const allTasks = await api('/tasks/all');
-      const from = new Date(fromStr); from.setHours(0,0,0,0);
-      const to   = new Date(toStr);   to.setHours(23,59,59,999);
-  
-      // Group tasks by date (target_date) within range
-      const byDate = {};
-      const dateList = [];
-      allTasks.forEach(t => {
-        if (!t.target_date) return;
-        const d = parseLocalDate(t.target_date); d.setHours(0,0,0,0);
-        if (d < from || d > to) return;
-        const key = d.toISOString().slice(0,10);
-        if (!byDate[key]) { byDate[key] = []; dateList.push(key); }
-        byDate[key].push(t);
-      });
-  
-      // Remove duplicate dates
-      const uniqueDates = [...new Set(dateList)].sort();
-  
+      const from = startOfLocalDay(parseLocalDate(fromStr));
+      const to   = startOfLocalDay(parseLocalDate(toStr));
+
       body.innerHTML = '';
-  
-      // PMS style header for range
       body.insertAdjacentHTML('beforeend', `
         <div class="drpt-pms-header">
           <div class="drpt-pms-smile">☺</div>
           <div class="drpt-pms-title">PMS (${rangeLabel})</div>
         </div>`);
-  
-      if (!uniqueDates.length) {
-        body.insertAdjacentHTML('beforeend', `<div class="empty-state">No tasks found for this date range</div>`);
+
+      let anyRows = false;
+      for (let cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
+        const day = startOfLocalDay(cursor);
+        const rows = classifyDailyReportTasks(allTasks, day);
+        if (!rows.length) continue;
+        anyRows = true;
+        const dayLabel = day.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', weekday:'long' });
+        const prevDate = new Date(day); prevDate.setDate(prevDate.getDate() - 1);
+        body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">📅 ${dayLabel}</div>`);
+        body.appendChild(buildDrptPmsTable(rows, prevDate));
+      }
+
+      if (!anyRows) {
+        body.insertAdjacentHTML('beforeend', `<div class="empty-state">No overdue, pending, or done-today tasks for this date range</div>`);
         if (dlBtn) dlBtn.style.display = 'none';
         return;
       }
-  
-      // Summary cards across range
-      const done    = allTasks.filter(t => { if (!t.target_date) return false; const d = parseLocalDate(t.target_date); return d >= from && d <= to && (t.status === 'Completed' || t.verification_status === 'Verified'); }).length;
-      const overdue = allTasks.filter(t => { if (!t.target_date) return false; const d = parseLocalDate(t.target_date); return d >= from && d <= to && d < new Date() && t.status !== 'Completed' && t.status !== 'Rejected' && t.verification_status !== 'Verified'; }).length;
-      const verif   = allTasks.filter(t => { if (!t.target_date) return false; const d = parseLocalDate(t.target_date); return d >= from && d <= to && t.verification_status === 'Pending Verification'; }).length;
-      const total   = Object.values(byDate).flat().length;
-  
-      // body.insertAdjacentHTML('beforeend', `
-      //   <div class="drpt-summary-row">
-      //     <div class="drpt-stat-card drpt-stat-done"><div class="drpt-stat-num">${done}</div><div class="drpt-stat-label">✅ Completed</div></div>
-      //     <div class="drpt-stat-card drpt-stat-overdue"><div class="drpt-stat-num">${overdue}</div><div class="drpt-stat-label">🔴 Overdue</div></div>
-      //     <div class="drpt-stat-card drpt-stat-verify"><div class="drpt-stat-num">${verif}</div><div class="drpt-stat-label">🔎 Under Verify</div></div>
-      //     <div class="drpt-stat-card drpt-stat-pending"><div class="drpt-stat-num">${total}</div><div class="drpt-stat-label">📋 Total in Range</div></div>
-      //   </div>`);
-  
-      // One PMS table per date in range
-      uniqueDates.forEach(dateKey => {
-        const tasks = byDate[dateKey];
-        const dayLabel = new Date(dateKey).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', weekday:'long' });
-        body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">📅 ${dayLabel}</div>`);
-  
-        const now = new Date();
-        const enriched = tasks.map(t => {
-          const isDone   = t.status === 'Completed' || t.verification_status === 'Verified';
-          const isVerify = t.verification_status === 'Pending Verification';
-          const tgt      = parseLocalDate(t.target_date);
-          const daysLate = isDone ? 0 : Math.max(0, Math.floor((now - tgt) / 86400000));
-          return { ...t, _section: isDone ? 'done' : isVerify ? 'verification' : daysLate > 0 ? 'overdue' : 'pending', _daysLate: daysLate };
-        });
-  
-        body.appendChild(buildDrptPmsTable(enriched));
-      });
-  
+
       if (dlBtn) dlBtn.style.display = '';
     } catch (err) {
       body.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(err.message)}</div>`;

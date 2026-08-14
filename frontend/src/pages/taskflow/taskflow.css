@@ -449,7 +449,6 @@ body.sidebar-open { overflow: hidden; }
   #correctionsList,
   #adminRecurringCards,
   #employeeRecurringList,
-  #buddyRequestsList,
   .employee-card-list.view-mobile-only,
   .task-list.view-mobile-only,
   .ticket-list.view-mobile-only {
