@@ -415,12 +415,12 @@ export default function TaskflowDom() {
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">🤖 DIP Bot</h2>
-            <p className="view-sub">Admin only — live TaskFlow data. History stays in this chat. Example: overdue tasks, or “Harshil and Roshan June and July attendance”.</p>
+            <p className="view-sub">Admin only — live TaskFlow: tasks, recurring, overdue, leave, verification, site (DPR/WPR/attendance), tickets, and MoM from calls.</p>
           </div>
           <div className="bot-shell">
             <div id="botChatLog" className="bot-chat-log"></div>
             <form id="botAskForm" className="bot-ask-form">
-              <input id="botAskInput" type="text" placeholder='e.g. Harshil clock-in time and Roshan Patel clock-in' autoComplete="off" />
+              <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
               <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
             </form>
             <div id="botAlerts" className="bot-alerts"></div>

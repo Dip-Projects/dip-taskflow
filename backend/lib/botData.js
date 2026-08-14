@@ -128,7 +128,7 @@ async function companyTaskSummary() {
   const { data, error } = await supabase
     .from('tasks')
     .select(
-      'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department)'
+      'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department), verifier:users!tasks_verifier_id_fkey(full_name)'
     );
   if (error) throw error;
   const tasks = data || [];
@@ -165,28 +165,39 @@ async function companyTaskSummary() {
     overdueTasks: overdue
       .slice()
       .sort((a, b) => String(a.target_date || '').localeCompare(String(b.target_date || ''))),
+    pendingVerifyTasks: pendingVerify.slice(0, 80),
   };
 }
 
 async function leaveSummary() {
   const { data, error } = await supabase
     .from('leaves')
-    .select('id, status, from_date, to_date, user:users!leaves_user_id_fkey(full_name)')
-    .eq('status', 'Pending');
+    .select('id, status, from_date, to_date, reason, is_half_day, user:users!leaves_user_id_fkey(full_name)')
+    .order('created_at', { ascending: false })
+    .limit(80);
   if (error) {
-    if (String(error.message || '').includes('leaves')) return { pending: 0, rows: [] };
+    if (String(error.message || '').includes('leaves')) return { pending: 0, rows: [], all: [] };
     throw error;
   }
-  return { pending: (data || []).length, rows: data || [] };
+  const all = data || [];
+  const pending = all.filter((r) => r.status === 'Pending');
+  return { pending: pending.length, rows: pending, all };
 }
 
 async function ticketSummary() {
-  const { data, error } = await supabase.from('tickets').select('id, status, category').eq('status', 'Open');
+  const { data, error } = await supabase
+    .from('tickets')
+    .select(
+      'id, status, category, description, created_at, raised_by_user:users!tickets_raised_by_fkey(full_name), task:tasks(description, project:projects(name))'
+    )
+    .eq('status', 'Open')
+    .order('created_at', { ascending: false })
+    .limit(40);
   if (error) {
-    if (String(error.message || '').toLowerCase().includes('ticket')) return { open: 0 };
+    if (String(error.message || '').toLowerCase().includes('ticket')) return { open: 0, rows: [] };
     throw error;
   }
-  return { open: (data || []).length };
+  return { open: (data || []).length, rows: data || [] };
 }
 
 function summarizeDprPayload(payload) {
@@ -204,17 +215,18 @@ function summarizeDprPayload(payload) {
   return bits.length ? ` (${bits.join('; ')})` : '';
 }
 
-async function sitePulse() {
+async function sitePulse(ql) {
   const out = { attendance: [], dprs: [], wprs: [], manpowerNote: '' };
+  const q = String(ql || '').toLowerCase();
   try {
     const since = new Date();
-    since.setDate(since.getDate() - 7);
+    since.setDate(since.getDate() - 30);
     const { data: att } = await supabase
       .from('attendance')
       .select('user_name, date, clock_in, clock_out, status, clock_in_status')
       .gte('date', since.toISOString().slice(0, 10))
       .order('date', { ascending: false })
-      .limit(25);
+      .limit(80);
     out.attendance = att || [];
   } catch (_) {}
   try {
@@ -222,7 +234,7 @@ async function sitePulse() {
       .from('dpr_reports')
       .select('id, site, engineer, report_type, date, payload, created_at')
       .order('date', { ascending: false })
-      .limit(8);
+      .limit(20);
     out.dprs = dprs || [];
   } catch (_) {}
   try {
@@ -230,20 +242,33 @@ async function sitePulse() {
       .from('wpr_reports')
       .select('id, site_name, engineer_name, report_date, report_number, created_at')
       .order('report_date', { ascending: false })
-      .limit(8);
+      .limit(20);
     out.wprs = wprs || [];
   } catch (_) {}
+  if (q) {
+    const hit = (text) => {
+      const t = String(text || '').toLowerCase();
+      if (!t) return false;
+      if (q.includes(t)) return true;
+      return t.length >= 4 && q.split(/\s+/).some((w) => w.length >= 4 && t.includes(w));
+    };
+    const fd = out.dprs.filter((d) => hit(d.site) || hit(d.engineer));
+    const fw = out.wprs.filter((w) => hit(w.site_name) || hit(w.engineer_name));
+    if (fd.length) out.dprs = fd;
+    if (fw.length) out.wprs = fw;
+  }
   return out;
 }
 
 function formatTaskBlock(t) {
   const who = t.assigned_to_user?.full_name ? `\n    Assigned: ${t.assigned_to_user.full_name}` : '';
+  const ver = t.verifier?.full_name ? `\n    Verifier: ${t.verifier.full_name}` : '';
   const verify = t.verification_status ? ` | Verify: ${t.verification_status}` : '';
   const hours = t.hours_to_complete != null ? ` | Hours: ${t.hours_to_complete}` : '';
   const pri = t.priority ? ` | ${t.priority}` : '';
   return (
     `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-    `    Project: ${t.project?.name || '—'}${who}\n` +
+    `    Project: ${t.project?.name || '—'}${who}${ver}\n` +
     `    Status: ${t.status || '—'}${verify}\n` +
     `    Due: ${fmtDate(t.target_date)}${hours}${pri}`
   );
@@ -478,10 +503,340 @@ function formatSitePulse(s) {
     '  (no WPR reports)'
   );
   return (
-    `SITE ATTENDANCE (last 7 days)\n${attLines}\n\n` +
+    `SITE ATTENDANCE (last 30 days sample)\n${attLines}\n\n` +
     `DPR (recent)\n${dprLines}\n\n` +
     `WPR (recent)\n${wprLines}`
   );
+}
+
+const STOP_WORDS = new Set(
+  'the a an and or of to for in on at is are was were what who whose which kitne kya ka ki ke mei me mei hai hain ho kaun kisko unka unki uska uski please show list give batao bataiye mujhe meri mere'.split(
+    ' '
+  )
+);
+
+function questionWords(ql) {
+  return String(ql || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w));
+}
+
+function personHit(text, people) {
+  const t = String(text || '').toLowerCase();
+  return (people || []).some((p) => {
+    const fn = String(p.full_name || '').toLowerCase();
+    const un = String(p.username || '').toLowerCase();
+    const first = fn.split(/\s+/)[0];
+    return (fn && t.includes(fn)) || (un && t.includes(un)) || (first && first.length >= 4 && t.includes(first));
+  });
+}
+
+async function recurringActiveList(assignedTo) {
+  let q = supabase
+    .from('recurring_tasks')
+    .select(
+      `id, description, frequency, frequency_days, start_date, end_date, is_active, priority,
+       project:projects(name),
+       assigned_to_user:users!recurring_tasks_assigned_to_fkey(full_name)`
+    )
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(80);
+  if (assignedTo) q = q.eq('assigned_to', assignedTo);
+  const { data, error } = await q;
+  if (error) {
+    console.warn('recurring list:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+function formatRecurringActive(rows) {
+  if (!rows.length) return '  (none)';
+  return rows
+    .slice(0, 40)
+    .map((t) => {
+      const days = t.frequency_days ? ` (${t.frequency_days})` : '';
+      return (
+        `  • ${(t.description || 'Recurring task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
+        `    Assigned: ${t.assigned_to_user?.full_name || '—'}\n` +
+        `    Project: ${t.project?.name || '—'}\n` +
+        `    ${t.frequency || '—'}${days} | ${fmtDate(t.start_date)} → ${fmtDate(t.end_date)} | ${t.priority || ''}`
+      );
+    })
+    .join('\n');
+}
+
+async function siteLeaveFacts(people) {
+  try {
+    const { data, error } = await supabase
+      .from('site_leaves')
+      .select('user_name, name, leave_type, from_date, to_date, reason, site_name, status')
+      .order('created_at', { ascending: false })
+      .limit(40);
+    if (error) return [];
+    let rows = data || [];
+    if (people?.length) {
+      const filtered = rows.filter((r) => personHit(`${r.user_name} ${r.name}`, people));
+      if (filtered.length) rows = filtered;
+    }
+    return rows;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function meetingFacts(ql, people) {
+  const selFull =
+    'id, title, started_at, status, mom_body, live_transcript, project:projects(name), starter:users!meeting_moms_started_by_fkey(full_name)';
+  const selBasic =
+    'id, title, started_at, status, mom_body, project:projects(name), starter:users!meeting_moms_started_by_fkey(full_name)';
+  let { data, error } = await supabase
+    .from('meeting_moms')
+    .select(selFull)
+    .order('started_at', { ascending: false })
+    .limit(25);
+  if (error && /live_transcript/i.test(String(error.message || ''))) {
+    const retry = await supabase.from('meeting_moms').select(selBasic).order('started_at', { ascending: false }).limit(25);
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) {
+    console.warn('MoM facts:', error.message);
+    return [];
+  }
+  const rows = data || [];
+  const words = questionWords(ql);
+  const scored = rows.map((m) => {
+    const blob = `${m.title || ''} ${m.mom_body || ''} ${m.live_transcript || ''} ${m.project?.name || ''} ${m.starter?.full_name || ''}`.toLowerCase();
+    let score = 0;
+    if (personHit(blob, people)) score += 6;
+    for (const w of words) {
+      if (['meeting', 'minutes', 'mom', 'call', 'video', 'baat'].includes(w)) continue;
+      if (blob.includes(w)) score += 2;
+    }
+    return { m, score };
+  });
+  const hits = scored.filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+  const picked = (hits.length ? hits : scored).slice(0, 8).map((x) => x.m);
+  return picked;
+}
+
+function formatMomBlock(m) {
+  const spoken = String(m.live_transcript || '')
+    .trim()
+    .slice(0, 2200);
+  const body = String(m.mom_body || '')
+    .trim()
+    .slice(0, 2200);
+  return (
+    `  • ${m.title || 'Meeting'} | ${fmtDate(m.started_at)} | ${m.status || 'draft'}\n` +
+    `    Project: ${m.project?.name || '—'} | Started by: ${m.starter?.full_name || '—'}\n` +
+    (body ? `    MINUTES:\n${body.split('\n').map((l) => `      ${l}`).join('\n')}\n` : '    MINUTES: (empty)\n') +
+    (spoken ? `    SPOKEN ON CALL:\n${spoken.split('\n').map((l) => `      ${l}`).join('\n')}` : '    SPOKEN ON CALL: (none captured)')
+  );
+}
+
+async function tasksForPeople(people) {
+  if (!people.length) return [];
+  const ids = people.map((p) => p.id).filter(Boolean);
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from('tasks')
+    .select(
+      'id, status, verification_status, target_date, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(full_name), verifier:users!tasks_verifier_id_fkey(full_name)'
+    )
+    .in('assigned_to', ids)
+    .order('target_date', { ascending: true })
+    .limit(80);
+  if (error) return [];
+  return data || [];
+}
+
+async function searchTasks(ql, people) {
+  const words = questionWords(ql).filter(
+    (w) =>
+      !['task', 'tasks', 'overdue', 'pending', 'leave', 'leaves', 'meeting', 'minutes', 'site', 'clock', 'attendance', 'verify', 'verification', 'recurring', 'ticket', 'company', 'summary'].includes(
+        w
+      )
+  );
+  if (!words.length && !people.length) return [];
+  const { data, error } = await supabase
+    .from('tasks')
+    .select(
+      'id, status, verification_status, target_date, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(full_name), verifier:users!tasks_verifier_id_fkey(full_name)'
+    )
+    .order('created_at', { ascending: false })
+    .limit(400);
+  if (error) return [];
+  return (data || []).filter((t) => {
+    const blob = `${t.description || ''} ${t.project?.name || ''} ${t.assigned_to_user?.full_name || ''}`.toLowerCase();
+    const byPerson = people.length ? personHit(blob, people) : true;
+    const byWord = words.length ? words.some((w) => blob.includes(w)) : true;
+    return byPerson && byWord;
+  }).slice(0, 25);
+}
+
+function formatLeaveRows(rows, empty) {
+  return lines(
+    rows,
+    (r) =>
+      `  • ${r.user?.full_name || r.name || r.user_name || '—'}: ${fmtDate(r.from_date)} → ${fmtDate(r.to_date)} | ${r.status || '—'}` +
+      (r.is_half_day ? ' | half day' : '') +
+      (r.leave_type ? ` | ${r.leave_type}` : '') +
+      (r.site_name ? ` | site ${r.site_name}` : '') +
+      (r.reason ? ` | ${String(r.reason).slice(0, 80)}` : ''),
+    empty
+  );
+}
+
+function capFacts(text, max = 14000) {
+  const s = String(text || '');
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}\n\n(Facts truncated — ask a narrower question for the rest.)`;
+}
+
+async function answerFromFacts(question, facts, name) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are DIP Bot for DIP Projects TaskFlow. Understand English, Hindi and Hinglish. Answer ONLY from Facts. If Facts do not contain it, say it is not in TaskFlow data. Keep every name, date, time and count. Use SECTION HEADINGS and "• " bullets. Do not invent tasks, leaves, meetings or times. If asked what was discussed on a call / MoM, quote the MINUTES and SPOKEN ON CALL lines. Reply in clear English.',
+        },
+        {
+          role: 'user',
+          content: `User ${name || ''} asked: ${question}\n\nFacts:\n${facts}\n\nAnswer the question from Facts:`,
+        },
+      ],
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error?.message || 'OpenAI error');
+  return data.choices?.[0]?.message?.content?.trim() || null;
+}
+
+async function gatherAdminFacts({ ql, people, intents }) {
+  const wantAll = !intents.specific || intents.company;
+  const jobs = [];
+  if (wantAll || intents.tasks || intents.overdue || intents.verify || intents.company || people.length) {
+    jobs.push(companyTaskSummary().then((c) => ({ c })).catch(() => ({ c: null })));
+  }
+  if (wantAll || intents.overdue || intents.recurring) {
+    jobs.push(overdueRecurring().then((recOverdue) => ({ recOverdue })).catch(() => ({ recOverdue: [] })));
+    jobs.push(recurringActiveList().then((recActive) => ({ recActive })).catch(() => ({ recActive: [] })));
+  }
+  if (wantAll || intents.leave) {
+    jobs.push(leaveSummary().then((leaves) => ({ leaves })).catch(() => ({ leaves: { pending: 0, rows: [], all: [] } })));
+    jobs.push(siteLeaveFacts(people).then((siteLeaves) => ({ siteLeaves })).catch(() => ({ siteLeaves: [] })));
+  }
+  if (wantAll || intents.site || intents.clock) {
+    jobs.push(sitePulse(ql).then((site) => ({ site })).catch(() => ({ site: null })));
+  }
+  if (wantAll || intents.mom) {
+    jobs.push(meetingFacts(ql, people).then((moms) => ({ moms })).catch(() => ({ moms: [] })));
+  }
+  if (wantAll || intents.ticket) {
+    jobs.push(ticketSummary().then((tickets) => ({ tickets })).catch(() => ({ tickets: { open: 0, rows: [] } })));
+  }
+  if (people.length) {
+    jobs.push(tasksForPeople(people).then((personTasks) => ({ personTasks })).catch(() => ({ personTasks: [] })));
+  }
+  jobs.push(searchTasks(ql, people).then((hits) => ({ hits })).catch(() => ({ hits: [] })));
+  const parts = await Promise.all(jobs);
+  return Object.assign({}, ...parts);
+}
+
+function formatAdminFacts(pack, people, intents) {
+  const bits = [];
+  const c = pack.c;
+  if (c) {
+    bits.push(
+      `TASK COUNTS\nDelegated total ${c.total} | open ${c.open} | overdue ${c.overdue} | pending verification ${c.pendingVerify}`
+    );
+    if (intents.overdue || !intents.specific) {
+      bits.push(
+        `DELEGATED OVERDUE\n` +
+          (c.overdueTasks?.length ? c.overdueTasks.slice(0, 40).map(formatTaskBlock).join('\n') : '  (none)')
+      );
+    }
+    if (intents.verify || !intents.specific) {
+      bits.push(
+        `PENDING VERIFICATION\n` +
+          (c.pendingVerifyTasks?.length
+            ? c.pendingVerifyTasks.slice(0, 30).map(formatTaskBlock).join('\n')
+            : '  (none)')
+      );
+    }
+    if (intents.company || (intents.tasks && !intents.overdue)) {
+      const peopleLines = Object.entries(c.byUser || {})
+        .sort((a, b) => b[1].open - a[1].open)
+        .slice(0, 25)
+        .map(([name, v]) => `  • ${name}: open ${v.open} | done ${v.done} | overdue ${v.overdue} | total ${v.total}`)
+        .join('\n');
+      const projectLines = Object.entries(c.byProject || {})
+        .sort((a, b) => b[1].open - a[1].open)
+        .slice(0, 20)
+        .map(([name, v]) => `  • ${name}: open ${v.open} | done ${v.done} | overdue ${v.overdue}`)
+        .join('\n');
+      bits.push(`BY EMPLOYEE\n${peopleLines || '  (none)'}`);
+      bits.push(`BY PROJECT\n${projectLines || '  (none)'}`);
+    }
+  }
+  if (pack.recOverdue) {
+    bits.push(`RECURRING OVERDUE\n${formatRecurringOverdue(pack.recOverdue)}`);
+  }
+  if (pack.recActive) {
+    bits.push(`ACTIVE RECURRING TASKS\n${formatRecurringActive(pack.recActive)}`);
+  }
+  if (pack.leaves) {
+    const src = people.length
+      ? (pack.leaves.all || []).filter((r) => personHit(r.user?.full_name, people))
+      : pack.leaves.all || pack.leaves.rows || [];
+    bits.push(
+      `OFFICE LEAVES\nPending: ${pack.leaves.pending}\n` +
+        formatLeaveRows(src.slice(0, 25), '  (none)')
+    );
+  }
+  if (pack.siteLeaves?.length) {
+    bits.push(`SITE LEAVES\n${formatLeaveRows(pack.siteLeaves.slice(0, 20), '  (none)')}`);
+  }
+  if (pack.site) bits.push(formatSitePulse(pack.site));
+  if (pack.moms?.length) {
+    bits.push(`MEETINGS / MoM (what was discussed)\n${pack.moms.map(formatMomBlock).join('\n\n')}`);
+  } else if (intents.mom) {
+    bits.push('MEETINGS / MoM\n  (no minutes stored yet — start a video call from Team chat and keep TaskFlow open)');
+  }
+  if (pack.tickets) {
+    bits.push(
+      `OPEN TICKETS: ${pack.tickets.open}\n` +
+        lines(
+          pack.tickets.rows || [],
+          (t) =>
+            `  • ${t.category || '—'} | ${t.raised_by_user?.full_name || '—'} | ${(t.description || '').replace(/\s+/g, ' ').slice(0, 80)}` +
+            (t.task?.project?.name ? ` | ${t.task.project.name}` : ''),
+          '  (none)'
+        )
+    );
+  }
+  if (pack.personTasks?.length) {
+    bits.push(
+      `TASKS FOR ${people.map((p) => p.full_name).join(', ')}\n` + pack.personTasks.slice(0, 30).map(formatTaskBlock).join('\n')
+    );
+  }
+  if (pack.hits?.length && !(pack.personTasks?.length)) {
+    bits.push(`MATCHING TASKS\n${pack.hits.map(formatTaskBlock).join('\n')}`);
+  }
+  return bits.filter(Boolean).join('\n\n');
 }
 
 async function answerQuestion({ question, user, isAdmin }) {
@@ -490,19 +845,51 @@ async function answerQuestion({ question, user, isAdmin }) {
   let adminOnly = false;
   let answer = '';
   let skipPolish = false;
+  let useAnswerModel = false;
   const downloads = [];
 
   const wantsClock =
-    /clok|clock|clicok|punch|attendance|in[\s-]*time|out[\s-]*time|clockin|clock-in/i.test(ql);
+    /clok|clock|clicok|punch|attendance|haziri|in[\s-]*time|out[\s-]*time|clockin|clock-in/i.test(ql);
   const wantsDpr = /\bdpr\b/i.test(ql);
   const wantsWpr = /\bwpr\b/i.test(ql);
-  const wantsAttendance = /\battendance\b/i.test(ql) && !wantsClock;
-  const wantsSiteDump = /\b(manpower|site report|labour|labor)\b/i.test(ql);
-  const wantsSite = wantsClock || wantsDpr || wantsWpr || wantsAttendance || wantsSiteDump;
-  const wantsTasks =
-    /\b(task|overdue|verify|verification|pending|due|assign|my work)\b/i.test(ql);
-  const wantsCompany =
-    /\b(company|sab|all|overall|team|kitne|everyone|total|mis|summary|status)\b/i.test(ql);
+  const wantsAttendance = /\battendance\b|haziri/i.test(ql);
+  const wantsSite =
+    wantsClock ||
+    wantsDpr ||
+    wantsWpr ||
+    wantsAttendance ||
+    /\b(manpower|site report|labour|labor|site)\b/i.test(ql);
+  const wantsOverdue = /\b(overdue|late|delay)\b|time nikal|due ho gaya/i.test(ql);
+  const wantsVerify = /verif|verifier|check kar/i.test(ql);
+  const wantsLeave = /\bleave\b|chutti|chhutti|chhuti|chhutiya/i.test(ql);
+  const wantsRecurring = /recurr|rozana|rojana|daily task|weekly task|checkpoint/i.test(ql);
+  const wantsMom = /\bmom\b|minutes|meeting|video call|\bcall\b|baat hui|charcha|discussed|discussion/i.test(ql);
+  const wantsTicket = /\bticket\b|complaint/i.test(ql);
+  const wantsTasks = /\b(task|pending|due|assign|my work)\b/i.test(ql) || wantsOverdue || wantsVerify || wantsRecurring;
+  const wantsCompany = /\b(company|sab|all|overall|team|kitne|everyone|total|mis|summary|status)\b/i.test(ql);
+
+  const intents = {
+    clock: wantsClock,
+    site: wantsSite,
+    overdue: wantsOverdue,
+    verify: wantsVerify,
+    leave: wantsLeave,
+    recurring: wantsRecurring,
+    mom: wantsMom,
+    ticket: wantsTicket,
+    tasks: wantsTasks,
+    company: wantsCompany,
+    specific:
+      wantsOverdue ||
+      wantsVerify ||
+      wantsLeave ||
+      wantsRecurring ||
+      wantsMom ||
+      wantsSite ||
+      wantsTicket ||
+      wantsTasks ||
+      wantsCompany,
+  };
 
   let directory = [];
   if (isAdmin) {
@@ -515,7 +902,12 @@ async function answerQuestion({ question, user, isAdmin }) {
   const people = matchPeople(directory, ql);
   const monthsWanted = parseMonthsFromQuestion(ql);
 
-  if (isAdmin && people.length && (wantsClock || wantsAttendance || (monthsWanted.length && !wantsTasks) || (/\btime\b/.test(ql) && !wantsTasks))) {
+  const namedAttendance =
+    isAdmin &&
+    people.length &&
+    (wantsClock || wantsAttendance || (monthsWanted.length && !wantsTasks && !wantsMom && !wantsLeave));
+
+  if (namedAttendance) {
     adminOnly = true;
     skipPolish = true;
     if (monthsWanted.length) {
@@ -547,57 +939,16 @@ async function answerQuestion({ question, user, isAdmin }) {
       const rows = await attendanceForPeople(people);
       answer = formatClockAnswer(people, rows);
     }
-  } else if (isAdmin && people.length && (wantsDpr || wantsWpr) && !wantsClock) {
-    adminOnly = true;
-    const s = await sitePulse();
-    const nameBits = people.flatMap((p) =>
-      [p.full_name, p.username, ...(String(p.full_name || '').split(/\s+/))]
-        .filter((x) => String(x || '').length >= 4)
-        .map((x) => String(x).toLowerCase())
-    );
-    const hit = (text) => {
-      const t = String(text || '').toLowerCase();
-      return nameBits.some((n) => t.includes(n));
-    };
-    const dprs = (s.dprs || []).filter((d) => hit(d.engineer) || hit(d.site));
-    const wprs = (s.wprs || []).filter((w) => hit(w.engineer_name) || hit(w.site_name));
-    answer =
-      (wantsDpr ? `DPR\n${lines(dprs, (d) => `  • ${fmtDate(d.date)} | ${d.site || '—'} | ${d.engineer || '—'} | ${d.report_type || 'DPR'}${summarizeDprPayload(d.payload)}`, '  (none for this person)')}\n\n` : '') +
-      (wantsWpr ? `WPR\n${lines(wprs, (w) => `  • ${fmtDate(w.report_date)} | ${w.site_name || '—'} | ${w.engineer_name || '—'} | #${w.report_number || '—'}`, '  (none for this person)')}` : '');
-  } else if (wantsSite && isAdmin) {
-    adminOnly = true;
-    const s = await sitePulse();
-    if (wantsClock || wantsAttendance) {
-      answer =
-        `CLOCK-IN / ATTENDANCE (last 7 days, IST)\n` +
-        lines(
-          s.attendance.slice(0, 20),
-          (a) =>
-            `  • ${a.user_name || '—'} | ${fmtDate(a.date)} | in ${fmtTimeIst(a.clock_in)} | out ${fmtTimeIst(a.clock_out)}`,
-          '  (no attendance in last 7 days)'
-        );
-    } else if (wantsDpr && !wantsWpr) {
-      answer = `DPR (recent)\n${lines(s.dprs, (d) => `  • ${fmtDate(d.date)} | ${d.site || '—'} | ${d.engineer || '—'} | ${d.report_type || 'DPR'}${summarizeDprPayload(d.payload)}`, '  (no DPR)')}`;
-    } else if (wantsWpr && !wantsDpr) {
-      answer = `WPR (recent)\n${lines(s.wprs, (w) => `  • ${fmtDate(w.report_date)} | ${w.site_name || '—'} | ${w.engineer_name || '—'} | #${w.report_number || '—'}`, '  (no WPR)')}`;
-    } else {
-      answer = `DIP site snapshot\n\n${formatSitePulse(s)}`;
-    }
-  } else if (wantsSite && !isAdmin) {
-    answer =
-      'Site attendance, DPR and WPR company view is available only on admin DIP Bot.\n' +
-      'Open the site portal for your own clock-in, DPR and WPR.';
-  } else if (/\b(overdue|late|delay)\b/i.test(ql)) {
+  } else if (wantsOverdue && !wantsMom && !wantsLeave && !wantsSite && !wantsVerify) {
     skipPolish = true;
     if (isAdmin) {
       adminOnly = true;
       const c = await companyTaskSummary();
       const rec = await overdueRecurring();
-      const recCount = rec.length;
       answer =
         `OVERDUE LIST\n` +
         `Delegated tasks overdue: ${c.overdue}\n` +
-        `Recurring instances overdue: ${recCount}\n` +
+        `Recurring instances overdue: ${rec.length}\n` +
         `Open (not overdue-only): ${c.open}   Pending verification: ${c.pendingVerify}\n\n` +
         `DELEGATED OVERDUE\n` +
         (c.overdueTasks.length ? c.overdueTasks.map(formatTaskBlock).join('\n') : '  (none)') +
@@ -613,72 +964,34 @@ async function answerQuestion({ question, user, isAdmin }) {
         `\n\nRECURRING\n` +
         formatRecurringOverdue(rec);
     }
-  } else if (/verif/i.test(ql) && wantsTasks) {
-    const s = await taskStatsForUser(user.id);
-    answer =
-      `YOUR VERIFICATION QUEUE: ${s.pendingVerify.length}\n` +
-      (s.pendingVerify.length ? s.pendingVerify.slice(0, 20).map(formatTaskBlock).join('\n') : 'None pending.');
-  } else if (/leave/i.test(ql) && isAdmin) {
-    adminOnly = true;
-    const L = await leaveSummary();
-    answer =
-      `Pending leaves: ${L.pending}\n` +
-      lines(L.rows.slice(0, 12), (r) => `  • ${r.user?.full_name || '—'}: ${fmtDate(r.from_date)} → ${fmtDate(r.to_date)}`);
-  } else if (/ticket/i.test(ql) && isAdmin) {
-    adminOnly = true;
-    const T = await ticketSummary();
-    answer = `Open tickets: ${T.open}`;
-  } else if (isAdmin && (wantsCompany || /project|performance|kisne|who/i.test(ql))) {
-    adminOnly = true;
-    skipPolish = true;
-    const c = await companyTaskSummary();
-    const rec = await overdueRecurring();
-    const people = Object.entries(c.byUser)
-      .sort((a, b) => b[1].open - a[1].open)
-      .slice(0, 20)
-      .map(([name, v]) => `  • ${name}: open ${v.open} | done ${v.done} | overdue ${v.overdue} | total ${v.total}`)
-      .join('\n');
-    const projects = Object.entries(c.byProject)
-      .sort((a, b) => b[1].open - a[1].open)
-      .slice(0, 15)
-      .map(([name, v]) => `  • ${name}: open ${v.open} | done ${v.done} | overdue ${v.overdue}`)
-      .join('\n');
-    answer =
-      `DIP COMPANY SNAPSHOT\n` +
-      `Tasks total ${c.total} | open ${c.open} | overdue ${c.overdue} | recurring overdue ${rec.length} | verify ${c.pendingVerify}\n\n` +
-      `BY EMPLOYEE\n${people || '  (none)'}\n\n` +
-      `BY PROJECT\n${projects || '  (none)'}`;
-  } else if (/my task|mera|mere|mine|pending|task/i.test(ql) || !isAdmin) {
-    const s = await taskStatsForUser(user.id);
-    answer =
-      `Hi ${user.full_name || ''}\n\n` +
-      `Open: ${s.pending.length}   Overdue: ${s.overdue.length}\n` +
-      `Pending verification: ${s.pendingVerify.length}   Done: ${s.completed.length}\n\n` +
-      (s.pending.length ? `OPEN TASKS\n` + s.pending.slice(0, 12).map(formatTaskBlock).join('\n') : 'No open tasks.') +
-      `\n\nAsk: overdue | verification | (admin) clock-in for a person | DPR | company`;
   } else if (isAdmin) {
     adminOnly = true;
     skipPolish = true;
-    const c = await companyTaskSummary();
-    const rec = await overdueRecurring();
-    const L = await leaveSummary();
-    const T = await ticketSummary();
+    useAnswerModel = true;
+    const pack = await gatherAdminFacts({ ql, people, intents });
+    answer = formatAdminFacts(pack, people, intents) || 'No matching TaskFlow rows for that question.';
+  } else if (wantsSite) {
     answer =
-      `LIVE DIP DATABASE\n` +
-      `Delegated tasks: ${c.total}  |  open ${c.open}  |  overdue ${c.overdue}  |  verify ${c.pendingVerify}\n` +
-      `Recurring overdue instances: ${rec.length}\n` +
-      `Pending leaves: ${L.pending}  |  Open tickets: ${T.open}\n\n` +
-      `Ask anything from this data. Examples:\n` +
-      `• overdue tasks\n` +
-      `• Roshan Patel and Harshil June and July attendance\n` +
-      `• company summary\n` +
-      `• DPR for SMJV`;
+      'Site attendance, DPR and WPR company view is available only on admin DIP Bot.\n' +
+      'Open the site portal for your own clock-in, DPR and WPR.';
   } else {
     const s = await taskStatsForUser(user.id);
-    answer = `Open tasks: ${s.pending.length}. Type "overdue" or "my tasks" for the list.`;
+    const rec = await overdueRecurring(user.id);
+    answer =
+      `Hi ${user.full_name || ''}\n\n` +
+      `Open: ${s.pending.length}   Overdue: ${s.overdue.length}\n` +
+      `Pending verification: ${s.pendingVerify.length}   Recurring overdue: ${rec.length}\n\n` +
+      (s.pending.length ? `OPEN TASKS\n` + s.pending.slice(0, 12).map(formatTaskBlock).join('\n') : 'No open tasks.');
   }
 
-  if (process.env.OPENAI_API_KEY && !skipPolish) {
+  if (process.env.OPENAI_API_KEY && useAnswerModel && answer) {
+    try {
+      const replied = await answerFromFacts(q, capFacts(answer), user.full_name);
+      if (replied) answer = replied;
+    } catch (e) {
+      console.warn('OpenAI answer skip:', e.message);
+    }
+  } else if (process.env.OPENAI_API_KEY && !skipPolish) {
     try {
       const polished = await polishWithOpenAI(q, answer, user.full_name);
       if (polished) answer = polished;
