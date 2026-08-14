@@ -1275,6 +1275,17 @@ function fmsRangeDates(range, from, to) {
   ];
 }
 
+function fmsJobCode(name) {
+  const words = String(name || '')
+    .replace(/[^A-Za-z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 'JB';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
 function fmsStep(planned, actual, isApplicable) {
   if (!isApplicable) return { planned: null, actual: null, status: 'NA', delayHrs: null };
   const p = planned ? new Date(planned) : null;
@@ -1347,16 +1358,19 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       return d >= startDate && d <= endDate;
     };
 
+    const seqByProject = {};
     const rows = (tasks || [])
       .filter((t) => stamps(t).some(inRange))
       .filter((t) => !project || String(t.project?.id) === String(project))
       .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
-      .map((t, idx) => {
+      .map((t) => {
         const assigned = t.assigned_at || t.created_at;
         const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
         const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
         const verifiedAt = t.verified_at || t.first_verified_at;
         const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
+        const pid = t.project?.id || 'none';
+        seqByProject[pid] = (seqByProject[pid] || 0) + 1;
 
         const steps = {
           accept: fmsStep(assigned, t.accepted_at, true),
@@ -1372,7 +1386,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
 
         return {
           id: t.id,
-          job_no: `JOB-${String(idx + 1).padStart(3, '0')}`,
+          job_no: `${fmsJobCode(t.project?.name)}-${String(seqByProject[pid]).padStart(2, '0')}`,
           timestamp: assigned,
           project: t.project?.name || 'No project',
           project_id: t.project?.id || null,

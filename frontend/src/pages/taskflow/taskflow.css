@@ -2669,8 +2669,10 @@ body.sidebar-open { overflow: hidden; }
 }
 .fms-table thead tr:first-child th { top: 0; }
 .fms-table thead tr:nth-child(2) th { top: 30px; z-index: 2; }
+.fms-table th.fms-id-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head--alt { background: #DCEBE1; color: #14532D; }
+.fms-table th.fms-sub-head { background: #E8EEF4; color: #334155; font-weight: 600; }
 .fms-table td.fms-sticky, .fms-table th.fms-sticky {
   position: sticky;
   left: 0;
@@ -2679,6 +2681,7 @@ body.sidebar-open { overflow: hidden; }
   box-shadow: 1px 0 0 #D8DCE8;
   text-align: left;
 }
+.fms-table th.fms-sticky.fms-id-head { background: #FDE9D9; }
 .fms-table tbody tr:hover td { background: #F7F9FF; }
 .fms-table tbody tr:hover td.fms-sticky { background: #F1F4FF; }
 .fms-desc { max-width: 260px; white-space: normal; }

@@ -361,6 +361,13 @@ export async function mountTaskflowApp(opts = {}) {
       day: '2-digit', month: 'short', year: 'numeric'
     });
   }
+  function fmtSheetDateTime(iso) {
+    if (!iso) return '—';
+    const d = parseLocalDate(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
   // Admin-facing deadline: ONLY the target date, no time. The employee-facing
   // calculated deadline (fmtCalculatedDeadline / fmtDueDateFromCreated below)
   // is the one that shows an actual time, since that's the real computed
@@ -6036,8 +6043,8 @@ export async function mountTaskflowApp(opts = {}) {
         ? `<span class="fms-delay-late">+${label}</span>`
         : `<span class="fms-delay-early">${abs ? `-${label}` : 'on time'}</span>`;
     }
-    return `<td>${escapeHtml(fmtDateOnly(step.planned))}</td>
-      <td>${escapeHtml(step.actual ? fmtDate(step.actual) : '—')}</td>
+    return `<td>${escapeHtml(fmtSheetDateTime(step.planned))}</td>
+      <td>${escapeHtml(step.actual ? fmtSheetDateTime(step.actual) : '—')}</td>
       <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span>${
         step.actor ? `<div class="fms-actor">${escapeHtml(step.actor)}</div>` : ''
       }</td>
@@ -6104,16 +6111,14 @@ export async function mountTaskflowApp(opts = {}) {
       }
       const stepHead = steps.map((s, i) =>
         `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
-      const subHead = steps.map(() => '<th>Planned</th><th>Actual</th><th>Status</th><th>Delay</th>').join('');
+      const subHead = steps.map(() => '<th class="fms-sub-head">Planned</th><th class="fms-sub-head">Actual</th><th class="fms-sub-head">Status</th><th class="fms-sub-head">Time Delay</th>').join('');
       const tbody = rows.map((r) => `<tr>
-        <td class="fms-sticky">${escapeHtml(fmtDateOnly(r.timestamp))}</td>
+        <td class="fms-sticky" title="${escapeHtml(r.description || '')}">${escapeHtml(fmtSheetDateTime(r.timestamp))}</td>
         <td>${escapeHtml(r.job_no)}</td>
         <td>${escapeHtml(r.project)}</td>
-        <td>${escapeHtml(r.work_type)}</td>
-        <td class="fms-desc">${escapeHtml((r.description || '').slice(0, 120))}</td>
+        <td title="${escapeHtml(r.description || '')}">${escapeHtml(r.work_type)}</td>
         <td>${escapeHtml(r.person)}</td>
-        <td>${escapeHtml(r.verifier)}</td>
-        <td>${r.lead_time_hrs || 0}h${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
+        <td>${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
         ${steps.map((s) => fmsCell(r.steps?.[s.key])).join('')}
       </tr>`).join('');
 
@@ -6121,14 +6126,12 @@ export async function mountTaskflowApp(opts = {}) {
         <table class="data-table fms-table">
           <thead>
             <tr>
-              <th class="fms-sticky" rowspan="2">Timestamp</th>
-              <th rowspan="2">Job no.</th>
-              <th rowspan="2">Project</th>
-              <th rowspan="2">Work type</th>
-              <th rowspan="2">Task</th>
-              <th rowspan="2">Person</th>
-              <th rowspan="2">Verifier</th>
-              <th rowspan="2">Lead time</th>
+              <th class="fms-sticky fms-id-head" rowspan="2">Timestamp</th>
+              <th class="fms-id-head" rowspan="2">JOB NO.</th>
+              <th class="fms-id-head" rowspan="2">PROJECT NAME</th>
+              <th class="fms-id-head" rowspan="2">WORK TYPE</th>
+              <th class="fms-id-head" rowspan="2">PERSON</th>
+              <th class="fms-id-head" rowspan="2">LEAD TIME</th>
               ${stepHead}
             </tr>
             <tr>${subHead}</tr>
@@ -6145,13 +6148,13 @@ export async function mountTaskflowApp(opts = {}) {
   function downloadFmsCsv(data) {
     if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
     const steps = data.steps || [];
-    const head = ['Timestamp', 'Job no', 'Project', 'Work type', 'Task', 'Person', 'Verifier', 'Lead time (h)'];
-    steps.forEach((s) => head.push(`${s.label} planned`, `${s.label} actual`, `${s.label} status`, `${s.label} delay (h)`));
+    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
+    steps.forEach((s) => head.push(`${s.label} Planned`, `${s.label} Actual`, `${s.label} Status`, `${s.label} Time Delay`));
     const lines = [head.join(',')];
     data.rows.forEach((r) => {
       const cells = [
         r.timestamp || '', r.job_no, r.project, r.work_type,
-        (r.description || '').replace(/\s+/g, ' '), r.person, r.verifier, r.lead_time_hrs || 0,
+        r.person, r.lead_time_hrs || 0,
       ];
       steps.forEach((s) => {
         const st = r.steps?.[s.key] || {};

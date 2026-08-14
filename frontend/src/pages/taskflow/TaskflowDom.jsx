@@ -1094,7 +1094,7 @@ export default function TaskflowDom() {
         <section id="view-fms" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">📑 FMS tracker</h2>
-            <p className="view-sub">Every task step-by-step: Planned vs Actual date, status and time delay — same layout as the office FMS sheet.</p>
+            <p className="view-sub">Same layout as the office FMS sheet: Timestamp, JOB NO., PROJECT NAME, WORK TYPE, PERSON, LEAD TIME, then Planned / Actual / Status / Time Delay for each step. Verifier name sits inside the Verification step.</p>
           </div>
           <div className="mis-toolbar" style={{marginBottom: 14}}>
             <label className="mis-field">
