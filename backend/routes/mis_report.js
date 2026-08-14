@@ -1,10 +1,10 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireAdmin);
+router.use(requireAdminOrMis);
 
 function ymd(d) {
   const x = new Date(d);

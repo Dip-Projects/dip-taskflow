@@ -37,7 +37,7 @@ export function syncSiteUser(user) {
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     designation: clientLogin ? 'Client' : (user.designation || user.department || ''),
-    is_head: clientLogin ? false : !!(user.is_head || user.can_access_site),
+    is_head: clientLogin ? false : !!user.is_head,
   };
   localStorage.setItem('user', JSON.stringify(siteUser));
 }
@@ -105,14 +105,21 @@ export function isHead(user) {
   return !!(user?.is_head || user?.can_access_site);
 }
 
-/** Site portal oversight (team submissions) */
+/** Site portal oversight (team submissions) — not Office↔Site, not every site engineer */
 export function isSiteHead(user) {
   if (!user) return false;
-  if (user.is_head || user.can_access_site) return true;
-  const role = (user.role || '').toLowerCase().trim();
+  if (user.is_head) return true;
+  const role = String(user.role || '').toLowerCase().trim();
   if (role === 'admin' || role === 'head') return true;
-  const desig = (user.designation || user.site_role || '').toLowerCase().trim();
-  return desig === 'project head' || desig === 'site incharge';
+  const blob = [
+    user.role,
+    user.designation,
+    user.department,
+    user.site_role,
+  ]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /site incharge|project head|site head/.test(blob);
 }
 
 export function canToggleSite(user) {

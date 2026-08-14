@@ -426,14 +426,25 @@ const Ico = {
   ),
 };
 
+function visAllows(visMap, key, user) {
+  if (!visMap || !visMap[key]) return true;
+  const row = visMap[key];
+  if (isSiteHead(user)) return row.site_head !== false;
+  return row.site !== false;
+}
+
 // ─── Nav structure ────────────────────────────────────────────────────────────
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
-function buildNav(user) {
+function buildNav(user, visMap) {
   const leaveChildren = [
     { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
     { key: "my-leave", label: "My Leave", icon: Ico.leave },
   ];
-  if (isSiteHead(user) || user?._isApprover) {
+  const head = isSiteHead(user);
+  const showTeam = visAllows(visMap, "site-team-submissions", user) && head;
+  const showSiteLeave = visAllows(visMap, "site-leave-approvals", user) && (head || user?._isApprover);
+
+  if (showSiteLeave) {
     leaveChildren.push({
       key: "leave-approvals",
       label: "Leave Approvals",
@@ -448,7 +459,7 @@ function buildNav(user) {
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
   ];
-  if (isSiteHead(user)) {
+  if (showTeam) {
     reportChildren.push({
       key: "report-submissions",
       label: "Team Submissions",
@@ -464,9 +475,9 @@ function buildNav(user) {
   ];
 }
 
-function buildAllItems(user) {
+function buildAllItems(user, visMap) {
   return [
-    ...buildNav(user).flatMap((n) => (n.children ? n.children : [n])),
+    ...buildNav(user, visMap).flatMap((n) => (n.children ? n.children : [n])),
     { key: "profile", label: "Profile & Settings", icon: Ico.profile },
   ];
 }
@@ -1600,7 +1611,7 @@ export function mergeRejectionReason(existing, slot, by, reason) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function SitePortal() {
   const navigate = useNavigate();
-  const { logout: authLogout } = useAuth();
+  const { logout: authLogout, user: authUser } = useAuth();
 const [hoveredNavKey, setHoveredNavKey] = useState(null);
 
 const NAV_COLORS = {
@@ -1644,6 +1655,7 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
 }
   const [user, setUser] = useState(null);
   const [userReady, setUserReady] = useState(false);
+  const [visMap, setVisMap] = useState(null);
   const [activeTab, setActiveTab] = useState("clock-in");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expanded, setExpanded] = useState({ leave: true, reports: true });
@@ -1782,7 +1794,7 @@ const markLeavesSeen = useCallback(async (u) => {
     navigate("/login", { replace: true });
   };
   const fetchSiteReports = useCallback(async (u) => {
-    if (!u || !isSiteHead(u)) return;
+    if (!u || !isSiteHead({ ...u, ...authUser, is_head: !!(u.is_head || authUser?.is_head) })) return;
     setLoadingReports(true);
 
     const sites =
@@ -1989,6 +2001,24 @@ useEffect(() => {
     }, 0);
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/master/nav-visibility", {
+          headers: { Authorization: `Bearer ${localStorage.getItem("tf_token") || ""}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) setVisMap(data.map || {});
+      } catch {
+        if (!cancelled) setVisMap({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (!userReady)
     return (
       <div className="loading" style={{ minHeight: "100vh" }}>
@@ -1999,9 +2029,16 @@ useEffect(() => {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  const navUser = { ...user, _isApprover: isApprover };
-  const NAV = buildNav(navUser);
-  const ALL_ITEMS = buildAllItems(navUser);
+  const navUser = {
+    ...user,
+    _isApprover: isApprover,
+    is_head: !!(user.is_head || authUser?.is_head),
+    role: authUser?.role || user.role,
+    designation: authUser?.designation || user.designation,
+    department: authUser?.department || user.department,
+  };
+  const NAV = buildNav(navUser, visMap);
+  const ALL_ITEMS = buildAllItems(navUser, visMap);
   const activeItem = ALL_ITEMS.find((i) => i.key === activeTab);
 
   const renderContent = () => {
@@ -2046,7 +2083,7 @@ useEffect(() => {
           />
         );
       case "report-submissions": {
-        if (!isSiteHead(user)) return null;
+        if (!isSiteHead(navUser)) return null;
 
         const fmtD = (d) =>
           d

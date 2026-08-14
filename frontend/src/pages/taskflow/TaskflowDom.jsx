@@ -602,7 +602,33 @@ export default function TaskflowDom() {
           </div>
         </section>
 
-        {/* VERIFICATIONS */}
+        {/* WHO SEES WHAT (admin + MIS) */}
+        <section id="view-visibility" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">Who sees what</h2>
+            <p className="view-sub">MIS executive and admin control this. Uncheck a box to hide that screen for that role — including admin. Save to apply for everyone.</p>
+          </div>
+          <div className="table-card table-card--stack">
+            <div className="table-scroll">
+              <table className="data-table" id="visibilityTable">
+                <thead>
+                  <tr>
+                    <th>Screen</th>
+                    <th className="perm-col">Admin</th>
+                    <th className="perm-col">MIS</th>
+                    <th className="perm-col">Employee</th>
+                    <th className="perm-col">Site engineer</th>
+                    <th className="perm-col">Site head</th>
+                  </tr>
+                </thead>
+                <tbody id="visibilityTableBody"></tbody>
+              </table>
+            </div>
+            <div style={{padding: '12px 16px'}}>
+              <button type="button" id="visibilitySaveBtn" className="primary-btn primary-btn-inline">Save visibility</button>
+            </div>
+          </div>
+        </section>
         <section id="view-verifications" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Verification requests</h2>

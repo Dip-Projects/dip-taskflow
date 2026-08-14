@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays } = require('../lib/workingHours');
 const router = express.Router();
 router.use(requireAuth);
@@ -1005,7 +1005,7 @@ router.patch('/:id/reassign', requireAdmin, async (req, res) => {
 
 // ----------------------------- admin report -----------------------------
 // GET /tasks/report?range=day|week|month|custom&from=DATE&to=DATE
-router.get('/report', requireAdmin, async (req, res) => {
+router.get('/report', requireAdminOrMis, async (req, res) => {
   try {
     const { range, from, to } = req.query;
 

@@ -550,7 +550,14 @@ export async function mountTaskflowApp(opts = {}) {
   async function enterApp() {
     if (els.appScreen) els.appScreen.hidden = false;
     if (els.userName) els.userName.textContent = state.user.full_name;
-    if (els.userRoleTag) els.userRoleTag.textContent = state.user.role;
+    if (els.userRoleTag) els.userRoleTag.textContent = state.user.is_mis_executive ? 'MIS executive' : state.user.role;
+    try {
+      const vis = await api('/master/nav-visibility');
+      state.navVis = vis.map || {};
+      state.navModules = vis.modules || [];
+    } catch {
+      state.navVis = {};
+    }
     buildNav();
     setupTopbarQuick();
     try {
@@ -574,69 +581,91 @@ export async function mountTaskflowApp(opts = {}) {
     checkLeaveCoverAlerts();
   }
   
+  function visOk(key) {
+    const map = state.navVis || {};
+    const row = map[key];
+    if (!row) return true;
+    const role = (state.user?.role || '').toLowerCase();
+    const who = role === 'admin' ? 'admin' : state.user?.is_mis_executive ? 'mis' : 'employee';
+    return row[who] !== false;
+  }
+
   function buildNav() {
     const isAdmin = state.user.role === 'admin';
+    const isMis = !!state.user.is_mis_executive;
     const canAddSite = isAdmin || !!state.user.can_add_site;
     const canAddEmployee = isAdmin || !!state.user.can_add_employee;
     const canResolveTickets = isAdmin || !!state.user.can_resolve_tickets;
   
-    const taskItems = isAdmin
-      ? [{ key:'add', label:'➕ Add new task' }, { key:'all', label:'📋 All delegated tasks' }, { key:'overdue', label:'⏰ Overdue tasks' }, { key:'my', label:'✅ My tasks' }, { key:'recurring', label:'🔁 Recurring tasks' }]
-      : [{ key:'my', label:'✅ My tasks' }, { key:'recurring', label:'🔁 My recurring tasks' }];
+    const taskItems = [];
+    if (visOk('add') && isAdmin) taskItems.push({ key:'add', label:'➕ Add new task' });
+    if (visOk('all') && isAdmin) taskItems.push({ key:'all', label:'📋 All delegated tasks' });
+    if (visOk('overdue') && isAdmin) taskItems.push({ key:'overdue', label:'⏰ Overdue tasks' });
+    if (visOk('my')) taskItems.push({ key:'my', label:'✅ My tasks' });
+    if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? '🔁 Recurring tasks' : '🔁 My recurring tasks' });
   
     els.navList.innerHTML = '';
-    const taskLabel = document.createElement('div');
-    taskLabel.className = 'nav-section-label'; taskLabel.textContent = 'Tasks';
-    els.navList.appendChild(taskLabel);
-    taskItems.forEach((t) => els.navList.appendChild(makeNavButton(t.key, t.label)));
+    if (taskItems.length) {
+      const taskLabel = document.createElement('div');
+      taskLabel.className = 'nav-section-label'; taskLabel.textContent = 'Tasks';
+      els.navList.appendChild(taskLabel);
+      taskItems.forEach((t) => els.navList.appendChild(makeNavButton(t.key, t.label)));
+    }
   
-    // Verification — moved right after Tasks so it's not buried under Leave/Administration
-    if (isAdmin || state.user.can_verify) {
+    if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis)) {
       const verifyLabel = document.createElement('div');
       verifyLabel.className = 'nav-section-label'; verifyLabel.textContent = 'Verification';
       els.navList.appendChild(verifyLabel);
       els.navList.appendChild(makeNavButton('verifications', '🔎 Verification requests'));
     }
   
-    // Reschedule requests — visible to everyone. Admin sees every pending
-    // request with Approve/Reject; anyone else sees only their own requests
-    // and their current status (read-only).
-    const reschedLabel = document.createElement('div');
-    reschedLabel.className = 'nav-section-label'; reschedLabel.textContent = 'Reschedule';
-    els.navList.appendChild(reschedLabel);
-    els.navList.appendChild(makeNavButton('reschedule-requests', '🗓️ Reschedule requests'));
-  
-    if (isAdmin || canAddEmployee || canAddSite) {
-      const adminLabel = document.createElement('div');
-      adminLabel.className = 'nav-section-label'; adminLabel.textContent = 'Administration';
-      els.navList.appendChild(adminLabel);
-      if (isAdmin || canAddEmployee) els.navList.appendChild(makeNavButton('employees', '👥 Manage employees'));
-      if (isAdmin) {
-        els.navList.appendChild(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
-        els.navList.appendChild(makeNavButton('project-mgmt', '🗂️ Project management'));
-      }
-      if (isAdmin || canAddSite)     els.navList.appendChild(makeNavButton('sites', '🏗️ Manage sites'));
-      if (isAdmin) {
-        els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
-        els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
-        els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
-        els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
-        els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
-      }
+    if (visOk('reschedule-requests') !== false) {
+      const reschedLabel = document.createElement('div');
+      reschedLabel.className = 'nav-section-label'; reschedLabel.textContent = 'Reschedule';
+      els.navList.appendChild(reschedLabel);
+      els.navList.appendChild(makeNavButton('reschedule-requests', '🗓️ Reschedule requests'));
     }
   
-    // Leave section — apply leave; buddy cover in its own sidebar item; admin approvals.
-    const leaveLabel = document.createElement('div');
-    leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
-    els.navList.appendChild(leaveLabel);
-    els.navList.appendChild(makeNavButton('applyleave', '🌴 Apply Leave'));
-    els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
-    if (isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+    const showAdminBlock = visOk('employees') && (isAdmin || canAddEmployee)
+      || visOk('sites') && (isAdmin || canAddSite)
+      || visOk('hierarchy') && isAdmin
+      || visOk('project-mgmt') && isAdmin
+      || visOk('masterdata') && isAdmin
+      || visOk('permissions') && isAdmin
+      || visOk('visibility') && (isAdmin || isMis)
+      || visOk('daily-report') && (isAdmin || isMis)
+      || visOk('mis-report') && (isAdmin || isMis)
+      || visOk('time-dashboard') && (isAdmin || isMis);
 
-    // DIP Bot + Team chat live in topbar (near logout), not sidebar
+    if (showAdminBlock) {
+      const adminLabel = document.createElement('div');
+      adminLabel.className = 'nav-section-label';
+      adminLabel.textContent = isMis && !isAdmin ? 'MIS' : 'Administration';
+      els.navList.appendChild(adminLabel);
+      if (visOk('employees') && (isAdmin || canAddEmployee)) els.navList.appendChild(makeNavButton('employees', '👥 Manage employees'));
+      if (visOk('hierarchy') && isAdmin) {
+        els.navList.appendChild(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
+        if (visOk('project-mgmt')) els.navList.appendChild(makeNavButton('project-mgmt', '🗂️ Project management'));
+      }
+      if (visOk('sites') && (isAdmin || canAddSite)) els.navList.appendChild(makeNavButton('sites', '🏗️ Manage sites'));
+      if (visOk('masterdata') && isAdmin) els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
+      if (visOk('permissions') && isAdmin) els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
+      if (visOk('visibility') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('visibility', '👁 Who sees what'));
+      if (visOk('daily-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
+      if (visOk('mis-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
+      if (visOk('time-dashboard') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
+    }
+  
+    if (visOk('applyleave') || visOk('buddyrequests') || (visOk('leaveapprovals') && isAdmin)) {
+      const leaveLabel = document.createElement('div');
+      leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
+      els.navList.appendChild(leaveLabel);
+      if (visOk('applyleave')) els.navList.appendChild(makeNavButton('applyleave', '🌴 Apply Leave'));
+      if (visOk('buddyrequests')) els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
+      if (visOk('leaveapprovals') && isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+    }
 
-    // Corrections section — visible to all employees (admin doesn't get corrections, they assign them)
-    if (!isAdmin) {
+    if (!isAdmin && visOk('corrections')) {
       const corrLabel = document.createElement('div');
       corrLabel.className = 'nav-section-label'; corrLabel.textContent = 'Corrections';
       els.navList.appendChild(corrLabel);
@@ -644,15 +673,16 @@ export async function mountTaskflowApp(opts = {}) {
       els.navList.appendChild(makeNavButton('updations', '📝 Updations'));
     }
   
-    const supportLabel = document.createElement('div');
-    supportLabel.className = 'nav-section-label';
-    supportLabel.textContent = state.user.is_mis_executive ? 'MIS — Ticket Tracking' : 'Support';
-    els.navList.appendChild(supportLabel);
-    els.navList.appendChild(makeNavButton('tickets-open', '🟠 Open Tickets'));
-    els.navList.appendChild(makeNavButton('tickets-resolved', '✅ Resolved Tickets'));
+    if (visOk('tickets')) {
+      const supportLabel = document.createElement('div');
+      supportLabel.className = 'nav-section-label';
+      supportLabel.textContent = isMis ? 'MIS — Ticket Tracking' : 'Support';
+      els.navList.appendChild(supportLabel);
+      els.navList.appendChild(makeNavButton('tickets-open', '🟠 Open Tickets'));
+      els.navList.appendChild(makeNavButton('tickets-resolved', '✅ Resolved Tickets'));
+    }
   
-    // Drawings — admin only
-    if (isAdmin) {
+    if (visOk('drawings') && isAdmin) {
       const drawLabel = document.createElement('div');
       drawLabel.className = 'nav-section-label'; drawLabel.textContent = 'Drawings';
       els.navList.appendChild(drawLabel);
@@ -719,13 +749,19 @@ export async function mountTaskflowApp(opts = {}) {
     const mom = document.getElementById('topMomBtn');
     const cal = document.getElementById('topCalBtn');
     if (dip) {
-      dip.hidden = !isAdmin;
+      dip.hidden = !visOk('ai-bot') || !isAdmin;
       dip.onclick = () => switchView('ai-bot');
     }
-    if (chat) chat.onclick = () => switchView('team-chat');
-    if (mom) mom.onclick = () => switchView('meetings');
+    if (chat) {
+      chat.hidden = !visOk('team-chat');
+      chat.onclick = () => switchView('team-chat');
+    }
+    if (mom) {
+      mom.hidden = !visOk('meetings');
+      mom.onclick = () => switchView('meetings');
+    }
     if (cal) {
-      cal.hidden = !!isAdmin; // employees get calendar; admin uses all-tasks
+      cal.hidden = !visOk('calendar') || !!isAdmin;
       cal.onclick = () => switchView('calendar');
     }
   }
@@ -851,6 +887,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'sites')         loadSites();
     if (viewKey === 'masterdata')    loadMasterDataView();
     if (viewKey === 'permissions')   loadPermissions();
+    if (viewKey === 'visibility')    loadVisibility();
     if (viewKey === 'verifications') loadVerifications();
     if (viewKey === 'reschedule-requests') loadRescheduleRequests();
     if (viewKey === 'tickets')       loadTickets();
@@ -1253,8 +1290,10 @@ export async function mountTaskflowApp(opts = {}) {
         document.querySelectorAll('#overdueTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         const tab = btn.dataset.overduetab;
-        document.getElementById('overdueTaskTabPanel').hidden = tab !== 'task';
-        document.getElementById('overdueRecurringTabPanel').hidden = tab !== 'recurring';
+        const taskPanel = document.getElementById('overdueTaskTabPanel');
+        const recPanel = document.getElementById('overdueRecurringTabPanel');
+        if (taskPanel) taskPanel.hidden = tab !== 'task';
+        if (recPanel) recPanel.hidden = tab !== 'recurring';
       });
     });
   });
@@ -1541,8 +1580,10 @@ export async function mountTaskflowApp(opts = {}) {
         document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         const tab = btn.dataset.mytab;
-        document.getElementById('myTaskTabPanel').hidden = tab !== 'mytask';
-        document.getElementById('otherPendingTabPanel').hidden = tab !== 'other';
+        const myPanel = document.getElementById('myTaskTabPanel');
+        const otherPanel = document.getElementById('otherPendingTabPanel');
+        if (myPanel) myPanel.hidden = tab !== 'mytask';
+        if (otherPanel) otherPanel.hidden = tab !== 'other';
         if (tab === 'other') loadOtherPendingWork();
       });
     });
@@ -1553,9 +1594,12 @@ export async function mountTaskflowApp(opts = {}) {
         document.querySelectorAll('#otherPendingSubTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         const sub = btn.dataset.subtab;
-        document.getElementById('otherPendingLeavesList').hidden = sub !== 'leave';
-        document.getElementById('otherPendingVerificationsWrap').hidden = sub !== 'verification';
-        document.getElementById('otherPendingTicketsList').hidden = sub !== 'tickets';
+        const leaves = document.getElementById('otherPendingLeavesList');
+        const verifs = document.getElementById('otherPendingVerificationsWrap');
+        const ticks = document.getElementById('otherPendingTicketsList');
+        if (leaves) leaves.hidden = sub !== 'leave';
+        if (verifs) verifs.hidden = sub !== 'verification';
+        if (ticks) ticks.hidden = sub !== 'tickets';
       });
     });
   });
@@ -3917,6 +3961,60 @@ export async function mountTaskflowApp(opts = {}) {
       loadPermissions();
     } catch (err) { showToast(err.message, 'error'); }
   }
+
+  async function loadVisibility() {
+    const body = document.getElementById('visibilityTableBody');
+    if (!body) return;
+    body.innerHTML = `<tr><td colspan="6" class="empty-state">Loading…</td></tr>`;
+    try {
+      const data = await api('/master/nav-visibility');
+      state.navVis = data.map || {};
+      const roles = data.roles || ['admin', 'mis', 'employee', 'site', 'site_head'];
+      const modules = data.modules || [];
+      body.innerHTML = '';
+      modules.forEach((mod) => {
+        const tr = document.createElement('tr');
+        const name = document.createElement('td');
+        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}</div>`;
+        tr.appendChild(name);
+        const row = state.navVis[mod.key] || {};
+        roles.forEach((r) => {
+          const td = document.createElement('td');
+          td.className = 'perm-col';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = row[r] !== false;
+          cb.dataset.mod = mod.key;
+          cb.dataset.role = r;
+          td.appendChild(cb);
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    } catch (err) {
+      body.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  document.getElementById('visibilitySaveBtn')?.addEventListener('click', async () => {
+    const body = document.getElementById('visibilityTableBody');
+    if (!body) return;
+    const map = {};
+    body.querySelectorAll('input[type="checkbox"][data-mod]').forEach((cb) => {
+      const k = cb.dataset.mod;
+      if (!map[k]) map[k] = {};
+      map[k][cb.dataset.role] = cb.checked;
+    });
+    try {
+      const saved = await api('/master/nav-visibility', { method: 'PUT', body: JSON.stringify({ map }) });
+      state.navVis = saved.map || map;
+      showToast('Visibility saved. Reloading menus…', 'success');
+      buildNav();
+      setupTopbarQuick();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
   
   // ─── Master data ──────────────────────────────────────────────────────────────
   async function loadMasterDataView() {

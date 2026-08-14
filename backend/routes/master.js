@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { MODULES, ROLES, mergeMap, canSee } = require('../lib/navVisibility');
 
 const router = express.Router();
 
@@ -66,4 +67,55 @@ router.get('/verifiers', async (req, res) => {
   res.json(data);
 });
 
+router.get('/nav-visibility', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'nav_visibility')
+      .maybeSingle();
+    const map = mergeMap(!error && data?.value ? data.value : null);
+    res.json({ modules: MODULES, roles: ROLES, map });
+  } catch (err) {
+    res.json({ modules: MODULES, roles: ROLES, map: mergeMap(null) });
+  }
+});
+
+router.put('/nav-visibility', async (req, res) => {
+  try {
+    const isAdmin = req.user?.role === 'admin';
+    let isMis = !!req.user?.is_mis_executive;
+    if (!isMis && !isAdmin) {
+      const { data: me } = await supabase
+        .from('users')
+        .select('is_mis_executive')
+        .eq('id', req.user.id)
+        .maybeSingle();
+      isMis = !!me?.is_mis_executive;
+    }
+    if (!isAdmin && !isMis) {
+      return res.status(403).json({ error: 'Only admin or MIS executive can change who sees what' });
+    }
+    const map = mergeMap(req.body?.map);
+    const { error } = await supabase.from('app_settings').upsert({
+      key: 'nav_visibility',
+      value: map,
+      updated_at: new Date().toISOString(),
+      updated_by: req.user.id,
+    });
+    if (error) {
+      return res.status(503).json({
+        error: 'Run backend/sql/add_nav_visibility.sql in Supabase, then save again.',
+        map,
+        modules: MODULES,
+        roles: ROLES,
+      });
+    }
+    res.json({ ok: true, map, modules: MODULES, roles: ROLES });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
+module.exports.canSeeNav = canSee;

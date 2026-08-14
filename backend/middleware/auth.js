@@ -68,4 +68,9 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, signToken };
+function requireAdminOrMis(req, res, next) {
+  if (req.user?.role === 'admin' || req.user?.is_mis_executive) return next();
+  return res.status(403).json({ error: 'Only an admin or MIS executive can do this' });
+}
+
+module.exports = { requireAuth, requireAdmin, requireAdminOrMis, signToken };
