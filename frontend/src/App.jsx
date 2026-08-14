@@ -6,6 +6,7 @@ import Login from './pages/Login';
 
 const TaskflowApp = lazy(() => import('./pages/TaskflowApp'));
 const SiteApp = lazy(() => import('./pages/SiteApp'));
+const MdoApp = lazy(() => import('./pages/MdoApp'));
 const ClientApp = lazy(() => import('./pages/ClientApp'));
 
 function RequireAuth({ children }) {
@@ -58,6 +59,14 @@ export default function App() {
               element={
                 <RequireAuth>
                   <SiteApp />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/mdo/*"
+              element={
+                <RequireAuth>
+                  <MdoApp />
                 </RequireAuth>
               }
             />

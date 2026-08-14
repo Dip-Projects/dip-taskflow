@@ -7,6 +7,7 @@ import {
   postLoginPath,
   canToggleSite,
   isSiteEngineer,
+  isProcessController,
   syncSiteUser,
 } from '../lib/api';
 
@@ -45,6 +46,7 @@ export function AuthProvider({ children }) {
       refreshUser,
       canToggleSite: canToggleSite(user),
       isSiteEngineer: isSiteEngineer(user),
+      isProcessController: isProcessController(user),
     }),
     [user, token, login, logout, refreshUser]
   );

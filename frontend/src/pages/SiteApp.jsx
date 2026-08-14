@@ -6,7 +6,7 @@ import SitePortal from './site/SitePortal';
 import './SurfaceToggle.css';
 
 export default function SiteApp() {
-  const { user, isAuthenticated, logout, canToggleSite, isSiteEngineer } = useAuth();
+  const { user, isAuthenticated, logout, canToggleSite, isSiteEngineer, isProcessController } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -15,22 +15,22 @@ export default function SiteApp() {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
+  if ((user?.role || '').toLowerCase() === 'client' || (user?.department || '').toLowerCase() === 'client') {
+    return <Navigate to="/client" replace />;
+  }
+
+  if (isProcessController) {
+    return <Navigate to="/mdo" replace />;
+  }
+
   // Only site engineers and heads (can_access_site / is_head) may open /site
   if (!isSiteEngineer && !canToggleSite) {
     return <Navigate to="/app" replace />;
-  }
-  if ((user?.role || '').toLowerCase() === 'client' || (user?.department || '').toLowerCase() === 'client') {
-    return <Navigate to="/client" replace />;
   }
 
   const goApp = () => {
     localStorage.setItem('tf_surface', 'app');
     navigate('/app');
-  };
-
-  const doLogout = () => {
-    logout();
-    navigate('/login', { replace: true });
   };
 
   return (

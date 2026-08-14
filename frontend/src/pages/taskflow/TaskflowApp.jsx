@@ -13,7 +13,7 @@ const StableTaskflowDom = memo(TaskflowDom, () => true);
  * Office TaskFlow: Classic UI (same look as before).
  */
 export default function TaskflowApp() {
-  const { user, token, isAuthenticated, logout, canToggleSite } = useAuth();
+  const { user, token, isAuthenticated, logout, canToggleSite, isProcessController } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -63,6 +63,9 @@ export default function TaskflowApp() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   const dept = (user?.department || '').trim().toLowerCase();
+  if (isProcessController) {
+    return <Navigate to="/mdo" replace />;
+  }
   if (dept === 'site engineer' && !canToggleSite) {
     return <Navigate to="/site" replace />;
   }
