@@ -80,6 +80,42 @@ async function updateTaskTolerant(id, updates, select) {
   throw new Error('Could not update task');
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function taskEventsOf(existing) {
+  return Array.isArray(existing?.task_events) ? [...existing.task_events] : [];
+}
+
+function withTaskEvent(existing, action, by, extra = {}) {
+  const events = taskEventsOf(existing);
+  events.push({ at: nowIso(), action, by: by || null, ...extra });
+  return events.slice(-80);
+}
+
+function firstStamp(existing, field, value) {
+  return existing?.[field] || value;
+}
+
+const TASK_TIME_SELECT =
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status';
+
+async function loadTaskForStamp(id) {
+  let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
+  if (error && /column|schema cache/i.test(error.message || '')) {
+    const retry = await supabase
+      .from('tasks')
+      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status')
+      .eq('id', id)
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw error;
+  return data;
+}
+
 // Both "toast says success but the date shown afterwards is still the old
 // one" reports (direct admin reschedule AND reschedule-request approval)
 // share one thing in common: they both PATCH successfully, then immediately
@@ -184,14 +220,10 @@ if (!isMdoOffice && !project_id) {
         uploadFile(voiceNoteFile, 'voice-notes')
       ]);
 
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert({
+      const payload = {
           department_id,
           assigned_to,
           assigned_by: req.user.id,
-         // project_id,
-          //these r 17th july
           project_id: project_id || null,
           task_type_id,
           description,
@@ -202,10 +234,17 @@ if (!isMdoOffice && !project_id) {
           attachment_url,
           voice_note_url,
           status: 'Pending',
-          assigned_at: new Date().toISOString()
-        })
-        .select(TASK_SELECT)
-        .single();
+          assigned_at: new Date().toISOString(),
+          task_events: [{ at: new Date().toISOString(), action: 'assigned', by: req.user.id }],
+      };
+      let { data, error } = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+      if (error && /task_events|assigned_at/i.test(error.message || '')) {
+        delete payload.task_events;
+        if (/assigned_at/i.test(error.message || '')) delete payload.assigned_at;
+        const retry = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retry.data;
+        error = retry.error;
+      }
 
     //   if (error) throw error;
     //   res.status(201).json(data);
@@ -358,12 +397,7 @@ router.patch('/:id/start-verification', async (req, res) => {
     //   .select('id, verifier_id, verification_status, verification_started_by, verification_started_at')
     //   .eq('id', id)
     //   .maybeSingle();
-   const { data: existing, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('id, verifier_id, verification_status, verification_started_by, verification_started_at')
-      .eq('id', id)
-      .maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const isChosenVerifier = existing.verifier_id === req.user.id;
@@ -374,25 +408,20 @@ router.patch('/:id/start-verification', async (req, res) => {
       return res.status(400).json({ error: 'This task is not awaiting verification' });
     }
 
-    // Already started (by this verifier or another admin) — don't overwrite
-    // who/when, just hand back the current state.
+    // Already started this cycle — keep the original start time.
     if (existing.verification_started_at) {
       const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
       if (error) throw error;
       return res.json(data);
     }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({
-        verification_started_by: req.user.id,
-        verification_started_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
-
-    if (error) throw error;
+    const at = nowIso();
+    const data = await updateTaskTolerant(id, {
+      verification_started_by: req.user.id,
+      verification_started_at: at,
+      first_verification_started_at: firstStamp(existing, 'first_verification_started_at', at),
+      task_events: withTaskEvent(existing, 'start_verification', req.user.id),
+    }, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Start verification error:', err.message);
@@ -405,9 +434,7 @@ router.patch('/:id/accept', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, assigned_to, status').eq('id', id).maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const isOwnTask = existing.assigned_to === req.user.id;
@@ -415,14 +442,12 @@ router.patch('/:id/accept', async (req, res) => {
       return res.status(403).json({ error: 'You can only accept your own tasks' });
     }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({ status: 'In Progress', accepted_at: new Date().toISOString() })
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
-
-    if (error) throw error;
+    const at = nowIso();
+    const data = await updateTaskTolerant(id, {
+      status: 'In Progress',
+      accepted_at: firstStamp(existing, 'accepted_at', at),
+      task_events: withTaskEvent(existing, 'start_task', req.user.id),
+    }, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Accept task error:', err.message);
@@ -480,13 +505,7 @@ router.patch('/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('id, assigned_to')
-      .eq('id', id)
-      .maybeSingle();
-
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const isOwnTask = existing.assigned_to === req.user.id;
@@ -494,34 +513,20 @@ router.patch('/:id/status', async (req, res) => {
       return res.status(403).json({ error: 'You can only update your own tasks' });
     }
 
-    // const updates = { status };
-    // if (status === 'Rejected') {
-    //   updates.status_note = `Rejected by ${req.user.full_name}${status_note ? `: ${status_note}` : ''}`;
-    //   updates.rejected_at = new Date().toISOString();
-    // } else if (status === 'Pending') {
-    //   updates.status_note = null;
-    // }
-const updates = { status };
+    const at = nowIso();
+    const updates = { status };
     if (status === 'Rejected') {
       updates.status_note = `Rejected by ${req.user.full_name}${status_note ? `: ${status_note}` : ''}`;
-      updates.rejected_at = new Date().toISOString();
+      updates.rejected_at = at;
+      updates.task_events = withTaskEvent(existing, 'rejected', req.user.id);
     } else if (status === 'Pending') {
       updates.status_note = null;
     } else if (status === 'In Progress') {
-      // Employee ne "Accept" dabaya. Pehli baar accept hone ka time record
-      // karo — agar pehle se accepted_at set hai (dobara accept, e.g.
-      // reopen -> accept cycle), usse overwrite mat karo.
-      updates.accepted_at = existing.accepted_at || new Date().toISOString();
+      updates.accepted_at = firstStamp(existing, 'accepted_at', at);
+      updates.task_events = withTaskEvent(existing, 'start_task', req.user.id);
     }
-    
-    const { data, error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
 
-    if (error) throw error;
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Update status error:', err.message);
@@ -542,9 +547,7 @@ router.patch(
         return res.status(400).json({ error: 'Please choose who should verify this task' });
       }
 
-      const { data: existing, error: fetchErr } = await supabase
-        .from('tasks').select('id, assigned_to, status, reschedule_status').eq('id', id).maybeSingle();
-      if (fetchErr) throw fetchErr;
+      const existing = await loadTaskForStamp(id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
 
       const isOwnTask = existing.assigned_to === req.user.id;
@@ -563,29 +566,21 @@ router.patch(
         files.map((file) => uploadFile(file, 'verification-attachments'))
       );
 
-      const { data, error } = await supabase
-        .from('tasks')
-        .update({
-          verifier_id,
-          verification_status: 'Pending Verification',
-          verification_note: null,
-          correction_voice_url: null,
-          sent_for_verification_at: new Date().toISOString(),
-          verification_attachment_urls: verification_attachment_urls.length ? verification_attachment_urls : null,
-          // fresh submission into the queue — clear any previous start-verification lock
-          verification_started_by: null,
-          verification_started_at: null
-        })
-        .eq('id', id)
-        .select(TASK_SELECT)
-        .single();
-//17th july 
-      
-    //   if (error) throw error;
-    //   res.json(data);
-    // } catch (err) {
-    //   console.error('Send for verification error:', err.message);
-      if (error) throw error;
+      const at = nowIso();
+      const data = await updateTaskTolerant(id, {
+        verifier_id,
+        verification_status: 'Pending Verification',
+        verification_note: null,
+        correction_voice_url: null,
+        sent_for_verification_at: at,
+        first_sent_for_verification_at: firstStamp(existing, 'first_sent_for_verification_at', at),
+        accepted_at: firstStamp(existing, 'accepted_at', at),
+        verification_attachment_urls: verification_attachment_urls.length ? verification_attachment_urls : null,
+        // current cycle restarts; first start-verification time is kept
+        verification_started_by: null,
+        verification_started_at: null,
+        task_events: withTaskEvent(existing, 'send_for_verification', req.user.id),
+      }, TASK_SELECT);
 
       const { data: verifierUser } = await supabase
         .from('users')
@@ -630,9 +625,7 @@ router.patch('/:id/verify', async (req, res) => {
     const { id } = req.params;
     const { approved, note } = req.body || {};
 
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, verifier_id, sent_for_verification_at').eq('id', id).maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const isChosenVerifier = existing.verifier_id === req.user.id;
@@ -640,20 +633,23 @@ router.patch('/:id/verify', async (req, res) => {
       return res.status(403).json({ error: 'You are not the verifier for this task' });
     }
 
-    const nowIso = new Date().toISOString();
+    const at = nowIso();
     const updates = approved
       ? {
           verification_status: 'Verified',
           verification_note: note || null,
           status: 'Completed',
-          verified_at: nowIso,
-          verification_decided_at: nowIso,
+          verified_at: at,
+          first_verified_at: firstStamp(existing, 'first_verified_at', at),
+          verification_decided_at: at,
+          task_events: withTaskEvent(existing, 'verified', req.user.id),
         }
       : {
           verification_status: 'Verification Rejected',
           verification_note: note || null,
           status: 'In Progress',
-          verification_decided_at: nowIso,
+          verification_decided_at: at,
+          task_events: withTaskEvent(existing, 'verification_rejected', req.user.id),
         };
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
@@ -678,12 +674,7 @@ router.patch(
         return res.status(400).json({ error: 'Please write a correction note before sending' });
       }
 
-      const { data: existing, error: fetchErr } = await supabase
-        .from('tasks')
-        .select('id, verifier_id, target_date, hours_to_complete, extra_hours, extra_days, correction_extensions')
-        .eq('id', id)
-        .maybeSingle();
-      if (fetchErr) throw fetchErr;
+      const existing = await loadTaskForStamp(id);
       if (!existing) return res.status(404).json({ error: 'Task not found' });
 
       const isChosenVerifier = existing.verifier_id === req.user.id;
@@ -713,7 +704,8 @@ router.patch(
           extra_hours,
           extra_days,
           correction_extensions: extensions,
-          verification_decided_at: new Date().toISOString(),
+          verification_decided_at: nowIso(),
+          task_events: withTaskEvent(existing, 'correction', req.user.id),
         };
 
       const data = await updateTaskTolerant(id, updates, TASK_SELECT);
@@ -735,12 +727,7 @@ router.patch('/:id/send-updation', async (req, res) => {
       return res.status(400).json({ error: 'Please write an updation note before sending' });
     }
 
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks')
-      .select('id, verifier_id, target_date, hours_to_complete, extra_hours, extra_days, correction_extensions')
-      .eq('id', id)
-      .maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const isChosenVerifier = existing.verifier_id === req.user.id;
@@ -758,7 +745,8 @@ router.patch('/:id/send-updation', async (req, res) => {
       extra_hours: extra.extra_hours,
       extra_days: extra.extra_days,
       correction_extensions: extra.extensions,
-      verification_decided_at: new Date().toISOString(),
+      verification_decided_at: nowIso(),
+      task_events: withTaskEvent(existing, 'updation', req.user.id),
     };
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
@@ -1302,7 +1290,9 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
     const columns = `
       id, description, status, priority, created_at, assigned_at, accepted_at,
       sent_for_verification_at, verification_started_at, verified_at, rejected_at,
-      verification_status, verification_decided_at, hours_to_complete, target_date,
+      verification_status, verification_decided_at, first_verified_at,
+      first_sent_for_verification_at, first_verification_started_at,
+      hours_to_complete, target_date,
       extra_hours, extra_days, correction_extensions,
       project:projects ( id, name ),
       task_type:task_types ( id, name ),
@@ -1312,25 +1302,28 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       verifier:users!tasks_verifier_id_fkey ( id, full_name )
     `;
 
-    let { data: tasks, error } = await supabase
-      .from('tasks')
-      .select(columns)
-      .order('created_at', { ascending: false })
-      .limit(4000);
-    if (error && /verification_decided_at/i.test(error.message || '')) {
-      const retry = await supabase
+    let selectCols = columns;
+    let tasks = null;
+    let error = null;
+    for (let i = 0; i < 8; i += 1) {
+      const result = await supabase
         .from('tasks')
-        .select(columns.replace('verification_decided_at,', ''))
+        .select(selectCols)
         .order('created_at', { ascending: false })
         .limit(4000);
-      tasks = retry.data;
-      error = retry.error;
+      tasks = result.data;
+      error = result.error;
+      if (!error) break;
+      const hit = /column "?([a-z_]+)"?/i.exec(error.message || '') || /'([a-z_]+)' column/i.exec(error.message || '');
+      const col = hit && hit[1];
+      if (!col || !selectCols.includes(col)) break;
+      selectCols = selectCols.replace(new RegExp(`\\s*${col},?`, 'i'), ' ');
     }
     if (error) throw error;
 
     const stamps = (t) => [
       t.created_at, t.assigned_at, t.accepted_at, t.sent_for_verification_at,
-      t.verified_at, t.rejected_at, t.verification_decided_at,
+      t.verification_started_at, t.verified_at, t.rejected_at, t.verification_decided_at,
     ];
     const inRange = (iso) => {
       if (!iso) return false;
@@ -1344,20 +1337,21 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
       .map((t, idx) => {
         const assigned = t.assigned_at || t.created_at;
+        const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
+        const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
+        const verifiedAt = t.verified_at || t.first_verified_at;
         const extensions = Array.isArray(t.correction_extensions) ? t.correction_extensions : [];
-        const lastExtensionAt = extensions.length ? extensions[extensions.length - 1]?.at || null : null;
         const wentBack = ['Verification Rejected', 'Updation Required'].includes(t.verification_status)
           || extensions.length > 0;
-        const decidedAt = t.verification_decided_at || t.verified_at || t.rejected_at || lastExtensionAt;
+        const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
 
         const steps = {
-          // Task ka timestamp hi step-1 ka planned hai; accept hone par actual.
           accept: fmsStep(assigned, t.accepted_at, true),
-          submit: fmsStep(t.target_date, t.sent_for_verification_at, true),
-          verify: fmsStep(t.target_date, decidedAt, !!t.sent_for_verification_at),
+          submit: fmsStep(t.target_date, sentAt, true),
+          verify: fmsStep(t.target_date, decidedAt || startVerifyAt, !!sentAt),
           reverify: fmsStep(
             t.target_date,
-            wentBack && t.verification_status === 'Verified' ? t.verified_at : null,
+            wentBack && t.verification_status === 'Verified' ? verifiedAt : null,
             wentBack
           ),
         };
