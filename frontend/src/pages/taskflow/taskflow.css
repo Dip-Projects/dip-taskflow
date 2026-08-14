@@ -1425,7 +1425,10 @@ body.sidebar-open { overflow: hidden; }
 .org-tree-container {
   position: relative;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: var(--sh-xs); padding: 40px 24px; overflow-x: auto;
+  box-shadow: var(--sh-xs); padding: 40px 16px;
+  overflow: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 .org-tree-svg {
   position: absolute; top: 0; left: 0; z-index: 0;
@@ -1437,18 +1440,26 @@ body.sidebar-open { overflow: hidden; }
 .org-tree {
   position: relative; z-index: 1;
   display: flex; align-items: flex-start; justify-content: center; gap: 56px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 56px 16px;
 }
 .org-branch {
   display: flex; flex-direction: column; align-items: center;
+  flex: 0 0 auto;
 }
 .org-branch-children {
   display: flex; align-items: flex-start; justify-content: center; gap: 28px;
   margin-top: 40px;
+  width: max-content;
+  flex: 0 0 auto;
 }
 
 .org-node {
   position: relative; z-index: 1;
   display: inline-flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
   background: var(--surface-2); border: 1.5px solid var(--border);
   border-radius: var(--r-md); padding: 9px 16px; box-shadow: var(--sh-xs);
   white-space: nowrap;

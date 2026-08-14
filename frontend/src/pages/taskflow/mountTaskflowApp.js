@@ -4018,8 +4018,21 @@ export async function mountTaskflowApp(opts = {}) {
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
       .forEach((root) => treeEl.appendChild(renderOrgNode(root, true)));
     els.hierarchyTreeContainer.appendChild(treeEl);
-  
-    requestAnimationFrame(() => drawOrgTreeLines(treeEl));
+
+    requestAnimationFrame(() => {
+      centerOrgTreeView();
+      drawOrgTreeLines(treeEl);
+    });
+  }
+
+  function centerOrgTreeView() {
+    const wrap = els.hierarchyTreeContainer;
+    if (!wrap) return;
+    const root = wrap.querySelector('.org-node-root') || wrap.querySelector('.org-node');
+    if (!root) return;
+    const extra = (root.getBoundingClientRect().left + root.offsetWidth / 2)
+      - (wrap.getBoundingClientRect().left + wrap.clientWidth / 2);
+    wrap.scrollLeft += extra;
   }
   
   function drawOrgTreeLines(treeEl) {
