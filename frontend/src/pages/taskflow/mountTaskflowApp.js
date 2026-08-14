@@ -5637,7 +5637,8 @@ export async function mountTaskflowApp(opts = {}) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
         return;
       }
-      const empHtml = emps.map((emp) => {
+      const empHtml = `<div class="td-grid">${emps.map((emp) => {
+        const pf = emp.portfolio || {};
         const projBlocks = (emp.projects || []).map((p) => {
           const rows = (p.tasks || []).map((t) => `
             <tr>
@@ -5664,8 +5665,24 @@ export async function mountTaskflowApp(opts = {}) {
             </table></div>
           </div>`;
         }).join('');
-        return `<div class="td-emp"><h3>${escapeHtml(emp.name)}</h3>${projBlocks}</div>`;
-      }).join('');
+        return `<article class="td-card">
+          <header class="td-card-head">
+            <h3>${escapeHtml(emp.name)}</h3>
+            <span class="td-muted">${pf.total || 0} tasks in range</span>
+          </header>
+          <div class="td-kpis">
+            <div class="td-kpi"><span>Planned</span><strong>${pf.plannedHours || 0}h</strong></div>
+            <div class="td-kpi"><span>Extra</span><strong>${pf.extraHours || 0}h / ${pf.extraDays || 0}d</strong></div>
+            <div class="td-kpi"><span>Done</span><strong>${pf.completed || 0}</strong></div>
+            <div class="td-kpi"><span>Open</span><strong>${(pf.pending || 0) + (pf.inProgress || 0)}</strong></div>
+            <div class="td-kpi"><span>Avg accept</span><strong>${fmtHrs(pf.avgAcceptHrs)}</strong></div>
+            <div class="td-kpi"><span>Avg submit</span><strong>${fmtHrs(pf.avgSubmitHrs)}</strong></div>
+            <div class="td-kpi"><span>Avg verify</span><strong>${fmtHrs(pf.avgVerifyHrs)}</strong></div>
+            <div class="td-kpi"><span>Avg cycle</span><strong>${fmtHrs(pf.avgCycleHrs)}</strong></div>
+          </div>
+          ${projBlocks}
+        </article>`;
+      }).join('')}</div>`;
 
       const verHtml = vers.length
         ? `<div class="td-emp"><h3>Verification time by person</h3>
@@ -5680,7 +5697,7 @@ export async function mountTaskflowApp(opts = {}) {
             </table></div></div>`
         : '';
 
-      body.innerHTML = `<p class="td-muted">${escapeHtml(data.from?.slice(0,10) || '')} → ${escapeHtml(data.to?.slice(0,10) || '')}</p>${verHtml}${empHtml}`;
+      body.innerHTML = `<p class="td-muted">${escapeHtml(data.from?.slice(0,10) || '')} → ${escapeHtml(data.to?.slice(0,10) || '')} · employee portfolios</p>${empHtml}${verHtml}`;
     } catch (err) {
       body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
@@ -5703,7 +5720,7 @@ export async function mountTaskflowApp(opts = {}) {
     const log = document.getElementById('botChatLog');
     if (log && !log.dataset.ready) {
       log.dataset.ready = '1';
-      appendBotBubble('bot', 'Namaste! Main DIP Bot hoon. Tasks, overdue, verification — poochho.');
+      appendBotBubble('bot', 'Hello. I am DIP Bot. Ask about a person\'s clock-in, overdue tasks, or verification — I will answer only what you asked.');
     }
     try {
       const alerts = await api('/bot/alerts').catch(() => []);

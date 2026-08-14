@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import Navbar from "../../components/Navbar";
-import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 import "./ClientPortal.css";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
@@ -695,53 +695,10 @@ function MediaFolderTree({ siteName, activeDate, onSelectDate }) {
   useEffect(() => {
     if (!siteName) return;
     (async () => {
-      const [{ data: dprRows }, { data: wprRows }, { data: drawingRows }] = await Promise.all([
-        supabase
-          .from("dpr_reports")
-          .select("id, date, payload")
-          .ilike("site", siteName),
-        supabase
-          .from("wpr_reports")
-          .select("id, report_date")
-          .ilike("site_name", siteName),
-        supabase
-          .from("drawings")
-          .select("id, date, file_urls")
-          .ilike("site_name", siteName),
-      ]);
-      const wprIds = (wprRows || []).map((w) => w.id);
-
-      let imgDates = [];
-      if (wprIds.length) {
-        const { data } = await supabase
-          .from("wpr_images")
-          .select("created_at")
-          .in("wpr_report_id", wprIds)
-          .in("image_type", ["site_photo", "site_photos", "graphical"]);
-        imgDates = (data || []).map((r) => r.created_at);
-      }
-
-      // DPR photos now live in payload.photos, not a separate table
-      const dprPhotoDates = (dprRows || []).flatMap((r) => {
-        const photos = Array.isArray(r?.payload?.photos)
-          ? r.payload.photos
-          : [];
-        return photos.length ? photos.map(() => r.date) : [];
-      });
-
-      const drawingDates = (drawingRows || []).flatMap((d) => {
-        const files = Array.isArray(d.file_urls) ? d.file_urls : [];
-        return files.length ? files.map(() => d.date) : [];
-      });
-
-      const allDates = [
-        ...(dprRows || []).map((r) => r.date),
-        ...(wprRows || []).map((r) => r.report_date),
-        ...imgDates,
-        ...dprPhotoDates,
-        ...drawingDates,
-      ];
-      const t = buildDateTree(allDates);
+      const { dates } = await api(
+        `/client/media-tree?site=${encodeURIComponent(siteName)}`,
+      );
+      const t = buildDateTree(dates || []);
       setTree(t);
       if (t[0]) {
         setOpenYears({ [t[0].key]: true });
@@ -848,45 +805,21 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
       return;
     }
     setLoading(true);
-
-    const { data: matRows } = await supabase
-      .from("material_requirements")
-      .select(
-        "id, status, material_name, quantity, unit_name, created_at, actioned_at",
-      )
-      .ilike("site_name", siteName)
-      .order("created_at", { ascending: false });
-
-    const { count: dprCount } = await supabase
-      .from("dpr_reports")
-      .select("id", { count: "exact", head: true })
-      .ilike("site", siteName);
-
-    const { data: wprRows } = await supabase
-      .from("wpr_reports")
-      .select("id")
-      .ilike("site_name", siteName);
-    const wprIds = (wprRows || []).map((w) => w.id);
-
-    let photoCount = 0;
-    if (wprIds.length) {
-      const { count } = await supabase
-        .from("wpr_images")
-        .select("id", { count: "exact", head: true })
-        .in("wpr_report_id", wprIds);
-      photoCount = count || 0;
+    try {
+      const data = await api(`/client/overview?site=${encodeURIComponent(siteName)}`);
+      setStats({
+        pending: data.pending || 0,
+        accepted: data.accepted || 0,
+        rejected: data.rejected || 0,
+        dpr: data.dpr || 0,
+        wpr: data.wpr || 0,
+        photos: data.photos || 0,
+      });
+      setRecent(data.recent || []);
+    } catch (_) {
+      setStats({ pending: 0, accepted: 0, rejected: 0, dpr: 0, wpr: 0, photos: 0 });
+      setRecent([]);
     }
-
-    const rows = matRows || [];
-    setStats({
-      pending: rows.filter((r) => r.status === "pending").length,
-      accepted: rows.filter((r) => r.status === "received").length,
-      rejected: rows.filter((r) => r.status === "rejected").length,
-      dpr: dprCount || 0,
-      wpr: wprIds.length,
-      photos: photoCount,
-    });
-    setRecent(rows.slice(0, 6));
     setLoading(false);
   }, [siteName]);
 
@@ -898,13 +831,13 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
     <div>
       <div className="cp-hero">
         <div>
-          <div className="cp-hero-label">Operational snapshot</div>
+          <div className="cp-hero-label">{siteName || "Your project"}</div>
           <div className="cp-hero-title">
-            Coordinate site decisions with a polished, focused portal.
+            Welcome to your DIP client portal
           </div>
           <div className="cp-hero-sub">
-            Track procurement approvals, review project documents, and stay
-            aligned with the latest site activity in one place.
+            Approve material requests, open daily and weekly reports, and view
+            site photos for the project assigned to this login.
           </div>
         </div>
         <div className="cp-hero-pill">
@@ -1075,26 +1008,28 @@ function MaterialRequests({ siteName, userName, onStatsChange }) {
       return;
     }
     setLoading(true);
-    let q = supabase
-      .from("material_requirements")
-      .select("*")
-      .ilike("site_name", siteName);
-    const dbStatus = dbStatusForFilter(filter);
-    if (dbStatus) q = q.eq("status", dbStatus);
-    const { data, error } = await q.order("created_at", { ascending: false });
-    if (!error) setRows(data || []);
+    try {
+      const dbStatus = dbStatusForFilter(filter);
+      const qs = new URLSearchParams({ site: siteName });
+      if (dbStatus) qs.set("status", dbStatus);
+      const data = await api(`/client/materials?${qs.toString()}`);
+      setRows(data || []);
+    } catch (_) {
+      setRows([]);
+    }
     setLoading(false);
   }, [siteName, filter]);
 
   const loadStats = useCallback(async () => {
     if (!siteName) return;
-    const { data } = await supabase
-      .from("material_requirements")
-      .select("id, status")
-      .ilike("site_name", siteName);
-    setAllRows(data || []);
-    if (onStatsChange) {
-      onStatsChange((data || []).filter((r) => r.status === "pending").length);
+    try {
+      const data = await api(`/client/materials?site=${encodeURIComponent(siteName)}`);
+      setAllRows(data || []);
+      if (onStatsChange) {
+        onStatsChange((data || []).filter((r) => r.status === "pending").length);
+      }
+    } catch (_) {
+      setAllRows([]);
     }
   }, [siteName, onStatsChange]);
 
@@ -1104,17 +1039,13 @@ function MaterialRequests({ siteName, userName, onStatsChange }) {
   }, [load, loadStats]);
 
   const handleAction = async (id, newStatus, materialName) => {
-    const { error } = await supabase
-      .from("material_requirements")
-      .update({
-        status: newStatus,
-        actioned_at: new Date().toISOString(),
-        actioned_by: userName || "Client",
-      })
-      .eq("id", id);
-
-    if (error) {
-      showToast("err", "Update failed: " + error.message);
+    try {
+      await api(`/client/materials/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: newStatus }),
+      });
+    } catch (err) {
+      showToast("err", "Update failed: " + (err.message || "try again"));
       return;
     }
     showToast(
@@ -1563,84 +1494,31 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
       return;
     }
     setLoading(true);
+    try {
+      const data = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
+      const dprData = data.dprs || [];
+      const wprData = data.wprs || [];
+      const drawingData = data.drawings || [];
+      setDprs(dprData);
+      setWprs(wprData);
 
-    const { data: dprData, error: dprErr } = await supabase
-      .from("dpr_reports")
-      .select(
-        "id, site, engineer, report_type, date, pdf_url, created_at, payload",
-      )
-      .ilike("site", siteName)
-      .order("date", { ascending: false });
-    if (dprErr) console.error("dpr_reports error:", dprErr);
-    setDprs(dprData || []);
-
-    const { data: wprData, error: wprErr } = await supabase
-      .from("wpr_reports")
-      .select(
-        "id, site_name, engineer_name, report_date, report_number, presentation_url, created_at",
-      )
-      .ilike("site_name", siteName)
-      .order("report_date", { ascending: false });
-    if (wprErr) console.error("wpr_reports error:", wprErr);
-    setWprs(wprData || []);
-
-    const wprIds = (wprData || []).map((w) => w.id);
-
-    let wprPhotoRows = [];
-    if (wprIds.length) {
-      const { data: imgData, error: imgErr } = await supabase
-        .from("wpr_images")
-        .select(
-          "id, wpr_report_id, image_type, public_url, storage_path, caption, created_at",
-        )
-        .in("wpr_report_id", wprIds)
-        .in("image_type", ["site_photo", "site_photos", "graphical"]);
-      if (imgErr) console.error("wpr_images error:", imgErr);
-      wprPhotoRows = (imgData || []).map((p) => ({
-        ...p,
-        source: "wpr",
-        public_url: p.public_url || p.supabaseUrl || null,
-      }));
+      const drawingPhotoRows = drawingData.flatMap((d) => {
+        const files = Array.isArray(d.file_urls) ? d.file_urls : [];
+        return files.map((f, i) => ({
+          id: `drw-${d.id}-${i}`,
+          public_url: f.url || f.publicUrl || null,
+          caption: f.name || "Drawing",
+          created_at: d.date || d.created_at,
+          source: "drawing",
+          image_type: "graphical",
+        }));
+      });
+      setPhotos([...(data.photos || []), ...drawingPhotoRows]);
+    } catch (_) {
+      setDprs([]);
+      setWprs([]);
+      setPhotos([]);
     }
-
-    const dprPhotoRows = (dprData || []).flatMap((report, reportIndex) => {
-      const photos = Array.isArray(report?.payload?.photos)
-        ? report.payload.photos
-        : [];
-      return photos.filter(Boolean).map((photo, photoIndex) => ({
-        id: `${report.id}-${photoIndex}`,
-        dpr_report_id: report.id,
-        public_url: photo.supabaseUrl || photo.publicUrl || photo.url || null,
-        storage_path: photo.storagePath || photo.storage_path || null,
-        caption: photo.caption || "",
-        created_at: report.date || report.created_at,
-        actual_created_at: report.created_at || report.date,
-        source: "dpr",
-        image_type: "photos",
-      }));
-    });
-
-    const { data: drawingData, error: drawErr } = await supabase
-      .from("drawings")
-      .select("id, site_name, date, file_urls, uploaded_by, created_at")
-      .ilike("site_name", siteName)
-      .order("date", { ascending: false });
-    if (drawErr) console.error("drawings error:", drawErr);
-
-    const drawingPhotoRows = (drawingData || []).flatMap((d) => {
-      const files = Array.isArray(d.file_urls) ? d.file_urls : [];
-      return files.map((f, i) => ({
-        id: `drw-${d.id}-${i}`,
-        public_url: f.url || f.publicUrl || null,
-        caption: f.name || "Drawing",
-        created_at: d.date || d.created_at,
-        source: "drawing",
-        image_type: "graphical",
-      }));
-    });
-
-    setPhotos([...wprPhotoRows, ...dprPhotoRows, ...drawingPhotoRows]);
-
     setLoading(false);
   }, [siteName]);
 
@@ -2150,14 +2028,7 @@ function ProfilePage({ siteName, onLogout, theme, onToggleTheme }) {
     }
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("site_details")
-        .select(
-          "site_name, client_name, head_name, head_contact_no, incharge_name, incharge_contact_no, pc_name, pc_contact_no, status, site_image_url, job_no",
-        )
-        .eq("site_name", siteName)
-        .maybeSingle();
-      if (error) console.error("site_details error:", error);
+      const data = await api(`/client/site-profile?site=${encodeURIComponent(siteName)}`);
       setSite(data || null);
       setLoading(false);
     })();
@@ -2170,34 +2041,12 @@ function ProfilePage({ siteName, onLogout, theme, onToggleTheme }) {
     }
     (async () => {
       setActivityLoading(true);
-
-      const { data: dprData } = await supabase
-        .from("dpr_reports")
-        .select("id, date, created_at, report_type, payload")
-        .ilike("site", siteName);
-
-      const { data: wprData } = await supabase
-        .from("wpr_reports")
-        .select("id, report_date, created_at")
-        .ilike("site_name", siteName);
-
-      const wprIds = (wprData || []).map((w) => w.id);
-      let wprPhotoRows = [];
-      if (wprIds.length) {
-        const { data: imgData } = await supabase
-          .from("wpr_images")
-          .select("id, image_type, created_at")
-          .in("wpr_report_id", wprIds)
-          .in("image_type", ["site_photo", "site_photos", "graphical"]);
-        wprPhotoRows = imgData || [];
-      }
-
-      const dprPhotoRows = (dprData || []).flatMap((r) => {
-        const photos = Array.isArray(r?.payload?.photos)
-          ? r.payload.photos
-          : [];
-        return photos.map(() => ({ created_at: r.date || r.created_at }));
-      });
+      try {
+      const media = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
+      const dprData = media.dprs || [];
+      const wprData = media.wprs || [];
+      const wprPhotoRows = (media.photos || []).filter((p) => p.source === "wpr");
+      const dprPhotoRows = (media.photos || []).filter((p) => p.source === "dpr");
 
       const unified = [
         ...(dprData || [])
@@ -2215,6 +2064,9 @@ function ProfilePage({ siteName, onLogout, theme, onToggleTheme }) {
       ];
 
       setActivity(unified);
+      } catch (_) {
+        setActivity([]);
+      }
       setActivityLoading(false);
     })();
   }, [siteName]);
@@ -2469,12 +2321,12 @@ export default function ClientPortal() {
   );
   const loadPendingCount = useCallback(async () => {
     if (!activeSite) return;
-    const { count } = await supabase
-      .from("material_requirements")
-      .select("id", { count: "exact", head: true })
-      .ilike("site_name", activeSite)
-      .eq("status", "pending");
-    setPendingCount(count || 0);
+    try {
+      const data = await api(`/client/materials?site=${encodeURIComponent(activeSite)}&status=pending`);
+      setPendingCount((data || []).length);
+    } catch (_) {
+      setPendingCount(0);
+    }
   }, [activeSite]);
 
   useEffect(() => {
@@ -2487,7 +2339,7 @@ export default function ClientPortal() {
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
   const [jumpDate, setJumpDate] = useState(null);
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user: authUser } = useAuth();
 
   const handleLogout = () => {
     logout();
@@ -2506,27 +2358,62 @@ export default function ClientPortal() {
     scrollToTop();
   };
   useEffect(() => {
-    const stored = localStorage.getItem("user");
-    if (!stored) return;
-    try {
-      const u = JSON.parse(stored);
-      setUser(u);
-
-      const sites = parseSiteNames(u.site_names);
-      const primary = (u.site_name || "").trim();
-      const combined =
-        primary && !sites.some((s) => s.toLowerCase() === primary.toLowerCase())
-          ? [primary, ...sites]
-          : sites.length
-            ? sites
-            : primary
-              ? [primary]
-              : [];
-
-      setAllSites(combined);
-      setActiveSite(combined[0] || "");
-    } catch (_) {}
-  }, []);
+    let cancelled = false;
+    (async () => {
+      try {
+        const portal = await api("/client/portal");
+        if (cancelled) return;
+        const sites = portal.sites || [];
+        const u = portal.user || {};
+        setUser({
+          name: u.full_name || authUser?.full_name || "Client",
+          username: u.username || authUser?.username,
+          role: "Client",
+          designation: "Client",
+          site_name: sites[0] || "",
+          site_names: sites,
+        });
+        setAllSites(sites);
+        setActiveSite(sites[0] || "");
+      } catch (_) {
+        if (cancelled) return;
+        const stored = localStorage.getItem("user");
+        if (stored) {
+          try {
+            const u = JSON.parse(stored);
+            setUser({ ...u, role: "Client", designation: "Client", name: u.name || authUser?.full_name });
+            const sites = parseSiteNames(u.site_names);
+            const primary = (u.site_name || "").trim();
+            const combined = primary && !sites.some((s) => s.toLowerCase() === primary.toLowerCase())
+              ? [primary, ...sites]
+              : sites.length ? sites : primary ? [primary] : [];
+            setAllSites(combined);
+            setActiveSite(combined[0] || "");
+            return;
+          } catch (_) {}
+        }
+        if (authUser) {
+          setUser({
+            name: authUser.full_name,
+            username: authUser.username,
+            role: "Client",
+            designation: "Client",
+            site_name: authUser.site_name || "",
+            site_names: parseSiteNames(authUser.site_names),
+          });
+          const sites = [
+            ...(authUser.site_name ? [authUser.site_name] : []),
+            ...parseSiteNames(authUser.site_names),
+          ];
+          setAllSites(sites);
+          setActiveSite(sites[0] || "");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -2566,6 +2453,7 @@ export default function ClientPortal() {
       <Navbar
         onMenuToggle={() => setMobileNavOpen((v) => !v)}
         menuOpen={mobileNavOpen}
+        onLogout={handleLogout}
       />
       <div className={`cp-wrap${theme === "dark" ? " theme-dark" : ""}`}>
         <div className="cp-shell">
@@ -2585,7 +2473,7 @@ export default function ClientPortal() {
               </button>
             </div>
             <div className="cp-drawer-scroll">
-              {allSites.length > 1 && (
+              {allSites.length > 0 && (
                 <div
                   className="cp-sidebar-section"
                   style={{ padding: "0 4px 8px" }}
@@ -2663,7 +2551,7 @@ export default function ClientPortal() {
           {activeSite && (
             <aside className="cp-sidebar">
               <div className="cp-sidebar-scroll">
-                {allSites.length > 1 && (
+                {allSites.length > 0 && (
                   <div className="cp-sidebar-section">
                     <div className="cp-sidebar-eyebrow">Site</div>
                     <div className="cp-site-list">
@@ -2777,8 +2665,8 @@ export default function ClientPortal() {
                     <IcoBox />
                     <div className="cp-empty-title">No site assigned</div>
                     <div className="cp-empty-sub">
-                      Your account isn't linked to a project site yet. Contact
-                      your project manager.
+                      This client login has no project site yet. Ask admin to
+                      open Employees, edit this client, and assign the site.
                     </div>
                   </div>
                 </div>

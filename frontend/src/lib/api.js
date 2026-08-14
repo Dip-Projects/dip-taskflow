@@ -24,17 +24,20 @@ export function syncSiteUser(user) {
     localStorage.removeItem('user');
     return;
   }
+  const clientLogin =
+    String(user.role || '').toLowerCase() === 'client' ||
+    String(user.department || '').toLowerCase() === 'client';
   const siteUser = {
     id: user.id,
     user_name: user.username,
     name: user.full_name,
     department: user.department || '',
-    role: user.designation || user.site_role || user.role || '',
+    role: clientLogin ? 'Client' : (user.designation || user.site_role || user.role || ''),
     status: user.is_active === false ? 'Inactive' : 'Active',
     site_name: user.site_name || '',
     site_names: user.site_names || null,
-    designation: user.designation || user.department || '',
-    is_head: !!(user.is_head || user.can_access_site),
+    designation: clientLogin ? 'Client' : (user.designation || user.department || ''),
+    is_head: clientLogin ? false : !!(user.is_head || user.can_access_site),
   };
   localStorage.setItem('user', JSON.stringify(siteUser));
 }

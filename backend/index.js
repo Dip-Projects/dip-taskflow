@@ -33,6 +33,7 @@ app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));
 app.use('/api/mis-report',      require('./routes/mis_report'));
 app.use('/api/bot',             require('./routes/bot'));
+app.use('/api/client',          require('./routes/client'));
 app.get('/api/health', (_, res) => {
   const phoneId = !!(process.env.META_PHONE_NUMBER_ID && String(process.env.META_PHONE_NUMBER_ID).trim());
   const accessToken = !!(process.env.META_ACCESS_TOKEN && String(process.env.META_ACCESS_TOKEN).trim());

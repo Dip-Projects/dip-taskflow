@@ -8,6 +8,99 @@ function fmtDate(v) {
   return String(v).slice(0, 10);
 }
 
+function fmtTimeIst(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata',
+    });
+  } catch {
+    return String(iso).slice(11, 16);
+  }
+}
+
+function matchPeople(users, ql) {
+  const q = String(ql || '').toLowerCase();
+  const scored = (users || [])
+    .map((u) => {
+      const fn = String(u.full_name || '').toLowerCase();
+      const un = String(u.username || '').toLowerCase();
+      let score = 0;
+      if (fn && q.includes(fn)) score += 10;
+      if (un && (q.includes(un) || q.includes(un.replace(/\./g, ' ')))) score += 8;
+      const parts = fn.split(/[\s.]+/).filter((p) => p.length >= 4);
+      const hits = parts.filter((p) => q.includes(p));
+      score += hits.length * 3;
+      return { u, score, hits: hits.length };
+    })
+    .filter((x) => x.score > 0);
+  if (!scored.length) return [];
+  const strong = scored.filter((x) => x.score >= 8);
+  if (strong.length) return strong.map((x) => x.u);
+  const maxHits = Math.max(...scored.map((x) => x.hits));
+  if (maxHits >= 2) return scored.filter((x) => x.hits >= 2).map((x) => x.u);
+  return scored.map((x) => x.u);
+}
+
+async function attendanceForPeople(people, days = 14) {
+  if (!people.length) return [];
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceStr = since.toISOString().slice(0, 10);
+  const names = [...new Set(people.flatMap((p) => [p.username, p.full_name].filter(Boolean)))];
+  const { data, error } = await supabase
+    .from('attendance')
+    .select('user_name, date, clock_in, clock_out, status, clock_in_status')
+    .gte('date', sinceStr)
+    .order('date', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  const keys = names.map((n) => String(n).toLowerCase());
+  return (data || []).filter((row) => {
+    const un = String(row.user_name || '').toLowerCase();
+    return keys.some(
+      (k) =>
+        un === k ||
+        un.includes(k) ||
+        k.includes(un) ||
+        k.split(/\s+/).some((p) => p.length >= 4 && un.includes(p))
+    );
+  });
+}
+
+function formatClockAnswer(people, rows) {
+  const blocks = people.map((p) => {
+    const un = String(p.username || '').toLowerCase();
+    const fn = String(p.full_name || '').toLowerCase();
+    const mine = rows.filter((r) => {
+      const n = String(r.user_name || '').toLowerCase();
+      return n === un || n.includes(un) || (fn && n.includes(fn.split(/\s+/)[0]));
+    });
+    const latest = mine[0];
+    if (!latest) {
+      return `${p.full_name} (${p.username})\n  No clock-in found in the last 14 days.`;
+    }
+    const rest = mine
+      .slice(0, 5)
+      .map(
+        (a) =>
+          `  ${fmtDate(a.date)}  ${a.status || '—'}  in ${fmtTimeIst(a.clock_in)}  out ${fmtTimeIst(a.clock_out)}` +
+          (a.clock_in_status ? `  (${a.clock_in_status})` : '')
+      )
+      .join('\n');
+    return (
+      `${p.full_name} (${p.username})\n` +
+      `  Latest clock-in: ${fmtDate(latest.date)} at ${fmtTimeIst(latest.clock_in)}\n` +
+      `  Clock-out: ${fmtTimeIst(latest.clock_out)}\n` +
+      `Recent:\n${rest}`
+    );
+  });
+  return `CLOCK-IN / CLOCK-OUT\nTimes are India (IST).\n\n${blocks.join('\n\n')}`;
+}
+
 function lines(arr, mapFn, empty) {
   if (!arr?.length) return empty || '  (none)';
   return arr.map(mapFn).join('\n');
@@ -157,7 +250,7 @@ function formatSitePulse(s) {
   const attLines = lines(
     s.attendance.slice(0, 12),
     (a) =>
-      `  • ${a.user_name || '—'} | ${fmtDate(a.date)} | ${a.status || '—'} | in ${a.clock_in ? String(a.clock_in).slice(11, 16) : '—'} out ${a.clock_out ? String(a.clock_out).slice(11, 16) : '—'}`,
+      `  • ${a.user_name || '—'} | ${fmtDate(a.date)} | ${a.status || '—'} | in ${fmtTimeIst(a.clock_in)} out ${fmtTimeIst(a.clock_out)}`,
     '  (no attendance in last 7 days)'
   );
   const dprLines = lines(
@@ -184,22 +277,75 @@ async function answerQuestion({ question, user, isAdmin }) {
   const ql = q.toLowerCase();
   let adminOnly = false;
   let answer = '';
+  let skipPolish = false;
 
-  const wantsSite =
-    /\b(dpr|wpr|attendance|manpower|site report|clock in|clock-in|labour|labor)\b/i.test(ql);
+  const wantsClock =
+    /clok|clock|clicok|punch|attendance|in[\s-]*time|out[\s-]*time|clockin|clock-in/i.test(ql);
+  const wantsDpr = /\bdpr\b/i.test(ql);
+  const wantsWpr = /\bwpr\b/i.test(ql);
+  const wantsAttendance = /\battendance\b/i.test(ql) && !wantsClock;
+  const wantsSiteDump = /\b(manpower|site report|labour|labor)\b/i.test(ql);
+  const wantsSite = wantsClock || wantsDpr || wantsWpr || wantsAttendance || wantsSiteDump;
   const wantsTasks =
     /\b(task|overdue|verify|verification|pending|due|assign|my work)\b/i.test(ql);
   const wantsCompany =
-    /\b(company|sab|all|overall|team|kitne|everyone|total|mis|summary|status|report)\b/i.test(ql);
+    /\b(company|sab|all|overall|team|kitne|everyone|total|mis|summary|status)\b/i.test(ql);
 
-  if (wantsSite && isAdmin) {
+  let directory = [];
+  if (isAdmin) {
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, username, full_name')
+      .eq('is_active', true);
+    directory = users || [];
+  }
+  const people = matchPeople(directory, ql);
+
+  if (isAdmin && people.length && (wantsClock || wantsAttendance || /\btime\b/.test(ql))) {
+    adminOnly = true;
+    skipPolish = true;
+    const rows = await attendanceForPeople(people);
+    answer = formatClockAnswer(people, rows);
+  } else if (isAdmin && people.length && (wantsDpr || wantsWpr) && !wantsClock) {
     adminOnly = true;
     const s = await sitePulse();
-    answer = `DIP site snapshot\n\n${formatSitePulse(s)}`;
+    const nameBits = people.flatMap((p) =>
+      [p.full_name, p.username, ...(String(p.full_name || '').split(/\s+/))]
+        .filter((x) => String(x || '').length >= 4)
+        .map((x) => String(x).toLowerCase())
+    );
+    const hit = (text) => {
+      const t = String(text || '').toLowerCase();
+      return nameBits.some((n) => t.includes(n));
+    };
+    const dprs = (s.dprs || []).filter((d) => hit(d.engineer) || hit(d.site));
+    const wprs = (s.wprs || []).filter((w) => hit(w.engineer_name) || hit(w.site_name));
+    answer =
+      (wantsDpr ? `DPR\n${lines(dprs, (d) => `  • ${fmtDate(d.date)} | ${d.site || '—'} | ${d.engineer || '—'} | ${d.report_type || 'DPR'}${summarizeDprPayload(d.payload)}`, '  (none for this person)')}\n\n` : '') +
+      (wantsWpr ? `WPR\n${lines(wprs, (w) => `  • ${fmtDate(w.report_date)} | ${w.site_name || '—'} | ${w.engineer_name || '—'} | #${w.report_number || '—'}`, '  (none for this person)')}` : '');
+  } else if (wantsSite && isAdmin) {
+    adminOnly = true;
+    const s = await sitePulse();
+    if (wantsClock || wantsAttendance) {
+      answer =
+        `CLOCK-IN / ATTENDANCE (last 7 days, IST)\n` +
+        lines(
+          s.attendance.slice(0, 20),
+          (a) =>
+            `  • ${a.user_name || '—'} | ${fmtDate(a.date)} | in ${fmtTimeIst(a.clock_in)} | out ${fmtTimeIst(a.clock_out)}`,
+          '  (no attendance in last 7 days)'
+        );
+    } else if (wantsDpr && !wantsWpr) {
+      answer = `DPR (recent)\n${lines(s.dprs, (d) => `  • ${fmtDate(d.date)} | ${d.site || '—'} | ${d.engineer || '—'} | ${d.report_type || 'DPR'}${summarizeDprPayload(d.payload)}`, '  (no DPR)')}`;
+    } else if (wantsWpr && !wantsDpr) {
+      answer = `WPR (recent)\n${lines(s.wprs, (w) => `  • ${fmtDate(w.report_date)} | ${w.site_name || '—'} | ${w.engineer_name || '—'} | #${w.report_number || '—'}`, '  (no WPR)')}`;
+    } else {
+      answer = `DIP site snapshot\n\n${formatSitePulse(s)}`;
+    }
   } else if (wantsSite && !isAdmin) {
     answer =
-      'Site attendance / DPR / WPR company view sirf admin ke DIP Bot pe hai.\n' +
-      'Apna site portal kholo for clock-in, DPR and WPR.';
+      'Site attendance, DPR and WPR company view is available only on admin DIP Bot.\n' +
+      'Open the site portal for your own clock-in, DPR and WPR.';
   } else if (/\b(overdue|late|delay)\b/i.test(ql) || (/verif/i.test(ql) && wantsTasks)) {
     if (isAdmin && wantsCompany) {
       adminOnly = true;
@@ -249,13 +395,11 @@ async function answerQuestion({ question, user, isAdmin }) {
       .slice(0, 15)
       .map(([name, v]) => `  • ${name}: open ${v.open} | done ${v.done} | overdue ${v.overdue}`)
       .join('\n');
-    const site = await sitePulse();
     answer =
       `DIP COMPANY SNAPSHOT\n` +
       `Tasks total ${c.total} | open ${c.open} | overdue ${c.overdue} | verify ${c.pendingVerify}\n\n` +
       `BY EMPLOYEE\n${people || '  (none)'}\n\n` +
-      `BY PROJECT\n${projects || '  (none)'}\n\n` +
-      formatSitePulse(site);
+      `BY PROJECT\n${projects || '  (none)'}`;
   } else if (/my task|mera|mere|mine|pending|task/i.test(ql) || !isAdmin) {
     const s = await taskStatsForUser(user.id);
     answer =
@@ -263,24 +407,23 @@ async function answerQuestion({ question, user, isAdmin }) {
       `Open: ${s.pending.length}   Overdue: ${s.overdue.length}\n` +
       `Pending verification: ${s.pendingVerify.length}   Done: ${s.completed.length}\n\n` +
       (s.pending.length ? `OPEN TASKS\n` + s.pending.slice(0, 12).map(formatTaskBlock).join('\n') : 'No open tasks.') +
-      `\n\nAsk: overdue | verification | (admin) dpr / attendance / company`;
+      `\n\nAsk: overdue | verification | (admin) clock-in for a person | DPR | company`;
   } else if (isAdmin) {
     adminOnly = true;
-    const c = await companyTaskSummary();
-    const L = await leaveSummary();
-    const T = await ticketSummary();
-    const site = await sitePulse();
+    skipPolish = true;
     answer =
-      `DIP PULSE\n` +
-      `Tasks open ${c.open} / overdue ${c.overdue} / verify ${c.pendingVerify}\n` +
-      `Leaves pending: ${L.pending}   Tickets open: ${T.open}\n\n` +
-      formatSitePulse(site);
+      'Ask a specific question. Examples:\n' +
+      '• Roshan Patel clock-in time\n' +
+      '• Harshil clock-in and clock-out\n' +
+      '• overdue tasks\n' +
+      '• company summary\n' +
+      '• DPR for SMJV';
   } else {
     const s = await taskStatsForUser(user.id);
     answer = `Open tasks: ${s.pending.length}. Type "overdue" or "my tasks" for the list.`;
   }
 
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.OPENAI_API_KEY && !skipPolish) {
     try {
       const polished = await polishWithOpenAI(q, answer, user.full_name);
       if (polished) answer = polished;
@@ -306,7 +449,7 @@ async function polishWithOpenAI(question, facts, name) {
         {
           role: 'system',
           content:
-            'You are DIP Projects office assistant. Keep ALL numbers and names from Facts. Reply in clear English with the same section headings. Do not invent data. Keep lists. Use plain text, no markdown tables.',
+            'You are DIP Bot. Always reply in clear English. Answer ONLY what the user asked using Facts. If they asked clock-in times, give only those people and times. Do not add tasks, DPR, WPR, or company pulse unless those facts were requested. Keep every number and name from Facts. Do not invent data. Plain text, no markdown tables.',
         },
         {
           role: 'user',

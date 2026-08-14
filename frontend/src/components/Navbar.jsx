@@ -6,16 +6,24 @@ import "./Navbar.css";
 
 export default function Navbar({ onMenuToggle, menuOpen, onLogout }) {
   const navigate = useNavigate();
-  const { logout } = useAuth();
-  let user = null;
-  try {
-    user = JSON.parse(localStorage.getItem("user") || "null");
-  } catch {
-    user = null;
-  }
+  const { user: authUser, logout } = useAuth();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-
-  const portalName = user?.role ? `${user.role}` : "Employee Portal";
+  const isClientLogin =
+    String(authUser?.role || "").toLowerCase() === "client" ||
+    String(authUser?.department || "").toLowerCase() === "client";
+  const user = authUser
+    ? {
+        name: authUser.full_name || authUser.name,
+        role: isClientLogin ? "Client" : authUser.role,
+        designation: isClientLogin ? "Client" : authUser.designation,
+        department: authUser.department,
+      }
+    : null;
+  const portalName = isClientLogin
+    ? "Client Portal"
+    : user?.role
+      ? `${user.role}`
+      : "Employee Portal";
 
   const confirmLogout = () => {
     setShowLogoutModal(false);

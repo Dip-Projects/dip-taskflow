@@ -112,10 +112,11 @@ router.post('/', async (req, res) => {
         ? 'Client'
         : department;
 
-    const { data, error } = await supabase
+    let insertRole = role;
+    let { data, error } = await supabase
       .from('users')
       .insert({
-        username, password_hash, full_name, department: departmentFinal, designation, role, is_active: true,
+        username, password_hash, full_name, department: departmentFinal, designation, role: insertRole, is_active: true,
         reporting_head_id: reporting_head_id || null,
         is_head: headFlag,
         site_name: site_name || null,
@@ -124,6 +125,23 @@ router.post('/', async (req, res) => {
       })
       .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .single();
+
+    if (error && role === 'client' && /users_role_check|role/i.test(error.message || '')) {
+      insertRole = 'employee';
+      ({ data, error } = await supabase
+        .from('users')
+        .insert({
+          username, password_hash, full_name, department: 'Client', designation: designation || 'Client',
+          role: insertRole, is_active: true,
+          reporting_head_id: reporting_head_id || null,
+          is_head: false,
+          site_name: site_name || null,
+          site_names: site_names || null,
+          whatsapp_number: whatsapp_number ? String(whatsapp_number).trim() : null
+        })
+        .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+        .single());
+    }
 
     if (error) throw error;
     const withHead = await attachReportingHead(data);

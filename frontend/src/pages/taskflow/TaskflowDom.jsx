@@ -415,12 +415,12 @@ export default function TaskflowDom() {
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">🤖 DIP Bot</h2>
-            <p className="view-sub">Admin only — ask about tasks, overdue, verification, company stats. Chat alerts stay in Team chat (not here).</p>
+            <p className="view-sub">Admin only — ask in English or Hindi. Example: “Harshil clock-in time and Roshan Patel clock-in time”.</p>
           </div>
           <div className="bot-shell">
             <div id="botChatLog" className="bot-chat-log"></div>
             <form id="botAskForm" className="bot-ask-form">
-              <input id="botAskInput" type="text" placeholder='e.g. "kitne overdue tasks?" or "verification pending"' autoComplete="off" />
+              <input id="botAskInput" type="text" placeholder='e.g. Harshil clock-in time and Roshan Patel clock-in' autoComplete="off" />
               <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
             </form>
             <div id="botAlerts" className="bot-alerts"></div>
@@ -1042,7 +1042,7 @@ export default function TaskflowDom() {
         <section id="view-time-dashboard" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">⏱ Time dashboard</h2>
-            <p className="view-sub">Assign → accept → submit for verification → start verify → verified. Extra correction time included.</p>
+            <p className="view-sub">One portfolio per employee: planned hours, extra time, and assign → accept → submit → verify cycle. Tasks counted if any of those dates fall in the range.</p>
           </div>
           <div className="mis-toolbar" style={{marginBottom: 14}}>
             <label className="mis-field">
@@ -1103,7 +1103,7 @@ export default function TaskflowDom() {
           <select id="emp-site">
             <option value="">— None —</option>
           </select>
-          <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers and Clients — Clock In / client portal use this site.</p>
+          <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers and Clients. Client login only shows this project’s reports and materials.</p>
         </div>
         <div className="field">
           <label htmlFor="emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>

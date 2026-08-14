@@ -1046,11 +1046,25 @@ router.get('/report', requireAdmin, async (req, res) => {
         assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
         verifier:users!tasks_verifier_id_fkey ( id, full_name )
       `)
-      .gte('created_at', startDate.toISOString())
-      .lte('created_at', endDate.toISOString())
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(3000);
 
     if (error) throw error;
+
+    const inRange = (iso) => {
+      if (!iso) return false;
+      const d = new Date(iso);
+      return d >= startDate && d <= endDate;
+    };
+    const ranged = (tasks || []).filter(
+      (t) =>
+        inRange(t.created_at) ||
+        inRange(t.assigned_at) ||
+        inRange(t.accepted_at) ||
+        inRange(t.sent_for_verification_at) ||
+        inRange(t.verified_at) ||
+        inRange(t.rejected_at)
+    );
 
     // Helper: diff in hours between two timestamps
     function hrsBetween(a, b) {
@@ -1059,7 +1073,7 @@ router.get('/report', requireAdmin, async (req, res) => {
     }
 
     // Enrich each task with computed time fields
-    const enriched = (tasks || []).map(t => {
+    const enriched = ranged.map(t => {
       const assigned = t.assigned_at || t.created_at;
       return {
         ...t,
@@ -1111,7 +1125,25 @@ router.get('/report', requireAdmin, async (req, res) => {
         return { ...proj, tasks, summary: { total: tasks.length, completed, pending, inProgress, rejected, avgCycleHrs: avgCycle } };
       });
 
-      return { ...emp, projects };
+      const allTasks = projects.flatMap((p) => p.tasks);
+      const avg = (arr) => {
+        const valid = arr.filter((h) => h != null);
+        return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
+      };
+      const portfolio = {
+        total: allTasks.length,
+        completed: allTasks.filter((t) => t.status === 'Completed' || t.verification_status === 'Verified').length,
+        pending: allTasks.filter((t) => t.status === 'Pending').length,
+        inProgress: allTasks.filter((t) => t.status === 'In Progress').length,
+        plannedHours: Math.round(allTasks.reduce((s, t) => s + Number(t.hours_to_complete || 0), 0) * 10) / 10,
+        extraHours: allTasks.reduce((s, t) => s + Number(t.extra_hours || 0), 0),
+        extraDays: allTasks.reduce((s, t) => s + Number(t.extra_days || 0), 0),
+        avgAcceptHrs: avg(allTasks.map((t) => t.time_to_accept_hrs)),
+        avgSubmitHrs: avg(allTasks.map((t) => t.time_to_submit_hrs)),
+        avgVerifyHrs: avg(allTasks.map((t) => t.time_to_verify_hrs)),
+        avgCycleHrs: avg(allTasks.map((t) => t.total_cycle_hrs)),
+      };
+      return { ...emp, projects, portfolio };
     });
 
     const byVerifier = {};
