@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
@@ -10,6 +11,7 @@ const {
 } = require('../lib/botData');
 
 const router = express.Router();
+const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 function isSchemaMissing(err) {
   const m = String(err?.message || err?.details || '').toLowerCase();
@@ -28,6 +30,92 @@ function isSchemaMissing(err) {
 
 function schemaHint() {
   return 'Run add_dip_bot.sql, add_chat_unread_meet.sql, and add_meeting_moms.sql in Supabase SQL Editor.';
+}
+
+function blankCallMom() {
+  return (
+    `Agenda:\n1. Review what was discussed on the call\n2. Decisions & next steps\n3. Action owners\n\n` +
+    `Discussion / important points (from the video call):\n` +
+    `- (join the call inside TaskFlow — spoken words are captured for MoM)\n\n` +
+    `Decisions:\n- \n\nAction items:\n- Owner — task — due date\n`
+  );
+}
+
+function discussionLinesFromTranscript(transcript) {
+  return String(transcript || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-80)
+    .map((l) => (l.startsWith('- ') ? l : `- ${l}`));
+}
+
+function replaceCallDiscussion(existingBody, transcript) {
+  const points = discussionLinesFromTranscript(transcript);
+  const discussion = points.length
+    ? points.join('\n')
+    : '- (no spoken captions yet — join video inside TaskFlow and keep the tab open)';
+  const block = `Discussion / important points (from the video call):\n${discussion}`;
+  const stripped = String(existingBody || blankCallMom()).replace(
+    /Discussion \/ important points[\s\S]*?(?=\n(?:Decisions:|Action items:)|$)/gi,
+    ''
+  );
+  if (/Decisions:/i.test(stripped)) {
+    return stripped.replace(/Decisions:/i, `${block}\n\nDecisions:`).replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  }
+  return `${stripped.trim()}\n\n${block}\n`;
+}
+
+function isMomParticipant(existing, user) {
+  if (!existing || !user) return false;
+  if (user.role === 'admin') return true;
+  if (String(existing.started_by) === String(user.id)) return true;
+  const attendees = Array.isArray(existing.attendees) ? existing.attendees.map(String) : [];
+  return attendees.includes(String(user.id));
+}
+
+async function appendMeetingTranscript(existing, line) {
+  const next = `${existing.live_transcript || ''}${existing.live_transcript ? '\n' : ''}${line}`.slice(-80000);
+  const mom_body = replaceCallDiscussion(existing.mom_body, next);
+  const updates = { mom_body, updated_at: new Date().toISOString() };
+  let { data, error } = await supabase
+    .from('meeting_moms')
+    .update({ ...updates, live_transcript: next })
+    .eq('id', existing.id)
+    .select('*')
+    .single();
+  if (error && /live_transcript/i.test(String(error.message || ''))) {
+    const retry = await supabase
+      .from('meeting_moms')
+      .update(updates)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    data = retry.data;
+    error = retry.error;
+    if (!error && data) data.live_transcript = next;
+  }
+  if (error) throw error;
+  return data;
+}
+
+async function whisperAudio(buffer, mime) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  const fd = new FormData();
+  fd.append('file', new Blob([buffer], { type: mime || 'audio/webm' }), 'chunk.webm');
+  fd.append('model', 'whisper-1');
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}` },
+    body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.warn('Whisper:', data.error?.message || res.status);
+    return null;
+  }
+  return String(data.text || '').trim() || null;
 }
 
 async function pushAlert(userId, title, body, linkHint) {
@@ -458,43 +546,30 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
       .eq('room_id', roomId);
     const attendeeIds = (members || []).map((m) => m.user_id);
 
-    const { data: recentMsgs } = await supabase
-      .from('chat_messages')
-      .select('body, created_at, is_bot, msg_type, sender:users!chat_messages_sender_id_fkey(full_name)')
-      .eq('room_id', roomId)
-      .neq('msg_type', 'meeting')
-      .order('created_at', { ascending: false })
-      .limit(20);
-
-    const points = (recentMsgs || [])
-      .reverse()
-      .filter((m) => !m.is_bot && String(m.body || '').trim().length > 2)
-      .slice(-12)
-      .map((m) => `- ${m.sender?.full_name || 'Member'}: ${String(m.body).replace(/\s+/g, ' ').slice(0, 160)}`);
-
-    const mom_body =
-      `Agenda:\n1. Review open items from this chat\n2. Decisions & next steps\n3. Action owners\n\n` +
-      `Discussion / important points (from chat before the call):\n` +
-      (points.length ? points.join('\n') : '- (no prior chat points — add during/after the call)') +
-      `\n\nDecisions:\n- \n\nAction items:\n- Owner — task — due date\n`;
+    const mom_body = blankCallMom();
 
     let mom = null;
     try {
-      const { data: momRow } = await supabase
-        .from('meeting_moms')
-        .insert({
-          chat_room_id: roomId,
-          project_id: room?.project_id || null,
-          meeting_url,
-          title: `MoM · ${room?.title || 'Meeting'} · ${new Date().toISOString().slice(0, 10)}`,
-          started_by: req.user.id,
-          attendees: attendeeIds,
-          mom_body,
-          status: 'draft',
-        })
-        .select('*')
-        .single();
-      mom = momRow;
+      const payload = {
+        chat_room_id: roomId,
+        project_id: room?.project_id || null,
+        meeting_url,
+        title: `MoM · ${room?.title || 'Meeting'} · ${new Date().toISOString().slice(0, 10)}`,
+        started_by: req.user.id,
+        attendees: attendeeIds,
+        mom_body,
+        live_transcript: '',
+        status: 'draft',
+      };
+      let { data: momRow, error: momErr } = await supabase.from('meeting_moms').insert(payload).select('*').single();
+      if (momErr && /live_transcript/i.test(String(momErr.message || ''))) {
+        delete payload.live_transcript;
+        const retry = await supabase.from('meeting_moms').insert(payload).select('*').single();
+        momRow = retry.data;
+        momErr = retry.error;
+      }
+      if (momErr) console.warn('MoM create:', momErr.message);
+      else mom = momRow;
     } catch (e) {
       console.warn('MoM create:', e.message);
     }
@@ -630,24 +705,9 @@ router.post('/meetings/:id/from-chat', requireAuth, async (req, res) => {
       .maybeSingle();
     if (findErr) throw findErr;
     if (!existing) return res.status(404).json({ error: 'Meeting not found' });
-    if (!existing.chat_room_id) return res.status(400).json({ error: 'This meeting is not linked to a chat' });
+    if (!isMomParticipant(existing, req.user)) return res.status(403).json({ error: 'Not a meeting participant' });
 
-    const { data: recentMsgs } = await supabase
-      .from('chat_messages')
-      .select('body, is_bot, msg_type, sender:users!chat_messages_sender_id_fkey(full_name)')
-      .eq('room_id', existing.chat_room_id)
-      .neq('msg_type', 'meeting')
-      .order('created_at', { ascending: false })
-      .limit(20);
-    const points = (recentMsgs || [])
-      .reverse()
-      .filter((m) => !m.is_bot && String(m.body || '').trim().length > 2)
-      .slice(-12)
-      .map((m) => `- ${m.sender?.full_name || 'Member'}: ${String(m.body).replace(/\s+/g, ' ').slice(0, 160)}`);
-    const block =
-      `\n\nDiscussion / important points (from chat):\n` +
-      (points.length ? points.join('\n') : '- (no chat points found)');
-    const mom_body = String(existing.mom_body || '') + block;
+    const mom_body = replaceCallDiscussion(existing.mom_body, existing.live_transcript);
     const { data, error } = await supabase
       .from('meeting_moms')
       .update({ mom_body, updated_at: new Date().toISOString() })
@@ -656,6 +716,50 @@ router.post('/meetings/:id/from-chat', requireAuth, async (req, res) => {
       .single();
     if (error) throw error;
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/meetings/:id/transcript', requireAuth, async (req, res) => {
+  try {
+    const { data: existing, error: findErr } = await supabase
+      .from('meeting_moms')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) return res.status(404).json({ error: 'Meeting not found' });
+    if (!isMomParticipant(existing, req.user)) return res.status(403).json({ error: 'Not a meeting participant' });
+
+    const chunk = String((req.body || {}).chunk || '').replace(/\s+/g, ' ').trim();
+    if (chunk.length < 2) return res.json(existing);
+    const who = req.user.full_name || 'Member';
+    const data = await appendMeetingTranscript(existing, `- ${who}: ${chunk.slice(0, 500)}`);
+    res.json(data);
+  } catch (err) {
+    if (isSchemaMissing(err)) return res.status(503).json({ error: 'Run backend/sql/add_meeting_moms.sql and add_meeting_transcript.sql' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/meetings/:id/transcribe-audio', requireAuth, audioUpload.single('audio'), async (req, res) => {
+  try {
+    const { data: existing, error: findErr } = await supabase
+      .from('meeting_moms')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) return res.status(404).json({ error: 'Meeting not found' });
+    if (!isMomParticipant(existing, req.user)) return res.status(403).json({ error: 'Not a meeting participant' });
+    if (!req.file?.buffer) return res.status(400).json({ error: 'No audio' });
+
+    const text = await whisperAudio(req.file.buffer, req.file.mimetype);
+    if (!text) return res.json({ ...existing, transcribed: false });
+    const who = req.user.full_name || 'Member';
+    const data = await appendMeetingTranscript(existing, `- ${who}: ${text.slice(0, 800)}`);
+    res.json({ ...data, transcribed: true, text });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -635,7 +635,8 @@ export async function mountTaskflowApp(opts = {}) {
       || visOk('permissions') && isAdmin
       || visOk('daily-report') && (isAdmin || isMis)
       || visOk('mis-report') && (isAdmin || isMis)
-      || visOk('time-dashboard') && (isAdmin || isMis);
+      || visOk('time-dashboard') && (isAdmin || isMis)
+      || visOk('fms') && (isAdmin || isMis);
 
     if (showAdminBlock) {
       const adminLabel = document.createElement('div');
@@ -653,6 +654,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('daily-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
       if (visOk('mis-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
+      if (visOk('fms') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('fms', '📑 FMS tracker'));
     }
   
     if (isMis && state.user?.role !== 'admin') {
@@ -662,6 +664,8 @@ export async function mountTaskflowApp(opts = {}) {
       els.navList.appendChild(misLabel);
       els.navList.appendChild(makeNavButton('visibility', '👁 Who sees what'));
     }
+
+    if (visOk('applyleave') || visOk('buddyrequests') || (visOk('leaveapprovals') && isAdmin)) {
       const leaveLabel = document.createElement('div');
       leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
       els.navList.appendChild(leaveLabel);
@@ -914,6 +918,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'daily-report')  loadDailyReport();
     if (viewKey === 'mis-report')    loadMisReport();
     if (viewKey === 'time-dashboard') loadTimeDashboard();
+    if (viewKey === 'fms')           loadFms();
     if (viewKey === 'ai-bot')        loadAiBot();
     if (viewKey === 'team-chat')     loadTeamChat();
     if (viewKey === 'meetings')      loadMeetings();
@@ -2180,7 +2185,8 @@ export async function mountTaskflowApp(opts = {}) {
   els.cancelCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
   function stopCorrectionRecordingAndClose() {
     if (corrMediaRecorder && corrMediaRecorder.state !== 'inactive') corrMediaRecorder.stop();
-    els.correctionModal.hidden = true;
+    const modal = els.correctionModal || document.getElementById('correctionModal');
+    if (modal) modal.hidden = true;
   }
   
   // Voice recording for correction modal
@@ -2785,20 +2791,22 @@ export async function mountTaskflowApp(opts = {}) {
     if (modal) modal.hidden = false;
   }
   
-  document.getElementById('closeUpdationModal')?.addEventListener('click', () => {
-    document.getElementById('updationModal').hidden = true;
-  });
-  document.getElementById('cancelUpdationModal')?.addEventListener('click', () => {
-    document.getElementById('updationModal').hidden = true;
-  });
+  function closeUpdationModal() {
+    const modal = document.getElementById('updationModal');
+    if (modal) modal.hidden = true;
+  }
+  document.getElementById('closeUpdationModal')?.addEventListener('click', closeUpdationModal);
+  document.getElementById('cancelUpdationModal')?.addEventListener('click', closeUpdationModal);
   document.getElementById('updationForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const note = document.getElementById('updation-note').value.trim();
+    const note = (document.getElementById('updation-note')?.value || '').trim();
     const msgEl = document.getElementById('updationFormMsg');
-    msgEl.hidden = true;
+    if (msgEl) msgEl.hidden = true;
     if (!note) {
-      msgEl.textContent = 'Please write an updation note before sending';
-      msgEl.hidden = false;
+      if (msgEl) {
+        msgEl.textContent = 'Please write an updation note before sending';
+        msgEl.hidden = false;
+      }
       return;
     }
     try {
@@ -2812,11 +2820,15 @@ export async function mountTaskflowApp(opts = {}) {
         },
       });
       showToast('Updation request sent ✅', 'success');
-      document.getElementById('updationModal').hidden = true;
+      closeUpdationModal();
       loadVerifications();
     } catch (err) {
-      msgEl.textContent = err.message;
-      msgEl.hidden = false;
+      if (msgEl) {
+        msgEl.textContent = err.message;
+        msgEl.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
     }
   });
   
@@ -4037,7 +4049,7 @@ export async function mountTaskflowApp(opts = {}) {
       map[k][cb.dataset.role] = cb.checked;
     });
     try {
-      const saved = await api('/master/nav-visibility', { method: 'PUT', body: JSON.stringify({ map }) });
+      const saved = await api('/master/nav-visibility', { method: 'PUT', body: { map } });
       state.navVis = saved.map || map;
       showToast('Visibility saved. Reloading menus…', 'success');
       buildNav();
@@ -5752,16 +5764,84 @@ export async function mountTaskflowApp(opts = {}) {
     return `${h}h`;
   }
 
+  let _tdLastData = null;
+
+  function tdPct(done, total) {
+    if (!total) return 0;
+    return Math.round((done / total) * 100);
+  }
+
+  function renderTimeDashboardSummary(emps) {
+    const el = document.getElementById('tdSummary');
+    if (!el) return;
+    if (!emps.length) {
+      el.innerHTML = '';
+      return;
+    }
+    const all = emps.map((e) => e.portfolio || {});
+    const sum = (k) => all.reduce((s, p) => s + Number(p[k] || 0), 0);
+    const avgOf = (k) => {
+      const vals = all.map((p) => p[k]).filter((v) => v != null);
+      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
+    };
+    const total = sum('total');
+    const done = sum('completed');
+    const slowest = [...emps]
+      .filter((e) => e.portfolio?.avgCycleHrs != null)
+      .sort((a, b) => b.portfolio.avgCycleHrs - a.portfolio.avgCycleHrs)[0];
+    el.innerHTML = `
+      <div class="td-stat"><span>Tasks in range</span><strong>${total}</strong><small>${emps.length} people</small></div>
+      <div class="td-stat"><span>Completed</span><strong>${done}</strong>
+        <div class="td-bar"><i style="width:${tdPct(done, total)}%"></i></div>
+        <small>${tdPct(done, total)}% of range</small></div>
+      <div class="td-stat"><span>Still open</span><strong>${sum('pending') + sum('inProgress')}</strong><small>pending + in progress</small></div>
+      <div class="td-stat"><span>Planned hours</span><strong>${Math.round(sum('plannedHours'))}h</strong><small>+${Math.round(sum('extraHours'))}h / ${sum('extraDays')}d extra given</small></div>
+      <div class="td-stat"><span>Avg accept</span><strong>${fmtHrs(avgOf('avgAcceptHrs'))}</strong><small>assign → accept</small></div>
+      <div class="td-stat"><span>Avg submit</span><strong>${fmtHrs(avgOf('avgSubmitHrs'))}</strong><small>accept → send for verify</small></div>
+      <div class="td-stat"><span>Avg verify</span><strong>${fmtHrs(avgOf('avgVerifyHrs'))}</strong><small>verifier turnaround</small></div>
+      <div class="td-stat"><span>Longest cycle</span><strong>${fmtHrs(slowest?.portfolio?.avgCycleHrs)}</strong><small>${escapeHtml(slowest?.name || '—')}</small></div>`;
+  }
+
+  function downloadTimeCsv(data) {
+    if (!data?.report?.length) return showToast('Nothing to export yet', 'error');
+    const head = ['Employee', 'Project', 'Task', 'Assigned', 'Accepted', 'Accept hrs', 'Submit hrs', 'Verify hrs', 'Cycle hrs', 'Extra hrs', 'Extra days'];
+    const lines = [head.join(',')];
+    data.report.forEach((emp) => {
+      (emp.projects || []).forEach((p) => {
+        (p.tasks || []).forEach((t) => {
+          lines.push([
+            emp.name, p.name, (t.description || '').replace(/\s+/g, ' '),
+            t.assigned_at || t.created_at || '', t.accepted_at || '',
+            t.time_to_accept_hrs ?? '', t.time_to_submit_hrs ?? '',
+            t.time_to_verify_hrs ?? '', t.total_cycle_hrs ?? '',
+            t.extra_hours || 0, t.extra_days || 0,
+          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+        });
+      });
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `time-dashboard-${(data.from || '').slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
   async function loadTimeDashboard() {
     const body = document.getElementById('tdBody');
     const rangeEl = document.getElementById('tdRange');
     if (!body) return;
     const range = rangeEl?.value || 'month';
+    const personId = document.getElementById('tdPerson')?.value || '';
     body.innerHTML = '<div class="empty-state">Loading time data…</div>';
     try {
       const data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
-      const emps = data.report || [];
+      _tdLastData = data;
+      const allEmps = data.report || [];
+      const emps = personId ? allEmps.filter((e) => String(e.id) === String(personId)) : allEmps;
       const vers = data.verifiers || [];
+      fillTdPeople(allEmps, personId);
+      renderTimeDashboardSummary(emps);
       if (!emps.length && !vers.length) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
         return;
@@ -5832,15 +5912,232 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  function fillTdPeople(emps, selected) {
+    const sel = document.getElementById('tdPerson');
+    if (!sel) return;
+    const opts = ['<option value="">All employees</option>']
+      .concat(emps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`));
+    sel.innerHTML = opts.join('');
+    sel.value = selected || '';
+  }
+
   document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
+  document.getElementById('tdRange')?.addEventListener('change', () => loadTimeDashboard());
+  document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard());
+  document.getElementById('tdCsvBtn')?.addEventListener('click', () => downloadTimeCsv(_tdLastData));
+
+  // ─── FMS step tracker (Planned vs Actual per workflow step) ─────────────────
+  let _fmsLastData = null;
+
+  function fmsCell(step) {
+    if (!step || step.status === 'NA') {
+      return `<td class="fms-na">—</td><td class="fms-na">—</td><td><span class="fms-pill fms-pill-NA">n/a</span></td><td class="fms-na">—</td>`;
+    }
+    const delay = step.delayHrs;
+    let delayText = '—';
+    if (delay != null) {
+      const abs = Math.abs(delay);
+      const label = abs >= 24 ? `${Math.round((abs / 24) * 10) / 10}d` : `${abs}h`;
+      delayText = delay > 0
+        ? `<span class="fms-delay-late">+${label}</span>`
+        : `<span class="fms-delay-early">${abs ? `-${label}` : 'on time'}</span>`;
+    }
+    return `<td>${escapeHtml(fmtDateOnly(step.planned))}</td>
+      <td>${escapeHtml(step.actual ? fmtDate(step.actual) : '—')}</td>
+      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span></td>
+      <td>${delayText}</td>`;
+  }
+
+  function renderFmsSummary(data) {
+    const el = document.getElementById('fmsSummary');
+    if (!el) return;
+    const steps = data.steps || [];
+    const sum = data.summary || {};
+    el.innerHTML = steps.map((s) => {
+      const v = sum[s.key] || {};
+      return `<div class="fms-step-card">
+        <h4>${escapeHtml(s.label)}</h4>
+        <div class="fms-step-nums">
+          <span>On time <b>${v.done || 0}</b></span>
+          <span>Delayed <b>${v.delayed || 0}</b></span>
+          <span>Overdue <b>${v.overdue || 0}</b></span>
+          <span>Waiting <b>${v.pending || 0}</b></span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function fillFmsFilters(rows) {
+    const projSel = document.getElementById('fmsProject');
+    const perSel = document.getElementById('fmsPerson');
+    const uniq = (list) => [...new Map(list.filter((x) => x.id).map((x) => [String(x.id), x])).values()];
+    if (projSel && !projSel.dataset.filled) {
+      const projects = uniq(rows.map((r) => ({ id: r.project_id, name: r.project })));
+      projSel.innerHTML = ['<option value="">All projects</option>']
+        .concat(projects.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
+      projSel.dataset.filled = '1';
+    }
+    if (perSel && !perSel.dataset.filled) {
+      const people = uniq(rows.map((r) => ({ id: r.person_id, name: r.person })));
+      perSel.innerHTML = ['<option value="">All people</option>']
+        .concat(people.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
+      perSel.dataset.filled = '1';
+    }
+  }
+
+  async function loadFms() {
+    const body = document.getElementById('fmsBody');
+    if (!body) return;
+    const range = document.getElementById('fmsRange')?.value || 'month';
+    const project = document.getElementById('fmsProject')?.value || '';
+    const person = document.getElementById('fmsPerson')?.value || '';
+    body.innerHTML = '<div class="empty-state">Building FMS sheet…</div>';
+    try {
+      const qs = new URLSearchParams({ range });
+      if (project) qs.set('project', project);
+      if (person) qs.set('person', person);
+      const data = await api(`/tasks/fms?${qs.toString()}`);
+      _fmsLastData = data;
+      const rows = data.rows || [];
+      const steps = data.steps || [];
+      fillFmsFilters(rows);
+      renderFmsSummary(data);
+      if (!rows.length) {
+        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
+        return;
+      }
+      const stepHead = steps.map((s, i) =>
+        `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
+      const subHead = steps.map(() => '<th>Planned</th><th>Actual</th><th>Status</th><th>Delay</th>').join('');
+      const tbody = rows.map((r) => `<tr>
+        <td class="fms-sticky">${escapeHtml(fmtDateOnly(r.timestamp))}</td>
+        <td>${escapeHtml(r.job_no)}</td>
+        <td>${escapeHtml(r.project)}</td>
+        <td>${escapeHtml(r.work_type)}</td>
+        <td class="fms-desc">${escapeHtml((r.description || '').slice(0, 120))}</td>
+        <td>${escapeHtml(r.person)}</td>
+        <td>${escapeHtml(r.verifier)}</td>
+        <td>${r.lead_time_hrs || 0}h${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
+        ${steps.map((s) => fmsCell(r.steps?.[s.key])).join('')}
+      </tr>`).join('');
+
+      body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
+        <table class="data-table fms-table">
+          <thead>
+            <tr>
+              <th class="fms-sticky" rowspan="2">Timestamp</th>
+              <th rowspan="2">Job no.</th>
+              <th rowspan="2">Project</th>
+              <th rowspan="2">Work type</th>
+              <th rowspan="2">Task</th>
+              <th rowspan="2">Person</th>
+              <th rowspan="2">Verifier</th>
+              <th rowspan="2">Lead time</th>
+              ${stepHead}
+            </tr>
+            <tr>${subHead}</tr>
+          </thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div></div>
+      <p class="td-muted" style="margin-top:10px">${escapeHtml((data.from || '').slice(0, 10))} → ${escapeHtml((data.to || '').slice(0, 10))} · ${rows.length} tasks</p>`;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function downloadFmsCsv(data) {
+    if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
+    const steps = data.steps || [];
+    const head = ['Timestamp', 'Job no', 'Project', 'Work type', 'Task', 'Person', 'Verifier', 'Lead time (h)'];
+    steps.forEach((s) => head.push(`${s.label} planned`, `${s.label} actual`, `${s.label} status`, `${s.label} delay (h)`));
+    const lines = [head.join(',')];
+    data.rows.forEach((r) => {
+      const cells = [
+        r.timestamp || '', r.job_no, r.project, r.work_type,
+        (r.description || '').replace(/\s+/g, ' '), r.person, r.verifier, r.lead_time_hrs || 0,
+      ];
+      steps.forEach((s) => {
+        const st = r.steps?.[s.key] || {};
+        cells.push(st.planned || '', st.actual || '', st.status || '', st.delayHrs ?? '');
+      });
+      lines.push(cells.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fms-tracker-${(data.from || '').slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  document.getElementById('fmsGenBtn')?.addEventListener('click', () => loadFms());
+  document.getElementById('fmsRange')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsProject')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsPerson')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsCsvBtn')?.addEventListener('click', () => downloadFmsCsv(_fmsLastData));
 
   // ─── DIP AI Bot ─────────────────────────────────────────────────────────────
+  // Bot answers arrive as plain text with SECTION HEADINGS, "• bullet" lines and
+  // "  Label: value" detail lines. Turn that into readable blocks instead of a
+  // wall of <br>s.
+  function renderBotAnswer(text) {
+    const raw = String(text || '').replace(/\r/g, '');
+    const out = [];
+    let list = [];
+    const flushList = () => {
+      if (list.length) {
+        out.push(`<ul class="bot-list">${list.join('')}</ul>`);
+        list = [];
+      }
+    };
+    raw.split('\n').forEach((lineRaw) => {
+      const line = lineRaw.replace(/\s+$/, '');
+      const trimmed = line.trim();
+      if (!trimmed) {
+        flushList();
+        return;
+      }
+      const isHeading = /^[A-Z0-9 \/()&·—-]{4,}$/.test(trimmed) && !/^[•-]/.test(trimmed);
+      if (isHeading) {
+        flushList();
+        out.push(`<div class="bot-heading">${escapeHtml(trimmed)}</div>`);
+        return;
+      }
+      if (/^[•*-]\s+/.test(trimmed)) {
+        const body = trimmed.replace(/^[•*-]\s+/, '');
+        const parts = body.split('|').map((p) => p.trim()).filter(Boolean);
+        const inner = parts.length > 1
+          ? `<strong>${escapeHtml(parts[0])}</strong>` +
+            parts.slice(1).map((p) => `<span class="bot-chip">${escapeHtml(p)}</span>`).join('')
+          : escapeHtml(body);
+        list.push(`<li>${inner}</li>`);
+        return;
+      }
+      const kv = /^([A-Za-z][A-Za-z \/]{2,24}):\s*(.+)$/.exec(trimmed);
+      if (kv && list.length) {
+        list[list.length - 1] = list[list.length - 1].replace(
+          /<\/li>$/,
+          `<span class="bot-kv"><em>${escapeHtml(kv[1])}</em> ${escapeHtml(kv[2])}</span></li>`
+        );
+        return;
+      }
+      flushList();
+      out.push(`<p class="bot-line">${escapeHtml(trimmed)}</p>`);
+    });
+    flushList();
+    return out.join('') || `<p class="bot-line">${escapeHtml(raw)}</p>`;
+  }
+
   function appendBotBubble(who, text) {
     const log = document.getElementById('botChatLog');
     if (!log) return;
     const div = document.createElement('div');
     div.className = `bot-bubble ${who === 'you' ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
-    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : 'DIP Bot'}</div><div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+    const body = who === 'you'
+      ? `<div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`
+      : `<div class="bot-bubble-body bot-rich">${renderBotAnswer(text)}</div>`;
+    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : 'DIP Bot'}</div>${body}`;
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
   }
@@ -5919,13 +6216,196 @@ export async function mountTaskflowApp(opts = {}) {
     if (m.msg_type === 'meeting' || meetUrl) {
       bodyHtml = `<div class="chat-meeting-card">
         <div>${escapeHtml((m.body || 'Video meeting').split('\n')[0])}</div>
-        <a href="${escapeHtml(meetUrl || '#')}" target="_blank" rel="noopener noreferrer">Join video meeting</a>
+        <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video in TaskFlow</button>
       </div>`;
     } else {
       bodyHtml = `<div class="bot-bubble-body">${escapeHtml(m.body).replace(/\n/g, '<br>')}</div>`;
     }
     div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div>${bodyHtml}<div class="chat-msg-meta">${escapeHtml(formatChatTime(m.created_at))}</div>`;
     return div;
+  }
+
+  let _jitsiApi = null;
+  let _meetRecog = null;
+  let _meetMomId = null;
+  let _meetKeepListening = false;
+  let _meetFlushTimer = null;
+  let _meetPending = '';
+
+  function loadJitsiApi() {
+    return new Promise((resolve, reject) => {
+      if (window.JitsiMeetExternalAPI) return resolve();
+      const s = document.createElement('script');
+      s.src = 'https://meet.jit.si/external_api.js';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Could not load video'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function resolveMomIdForUrl(meetUrl) {
+    if (!meetUrl) return null;
+    try {
+      const rows = await api('/bot/meetings');
+      const hit = (rows || []).find((m) => String(m.meeting_url || '') === String(meetUrl));
+      return hit?.id || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setMeetCaptionStatus(text) {
+    const el = document.getElementById('meetCaptionStatus');
+    if (el) el.textContent = text;
+  }
+
+  function appendLiveCaptionLine(line) {
+    const pre = document.getElementById('meetLiveCaption');
+    if (!pre) return;
+    pre.textContent = `${pre.textContent}${pre.textContent ? '\n' : ''}${line}`.split('\n').slice(-12).join('\n');
+    pre.scrollTop = pre.scrollHeight;
+  }
+
+  async function flushMeetCaptions() {
+    const chunk = _meetPending.trim();
+    _meetPending = '';
+    if (!chunk || !_meetMomId) return;
+    try {
+      await api(`/bot/meetings/${_meetMomId}/transcript`, { method: 'POST', body: { chunk } });
+    } catch (err) {
+      console.warn('MoM caption:', err.message);
+    }
+  }
+
+  function stopCallCaptions() {
+    _meetKeepListening = false;
+    if (_meetFlushTimer) {
+      clearInterval(_meetFlushTimer);
+      _meetFlushTimer = null;
+    }
+    try { _meetRecog?.stop(); } catch (_) {}
+    _meetRecog = null;
+    flushMeetCaptions();
+  }
+
+  function startCallCaptions(momId) {
+    stopCallCaptions();
+    _meetMomId = momId;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!momId) {
+      setMeetCaptionStatus('MoM not linked — spoken words will not be saved');
+      return;
+    }
+    if (!SR) {
+      setMeetCaptionStatus('Use Chrome/Edge — this browser cannot capture speech for MoM');
+      return;
+    }
+    _meetKeepListening = true;
+    _meetPending = '';
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'hi-IN';
+    rec.onresult = (ev) => {
+      let finals = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+        const t = ev.results[i][0]?.transcript || '';
+        if (ev.results[i].isFinal) finals += ` ${t}`;
+      }
+      const piece = finals.replace(/\s+/g, ' ').trim();
+      if (piece) {
+        _meetPending = `${_meetPending} ${piece}`.trim();
+        appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${piece}`);
+      }
+    };
+    rec.onerror = () => {};
+    rec.onend = () => {
+      if (_meetKeepListening) {
+        try { rec.start(); } catch (_) {}
+      }
+    };
+    _meetRecog = rec;
+    try {
+      rec.start();
+      setMeetCaptionStatus('Listening to the call — Hindi/English speech goes into MoM');
+    } catch (_) {
+      setMeetCaptionStatus('Allow microphone so spoken words can be written to MoM');
+    }
+    _meetFlushTimer = setInterval(flushMeetCaptions, 4000);
+  }
+
+  async function closeInAppMeeting(goToMom) {
+    const momId = _meetMomId;
+    stopCallCaptions();
+    try { _jitsiApi?.dispose(); } catch (_) {}
+    _jitsiApi = null;
+    const overlay = document.getElementById('meetOverlay');
+    if (overlay) overlay.hidden = true;
+    const box = document.getElementById('jitsiContainer');
+    if (box) box.innerHTML = '';
+    if (goToMom && momId) {
+      switchView('meetings');
+      try {
+        const rows = await api('/bot/meetings');
+        const m = (rows || []).find((r) => String(r.id) === String(momId));
+        if (m) openMomEditor(m);
+      } catch (_) {}
+    }
+  }
+
+  async function openInAppMeeting(meetUrl, momId) {
+    const overlay = document.getElementById('meetOverlay');
+    const box = document.getElementById('jitsiContainer');
+    if (!overlay || !box) {
+      window.open(meetUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    let roomName = '';
+    try {
+      roomName = decodeURIComponent(new URL(meetUrl).pathname.replace(/^\//, ''));
+    } catch (_) {
+      roomName = String(meetUrl).split('/').pop();
+    }
+    overlay.hidden = false;
+    document.getElementById('meetLiveCaption').textContent = '';
+    setMeetCaptionStatus('Starting call…');
+    try {
+      await loadJitsiApi();
+    } catch (err) {
+      showToast(err.message, 'error');
+      window.open(meetUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    try { _jitsiApi?.dispose(); } catch (_) {}
+    box.innerHTML = '';
+    _jitsiApi = new window.JitsiMeetExternalAPI('meet.jit.si', {
+      roomName,
+      parentNode: box,
+      width: '100%',
+      height: '100%',
+      userInfo: { displayName: state.user?.full_name || 'DIP' },
+      configOverwrite: {
+        startWithAudioMuted: false,
+        startWithVideoMuted: false,
+        prejoinPageEnabled: false,
+      },
+    });
+    const linkedMom = momId || (await resolveMomIdForUrl(meetUrl));
+    startCallCaptions(linkedMom);
+    _jitsiApi.addListener('videoConferenceLeft', () => closeInAppMeeting(true));
+  }
+
+  if (!window._meetOverlayBound) {
+    window._meetOverlayBound = true;
+    document.getElementById('meetEndMomBtn')?.addEventListener('click', () => closeInAppMeeting(true));
+    document.getElementById('meetCloseBtn')?.addEventListener('click', () => closeInAppMeeting(false));
+    document.getElementById('chatMsgLog')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest?.('.js-join-meet');
+      if (!btn) return;
+      const url = btn.dataset.meetUrl;
+      if (!url) return;
+      await openInAppMeeting(url, null);
+    });
   }
 
   function stopChatPoll() {
@@ -6175,10 +6655,9 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/bot/chats/${_activeChatRoom}/meeting`, { method: 'POST', body: {} });
         const url = res.meeting_url;
-        if (url) window.open(url, '_blank', 'noopener,noreferrer');
-        showToast(res.mom ? 'Meeting + MoM draft created — fill minutes in Meetings' : 'Video meeting started', 'success');
+        showToast('Call started — keep this window open so spoken words go into MoM', 'success');
         await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle, kind: 'project' });
-        if (res.mom) switchView('meetings');
+        if (url) await openInAppMeeting(url, res.mom?.id || null);
       } catch (err) {
         showToast(err.message || 'Could not start meeting', 'error');
       }
@@ -6264,7 +6743,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
-  function openMomEditor(m) {
+  async function openMomEditor(m) {
     if (!m) return;
     _editingMomId = m.id;
     const editor = document.getElementById('momEditor');
@@ -6274,6 +6753,14 @@ export async function mountTaskflowApp(opts = {}) {
     if (t) t.value = m.title || '';
     if (b) b.value = m.mom_body || '';
     editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (m.status !== 'final') {
+      try {
+        const row = await api(`/bot/meetings/${m.id}/from-chat`, { method: 'POST', body: {} });
+        if (b && row?.mom_body) b.value = row.mom_body;
+      } catch (_) {
+        /* keep saved body */
+      }
+    }
   }
 
   if (!window._momBound) {
@@ -6300,7 +6787,7 @@ export async function mountTaskflowApp(opts = {}) {
         const row = await api(`/bot/meetings/${_editingMomId}/from-chat`, { method: 'POST', body: {} });
         const b = document.getElementById('momBody');
         if (b) b.value = row.mom_body || '';
-        showToast('Chat points added to MoM', 'success');
+        showToast('Call captions loaded into MoM', 'success');
       } catch (err) {
         showToast(err.message, 'error');
       }

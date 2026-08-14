@@ -472,7 +472,7 @@ export default function TaskflowDom() {
         <section id="view-meetings" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">📝 Meetings &amp; MoM</h2>
-            <p className="view-sub">Video meetings and minutes. Employees see their project meetings; admin sees all, project-wise.</p>
+            <p className="view-sub">Spoken discussion from the in-app video call is captured into minutes. Join video inside TaskFlow (not a new tab).</p>
           </div>
           <div id="momList" className="mom-list"></div>
           <div id="momEditor" className="mom-editor" hidden>
@@ -487,7 +487,7 @@ export default function TaskflowDom() {
             </div>
             <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
               <button type="button" id="momSaveBtn" className="primary-btn primary-btn-inline">Save MoM</button>
-              <button type="button" id="momFillChatBtn" className="ghost-btn">Pull points from chat</button>
+              <button type="button" id="momFillChatBtn" className="ghost-btn">Refresh from call captions</button>
               <button type="button" id="momFinalBtn" className="ghost-btn">Mark final</button>
               <button type="button" id="momCloseBtn" className="ghost-btn">Close</button>
             </div>
@@ -1079,9 +1079,46 @@ export default function TaskflowDom() {
                 <option value="day">Today</option>
               </select>
             </label>
+            <label className="mis-field">
+              <span>Employee</span>
+              <select id="tdPerson"><option value="">All employees</option></select>
+            </label>
             <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
+            <button type="button" id="tdCsvBtn" className="ghost-btn">Export CSV</button>
           </div>
+          <div id="tdSummary" className="td-summary"></div>
           <div id="tdBody"></div>
+        </section>
+
+        {/* FMS STEP TRACKER */}
+        <section id="view-fms" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">📑 FMS tracker</h2>
+            <p className="view-sub">Every task step-by-step: Planned vs Actual date, status and time delay — same layout as the office FMS sheet.</p>
+          </div>
+          <div className="mis-toolbar" style={{marginBottom: 14}}>
+            <label className="mis-field">
+              <span>Range</span>
+              <select id="fmsRange">
+                <option value="month">This month</option>
+                <option value="week">This week</option>
+                <option value="day">Today</option>
+                <option value="all">All time</option>
+              </select>
+            </label>
+            <label className="mis-field">
+              <span>Project</span>
+              <select id="fmsProject"><option value="">All projects</option></select>
+            </label>
+            <label className="mis-field">
+              <span>Person</span>
+              <select id="fmsPerson"><option value="">All people</option></select>
+            </label>
+            <button type="button" id="fmsGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
+            <button type="button" id="fmsCsvBtn" className="ghost-btn">Export CSV</button>
+          </div>
+          <div id="fmsSummary" className="fms-summary"></div>
+          <div id="fmsBody"></div>
         </section>
 
       </main>
@@ -1831,6 +1868,21 @@ export default function TaskflowDom() {
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="meetOverlay" className="meet-overlay" hidden>
+    <div className="meet-overlay-bar">
+      <div>
+        <strong>Video call</strong>
+        <span id="meetCaptionStatus" className="meet-caption-status">Capturing spoken words for MoM…</span>
+      </div>
+      <div className="meet-overlay-actions">
+        <button type="button" id="meetEndMomBtn" className="primary-btn primary-btn-inline">End call &amp; write MoM</button>
+        <button type="button" id="meetCloseBtn" className="ghost-btn">Close video</button>
+      </div>
+    </div>
+    <div id="jitsiContainer" className="meet-jitsi"></div>
+    <pre id="meetLiveCaption" className="meet-live-caption"></pre>
   </div>
 
   

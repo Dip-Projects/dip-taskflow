@@ -55,6 +55,31 @@ function applyDeadlineChange(existing, body, note) {
   return { target_date, hours_to_complete, extra_hours, extra_days, extensions };
 }
 
+// Older deployments may not have run every SQL migration yet. Retry the update
+// after dropping whichever column Postgres says it doesn't know about, so a
+// missing migration degrades one field instead of breaking the whole action.
+async function updateTaskTolerant(id, updates, select) {
+  const attempt = { ...updates };
+  for (let i = 0; i < 6; i += 1) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(attempt)
+      .eq('id', id)
+      .select(select)
+      .single();
+    if (!error) return data;
+    const msg = String(error.message || '');
+    const hit = /'([a-z_]+)' column/i.exec(msg) || /column "?([a-z_]+)"?/i.exec(msg);
+    const col = hit && hit[1];
+    if (col && Object.prototype.hasOwnProperty.call(attempt, col)) {
+      delete attempt[col];
+      continue;
+    }
+    throw error;
+  }
+  throw new Error('Could not update task');
+}
+
 // Both "toast says success but the date shown afterwards is still the old
 // one" reports (direct admin reschedule AND reschedule-request approval)
 // share one thing in common: they both PATCH successfully, then immediately
@@ -606,7 +631,7 @@ router.patch('/:id/verify', async (req, res) => {
     const { approved, note } = req.body || {};
 
     const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, verifier_id').eq('id', id).maybeSingle();
+      .from('tasks').select('id, verifier_id, sent_for_verification_at').eq('id', id).maybeSingle();
     if (fetchErr) throw fetchErr;
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
@@ -615,18 +640,23 @@ router.patch('/:id/verify', async (req, res) => {
       return res.status(403).json({ error: 'You are not the verifier for this task' });
     }
 
+    const nowIso = new Date().toISOString();
     const updates = approved
-      ? { verification_status: 'Verified', verification_note: note || null, status: 'Completed', verified_at: new Date().toISOString() }
-      : { verification_status: 'Verification Rejected', verification_note: note || null, status: 'In Progress' };
+      ? {
+          verification_status: 'Verified',
+          verification_note: note || null,
+          status: 'Completed',
+          verified_at: nowIso,
+          verification_decided_at: nowIso,
+        }
+      : {
+          verification_status: 'Verification Rejected',
+          verification_note: note || null,
+          status: 'In Progress',
+          verification_decided_at: nowIso,
+        };
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
-
-    if (error) throw error;
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Verify task error:', err.message);
@@ -683,24 +713,10 @@ router.patch(
           extra_hours,
           extra_days,
           correction_extensions: extensions,
+          verification_decided_at: new Date().toISOString(),
         };
 
-      let { data, error } = await supabase
-        .from('tasks')
-        .update(updates)
-        .eq('id', id)
-        .select(TASK_SELECT)
-        .single();
-      if (error && /extra_hours|extra_days|correction_extensions|assigned_at/i.test(error.message || '')) {
-        delete updates.extra_hours;
-        delete updates.extra_days;
-        delete updates.correction_extensions;
-        const retry = await supabase.from('tasks').update(updates).eq('id', id).select(TASK_SELECT.replace(/assigned_at, extra_hours, extra_days, correction_extensions,\s*/, '')).single();
-        data = retry.data;
-        error = retry.error;
-      }
-
-      if (error) throw error;
+      const data = await updateTaskTolerant(id, updates, TASK_SELECT);
       res.json(data);
     } catch (err) {
       console.error('Send correction error:', err.message);
@@ -742,24 +758,10 @@ router.patch('/:id/send-updation', async (req, res) => {
       extra_hours: extra.extra_hours,
       extra_days: extra.extra_days,
       correction_extensions: extra.extensions,
+      verification_decided_at: new Date().toISOString(),
     };
 
-    let { data, error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
-    if (error && /extra_hours|extra_days|correction_extensions/i.test(error.message || '')) {
-      delete updates.extra_hours;
-      delete updates.extra_days;
-      delete updates.correction_extensions;
-      const retry = await supabase.from('tasks').update(updates).eq('id', id).select(TASK_SELECT).single();
-      data = retry.data;
-      error = retry.error;
-    }
-
-    if (error) throw error;
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Send updation error:', err.message);
@@ -1232,6 +1234,181 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
   } catch (err) {
     console.error('Report error:', err.message);
     res.status(500).json({ error: err.message || 'Could not generate report' });
+  }
+});
+
+// ----------------------------- FMS step tracker -----------------------------
+// One row per task, each workflow step showing Planned vs Actual + delay,
+// the same way the office FMS sheet is read.
+const FMS_STEPS = [
+  { key: 'accept', label: 'Start / Accept' },
+  { key: 'submit', label: 'Send for verification' },
+  { key: 'verify', label: 'Verification' },
+  { key: 'reverify', label: 'Second verification' },
+];
+
+function fmsRangeDates(range, from, to) {
+  const now = new Date();
+  if (range === 'day') {
+    const s = new Date(now); s.setHours(0, 0, 0, 0);
+    const e = new Date(now); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'week') {
+    const s = new Date(now); s.setDate(now.getDate() - now.getDay()); s.setHours(0, 0, 0, 0);
+    const e = new Date(s); e.setDate(s.getDate() + 6); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'custom' && from && to) {
+    const s = new Date(from); s.setHours(0, 0, 0, 0);
+    const e = new Date(to); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'all') return [new Date('2000-01-01'), new Date('2999-12-31')];
+  return [
+    new Date(now.getFullYear(), now.getMonth(), 1),
+    new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+  ];
+}
+
+function fmsStep(planned, actual, isApplicable) {
+  if (!isApplicable) return { planned: null, actual: null, status: 'NA', delayHrs: null };
+  const p = planned ? new Date(planned) : null;
+  const a = actual ? new Date(actual) : null;
+  let status = 'Pending';
+  let delayHrs = null;
+  if (a && p) {
+    delayHrs = Math.round(((a - p) / 36e5) * 10) / 10;
+    status = delayHrs > 0 ? 'Delayed' : 'Done';
+  } else if (a) {
+    status = 'Done';
+  } else if (p && p < new Date()) {
+    status = 'Overdue';
+    delayHrs = Math.round(((new Date() - p) / 36e5) * 10) / 10;
+  }
+  return {
+    planned: p ? p.toISOString() : null,
+    actual: a ? a.toISOString() : null,
+    status,
+    delayHrs,
+  };
+}
+
+router.get('/fms', requireAdminOrMis, async (req, res) => {
+  try {
+    const { range, from, to, project, person } = req.query;
+    const [startDate, endDate] = fmsRangeDates(range, from, to);
+
+    const columns = `
+      id, description, status, priority, created_at, assigned_at, accepted_at,
+      sent_for_verification_at, verification_started_at, verified_at, rejected_at,
+      verification_status, verification_decided_at, hours_to_complete, target_date,
+      extra_hours, extra_days, correction_extensions,
+      project:projects ( id, name ),
+      task_type:task_types ( id, name ),
+      department:departments ( id, name ),
+      assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+      assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+      verifier:users!tasks_verifier_id_fkey ( id, full_name )
+    `;
+
+    let { data: tasks, error } = await supabase
+      .from('tasks')
+      .select(columns)
+      .order('created_at', { ascending: false })
+      .limit(4000);
+    if (error && /verification_decided_at/i.test(error.message || '')) {
+      const retry = await supabase
+        .from('tasks')
+        .select(columns.replace('verification_decided_at,', ''))
+        .order('created_at', { ascending: false })
+        .limit(4000);
+      tasks = retry.data;
+      error = retry.error;
+    }
+    if (error) throw error;
+
+    const stamps = (t) => [
+      t.created_at, t.assigned_at, t.accepted_at, t.sent_for_verification_at,
+      t.verified_at, t.rejected_at, t.verification_decided_at,
+    ];
+    const inRange = (iso) => {
+      if (!iso) return false;
+      const d = new Date(iso);
+      return d >= startDate && d <= endDate;
+    };
+
+    const rows = (tasks || [])
+      .filter((t) => stamps(t).some(inRange))
+      .filter((t) => !project || String(t.project?.id) === String(project))
+      .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
+      .map((t, idx) => {
+        const assigned = t.assigned_at || t.created_at;
+        const extensions = Array.isArray(t.correction_extensions) ? t.correction_extensions : [];
+        const lastExtensionAt = extensions.length ? extensions[extensions.length - 1]?.at || null : null;
+        const wentBack = ['Verification Rejected', 'Updation Required'].includes(t.verification_status)
+          || extensions.length > 0;
+        const decidedAt = t.verification_decided_at || t.verified_at || t.rejected_at || lastExtensionAt;
+
+        const steps = {
+          // Task ka timestamp hi step-1 ka planned hai; accept hone par actual.
+          accept: fmsStep(assigned, t.accepted_at, true),
+          submit: fmsStep(t.target_date, t.sent_for_verification_at, true),
+          verify: fmsStep(t.target_date, decidedAt, !!t.sent_for_verification_at),
+          reverify: fmsStep(
+            t.target_date,
+            wentBack && t.verification_status === 'Verified' ? t.verified_at : null,
+            wentBack
+          ),
+        };
+
+        return {
+          id: t.id,
+          job_no: `JOB-${String(idx + 1).padStart(3, '0')}`,
+          timestamp: assigned,
+          project: t.project?.name || 'No project',
+          project_id: t.project?.id || null,
+          work_type: t.task_type?.name || '—',
+          department: t.department?.name || '—',
+          description: t.description || '',
+          person: t.assigned_to_user?.full_name || 'Unassigned',
+          person_id: t.assigned_to_user?.id || null,
+          assigned_by: t.assigned_by_user?.full_name || '—',
+          verifier: t.verifier?.full_name || '—',
+          lead_time_hrs: Number(t.hours_to_complete || 0),
+          extra_hours: Number(t.extra_hours || 0),
+          extra_days: Number(t.extra_days || 0),
+          target_date: t.target_date,
+          status: t.status,
+          verification_status: t.verification_status,
+          steps,
+        };
+      });
+
+    const stepSummary = {};
+    for (const step of FMS_STEPS) {
+      const all = rows.map((r) => r.steps[step.key]).filter((s) => s.status !== 'NA');
+      stepSummary[step.key] = {
+        label: step.label,
+        total: all.length,
+        done: all.filter((s) => s.status === 'Done').length,
+        delayed: all.filter((s) => s.status === 'Delayed').length,
+        overdue: all.filter((s) => s.status === 'Overdue').length,
+        pending: all.filter((s) => s.status === 'Pending').length,
+      };
+    }
+
+    res.json({
+      range: range || 'month',
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+      steps: FMS_STEPS,
+      rows,
+      summary: stepSummary,
+    });
+  } catch (err) {
+    console.error('FMS error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not build FMS tracker' });
   }
 });
 
