@@ -621,6 +621,7 @@ export async function mountTaskflowApp(opts = {}) {
         els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
         els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
         els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
+        els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
       }
     }
   
@@ -865,6 +866,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'drawings-all')  loadAllDrawings();
     if (viewKey === 'daily-report')  loadDailyReport();
     if (viewKey === 'mis-report')    loadMisReport();
+    if (viewKey === 'time-dashboard') loadTimeDashboard();
     if (viewKey === 'ai-bot')        loadAiBot();
     if (viewKey === 'team-chat')     loadTeamChat();
     if (viewKey === 'meetings')      loadMeetings();
@@ -2109,6 +2111,10 @@ export async function mountTaskflowApp(opts = {}) {
     els.corrStartRecord.disabled = false;
     els.corrStopRecord.disabled = true;
     corrVoiceBlob = null;
+    const u = document.getElementById('correction-extra-unit');
+    const a = document.getElementById('correction-extra-amount');
+    if (u) u.value = '';
+    if (a) a.value = '';
     els.correctionModal.hidden = false;
   }
   
@@ -2161,6 +2167,12 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const formData = new FormData();
       formData.append('note', note);
+      const extraUnit = document.getElementById('correction-extra-unit')?.value || '';
+      const extraAmount = document.getElementById('correction-extra-amount')?.value || '';
+      if (extraUnit && extraAmount) {
+        formData.append('extra_unit', extraUnit);
+        formData.append('extra_amount', extraAmount);
+      }
       if (corrVoiceBlob) {
         formData.append('correction_voice', corrVoiceBlob, 'correction_voice.webm');
       }
@@ -5606,6 +5618,76 @@ export async function mountTaskflowApp(opts = {}) {
     run();
   }
 
+  function fmtHrs(h) {
+    if (h == null || h === '') return '—';
+    return `${h}h`;
+  }
+
+  async function loadTimeDashboard() {
+    const body = document.getElementById('tdBody');
+    const rangeEl = document.getElementById('tdRange');
+    if (!body) return;
+    const range = rangeEl?.value || 'month';
+    body.innerHTML = '<div class="empty-state">Loading time data…</div>';
+    try {
+      const data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+      const emps = data.report || [];
+      const vers = data.verifiers || [];
+      if (!emps.length && !vers.length) {
+        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
+        return;
+      }
+      const empHtml = emps.map((emp) => {
+        const projBlocks = (emp.projects || []).map((p) => {
+          const rows = (p.tasks || []).map((t) => `
+            <tr>
+              <td>${escapeHtml((t.description || '').slice(0, 70))}</td>
+              <td>${escapeHtml(fmtDate(t.assigned_at || t.created_at))}</td>
+              <td>${escapeHtml(t.accepted_at ? fmtDate(t.accepted_at) : '—')}</td>
+              <td>${fmtHrs(t.time_to_accept_hrs)}</td>
+              <td>${fmtHrs(t.time_to_submit_hrs)}</td>
+              <td>${fmtHrs(t.time_to_start_verify_hrs)}</td>
+              <td>${fmtHrs(t.time_to_verify_hrs)}</td>
+              <td>${fmtHrs(t.total_cycle_hrs)}</td>
+              <td>${Number(t.extra_hours || 0) || Number(t.extra_days || 0)
+                ? `${t.extra_hours || 0}h / ${t.extra_days || 0}d`
+                : '—'}</td>
+            </tr>`).join('');
+          return `<div class="td-project">
+            <h4>${escapeHtml(p.name)} <span class="td-muted">${p.summary?.total || 0} tasks · avg cycle ${fmtHrs(p.summary?.avgCycleHrs)}</span></h4>
+            <div class="table-scroll"><table class="data-table td-table">
+              <thead><tr>
+                <th>Task</th><th>Assigned</th><th>Accepted</th>
+                <th>Accept</th><th>Submit</th><th>Start verify</th><th>Verified</th><th>Cycle</th><th>Extra</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table></div>
+          </div>`;
+        }).join('');
+        return `<div class="td-emp"><h3>${escapeHtml(emp.name)}</h3>${projBlocks}</div>`;
+      }).join('');
+
+      const verHtml = vers.length
+        ? `<div class="td-emp"><h3>Verification time by person</h3>
+            <div class="table-scroll"><table class="data-table td-table">
+              <thead><tr><th>Verifier</th><th>Tasks</th><th>Avg verify hrs</th><th>By project</th></tr></thead>
+              <tbody>${vers.map((v) => `<tr>
+                <td>${escapeHtml(v.name)}</td>
+                <td>${v.total}</td>
+                <td>${fmtHrs(v.avgVerifyHrs)}</td>
+                <td>${(v.projects || []).map((p) => `${escapeHtml(p.name)} (${p.count}, avg ${fmtHrs(p.avgVerifyHrs)})`).join('<br>')}</td>
+              </tr>`).join('')}</tbody>
+            </table></div></div>`
+        : '';
+
+      body.innerHTML = `<p class="td-muted">${escapeHtml(data.from?.slice(0,10) || '')} → ${escapeHtml(data.to?.slice(0,10) || '')}</p>${verHtml}${empHtml}`;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
+
   // ─── DIP AI Bot ─────────────────────────────────────────────────────────────
   function appendBotBubble(who, text) {
     const log = document.getElementById('botChatLog');
@@ -6066,6 +6148,17 @@ export async function mountTaskflowApp(opts = {}) {
         showToast(err.message, 'error');
       }
     });
+    document.getElementById('momFillChatBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        const row = await api(`/bot/meetings/${_editingMomId}/from-chat`, { method: 'POST', body: {} });
+        const b = document.getElementById('momBody');
+        if (b) b.value = row.mom_body || '';
+        showToast('Chat points added to MoM', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
     document.getElementById('momFinalBtn')?.addEventListener('click', async () => {
       if (!_editingMomId) return;
       try {
@@ -6111,7 +6204,7 @@ export async function mountTaskflowApp(opts = {}) {
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const firstDow = new Date(y, m, 1).getDay();
     const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const heads = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const heads = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
       .map((d) => `<div class="cal-head">${d}</div>`)
       .join('');
     let cells = '';
@@ -6120,13 +6213,13 @@ export async function mountTaskflowApp(opts = {}) {
       const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const dayTasks = (tasks || []).filter((t) => String(t.target_date || '').slice(0, 10) === key);
       const chips = dayTasks
-        .slice(0, 4)
+        .slice(0, 3)
         .map((t) => {
           const cls = calTaskClass(t, todayKey);
-          return `<div class="cal-chip ${cls}" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || 'Task').slice(0, 28))}</div>`;
+          return `<div class="cal-chip ${cls}" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || 'Task').slice(0, 22))}</div>`;
         })
         .join('');
-      const more = dayTasks.length > 4 ? `<div class="cal-more">+${dayTasks.length - 4}</div>` : '';
+      const more = dayTasks.length > 3 ? `<div class="cal-more">+${dayTasks.length - 3} more</div>` : '';
       cells += `<button type="button" class="cal-cell${key === todayKey ? ' cal-is-today' : ''}" data-day="${key}">
         <span class="cal-daynum">${day}</span>${chips}${more}
       </button>`;

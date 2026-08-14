@@ -458,7 +458,26 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
       .eq('room_id', roomId);
     const attendeeIds = (members || []).map((m) => m.user_id);
 
-    // Create MoM draft so minutes can be filled after the call
+    const { data: recentMsgs } = await supabase
+      .from('chat_messages')
+      .select('body, created_at, is_bot, msg_type, sender:users!chat_messages_sender_id_fkey(full_name)')
+      .eq('room_id', roomId)
+      .neq('msg_type', 'meeting')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const points = (recentMsgs || [])
+      .reverse()
+      .filter((m) => !m.is_bot && String(m.body || '').trim().length > 2)
+      .slice(-12)
+      .map((m) => `- ${m.sender?.full_name || 'Member'}: ${String(m.body).replace(/\s+/g, ' ').slice(0, 160)}`);
+
+    const mom_body =
+      `Agenda:\n1. Review open items from this chat\n2. Decisions & next steps\n3. Action owners\n\n` +
+      `Discussion / important points (from chat before the call):\n` +
+      (points.length ? points.join('\n') : '- (no prior chat points — add during/after the call)') +
+      `\n\nDecisions:\n- \n\nAction items:\n- Owner — task — due date\n`;
+
     let mom = null;
     try {
       const { data: momRow } = await supabase
@@ -470,8 +489,7 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
           title: `MoM · ${room?.title || 'Meeting'} · ${new Date().toISOString().slice(0, 10)}`,
           started_by: req.user.id,
           attendees: attendeeIds,
-          mom_body:
-            'Agenda:\n1. \n\nDiscussion:\n- \n\nDecisions:\n- \n\nAction items:\n- Owner — task — due date\n',
+          mom_body,
           status: 'draft',
         })
         .select('*')
@@ -599,6 +617,46 @@ router.patch('/meetings/:id', requireAuth, async (req, res) => {
     res.json(data);
   } catch (err) {
     if (isSchemaMissing(err)) return res.status(503).json({ error: 'Run backend/sql/add_meeting_moms.sql' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/meetings/:id/from-chat', requireAuth, async (req, res) => {
+  try {
+    const { data: existing, error: findErr } = await supabase
+      .from('meeting_moms')
+      .select('*')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (findErr) throw findErr;
+    if (!existing) return res.status(404).json({ error: 'Meeting not found' });
+    if (!existing.chat_room_id) return res.status(400).json({ error: 'This meeting is not linked to a chat' });
+
+    const { data: recentMsgs } = await supabase
+      .from('chat_messages')
+      .select('body, is_bot, msg_type, sender:users!chat_messages_sender_id_fkey(full_name)')
+      .eq('room_id', existing.chat_room_id)
+      .neq('msg_type', 'meeting')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    const points = (recentMsgs || [])
+      .reverse()
+      .filter((m) => !m.is_bot && String(m.body || '').trim().length > 2)
+      .slice(-12)
+      .map((m) => `- ${m.sender?.full_name || 'Member'}: ${String(m.body).replace(/\s+/g, ' ').slice(0, 160)}`);
+    const block =
+      `\n\nDiscussion / important points (from chat):\n` +
+      (points.length ? points.join('\n') : '- (no chat points found)');
+    const mom_body = String(existing.mom_body || '') + block;
+    const { data, error } = await supabase
+      .from('meeting_moms')
+      .update({ mom_body, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const { addWorkingHours, addCalendarDays } = require('../lib/workingHours');
 const router = express.Router();
 router.use(requireAuth);
 
@@ -34,6 +34,7 @@ const BUCKET = 'task-files';
 const TASK_SELECT = `
   id, description, hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -126,7 +127,8 @@ if (!isMdoOffice && !project_id) {
           rescheduling_possible: rescheduling_possible === 'true',
           attachment_url,
           voice_note_url,
-          status: 'Pending'
+          status: 'Pending',
+          assigned_at: new Date().toISOString()
         })
         .select(TASK_SELECT)
         .single();
@@ -598,7 +600,10 @@ router.patch(
       }
 
       const { data: existing, error: fetchErr } = await supabase
-        .from('tasks').select('id, verifier_id').eq('id', id).maybeSingle();
+        .from('tasks')
+        .select('id, verifier_id, target_date, hours_to_complete, extra_hours, extra_days, correction_extensions')
+        .eq('id', id)
+        .maybeSingle();
       if (fetchErr) throw fetchErr;
       if (!existing) return res.status(404).json({ error: 'Task not found' });
 
@@ -612,17 +617,63 @@ router.patch(
         correction_voice_url = await uploadFile(req.file, 'correction-voices');
       }
 
-      const { data, error } = await supabase
-        .from('tasks')
-        .update({
+      const extraUnit = String(req.body.extra_unit || '').toLowerCase(); // hours | days
+      const extraAmount = Number(req.body.extra_amount || 0);
+      let target_date = existing.target_date;
+      let hours_to_complete = existing.hours_to_complete != null ? Number(existing.hours_to_complete) : null;
+      let extra_hours = Number(existing.extra_hours || 0);
+      let extra_days = Number(existing.extra_days || 0);
+      const extensions = Array.isArray(existing.correction_extensions) ? [...existing.correction_extensions] : [];
+
+      if (extraAmount > 0 && (extraUnit === 'hours' || extraUnit === 'days')) {
+        if (extraUnit === 'hours') {
+          extra_hours += extraAmount;
+          hours_to_complete = (hours_to_complete || 0) + extraAmount;
+          if (target_date) {
+            target_date = addWorkingHours(target_date, extraAmount).toISOString();
+          }
+        } else {
+          extra_days += extraAmount;
+          if (target_date) {
+            target_date = addCalendarDays(target_date, extraAmount).toISOString();
+          }
+        }
+        extensions.push({
+          at: new Date().toISOString(),
+          by: req.user.id,
+          by_name: req.user.full_name,
+          unit: extraUnit,
+          amount: extraAmount,
+          note: note.trim().slice(0, 200),
+        });
+      }
+
+      const updates = {
           verification_status: 'Verification Rejected',
           verification_note: note.trim(),
           status: 'In Progress',
-          correction_voice_url
-        })
+          correction_voice_url,
+          target_date,
+          hours_to_complete,
+          extra_hours,
+          extra_days,
+          correction_extensions: extensions,
+        };
+
+      let { data, error } = await supabase
+        .from('tasks')
+        .update(updates)
         .eq('id', id)
         .select(TASK_SELECT)
         .single();
+      if (error && /extra_hours|extra_days|correction_extensions|assigned_at/i.test(error.message || '')) {
+        delete updates.extra_hours;
+        delete updates.extra_days;
+        delete updates.correction_extensions;
+        const retry = await supabase.from('tasks').update(updates).eq('id', id).select(TASK_SELECT.replace(/assigned_at, extra_hours, extra_days, correction_extensions,\s*/, '')).single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) throw error;
       res.json(data);
@@ -933,6 +984,7 @@ router.patch('/:id/reassign', requireAdmin, async (req, res) => {
       .update({
         assigned_to,
         status: 'Pending',
+        assigned_at: new Date().toISOString(),
         status_note: null,
         verifier_id: null,
         verification_status: null,
@@ -983,8 +1035,9 @@ router.get('/report', requireAdmin, async (req, res) => {
       .from('tasks')
       .select(`
         id, description, status, priority,
-        created_at, accepted_at, sent_for_verification_at, verified_at, rejected_at,
-        hours_to_complete, target_date,
+        created_at, assigned_at, accepted_at, sent_for_verification_at,
+        verification_started_at, verified_at, rejected_at,
+        hours_to_complete, target_date, extra_hours, extra_days,
         verification_status,
         project:projects ( id, name ),
         task_type:task_types ( id, name ),
@@ -1006,13 +1059,20 @@ router.get('/report', requireAdmin, async (req, res) => {
     }
 
     // Enrich each task with computed time fields
-    const enriched = tasks.map(t => ({
-      ...t,
-      time_to_accept_hrs:   hrsBetween(t.created_at, t.accepted_at),
-      time_to_submit_hrs:   hrsBetween(t.accepted_at, t.sent_for_verification_at),
-      time_to_verify_hrs:   hrsBetween(t.sent_for_verification_at, t.verified_at),
-      total_cycle_hrs:      hrsBetween(t.created_at, t.verified_at || t.rejected_at)
-    }));
+    const enriched = (tasks || []).map(t => {
+      const assigned = t.assigned_at || t.created_at;
+      return {
+        ...t,
+        assigned_at: assigned,
+        time_to_accept_hrs: hrsBetween(assigned, t.accepted_at),
+        time_to_submit_hrs: hrsBetween(t.accepted_at, t.sent_for_verification_at),
+        time_to_start_verify_hrs: hrsBetween(t.sent_for_verification_at, t.verification_started_at),
+        time_to_verify_hrs: hrsBetween(t.verification_started_at || t.sent_for_verification_at, t.verified_at),
+        total_cycle_hrs: hrsBetween(assigned, t.verified_at || t.rejected_at),
+        extra_hours: Number(t.extra_hours || 0),
+        extra_days: Number(t.extra_days || 0),
+      };
+    });
 
     // Group by employee → project
     const byEmployee = {};
@@ -1054,7 +1114,45 @@ router.get('/report', requireAdmin, async (req, res) => {
       return { ...emp, projects };
     });
 
-    res.json({ range: range || 'month', from: startDate.toISOString(), to: endDate.toISOString(), report });
+    const byVerifier = {};
+    for (const t of enriched) {
+      const vid = t.verifier?.id || 'none';
+      const vname = t.verifier?.full_name || 'No verifier';
+      if (!byVerifier[vid]) {
+        byVerifier[vid] = { id: vid, name: vname, projects: {}, total: 0, verifyHrs: [] };
+      }
+      const row = byVerifier[vid];
+      row.total += 1;
+      if (t.time_to_verify_hrs != null) row.verifyHrs.push(t.time_to_verify_hrs);
+      const pid = t.project?.id || 'no-project';
+      const pname = t.project?.name || 'No project';
+      if (!row.projects[pid]) row.projects[pid] = { id: pid, name: pname, count: 0, verifyHrs: [] };
+      row.projects[pid].count += 1;
+      if (t.time_to_verify_hrs != null) row.projects[pid].verifyHrs.push(t.time_to_verify_hrs);
+    }
+    const verifiers = Object.values(byVerifier).map((v) => ({
+      id: v.id,
+      name: v.name,
+      total: v.total,
+      avgVerifyHrs: v.verifyHrs.length
+        ? Math.round((v.verifyHrs.reduce((a, b) => a + b, 0) / v.verifyHrs.length) * 10) / 10
+        : null,
+      projects: Object.values(v.projects).map((p) => ({
+        ...p,
+        avgVerifyHrs: p.verifyHrs.length
+          ? Math.round((p.verifyHrs.reduce((a, b) => a + b, 0) / p.verifyHrs.length) * 10) / 10
+          : null,
+        verifyHrs: undefined,
+      })),
+    }));
+
+    res.json({
+      range: range || 'month',
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+      report,
+      verifiers,
+    });
   } catch (err) {
     console.error('Report error:', err.message);
     res.status(500).json({ error: err.message || 'Could not generate report' });

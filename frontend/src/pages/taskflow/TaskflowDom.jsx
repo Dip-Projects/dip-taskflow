@@ -487,6 +487,7 @@ export default function TaskflowDom() {
             </div>
             <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
               <button type="button" id="momSaveBtn" className="primary-btn primary-btn-inline">Save MoM</button>
+              <button type="button" id="momFillChatBtn" className="ghost-btn">Pull points from chat</button>
               <button type="button" id="momFinalBtn" className="ghost-btn">Mark final</button>
               <button type="button" id="momCloseBtn" className="ghost-btn">Close</button>
             </div>
@@ -495,22 +496,15 @@ export default function TaskflowDom() {
 
         {/* EMPLOYEE CALENDAR */}
         <section id="view-calendar" className="view" hidden={true}>
-          <div className="view-heading">
-            <h2 className="view-title">📅 My task calendar</h2>
-            <p className="view-sub">
-              <span className="cal-legend cal-today">Today</span>
-              <span className="cal-legend cal-done">Completed</span>
-              <span className="cal-legend cal-overdue">Overdue</span>
-              <span className="cal-legend cal-upcoming">Upcoming</span>
-            </p>
+          <div className="cal-wrap">
+            <div className="cal-nav">
+              <button type="button" id="calPrev" className="cal-nav-btn" aria-label="Previous month">‹</button>
+              <h2 id="calMonthLabel" className="cal-month-title">—</h2>
+              <button type="button" id="calNext" className="cal-nav-btn" aria-label="Next month">›</button>
+            </div>
+            <div id="calGrid" className="cal-grid"></div>
+            <div id="calDayDetail" className="cal-day-detail"></div>
           </div>
-          <div className="cal-nav">
-            <button type="button" id="calPrev" className="ghost-btn">‹ Prev</button>
-            <strong id="calMonthLabel">—</strong>
-            <button type="button" id="calNext" className="ghost-btn">Next ›</button>
-          </div>
-          <div id="calGrid" className="cal-grid"></div>
-          <div id="calDayDetail" className="cal-day-detail"></div>
         </section>
 
         {/* MANAGE SITES */}
@@ -1042,6 +1036,26 @@ export default function TaskflowDom() {
             </div>
           </div>
           <div id="misReportBody" className="mis-body" style={{marginTop: 16}}></div>
+        </section>
+
+        {/* TIME DASHBOARD (admin) */}
+        <section id="view-time-dashboard" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">⏱ Time dashboard</h2>
+            <p className="view-sub">Assign → accept → submit for verification → start verify → verified. Extra correction time included.</p>
+          </div>
+          <div className="mis-toolbar" style={{marginBottom: 14}}>
+            <label className="mis-field">
+              <span>Range</span>
+              <select id="tdRange">
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+                <option value="day">Today</option>
+              </select>
+            </label>
+            <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
+          </div>
+          <div id="tdBody"></div>
         </section>
 
       </main>
@@ -1625,7 +1639,18 @@ export default function TaskflowDom() {
             <audio id="corrVoicePlayback" controls hidden={true} style={{marginTop: 8, width: '100%'}}></audio>
           </div>
         </div>
-        <p id="correctionFormMsg" className="form-error" hidden={true}></p>
+        <div className="field">
+          <label>Extra time for correction <span className="optional">(admin / verifier)</span></label>
+          <div className="field-grid" style={{gridTemplateColumns: '1fr 1fr'}}>
+            <select id="correction-extra-unit">
+              <option value="">No extra time</option>
+              <option value="hours">Hours</option>
+              <option value="days">Days</option>
+            </select>
+            <input id="correction-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+          </div>
+          <p className="form-note">Hours add to planned hours and shift due date in office time. Days move the target date.</p>
+        </div>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelCorrectionModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline">Send Correction</button>
