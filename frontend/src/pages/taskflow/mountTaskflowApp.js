@@ -917,7 +917,8 @@ export async function mountTaskflowApp(opts = {}) {
   
         // Pending leave requests awaiting approval
         const pendingLeaves = await api('/leaves/all?status=Pending').catch(() => []);
-        setNavBadge('leaveapprovals', pendingLeaves.length);
+        const coverItems = await api('/leaves/unresolved-covers').catch(() => []);
+        setNavBadge('leaveapprovals', pendingLeaves.length + (Array.isArray(coverItems) ? coverItems.length : 0));
 
         const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
         setNavBadge('buddyrequests', buddyReqs.length);
@@ -980,7 +981,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'recurring')     loadRecurringView();
     if (viewKey === 'applyleave')      loadMyLeaves();
     if (viewKey === 'buddyrequests')  loadBuddyRequests();
-    if (viewKey === 'leaveapprovals')  loadLeaveApprovals();
+    if (viewKey === 'leaveapprovals')  { loadLeaveApprovals(); checkLeaveCoverAlerts(); }
     if (viewKey === 'drawings-add')  renderDrawingAddView();
     if (viewKey === 'drawings-all')  loadAllDrawings();
     if (viewKey === 'daily-report')  loadDailyReport();
@@ -3263,8 +3264,10 @@ export async function mountTaskflowApp(opts = {}) {
     yesBtn.textContent = '✅ Yes, I\'ll cover';
     yesBtn.addEventListener('click', async () => {
       try {
-        await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
-        showToast('You accepted buddy cover ✅', 'success');
+        const res = await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
+        const n = res.tasks_moved || 0;
+        const day = res.accept_date || 'today';
+        showToast(n ? `${n} task(s) moved to you · target date ${day}` : 'You accepted buddy cover ✅', 'success');
         loadBuddyRequests();
         refreshNavBadges();
       } catch (err) { showToast(err.message, 'error'); }
@@ -3276,7 +3279,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (!confirm('Decline this buddy request?')) return;
       try {
         await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
-        showToast('Buddy request declined', 'success');
+        showToast('Declined — admin can reassign or change the target date', 'success');
         loadBuddyRequests();
         refreshNavBadges();
       } catch (err) { showToast(err.message, 'error'); }
@@ -3596,14 +3599,14 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="ticket-meta">Buddy: <strong>${escapeHtml(item.buddy?.full_name || '—')}</strong> (declined)</div>
         <ul style="margin:8px 0;padding-left:18px;">${taskLines || '<li>No open tasks in leave window</li>'}</ul>
         <div class="field">
-          <label>Transfer all to</label>
+          <label>Reassign tasks to</label>
           <select class="leave-cover-assignee" data-idx="${idx}">
             <option value="">Select employee…</option>
             ${assigneeOpts}
           </select>
         </div>
         <div class="field">
-          <label>Or reschedule all to</label>
+          <label>Or change target date</label>
           <input type="date" class="leave-cover-date" data-idx="${idx}" />
         </div>
         <div class="row-actions" style="margin-top:8px;gap:8px;display:flex;flex-wrap:wrap;"></div>
@@ -3612,7 +3615,7 @@ export async function mountTaskflowApp(opts = {}) {
       const transferBtn = document.createElement('button');
       transferBtn.type = 'button';
       transferBtn.className = 'action-btn action-complete';
-      transferBtn.textContent = 'Transfer tasks';
+      transferBtn.textContent = 'Reassign tasks';
       transferBtn.addEventListener('click', async () => {
         const sel = block.querySelector('.leave-cover-assignee');
         const assignee_id = sel?.value;
@@ -3636,7 +3639,7 @@ export async function mountTaskflowApp(opts = {}) {
       const reschedBtn = document.createElement('button');
       reschedBtn.type = 'button';
       reschedBtn.className = 'action-btn';
-      reschedBtn.textContent = 'Reschedule dates';
+      reschedBtn.textContent = 'Change target date';
       reschedBtn.addEventListener('click', async () => {
         const dateEl = block.querySelector('.leave-cover-date');
         const target_date = dateEl?.value;
