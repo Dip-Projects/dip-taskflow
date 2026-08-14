@@ -2270,8 +2270,10 @@ export async function mountTaskflowApp(opts = {}) {
         stream.getTracks().forEach((t) => t.stop());
         corrVoiceBlob = new Blob(chunks, { type: 'audio/webm' });
         const url = URL.createObjectURL(corrVoiceBlob);
-        els.corrVoicePlayback.src = url;
-        if (els.corrVoicePlayback) els.corrVoicePlayback.hidden = false;
+        if (els.corrVoicePlayback) {
+          els.corrVoicePlayback.src = url;
+          els.corrVoicePlayback.hidden = false;
+        }
         if (els.corrRecordStatus) els.corrRecordStatus.textContent = '✅ Recording saved';
         if (els.corrStartRecord) els.corrStartRecord.disabled = false;
         if (els.corrStopRecord) els.corrStopRecord.disabled = true;
@@ -2282,7 +2284,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (els.corrRecordStatus) els.corrRecordStatus.textContent = '🔴 Recording…';
       if (els.corrVoicePlayback) els.corrVoicePlayback.hidden = true;
     } catch (err) {
-      els.corrRecordStatus.textContent = '❌ Microphone access denied';
+      if (els.corrRecordStatus) els.corrRecordStatus.textContent = '❌ Microphone access denied';
     }
   });
   els.corrStopRecord?.addEventListener('click', () => {
