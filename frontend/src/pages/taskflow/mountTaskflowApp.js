@@ -6097,15 +6097,15 @@ export async function mountTaskflowApp(opts = {}) {
             <tr class="fms-meta-row">${metaRow('How', '')}</tr>
             <tr class="fms-meta-row">${metaRow('Why', '')}</tr>
             <tr>
-              <th class="fms-sticky fms-id-head" rowspan="1">Timestamp</th>
-              <th class="fms-id-head">JOB NO.</th>
-              <th class="fms-id-head">PROJECT NAME</th>
-              <th class="fms-id-head">WORK TYPE</th>
-              <th class="fms-id-head">PERSON</th>
-              <th class="fms-id-head">LEAD TIME</th>
+              <th class="fms-sticky fms-id-head" rowspan="2">Timestamp</th>
+              <th class="fms-id-head" rowspan="2">JOB NO.</th>
+              <th class="fms-id-head" rowspan="2">PROJECT NAME</th>
+              <th class="fms-id-head" rowspan="2">WORK TYPE</th>
+              <th class="fms-id-head" rowspan="2">PERSON</th>
+              <th class="fms-id-head" rowspan="2">LEAD TIME</th>
               ${stepHead}
             </tr>
-            <tr>${subHead}</tr>
+            <tr class="fms-sub-row">${subHead}</tr>
           </thead>
           <tbody>${tbody}</tbody>
         </table>

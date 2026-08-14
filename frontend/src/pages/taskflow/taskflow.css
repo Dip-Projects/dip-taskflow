@@ -2686,6 +2686,7 @@ body.sidebar-open { overflow: hidden; }
 .fms-table thead tr:nth-child(4) th { top: 66px; z-index: 5; }
 .fms-table thead tr:nth-child(5) th { top: 88px; z-index: 6; }
 .fms-table thead tr:nth-child(6) th { top: 118px; z-index: 6; }
+.fms-table thead tr.fms-sub-row th { top: 118px; z-index: 6; }
 .fms-table th.fms-id-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head { background: #FDE9D9; color: #7C2D12; }
 .fms-table th.fms-step-head--alt { background: #DCEBE1; color: #14532D; }
