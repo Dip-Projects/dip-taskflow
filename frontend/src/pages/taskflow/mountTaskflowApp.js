@@ -605,10 +605,15 @@ export async function mountTaskflowApp(opts = {}) {
     } else {
       switchView('my');
     }
-    // Refresh badge counts now and every 60s
+    // Refresh badge counts now and every 15s
     refreshNavBadges();
     if (window._badgeInterval) clearInterval(window._badgeInterval);
-    window._badgeInterval = setInterval(refreshNavBadges, 60000);
+    window._badgeInterval = setInterval(refreshNavBadges, 15000);
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch (_) {}
     // Head/admin: unresolved leave covers (buddy declined) — popup until resolved
     checkLeaveCoverAlerts();
   }
@@ -900,6 +905,17 @@ export async function mountTaskflowApp(opts = {}) {
         const chatUnreadAdmin = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
         setNavBadge('team-chat', chatUnreadAdmin?.total || 0);
       }
+
+      const alerts = await api('/bot/alerts').catch(() => []);
+      const unreadMeet = (alerts || []).filter((a) => !a.is_read && /^Meeting started/i.test(String(a.title || '')));
+      setNavBadge('meetings', unreadMeet.length);
+      if (!window._seenMeetAlerts) window._seenMeetAlerts = new Set();
+      unreadMeet.forEach((a) => {
+        if (window._seenMeetAlerts.has(a.id)) return;
+        window._seenMeetAlerts.add(a.id);
+        const age = Date.now() - new Date(a.created_at || 0).getTime();
+        if (Number.isFinite(age) && age < 3 * 60 * 1000) fireSystemNotify(a.title, a.body);
+      });
     } catch(e) { /* silently fail — badges are non-critical */ }
   }
   
@@ -6191,7 +6207,7 @@ export async function mountTaskflowApp(opts = {}) {
     return out.join('') || `<p class="bot-line">${escapeHtml(raw)}</p>`;
   }
 
-  function appendBotBubble(who, text) {
+  function appendBotBubble(who, text, downloads) {
     const log = document.getElementById('botChatLog');
     if (!log) return;
     const div = document.createElement('div');
@@ -6200,6 +6216,26 @@ export async function mountTaskflowApp(opts = {}) {
       ? `<div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`
       : `<div class="bot-bubble-body bot-rich">${renderBotAnswer(text)}</div>`;
     div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : 'DIP Bot'}</div>${body}`;
+    if (who !== 'you' && Array.isArray(downloads) && downloads.length) {
+      const bar = document.createElement('div');
+      bar.className = 'bot-downloads';
+      downloads.forEach((d) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'primary-btn primary-btn-inline';
+        btn.textContent = `Download ${d.label || d.filename || 'report'}`;
+        btn.addEventListener('click', () => {
+          const blob = new Blob([d.html || ''], { type: 'text/html;charset=utf-8' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = d.filename || 'report.html';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        });
+        bar.appendChild(btn);
+      });
+      div.appendChild(bar);
+    }
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
   }
@@ -6208,7 +6244,19 @@ export async function mountTaskflowApp(opts = {}) {
     const log = document.getElementById('botChatLog');
     if (log && !log.dataset.ready) {
       log.dataset.ready = '1';
-      appendBotBubble('bot', 'Hello. I am DIP Bot. Ask about a person\'s clock-in, overdue tasks, or verification — I will answer only what you asked.');
+      try {
+        const hist = await api('/bot/qa').catch(() => []);
+        if (Array.isArray(hist) && hist.length) {
+          hist.forEach((row) => {
+            if (row.question) appendBotBubble('you', row.question);
+            if (row.answer) appendBotBubble('bot', row.answer);
+          });
+        } else {
+          appendBotBubble('bot', 'Hello. I am DIP Bot. Ask overdue tasks, a person\'s June/July attendance, DPR, or company summary — I answer from live TaskFlow data.');
+        }
+      } catch (_) {
+        appendBotBubble('bot', 'Hello. I am DIP Bot. Ask overdue tasks, attendance, DPR, or company summary.');
+      }
     }
     try {
       const alerts = await api('/bot/alerts').catch(() => []);
@@ -6240,7 +6288,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (input) input.value = '';
       try {
         const res = await api('/bot/ask', { method: 'POST', body: { question: q } });
-        appendBotBubble('bot', res.answer || 'No answer');
+        appendBotBubble('bot', res.answer || 'No answer', res.downloads);
       } catch (err) {
         appendBotBubble('bot', err.message || 'Error');
       }
@@ -6278,7 +6326,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (m.msg_type === 'meeting' || meetUrl) {
       bodyHtml = `<div class="chat-meeting-card">
         <div>${escapeHtml((m.body || 'Video meeting').split('\n')[0])}</div>
-        <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video in TaskFlow</button>
+        <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video</button>
       </div>`;
     } else {
       bodyHtml = `<div class="bot-bubble-body">${escapeHtml(m.body).replace(/\n/g, '<br>')}</div>`;
@@ -6287,23 +6335,15 @@ export async function mountTaskflowApp(opts = {}) {
     return div;
   }
 
-  let _jitsiApi = null;
+  let _jitsiWin = null;
+  let _meetUrl = null;
   let _meetRecog = null;
   let _meetMomId = null;
   let _meetKeepListening = false;
   let _meetFlushTimer = null;
   let _meetPending = '';
-
-  function loadJitsiApi() {
-    return new Promise((resolve, reject) => {
-      if (window.JitsiMeetExternalAPI) return resolve();
-      const s = document.createElement('script');
-      s.src = 'https://meet.jit.si/external_api.js';
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('Could not load video'));
-      document.head.appendChild(s);
-    });
-  }
+  let _meetRecorder = null;
+  let _meetStream = null;
 
   async function resolveMomIdForUrl(meetUrl) {
     if (!meetUrl) return null;
@@ -6339,6 +6379,42 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  function stopCallAudioBackup() {
+    try { _meetRecorder?.stop(); } catch (_) {}
+    _meetRecorder = null;
+    try { _meetStream?.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    _meetStream = null;
+  }
+
+  async function startCallAudioBackup(momId) {
+    stopCallAudioBackup();
+    if (!momId || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      _meetStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      setMeetCaptionStatus('Allow microphone so spoken words can be written to MoM');
+      return;
+    }
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    let rec;
+    try {
+      rec = new MediaRecorder(_meetStream, { mimeType: mime });
+    } catch (_) {
+      rec = new MediaRecorder(_meetStream);
+    }
+    rec.ondataavailable = async (ev) => {
+      if (!ev.data || ev.data.size < 2500 || !_meetMomId) return;
+      const fd = new FormData();
+      fd.append('audio', ev.data, 'chunk.webm');
+      try {
+        const res = await api(`/bot/meetings/${_meetMomId}/transcribe-audio`, { method: 'POST', body: fd, isForm: true });
+        if (res?.text) appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${res.text}`);
+      } catch (_) {}
+    };
+    rec.start(12000);
+    _meetRecorder = rec;
+  }
+
   function stopCallCaptions() {
     _meetKeepListening = false;
     if (_meetFlushTimer) {
@@ -6348,18 +6424,20 @@ export async function mountTaskflowApp(opts = {}) {
     try { _meetRecog?.stop(); } catch (_) {}
     _meetRecog = null;
     flushMeetCaptions();
+    stopCallAudioBackup();
   }
 
-  function startCallCaptions(momId) {
+  async function startCallCaptions(momId) {
     stopCallCaptions();
     _meetMomId = momId;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!momId) {
       setMeetCaptionStatus('MoM not linked — spoken words will not be saved');
       return;
     }
+    await startCallAudioBackup(momId);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-      setMeetCaptionStatus('Use Chrome/Edge — this browser cannot capture speech for MoM');
+      setMeetCaptionStatus('Keep this tab open — microphone audio is being saved to MoM');
       return;
     }
     _meetKeepListening = true;
@@ -6367,7 +6445,7 @@ export async function mountTaskflowApp(opts = {}) {
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = 'hi-IN';
+    rec.lang = navigator.language || 'en-IN';
     rec.onresult = (ev) => {
       let finals = '';
       for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
@@ -6389,7 +6467,7 @@ export async function mountTaskflowApp(opts = {}) {
     _meetRecog = rec;
     try {
       rec.start();
-      setMeetCaptionStatus('Listening to the call — Hindi/English speech goes into MoM');
+      setMeetCaptionStatus('Listening here — keep this tab open. Speech goes into MoM.');
     } catch (_) {
       setMeetCaptionStatus('Allow microphone so spoken words can be written to MoM');
     }
@@ -6399,12 +6477,9 @@ export async function mountTaskflowApp(opts = {}) {
   async function closeInAppMeeting(goToMom) {
     const momId = _meetMomId;
     stopCallCaptions();
-    try { _jitsiApi?.dispose(); } catch (_) {}
-    _jitsiApi = null;
+    _meetUrl = null;
     const overlay = document.getElementById('meetOverlay');
     if (overlay) overlay.hidden = true;
-    const box = document.getElementById('jitsiContainer');
-    if (box) box.innerHTML = '';
     if (goToMom && momId) {
       switchView('meetings');
       try {
@@ -6415,52 +6490,43 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  function launchJitsiWindow(meetUrl) {
+    if (!meetUrl) return;
+    try {
+      _jitsiWin = window.open(meetUrl, 'dip-jitsi-call', 'noopener,noreferrer');
+    } catch (_) {
+      _jitsiWin = null;
+    }
+    if (!_jitsiWin) window.open(meetUrl, '_blank', 'noopener,noreferrer');
+  }
+
   async function openInAppMeeting(meetUrl, momId) {
     const overlay = document.getElementById('meetOverlay');
-    const box = document.getElementById('jitsiContainer');
-    if (!overlay || !box) {
+    if (!overlay) {
       window.open(meetUrl, '_blank', 'noopener,noreferrer');
       return;
     }
-    let roomName = '';
-    try {
-      roomName = decodeURIComponent(new URL(meetUrl).pathname.replace(/^\//, ''));
-    } catch (_) {
-      roomName = String(meetUrl).split('/').pop();
-    }
+    _meetUrl = meetUrl;
     overlay.hidden = false;
-    document.getElementById('meetLiveCaption').textContent = '';
-    setMeetCaptionStatus('Starting call…');
-    try {
-      await loadJitsiApi();
-    } catch (err) {
-      showToast(err.message, 'error');
-      window.open(meetUrl, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    try { _jitsiApi?.dispose(); } catch (_) {}
-    box.innerHTML = '';
-    _jitsiApi = new window.JitsiMeetExternalAPI('meet.jit.si', {
-      roomName,
-      parentNode: box,
-      width: '100%',
-      height: '100%',
-      userInfo: { displayName: state.user?.full_name || 'DIP' },
-      configOverwrite: {
-        startWithAudioMuted: false,
-        startWithVideoMuted: false,
-        prejoinPageEnabled: false,
-      },
-    });
+    const cap = document.getElementById('meetLiveCaption');
+    if (cap) cap.textContent = '';
+    setMeetCaptionStatus('Opening Jitsi in a new window… keep this tab open for MoM');
     const linkedMom = momId || (await resolveMomIdForUrl(meetUrl));
-    startCallCaptions(linkedMom);
-    _jitsiApi.addListener('videoConferenceLeft', () => closeInAppMeeting(true));
+    await startCallCaptions(linkedMom);
+    launchJitsiWindow(meetUrl);
   }
 
   if (!window._meetOverlayBound) {
     window._meetOverlayBound = true;
     document.getElementById('meetEndMomBtn')?.addEventListener('click', () => closeInAppMeeting(true));
     document.getElementById('meetCloseBtn')?.addEventListener('click', () => closeInAppMeeting(false));
+    document.getElementById('meetOpenCallBtn')?.addEventListener('click', () => {
+      if (_meetUrl) launchJitsiWindow(_meetUrl);
+    });
+    document.getElementById('meetNoticeClose')?.addEventListener('click', () => {
+      const n = document.getElementById('meetJitsiNotice');
+      if (n) n.hidden = true;
+    });
     document.getElementById('chatMsgLog')?.addEventListener('click', async (e) => {
       const btn = e.target.closest?.('.js-join-meet');
       if (!btn) return;
@@ -6717,7 +6783,7 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/bot/chats/${_activeChatRoom}/meeting`, { method: 'POST', body: {} });
         const url = res.meeting_url;
-        showToast('Call started — keep this window open so spoken words go into MoM', 'success');
+        fireSystemNotify('Meeting started', 'Jitsi opens in a new window. Keep this TaskFlow tab open so spoken words go into MoM. WhatsApp sent to members.');
         await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle, kind: 'project' });
         if (url) await openInAppMeeting(url, res.mom?.id || null);
       } catch (err) {

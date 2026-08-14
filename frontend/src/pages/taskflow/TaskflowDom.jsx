@@ -415,7 +415,7 @@ export default function TaskflowDom() {
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">🤖 DIP Bot</h2>
-            <p className="view-sub">Admin only — ask in English or Hindi. Example: “Harshil clock-in time and Roshan Patel clock-in time”.</p>
+            <p className="view-sub">Admin only — live TaskFlow data. History stays in this chat. Example: overdue tasks, or “Harshil and Roshan June and July attendance”.</p>
           </div>
           <div className="bot-shell">
             <div id="botChatLog" className="bot-chat-log"></div>
@@ -472,7 +472,7 @@ export default function TaskflowDom() {
         <section id="view-meetings" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">📝 Meetings &amp; MoM</h2>
-            <p className="view-sub">Spoken discussion from the in-app video call is captured into minutes. Join video inside TaskFlow (not a new tab).</p>
+            <p className="view-sub">Spoken discussion is captured here while video runs in a Jitsi window. Keep this TaskFlow tab open during the call.</p>
           </div>
           <div id="momList" className="mom-list"></div>
           <div id="momEditor" className="mom-editor" hidden>
@@ -1881,18 +1881,30 @@ export default function TaskflowDom() {
   </div>
 
   <div id="meetOverlay" className="meet-overlay" hidden>
+    <div id="meetJitsiNotice" className="meet-jitsi-notice">
+      <span className="meet-jitsi-notice-icon" aria-hidden="true">!</span>
+      <p>
+        Embedding meet.jitsi.si is only meant for demo purposes, so an embedded call disconnects in 5 minutes.
+        TaskFlow now opens the real Jitsi window. Keep this tab open so spoken words are written to MoM.
+        Please use <a href="https://jaas.8x8.vc/" target="_blank" rel="noopener noreferrer">Jitsi as a Service</a> for production.
+      </p>
+      <button type="button" id="meetNoticeClose" className="meet-jitsi-notice-x" aria-label="Dismiss">×</button>
+    </div>
     <div className="meet-overlay-bar">
       <div>
-        <strong>Video call</strong>
+        <strong>Minutes of meeting</strong>
         <span id="meetCaptionStatus" className="meet-caption-status">Capturing spoken words for MoM…</span>
       </div>
       <div className="meet-overlay-actions">
+        <button type="button" id="meetOpenCallBtn" className="primary-btn primary-btn-inline">Open / rejoin Jitsi</button>
         <button type="button" id="meetEndMomBtn" className="primary-btn primary-btn-inline">End call &amp; write MoM</button>
-        <button type="button" id="meetCloseBtn" className="ghost-btn">Close video</button>
+        <button type="button" id="meetCloseBtn" className="ghost-btn">Close captions</button>
       </div>
     </div>
-    <div id="jitsiContainer" className="meet-jitsi"></div>
-    <pre id="meetLiveCaption" className="meet-live-caption"></pre>
+    <div className="meet-caption-panel">
+      <p className="meet-caption-hint">Video is in the Jitsi window. Live captions for MoM appear below.</p>
+      <pre id="meetLiveCaption" className="meet-live-caption"></pre>
+    </div>
   </div>
 
   

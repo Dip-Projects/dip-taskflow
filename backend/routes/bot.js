@@ -200,6 +200,24 @@ router.post('/ask', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/qa', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('bot_qa')
+      .select('id, question, answer, created_at')
+      .eq('user_id', req.user.id)
+      .order('created_at', { ascending: true })
+      .limit(80);
+    if (error) {
+      if (isSchemaMissing(error)) return res.json([]);
+      throw error;
+    }
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/alerts', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -574,11 +592,12 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
       console.warn('MoM create:', e.message);
     }
 
-    // One WhatsApp per member when meeting starts (not for every chat message)
+    const meetTitle = `Meeting started · ${room?.title || 'Team chat'}`;
+    const meetBody = `Video meeting started by ${req.user.full_name}. Open Team chat → Join video. Keep TaskFlow open so spoken words go into MoM.`;
     for (const uid of attendeeIds) {
-      if (String(uid) === String(req.user.id)) continue;
+      await pushAlert(uid, meetTitle, meetBody, 'meetings');
       await notifyUserWa(uid, {
-        desc: `Video meeting started by ${req.user.full_name}. Open Chat → Join video, then check Meetings for MoM.`,
+        desc: meetBody,
         project: room?.title || 'Meeting',
         priority: 'High',
       });

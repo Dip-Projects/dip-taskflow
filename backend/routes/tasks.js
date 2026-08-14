@@ -1237,7 +1237,6 @@ const FMS_STEPS = [
   { key: 'accept', label: 'Start / Accept' },
   { key: 'submit', label: 'Send for verification' },
   { key: 'verify', label: 'Verification' },
-  { key: 'reverify', label: 'Second verification' },
 ];
 
 function fmsRangeDates(range, from, to) {
@@ -1345,20 +1344,12 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
         const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
         const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
         const verifiedAt = t.verified_at || t.first_verified_at;
-        const extensions = Array.isArray(t.correction_extensions) ? t.correction_extensions : [];
-        const wentBack = ['Verification Rejected', 'Updation Required'].includes(t.verification_status)
-          || extensions.length > 0;
         const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
 
         const steps = {
           accept: fmsStep(assigned, t.accepted_at, true),
           submit: fmsStep(t.target_date, sentAt, true),
           verify: fmsStep(t.target_date, decidedAt || startVerifyAt, !!sentAt),
-          reverify: fmsStep(
-            t.target_date,
-            wentBack && t.verification_status === 'Verified' ? verifiedAt : null,
-            wentBack
-          ),
         };
 
         return {
