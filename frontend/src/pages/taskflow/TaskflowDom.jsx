@@ -1428,21 +1428,26 @@ export default function TaskflowDom() {
           <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
         </div>
         <div className="field">
-          <label>Extra time <span className="optional">(optional)</span></label>
-          <div className="field-grid" style={{gridTemplateColumns: '1fr 1fr'}}>
-            <select id="updation-extra-unit">
-              <option value="">No extra time</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
-            </select>
-            <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
-          </div>
+          <p id="updationCurrentDue" className="form-note" style={{marginBottom: 8}}>This was your target date.</p>
+          <label htmlFor="updation-due-action">Now what would you like to do?</label>
+          <select id="updation-due-action">
+            <option value="keep">Keep the same date</option>
+            <option value="hours">Give extra hours</option>
+            <option value="days">Give extra days</option>
+            <option value="new">Set a new date &amp; time</option>
+          </select>
         </div>
-        <div className="field">
-          <label htmlFor="updation-new-due">New due date &amp; time <span className="optional">(optional — this task only)</span></label>
+        <div className="field" id="updationExtraWrap" hidden={true}>
+          <label htmlFor="updation-extra-amount">How much extra?</label>
+          <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+          <input type="hidden" id="updation-extra-unit" value="" />
+        </div>
+        <div className="field" id="updationNewDueWrap" hidden={true}>
+          <label htmlFor="updation-new-due">New due date &amp; time</label>
           <input id="updation-new-due" type="datetime-local" />
-          <p className="form-note">Set a new deadline for this task when sending it back for updation.</p>
+          <p className="form-note">This exact date and time will become the new target date for this task.</p>
         </div>
+        <p id="updationFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline">📤 Send Updation</button>
@@ -1718,21 +1723,26 @@ export default function TaskflowDom() {
           </div>
         </div>
         <div className="field">
-          <label>Extra time for correction <span className="optional">(admin / verifier)</span></label>
-          <div className="field-grid" style={{gridTemplateColumns: '1fr 1fr'}}>
-            <select id="correction-extra-unit">
-              <option value="">No extra time</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
-            </select>
-            <input id="correction-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
-          </div>
-          <p className="form-note">Hours add to planned hours. Days move the due date. Or set an exact new due date/time below for this task only.</p>
+          <p id="correctionCurrentDue" className="form-note" style={{marginBottom: 8}}>This was your target date.</p>
+          <label htmlFor="correction-due-action">Now what would you like to do?</label>
+          <select id="correction-due-action">
+            <option value="keep">Keep the same date</option>
+            <option value="hours">Give extra hours</option>
+            <option value="days">Give extra days</option>
+            <option value="new">Set a new date &amp; time</option>
+          </select>
         </div>
-        <div className="field">
-          <label htmlFor="correction-new-due">New due date &amp; time <span className="optional">(optional — this task only)</span></label>
+        <div className="field" id="correctionExtraWrap" hidden={true}>
+          <label htmlFor="correction-extra-amount">How much extra?</label>
+          <input id="correction-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+          <input type="hidden" id="correction-extra-unit" value="" />
+        </div>
+        <div className="field" id="correctionNewDueWrap" hidden={true}>
+          <label htmlFor="correction-new-due">New due date &amp; time</label>
           <input id="correction-new-due" type="datetime-local" />
+          <p className="form-note">This exact date and time will become the new target date for this task.</p>
         </div>
+        <p id="correctionFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelCorrectionModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline">Send Correction</button>

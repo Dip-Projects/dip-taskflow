@@ -17,7 +17,12 @@ function applyDeadlineChange(existing, body, note) {
   const newDueRaw = String(body.new_target_date || '').trim();
   let usedExplicitDue = false;
   if (newDueRaw) {
-    const d = new Date(newDueRaw);
+    const d = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(newDueRaw) && !/[zZ]|[+-]\d{2}:\d{2}$/.test(newDueRaw)
+      ? (() => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(newDueRaw);
+          return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : new Date(newDueRaw);
+        })()
+      : new Date(newDueRaw);
     if (!Number.isNaN(d.getTime())) {
       target_date = d.toISOString();
       usedExplicitDue = true;

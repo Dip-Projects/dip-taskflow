@@ -473,6 +473,38 @@ export async function mountTaskflowApp(opts = {}) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
+  function datetimeLocalToIso(value) {
+    if (!value) return '';
+    const [date, time] = String(value).split('T');
+    if (!date || !time) return '';
+    const [y, mo, d] = date.split('-').map(Number);
+    const [h, mi, se] = time.split(':').map(Number);
+    return new Date(y, mo - 1, d, h, mi || 0, se || 0).toISOString();
+  }
+  function syncDueActionFields(prefix) {
+    const action = document.getElementById(`${prefix}-due-action`)?.value || 'keep';
+    const extraWrap = document.getElementById(`${prefix}ExtraWrap`);
+    const dueWrap = document.getElementById(`${prefix}NewDueWrap`);
+    const unit = document.getElementById(`${prefix}-extra-unit`);
+    if (extraWrap) extraWrap.hidden = action !== 'hours' && action !== 'days';
+    if (dueWrap) dueWrap.hidden = action !== 'new';
+    if (unit) unit.value = action === 'hours' || action === 'days' ? action : '';
+  }
+  function fillDuePrompt(prefix, task) {
+    const label = document.getElementById(`${prefix}CurrentDue`);
+    const due = document.getElementById(`${prefix}-new-due`);
+    const action = document.getElementById(`${prefix}-due-action`);
+    const amount = document.getElementById(`${prefix}-extra-amount`);
+    if (label) {
+      label.innerHTML = task?.target_date
+        ? `This was your target date: <strong>${escapeHtml(fmtDate(task.target_date))}</strong>`
+        : 'This task has no target date yet.';
+    }
+    if (action) action.value = 'keep';
+    if (amount) amount.value = '';
+    if (due) due.value = toDatetimeLocalValue(task?.target_date);
+    syncDueActionFields(prefix);
+  }
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str ?? '';
@@ -2039,13 +2071,13 @@ export async function mountTaskflowApp(opts = {}) {
     const actionsEl = card.querySelector('.task-actions');
     if (verificationMode) {
       if (task.verification_started_at) {
-        startVerificationInline(task.id, actionsEl); // already started (recorded on the task itself)
+        startVerificationInline(task, actionsEl);
       } else {
         const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
           startBtn.disabled = true;
           try {
             await startVerification(task.id);
-            startVerificationInline(task.id, actionsEl);
+            startVerificationInline(task, actionsEl);
           } catch (err) {
             startBtn.disabled = false;
             showToast(err.message, 'error');
@@ -2139,13 +2171,14 @@ export async function mountTaskflowApp(opts = {}) {
   // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
   // Called when verifier clicks "Start Verification" on a card/row.
   // We toggle the card's action area to show the two choice buttons.
-  function startVerificationInline(taskId, actionsEl) {
+  function startVerificationInline(task, actionsEl) {
+    const taskId = task?.id || task;
     actionsEl.innerHTML = '';
     actionsEl.appendChild(makeActionBtn('action-complete', '✅ Verify', () => {
       if (confirm('Mark this task as Verified?')) verifyApprove(taskId);
     }));
-    actionsEl.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(taskId)));
-    actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(taskId)));
+    actionsEl.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
+    actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
   }
   
   async function verifyApprove(taskId) {
@@ -2160,8 +2193,9 @@ export async function mountTaskflowApp(opts = {}) {
   let corrVoiceBlob = null;
   let corrMediaRecorder = null;
   
-  function openCorrectionModal(taskId) {
-    state.pendingTaskId = taskId;
+  function openCorrectionModal(taskOrId) {
+    const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
+    state.pendingTaskId = task.id;
     if (els.correctionNote) els.correctionNote.value = '';
     if (els.correctionFormMsg) els.correctionFormMsg.hidden = true;
     if (els.corrVoicePlayback) {
@@ -2172,17 +2206,14 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.corrStartRecord) els.corrStartRecord.disabled = false;
     if (els.corrStopRecord) els.corrStopRecord.disabled = true;
     corrVoiceBlob = null;
-    const u = document.getElementById('correction-extra-unit');
-    const a = document.getElementById('correction-extra-amount');
-    const due = document.getElementById('correction-new-due');
-    if (u) u.value = '';
-    if (a) a.value = '';
-    if (due) due.value = '';
+    fillDuePrompt('correction', task);
     if (els.correctionModal) els.correctionModal.hidden = false;
   }
   
   els.closeCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
   els.cancelCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
+  document.getElementById('correction-due-action')?.addEventListener('change', () => syncDueActionFields('correction'));
+  document.getElementById('updation-due-action')?.addEventListener('change', () => syncDueActionFields('updation'));
   function stopCorrectionRecordingAndClose() {
     if (corrMediaRecorder && corrMediaRecorder.state !== 'inactive') corrMediaRecorder.stop();
     const modal = els.correctionModal || document.getElementById('correctionModal');
@@ -2221,24 +2252,45 @@ export async function mountTaskflowApp(opts = {}) {
   
   els.correctionForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    els.correctionFormMsg.hidden = true;
-    const note = els.correctionNote.value.trim();
+    const msg = els.correctionFormMsg || document.getElementById('correctionFormMsg');
+    if (msg) msg.hidden = true;
+    const note = (els.correctionNote?.value || '').trim();
     if (!note) {
-      els.correctionFormMsg.textContent = 'Please write a correction note before sending';
-      els.correctionFormMsg.hidden = false;
+      if (msg) {
+        msg.textContent = 'Please write a correction note before sending';
+        msg.hidden = false;
+      } else {
+        showToast('Please write a correction note before sending', 'error');
+      }
       return;
     }
     try {
       const formData = new FormData();
       formData.append('note', note);
-      const extraUnit = document.getElementById('correction-extra-unit')?.value || '';
-      const extraAmount = document.getElementById('correction-extra-amount')?.value || '';
-      if (extraUnit && extraAmount) {
-        formData.append('extra_unit', extraUnit);
+      const action = document.getElementById('correction-due-action')?.value || 'keep';
+      if (action === 'hours' || action === 'days') {
+        const extraAmount = document.getElementById('correction-extra-amount')?.value || '';
+        if (!extraAmount || Number(extraAmount) <= 0) {
+          if (msg) {
+            msg.textContent = 'Enter how much extra time to give';
+            msg.hidden = false;
+          }
+          return;
+        }
+        formData.append('extra_unit', action);
         formData.append('extra_amount', extraAmount);
       }
-      const newDue = document.getElementById('correction-new-due')?.value || '';
-      if (newDue) formData.append('new_target_date', newDue);
+      if (action === 'new') {
+        const newDue = document.getElementById('correction-new-due')?.value || '';
+        if (!newDue) {
+          if (msg) {
+            msg.textContent = 'Pick the new due date and time';
+            msg.hidden = false;
+          }
+          return;
+        }
+        formData.append('new_target_date', datetimeLocalToIso(newDue));
+      }
       if (corrVoiceBlob) {
         formData.append('correction_voice', corrVoiceBlob, 'correction_voice.webm');
       }
@@ -2246,9 +2298,17 @@ export async function mountTaskflowApp(opts = {}) {
         method: 'PATCH', body: formData, isForm: true
       });
       showToast('Correction sent ✅', 'success');
-      els.correctionModal.hidden = true;
+      const modal = els.correctionModal || document.getElementById('correctionModal');
+      if (modal) modal.hidden = true;
       loadVerifications();
-    } catch (err) { els.correctionFormMsg.textContent = err.message; els.correctionFormMsg.hidden = false; }
+    } catch (err) {
+      if (msg) {
+        msg.textContent = err.message;
+        msg.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
   });
   
   // "Start Verification" state now lives on the task itself (verification_started_at /
@@ -2582,8 +2642,8 @@ export async function mountTaskflowApp(opts = {}) {
         tdActions.appendChild(makeActionBtn('action-complete', '✅ Verify', () => {
           if (confirm('Mark this task as Verified?')) verifyApprove(task.id);
         }));
-        tdActions.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task.id)));
-        tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task.id)));
+        tdActions.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
+        tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
       }
   
       // Actions — "Start Verification" → then Verify or Send for Correction
@@ -2775,19 +2835,15 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // ─── Updation Modal (verifier/admin → employee: request task updation) ──────────
-  function openUpdationModal(taskId) {
-    state.pendingTaskId = taskId;
+  function openUpdationModal(taskOrId) {
+    const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
+    state.pendingTaskId = task.id;
     const note = document.getElementById('updation-note');
     const msg = document.getElementById('updationFormMsg');
     const modal = document.getElementById('updationModal');
-    const unit = document.getElementById('updation-extra-unit');
-    const amt = document.getElementById('updation-extra-amount');
-    const due = document.getElementById('updation-new-due');
     if (note) note.value = '';
     if (msg) msg.hidden = true;
-    if (unit) unit.value = '';
-    if (amt) amt.value = '';
-    if (due) due.value = '';
+    fillDuePrompt('updation', task);
     if (modal) modal.hidden = false;
   }
   
@@ -2812,12 +2868,18 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       await api(`/tasks/${state.pendingTaskId}/send-updation`, {
         method: 'PATCH',
-        body: {
-          note,
-          extra_unit: document.getElementById('updation-extra-unit')?.value || '',
-          extra_amount: document.getElementById('updation-extra-amount')?.value || '',
-          new_target_date: document.getElementById('updation-new-due')?.value || '',
-        },
+        body: (() => {
+          const action = document.getElementById('updation-due-action')?.value || 'keep';
+          const payload = { note };
+          if (action === 'hours' || action === 'days') {
+            payload.extra_unit = action;
+            payload.extra_amount = document.getElementById('updation-extra-amount')?.value || '';
+          }
+          if (action === 'new') {
+            payload.new_target_date = datetimeLocalToIso(document.getElementById('updation-new-due')?.value || '');
+          }
+          return payload;
+        })(),
       });
       showToast('Updation request sent ✅', 'success');
       closeUpdationModal();
