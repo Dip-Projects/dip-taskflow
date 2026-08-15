@@ -676,6 +676,22 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
   
+    if (visOk('tickets')) {
+      appendCollapsibleNav(
+        isMis ? 'MIS — Ticket Tracking' : 'Support',
+        [makeNavButton('tickets-open', '🟠 Open Tickets'), makeNavButton('tickets-resolved', '✅ Resolved Tickets')],
+        { collapsed: true, sectionId: 'support' }
+      );
+    }
+
+    if (!isAdmin && visOk('corrections')) {
+      appendCollapsibleNav(
+        'Corrections',
+        [makeNavButton('corrections', '↩ Corrections'), makeNavButton('updations', '📝 Updations')],
+        { collapsed: true, sectionId: 'corrections' }
+      );
+    }
+
     if (visOk('reschedule-requests') !== false) {
       appendCollapsibleNav(
         'Reschedule',
@@ -716,19 +732,27 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
-    if (visOk('monthly-report')) {
-      appendCollapsibleNav(
-        'Reports',
-        [makeNavButton('monthly-report', '📁 Monthly Report')],
-        { collapsed: true, sectionId: 'reports' }
-      );
-    }
-  
     if (isMis && state.user?.role !== 'admin') {
       appendCollapsibleNav(
         'MIS Support',
         [makeNavButton('visibility', '👁 Who sees what')],
         { collapsed: true, sectionId: 'mis-support' }
+      );
+    }
+
+    if (visOk('drawings') && isAdmin) {
+      appendCollapsibleNav(
+        'Drawings',
+        [makeNavButton('drawings-add', '➕ Add Drawing'), makeNavButton('drawings-all', '📐 All Drawings')],
+        { collapsed: true, sectionId: 'drawings' }
+      );
+    }
+
+    if (visOk('monthly-report')) {
+      appendCollapsibleNav(
+        'Reports',
+        [makeNavButton('monthly-report', '📁 Monthly Report')],
+        { collapsed: true, sectionId: 'reports' }
       );
     }
 
@@ -738,30 +762,6 @@ export async function mountTaskflowApp(opts = {}) {
     if (visOk('leaveapprovals') && isAdmin) leaveBtns.push(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
     if (leaveBtns.length) {
       appendCollapsibleNav('Leave', leaveBtns, { collapsed: true, sectionId: 'leave' });
-    }
-
-    if (!isAdmin && visOk('corrections')) {
-      appendCollapsibleNav(
-        'Corrections',
-        [makeNavButton('corrections', '↩ Corrections'), makeNavButton('updations', '📝 Updations')],
-        { collapsed: true, sectionId: 'corrections' }
-      );
-    }
-  
-    if (visOk('tickets')) {
-      appendCollapsibleNav(
-        isMis ? 'MIS — Ticket Tracking' : 'Support',
-        [makeNavButton('tickets-open', '🟠 Open Tickets'), makeNavButton('tickets-resolved', '✅ Resolved Tickets')],
-        { collapsed: true, sectionId: 'support' }
-      );
-    }
-  
-    if (visOk('drawings') && isAdmin) {
-      appendCollapsibleNav(
-        'Drawings',
-        [makeNavButton('drawings-add', '➕ Add Drawing'), makeNavButton('drawings-all', '📐 All Drawings')],
-        { collapsed: true, sectionId: 'drawings' }
-      );
     }
   }
   

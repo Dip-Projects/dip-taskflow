@@ -1,6 +1,11 @@
 import { getToken } from './api';
+import { supabase } from './supabase';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+
+/** Serverless functions cap request bodies at ~4.5 MB, so bigger files must go
+ *  straight to Supabase Storage with a signed URL instead of via /api. */
+const PROXY_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Shared public bucket for all Site Engineer uploads */
 export const SITE_FILES_BUCKET = 'site-files';
@@ -60,6 +65,33 @@ async function dataUrlToBlob(dataUrl) {
   return res.blob();
 }
 
+async function uploadViaSignedUrl({ path, blob, contentType, bucket }) {
+  const token = getToken();
+  if (!token) throw new Error('Please log in again — missing session for file upload.');
+
+  const res = await fetch(`${API_BASE}/storage/signed-upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ path, bucket }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+
+  const { error } = await supabase.storage
+    .from(data.bucket || bucket)
+    .uploadToSignedUrl(data.path, data.token, blob, {
+      contentType: contentType || 'application/octet-stream',
+      upsert: true,
+    });
+
+  if (error) throw new Error(error.message || 'Upload failed');
+  return data.publicUrl;
+}
+
 /**
  * Upload via backend (service_role) — always multipart FormData.
  * Avoids huge JSON base64 bodies that trigger ERR_CONNECTION_RESET on Vercel.
@@ -85,6 +117,10 @@ export async function uploadViaApi({
     type = fileBlob.type || type || 'image/jpeg';
   }
   if (!fileBlob) throw new Error('uploadViaApi: need dataUrl or blob');
+
+  if (fileBlob.size > PROXY_MAX_BYTES) {
+    return uploadViaSignedUrl({ path, blob: fileBlob, contentType: type, bucket });
+  }
 
   const fileName = path.split('/').pop() || 'file';
   let lastErr;

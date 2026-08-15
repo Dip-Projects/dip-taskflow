@@ -437,9 +437,9 @@
 }
 
 .cp-main-inner {
-  max-width: 1120px;
+  max-width: 1560px;
   margin: 0 auto;
-  padding: 24px 28px 70px;
+  padding: 24px 32px 70px;
 }
 
 .cp-page-header {
@@ -1120,7 +1120,7 @@
 
 .cp-media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
   gap: 12px;
 }
 
@@ -1149,17 +1149,17 @@
 
 .cp-media-photo {
   width: 100%;
-  height: 150px;
+  height: 132px;
   object-fit: cover;
   display: block;
   cursor: zoom-in;
 }
 
 .cp-media-body {
-  padding: 13px 15px;
+  padding: 11px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   flex: 1;
 }
 

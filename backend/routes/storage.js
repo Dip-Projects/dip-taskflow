@@ -43,6 +43,42 @@ router.post('/ensure-bucket', requireAuth, async (req, res) => {
 });
 
 /**
+ * Signed upload URL so the browser can PUT straight to Supabase. The /upload
+ * proxy below runs as a serverless function with a ~4.5 MB body cap, so
+ * anything bigger has to skip it (it came back as 413 Content Too Large).
+ */
+router.post('/signed-upload', requireAuth, async (req, res) => {
+  try {
+    const path = String(req.body.path || '').replace(/^\/+/, '');
+    if (!path) return res.status(400).json({ error: 'Missing path' });
+
+    const bucket = req.body.bucket || SHARED_BUCKET;
+    await ensurePublicBucket(bucket);
+
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUploadUrl(path, { upsert: true });
+
+    if (error) {
+      console.error('signed-upload error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
+    res.json({
+      bucket,
+      path: data.path,
+      token: data.token,
+      signedUrl: data.signedUrl,
+      publicUrl: urlData.publicUrl,
+    });
+  } catch (err) {
+    console.error('signed-upload error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not prepare upload' });
+  }
+});
+
+/**
  * Upload file via service_role — bypasses Storage RLS that blocks anon key.
  * Body JSON: { path, contentType?, dataUrl } OR multipart field "file" + path
  */

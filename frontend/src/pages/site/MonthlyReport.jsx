@@ -161,18 +161,32 @@ export default function MonthlyReport({ user }) {
       const folderPath = `${prefix}/monthly/${year}/${String(month).padStart(2, "0")}/${sanitizeBucketName(project)}/${stamp}`;
       let done = 0;
       let firstUrl = "";
-      for (const file of files) {
-        const rel = (file.webkitRelativePath || file.name).replace(/^\/+/, "");
-        const url = await uploadViaApi({
-          path: `${folderPath}/${rel}`,
-          blob: file,
-          contentType: file.type || "application/octet-stream",
-          bucket: SITE_FILES_BUCKET,
-        });
-        if (!firstUrl) firstUrl = url;
-        done += file.size;
-        setPct(Math.round((done / Math.max(totalBytes, 1)) * 100));
-      }
+      let next = 0;
+      const queue = files.slice();
+      const worker = async () => {
+        for (;;) {
+          const i = next;
+          next += 1;
+          const file = queue[i];
+          if (!file) return;
+          const rel = (file.webkitRelativePath || file.name).replace(/^\/+/, "");
+          let url;
+          try {
+            url = await uploadViaApi({
+              path: `${folderPath}/${rel}`,
+              blob: file,
+              contentType: file.type || "application/octet-stream",
+              bucket: SITE_FILES_BUCKET,
+            });
+          } catch (e) {
+            throw new Error(`${rel}: ${e.message || "upload failed"}`);
+          }
+          if (!firstUrl) firstUrl = url;
+          done += file.size;
+          setPct(Math.round((done / Math.max(totalBytes, 1)) * 100));
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, files.length) }, worker));
       const { error } = await supabase.from("monthly_reports").insert({
         month: Number(month),
         year: Number(year),

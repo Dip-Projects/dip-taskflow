@@ -1,5 +1,12 @@
-* {
+/* Every portal's CSS was written on top of a global reset (Office and Site each
+   shipped their own `*` rule). Keep it here, once, so scoping those stylesheets
+   does not change spacing anywhere. */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 html,
 body,

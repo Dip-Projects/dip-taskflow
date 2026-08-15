@@ -1490,14 +1490,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
     : [];
   const groupLabels = Object.keys(grouped);
 
-  const VIEW_MODES = [
-    { key: "recent", label: "Recent" },
-    { key: "day", label: "By Day" },
-    { key: "month", label: "By Month" },
-    { key: "year", label: "By Year" },
-    { key: "range", label: "Date Range" },
-  ];
-
   const TYPE_FILTERS = [
     {
       key: "all",
@@ -1537,8 +1529,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
     },
   ];
 
-  const activeViewLabel =
-    VIEW_MODES.find((v) => v.key === viewMode)?.label || "Recent";
   const activeTypeLabel =
     TYPE_FILTERS.find((f) => f.key === typeFilter)?.label || "All";
   return (
@@ -1565,7 +1555,8 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         >
           <IcoFilter />
           <span className="cp-filter-toggle-text">
-            {activeViewLabel} · {activeTypeLabel}
+            {activeTypeLabel}
+            {viewMode === "range" ? " · Date range" : ""}
           </span>
           <span className="cp-filter-toggle-chevron">
             <IcoChevron open={filterOpen} />
@@ -1573,22 +1564,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         </button>
 
         <div className={`cp-filter-panel${filterOpen ? " open" : ""}`}>
-          <div className="cp-viewmodes">
-            {VIEW_MODES.map((v) => (
-              <button
-                key={v.key}
-                className={`cp-chip${viewMode === v.key ? " act" : ""}`}
-                onClick={() => {
-                  setViewMode(v.key);
-                  if (jumpDate && onClearJump) onClearJump();
-                  scrollToTop();
-                }}
-              >
-                {v.label}
-              </button>
-            ))}
-          </div>
-
           {viewMode === "range" && (
             <div className="cp-range-picker">
               <div className="cp-range-field">
@@ -1647,6 +1622,22 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                 {f.icon} {f.label}
               </button>
             ))}
+            <button
+              className={`cp-chip${viewMode === "range" ? " act" : ""}`}
+              onClick={() => {
+                if (viewMode === "range") {
+                  setViewMode("recent");
+                  setRangeStart("");
+                  setRangeEnd("");
+                } else {
+                  setViewMode("range");
+                  if (jumpDate && onClearJump) onClearJump();
+                }
+                scrollToTop();
+              }}
+            >
+              <IcoDocCalendar /> Date range
+            </button>
             <button className="cp-refresh-btn" onClick={load}>
               <IcoRefresh /> Refresh
             </button>

@@ -4,7 +4,6 @@ import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
-import MonthlyReport from "./MonthlyReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
@@ -465,9 +464,6 @@ function buildNav(user, visMap) {
       items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
     }
     items.push({ key: "my-reports", label: "My Reports", icon: Ico.myRpt });
-    if (visAllows(visMap, "monthly-report", user)) {
-      items.push({ key: "monthly-report", label: "Monthly Report", icon: Ico.monthly });
-    }
     if (visAllows(visMap, "site-team-submissions", user)) {
       items.push({ key: "report-submissions", label: "Team Submissions", icon: Ico.myRpt });
     }
@@ -495,9 +491,6 @@ function buildNav(user, visMap) {
     { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
     { key: "site-report", label: "Site Visit Report", icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
-    ...(visAllows(visMap, "monthly-report", user)
-      ? [{ key: "monthly-report", label: "Monthly Report", icon: Ico.monthly }]
-      : []),
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
   ];
   if (showTeam) {
@@ -1565,10 +1558,6 @@ function WeeklyReport() {
     </div>
   );
 }
- //
-// ═══════════════════════════════════════════════════════════════════════════════
-// MONTHLY REPORT
-// ═══════════════════════════════════════════════════════════════════════════════
 export const ROLE_LEVELS = [
   "Site Engineer",
   "Site Incharge",
@@ -1960,7 +1949,7 @@ useEffect(() => {
     };
     if (!isOfficeSiteViewer(viewer)) return;
     setActiveTab((tab) =>
-      tab === "profile" || tab === "report-submissions" || tab === "site-report" || tab === "my-reports" || tab === "monthly-report"
+      tab === "profile" || tab === "report-submissions" || tab === "site-report" || tab === "my-reports"
         ? tab
         : "report-submissions",
     );
@@ -1986,7 +1975,6 @@ useEffect(() => {
       key !== "report-submissions" &&
       key !== "site-report" &&
       key !== "my-reports" &&
-      key !== "monthly-report" &&
       key !== "profile"
     ) {
       setActiveTab("report-submissions");
@@ -2052,7 +2040,6 @@ useEffect(() => {
       activeTab !== "profile" &&
       activeTab !== "site-report" &&
       activeTab !== "my-reports" &&
-      activeTab !== "monthly-report" &&
       activeTab !== "report-submissions"
         ? "report-submissions"
         : activeTab;
@@ -2077,8 +2064,6 @@ useEffect(() => {
 
       case "wpr-generator":
         return <WprGenerator user={user} supabase={supabase} />;
-      case "monthly-report":
-        return <MonthlyReport user={user} />;
       case "site-report":
         return <SiteReport user={user} />;
       // case "material-requirement":

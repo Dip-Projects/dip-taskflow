@@ -58,7 +58,7 @@ function defaultRow(key) {
     'mis-report': adminMis,
     'time-dashboard': adminMis,
     fms: adminMis,
-    'monthly-report': { admin: true, mis: true, employee: true, site: true, site_head: true },
+    'monthly-report': { admin: true, mis: true, employee: true, site: false, site_head: false },
     applyleave: officeStaff,
     buddyrequests: officeStaff,
     leaveapprovals: adminOnly,

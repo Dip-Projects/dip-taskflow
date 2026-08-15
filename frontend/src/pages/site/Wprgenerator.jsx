@@ -2315,9 +2315,14 @@ export default function WprGenerator({ user, supabase }) {
         .from("wpr_reports")
         .select("report_number")
         .eq("site_name", siteName)
-        .order("report_number", { ascending: false })
-        .limit(1);
-      setReportNum(data?.[0]?.report_number ? data[0].report_number + 1 : 1);
+        .limit(500);
+      // report_number is stored as text, so "11" + 1 used to give "111" and then
+      // "1111". Compare numerically and skip the junk those rows left behind.
+      const last = (data || []).reduce((max, row) => {
+        const n = parseInt(row.report_number, 10);
+        return Number.isFinite(n) && n > max && n < 1000 ? n : max;
+      }, 0);
+      setReportNum(last + 1);
     },
     [supabase],
   );
@@ -2486,7 +2491,7 @@ export default function WprGenerator({ user, supabase }) {
       site_name: site,
       engineer_name: engineer,
       report_date: reportDate,
-      report_number: reportNum,
+      report_number: parseInt(reportNum, 10) || 1,
       location,
       activities: activities.map((a) => ({
         name: a.name || "",
@@ -2555,7 +2560,7 @@ export default function WprGenerator({ user, supabase }) {
     if (data.site_name && !site) setSite(data.site_name);
     if (data.report_date) setReportDate(data.report_date);
     if (data.location !== undefined) setLocation(data.location ?? "");
-    if (data.report_number) setReportNum(data.report_number);
+    if (data.report_number) setReportNum(parseInt(data.report_number, 10) || 1);
     if (Array.isArray(data.visitor_photos)) setVisitorPhotos(data.visitor_photos);
     if (data.visitor_mode) setVisitorMode(data.visitor_mode);
     if (Array.isArray(data.activities))
@@ -3499,12 +3504,16 @@ export default function WprGenerator({ user, supabase }) {
                           throw new Error("Could not get public URL");
 
                         // Step 3 — update site_details (log result to verify)
+                        // Upsert: a site with no site_details row yet would
+                        // otherwise update zero rows and silently lose the image.
                         const { data: updateData, error: updateErr } =
                           await supabase
                             .from("site_details")
-                            .update({ site_image_url: publicUrl })
-                            .eq("site_name", site)
-                            .select(); // ← .select() forces it to return rows
+                            .upsert(
+                              { site_name: site, site_image_url: publicUrl },
+                              { onConflict: "site_name" },
+                            )
+                            .select();
 
                         if (updateErr)
                           throw new Error(
