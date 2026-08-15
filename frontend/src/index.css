@@ -8,5 +8,6 @@ body,
   min-height: 100%;
 }
 body {
-  font-family: "Segoe UI", system-ui, sans-serif;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  background: #F0F2F8;
 }

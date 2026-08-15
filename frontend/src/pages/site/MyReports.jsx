@@ -1,5 +1,20 @@
 import { useState, useEffect } from "react";
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { isOfficeSiteViewer } from '../../lib/api';
+
+function identitySet(user) {
+  return new Set(
+    [user?.user_name, user?.username, user?.name, user?.full_name, user?.id]
+      .map((s) => String(s || "").toLowerCase().trim())
+      .filter(Boolean)
+  );
+}
+
+function isMine(row, user, fields) {
+  const ids = identitySet(user);
+  if (!ids.size) return false;
+  return fields.some((f) => ids.has(String(f || "").toLowerCase().trim()));
+}
 
 
 
@@ -255,7 +270,7 @@ const isOfficeDoc = (url) => /\.(pptx|ppt|docx|doc|xlsx|xls)(\?|$)/i.test(url ||
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MyReports({ user }) {
-  const [tab,        setTab]        = useState("dpr");
+  const [tab,        setTab]        = useState(() => (isOfficeSiteViewer(user) ? "svr" : "dpr"));
   const [month,      setMonth]      = useState(new Date().toISOString().slice(0,7));
   const [siteFilter, setSiteFilter] = useState("");
   const [data,       setData]       = useState([]);
@@ -289,7 +304,7 @@ export default function MyReports({ user }) {
           if (error) { setErr(error.message); setLoading(false); return; }
 
           const mine = (rows || []).filter(r =>
-            (r.engineer === user.user_name || r.engineer === user.name) &&
+            isMine(r, user, [r.engineer]) &&
             r.report_type !== "morning"
           ).map(r => ({ ...r, _source:"dpr" }));
 
@@ -307,9 +322,7 @@ export default function MyReports({ user }) {
           if (error) { setErr(error.message); setLoading(false); return; }
 
           const mine = (rows || []).filter(r =>
-            r.submitted_by === user.user_name ||
-            r.submitted_by === user.name      ||
-            r.submitted_by_name === user.name
+            isMine(r, user, [r.submitted_by, r.submitted_by_name, r.reporter_name])
           ).map(r => ({ ...r, _source:"svr" }));
 
           setData(mine);
@@ -326,8 +339,7 @@ export default function MyReports({ user }) {
           if (error) { setErr(error.message); setLoading(false); return; }
 
           const mine = (rows || []).filter(r =>
-            r.engineer_name === user.user_name ||
-            r.engineer_name === user.name
+            isMine(r, user, [r.engineer_name])
           ).map(r => ({
             ...r,
             _source:  "wpr",
@@ -345,32 +357,27 @@ export default function MyReports({ user }) {
       }
       setLoading(false);
     })();
-  }, [tab, month, user.user_name, user.name]);
+  }, [tab, month, user.user_name, user.username, user.name, user.full_name, user.id]);
   // Fetch total counts for all tabs (for the banner chips)
 useEffect(() => {
   (async () => {
-    const userName = user.user_name;
-    const name     = user.name;
-
     // DPR count
     const { data: dprRows } = await supabase
       .from("dpr_reports")
       .select("id, engineer, report_type")
       .limit(1000);
     const dprCount = (dprRows || []).filter(r =>
-      (r.engineer === userName || r.engineer === name) &&
+      isMine(r, user, [r.engineer]) &&
       r.report_type !== "morning"
     ).length;
 
     // SVR count
     const { data: svrRows } = await supabase
       .from("site_reports")
-      .select("id, submitted_by, submitted_by_name")
+      .select("id, submitted_by, submitted_by_name, reporter_name")
       .limit(1000);
     const svrCount = (svrRows || []).filter(r =>
-      r.submitted_by === userName ||
-      r.submitted_by === name     ||
-      r.submitted_by_name === name
+      isMine(r, user, [r.submitted_by, r.submitted_by_name, r.reporter_name])
     ).length;
 
     // WPR count
@@ -379,12 +386,12 @@ useEffect(() => {
       .select("id, engineer_name")
       .limit(1000);
     const wprCount = (wprRows || []).filter(r =>
-      r.engineer_name === userName || r.engineer_name === name
+      isMine(r, user, [r.engineer_name])
     ).length;
 
     setCounts({ dpr: dprCount, wpr: wprCount, svr: svrCount });
   })();
-}, [user.user_name, user.name]);
+}, [user.user_name, user.username, user.name, user.full_name, user.id]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const siteKey = (r) => r._source === "svr" ? r.site_name : r._source === "wpr" ? r.site_name : r.site;

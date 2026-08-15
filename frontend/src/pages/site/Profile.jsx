@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { ActivityChart, PerformanceScore } from "./ActivityChart";
 import { computeMonthlyLeaveBalance, isMonthlyLeaveRole } from "./leaveUtils.js";
 import "./Profile.css";
-import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe } from '../../lib/supabase';
 
 
 
@@ -196,11 +196,12 @@ const [monthlyBalance, setMonthlyBalance] = useState(null);
 
       // ────────────────────────────────────────────────────────────────────────
       // ── LEAVE BALANCE + UPCOMING APPROVED LEAVES ────────────────────────────
-      const { data: allLeaves } = await supabase
-        .from("site_leaves")
-        .select("*")
-        .eq("user_name", user.user_name)
-        .order("from_date", { ascending: true });
+      const { data: allLeaves } = await fromMaybe('site_leaves', (q) =>
+        q
+          .select('*')
+          .eq('user_name', user.user_name)
+          .order('from_date', { ascending: true })
+      );
 
       const leaves = allLeaves || [];
       const todayDate = new Date().toISOString().slice(0, 10);

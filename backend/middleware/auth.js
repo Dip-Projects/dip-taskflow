@@ -19,6 +19,7 @@ function signToken(user) {
     is_head: !!user.is_head,
     can_access_site: !!(user.is_head || user.can_access_site || user.can_switch_office_site),
     can_switch_office_site: !!user.can_switch_office_site,
+    can_switch_office_mdo: !!user.can_switch_office_mdo,
     site_name: user.site_name || '',
     site_names: user.site_names || null,
     can_verify: !!user.can_verify,

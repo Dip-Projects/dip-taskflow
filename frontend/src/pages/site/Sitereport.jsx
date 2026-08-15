@@ -3,7 +3,8 @@ import { generateSiteReportPDF } from "./generateSiteReportPDF";
 import logoAsset from "../../assets/logo.png";
 import { processImage } from "../../utils/imageUtils.js";
 import './Sitereport.css';
-import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe } from '../../lib/supabase';
+import { api } from '../../lib/api';
 import { ensureSiteBucket, sanitizeBucketName, SITE_FILES_BUCKET, uploadViaApi } from '../../lib/ensureBucket';
 
 const SUBMIT_STEPS = [
@@ -127,8 +128,7 @@ async function fetchAllSiteNames() {
     .eq("status", "Active");
 
   if (error) {
-    console.error("fetchAllSiteNames error:", error);
-    return [];
+    console.warn("fetchAllSiteNames site_user_details:", error.message);
   }
 
   const siteMap = new Map(); // lowercase → display label
@@ -165,6 +165,20 @@ async function fetchAllSiteNames() {
       }
     }
   });
+
+  if (siteMap.size === 0) {
+    try {
+      const projects = await api("/sites");
+      (projects || []).forEach((p) => addSite(p.name));
+    } catch { /* ignore */ }
+    const { data: users } = await fromMaybe("users", (q) =>
+      q.select("site_name, site_names")
+    );
+    (users || []).forEach((row) => {
+      addSite(row.site_name);
+      if (Array.isArray(row.site_names)) row.site_names.forEach(addSite);
+    });
+  }
 
   // Sort by display label alphabetically
   return Array.from(siteMap.values()).sort((a, b) =>
@@ -531,8 +545,8 @@ const handleSubmit = async () => {
         issues_concerns:         form.issues_concerns || null,
         site_visit_instructions: form.site_visit_instructions || null,
         key_instructions:        form.key_instructions || null,
-        submitted_by:            user?.user_name || null,
-        submitted_by_name:       user?.name || null,
+        submitted_by:            user?.user_name || user?.username || null,
+        submitted_by_name:       user?.name || user?.full_name || null,
       }])
       .select()
       .single();

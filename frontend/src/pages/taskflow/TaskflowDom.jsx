@@ -1,4 +1,12 @@
 /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
+import MonthlyReport from '../site/MonthlyReport';
+
+function OfficeMonthlyReport() {
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
+  return <MonthlyReport user={user} />;
+}
+
 export default function TaskflowDom() {
   return (
     <>
@@ -139,10 +147,12 @@ export default function TaskflowDom() {
               </div>
               <div className="filter-field">
                 <label className="filter-label">Status</label>
-                <select id="filter-status">
+                <select id="filter-status" defaultValue="open">
+                  <option value="open">Pending &amp; In Progress</option>
                   <option value="">All statuses</option>
                   <option value="Pending">Pending</option>
                   <option value="In Progress">In Progress</option>
+                  <option value="Ticket Raised">Ticket Raised</option>
                   <option value="Completed">Completed</option>
                   <option value="Rejected">Rejected</option>
                 </select>
@@ -188,6 +198,16 @@ export default function TaskflowDom() {
           <div className="view-heading">
             <h2 className="view-title">Overdue tasks</h2>
             <p className="view-sub">Tasks whose target date has passed and are still not completed/verified — includes who's currently verifying, if anyone.</p>
+          </div>
+
+          <div className="filter-panel">
+            <div className="filter-row">
+              <div className="filter-field">
+                <label className="filter-label">Employee</label>
+                <select id="overdue-filter-employee"><option value="">All employees</option></select>
+              </div>
+              <button type="button" id="clearOverdueFilters" className="clear-btn">✕ Clear</button>
+            </div>
           </div>
 
           <div className="my-tasks-tabs" id="overdueTabBar">
@@ -415,7 +435,7 @@ export default function TaskflowDom() {
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">🤖 DIP Bot</h2>
-            <p className="view-sub">Admin only — live TaskFlow: tasks, recurring, overdue, leave, verification, site (DPR/WPR/attendance), tickets, and MoM from calls.</p>
+            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. DIP Bot answers only that.</p>
           </div>
           <div className="bot-shell">
             <div id="botChatLog" className="bot-chat-log"></div>
@@ -579,7 +599,7 @@ export default function TaskflowDom() {
         <section id="view-permissions" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Permissions</h2>
-            <p className="view-sub">Decide what each employee is allowed to do — including who gets the Office ↔ Site switch — without making them a full admin.</p>
+            <p className="view-sub">Decide what each employee is allowed to do — including who gets the Office ↔ Site and Office ↔ MDO switches — without making them a full admin.</p>
           </div>
           <div className="table-card table-card--stack">
             <div className="table-scroll">
@@ -594,6 +614,7 @@ export default function TaskflowDom() {
                     <th className="perm-col">Verify tasks</th>
                     <th className="perm-col">MIS Executive</th>
                     <th className="perm-col">Office ↔ Site</th>
+                    <th className="perm-col">Office ↔ MDO</th>
                   </tr>
                 </thead>
                 <tbody id="permissionsTableBody"></tbody>
@@ -1085,21 +1106,37 @@ export default function TaskflowDom() {
         {/* TIME DASHBOARD (admin) */}
         <section id="view-time-dashboard" className="view" hidden={true}>
           <div className="view-heading">
-            <h2 className="view-title">⏱ Time dashboard</h2>
-            <p className="view-sub">One portfolio per employee: planned hours, extra time, and assign → accept → submit → verify cycle. Tasks counted if any of those dates fall in the range.</p>
+            <h2 className="view-title">Time dashboard</h2>
+            <p className="view-sub">Planned hours versus assign → accept → submit → verify. Green is on pace, amber is slow, red is late.</p>
           </div>
-          <div className="mis-toolbar" style={{marginBottom: 14}}>
+          <div className="td-toolbar mis-toolbar">
             <label className="mis-field">
               <span>Range</span>
               <select id="tdRange">
                 <option value="week">This week</option>
                 <option value="month">This month</option>
+                <option value="last-month">Last month</option>
                 <option value="day">Today</option>
+                <option value="all">All time</option>
               </select>
+            </label>
+            <label className="mis-field">
+              <span>Department</span>
+              <select id="tdDept"><option value="">All departments</option></select>
             </label>
             <label className="mis-field">
               <span>Employee</span>
               <select id="tdPerson"><option value="">All employees</option></select>
+            </label>
+            <label className="mis-field">
+              <span>Sort</span>
+              <select id="tdSort">
+                <option value="name">Name</option>
+                <option value="cycle">Slowest cycle</option>
+                <option value="open">Most open</option>
+                <option value="hours">Most planned hours</option>
+                <option value="late">Most late</option>
+              </select>
             </label>
             <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
             <button type="button" id="tdCsvBtn" className="ghost-btn">Export CSV</button>
@@ -1136,6 +1173,10 @@ export default function TaskflowDom() {
           </div>
           <div id="fmsSummary" className="fms-summary"></div>
           <div id="fmsBody"></div>
+        </section>
+
+        <section id="view-monthly-report" className="view" hidden={true}>
+          <OfficeMonthlyReport />
         </section>
 
       </main>
@@ -1529,7 +1570,7 @@ export default function TaskflowDom() {
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
-            Your open tasks due in this leave window will move to this buddy after they say Yes and leave is approved. Buddy list shows only your department (e.g. MDO OFFICE → MDO only).
+            Your open tasks due in this leave window will move to this buddy after they say Yes. Their target dates stay the same — they do not become due on the accept day. Buddy list shows only your department (e.g. MDO OFFICE → MDO only).
           </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>

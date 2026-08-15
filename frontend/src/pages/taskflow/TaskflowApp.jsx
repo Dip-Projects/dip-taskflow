@@ -13,7 +13,7 @@ const StableTaskflowDom = memo(TaskflowDom, () => true);
  * Office TaskFlow: Classic UI (same look as before).
  */
 export default function TaskflowApp() {
-  const { user, token, isAuthenticated, logout, canToggleSite, isProcessController } = useAuth();
+  const { user, token, isAuthenticated, logout, canToggleSite, canToggleMdo } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -63,9 +63,6 @@ export default function TaskflowApp() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   const dept = (user?.department || '').trim().toLowerCase();
-  if (isProcessController) {
-    return <Navigate to="/mdo" replace />;
-  }
   if (dept === 'site engineer' && !canToggleSite) {
     return <Navigate to="/site" replace />;
   }
@@ -73,6 +70,10 @@ export default function TaskflowApp() {
     return <Navigate to="/client" replace />;
   }
 
+  const goMdo = () => {
+    localStorage.setItem('tf_surface', 'mdo');
+    navigate('/mdo');
+  };
   const goSite = () => {
     localStorage.setItem('tf_surface', 'site');
     navigate('/site');
@@ -80,23 +81,34 @@ export default function TaskflowApp() {
 
   return (
     <div className="tf-shell">
-      {canToggleSite && (
+      {(canToggleMdo || canToggleSite) && (
         <div className="tf-surface-bar">
           <span className="tf-surface-label">Switch view</span>
-          <div className="tf-surface-toggle">
-            <button type="button" className="active" disabled>
-              Office
-            </button>
-            <button type="button" onClick={goSite}>
-              Site
-            </button>
-          </div>
+          {canToggleMdo && (
+            <div className="tf-surface-toggle">
+              <button type="button" onClick={goMdo}>
+                MDO
+              </button>
+              <button type="button" className="active" disabled>
+                Office
+              </button>
+            </div>
+          )}
+          {canToggleSite && (
+            <div className="tf-surface-toggle">
+              <button type="button" className="active" disabled>
+                Office
+              </button>
+              <button type="button" onClick={goSite}>
+                Site
+              </button>
+            </div>
+          )}
         </div>
       )}
       <div
         id="tf-react-root"
         className="tf-legacy-frame"
-        style={{ overflow: 'auto', height: '100%' }}
       >
         <StableTaskflowDom />
       </div>

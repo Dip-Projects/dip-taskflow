@@ -94,10 +94,21 @@ export function isProcessController(user) {
   return /process controller/.test(blob);
 }
 
+/** Process Controller last choice: MDO portal or Office TaskFlow. */
+export function processControllerPath() {
+  try {
+    const s = localStorage.getItem('tf_surface');
+    if (s === 'app' || s === 'office') return '/app';
+  } catch {
+    /* ignore */
+  }
+  return '/mdo';
+}
+
 /** Where should this user land after login? */
 export function postLoginPath(user) {
   if (isClient(user)) return '/client';
-  if (isProcessController(user)) return '/mdo';
+  if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();
   const dept = (user.department || '').trim().toLowerCase();
   if (dept === 'site engineer') return '/site';
   return '/app';
@@ -112,6 +123,21 @@ export function isClient(user) {
 
 export function isSiteEngineer(user) {
   return (user?.department || '').trim().toLowerCase() === 'site engineer';
+}
+
+/** People who work on site (clock-in, own DPR). Not office heads. */
+export function isOnSiteStaff(user) {
+  if (!user) return false;
+  if (isSiteEngineer(user)) return true;
+  const blob = [user.role, user.designation, user.department, user.site_role]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /site engineer|site incharge|site coordinator/.test(blob);
+}
+
+/** Office head on Site view: only their team's submitted reports. */
+export function isOfficeSiteViewer(user) {
+  return isSiteHead(user) && !isOnSiteStaff(user);
 }
 
 export function isHead(user) {
@@ -144,4 +170,11 @@ export function canToggleSite(user) {
   if (isSiteEngineer(user)) return false;
   const desig = (user.designation || '').toLowerCase().trim();
   return desig === 'project head' || desig === 'site incharge';
+}
+
+/** Office ↔ MDO: Process Controller by role, or Permissions toggle. */
+export function canToggleMdo(user) {
+  if (!user || isClient(user)) return false;
+  if (isProcessController(user)) return true;
+  return !!user.can_switch_office_mdo;
 }

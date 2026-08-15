@@ -57,4 +57,22 @@ function addCalendarDays(startDate, days) {
   return d;
 }
 
-module.exports = { addWorkingHours, addCalendarDays, snapToWorkingMoment };
+/** Employee-facing due: assign/create time + working hours (IST). */
+function fmtEmployeeDueLabel(startIso, hours) {
+  const start = startIso || new Date().toISOString();
+  const due = hours == null || hours === ''
+    ? new Date(start)
+    : addWorkingHours(start, hours);
+  const label = due.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return hours != null && hours !== '' ? `${label} · ${hours}h` : label;
+}
+
+module.exports = { addWorkingHours, addCalendarDays, snapToWorkingMoment, fmtEmployeeDueLabel };

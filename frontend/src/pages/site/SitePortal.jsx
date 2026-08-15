@@ -4,6 +4,7 @@ import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
+import MonthlyReport from "./MonthlyReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
@@ -14,9 +15,9 @@ import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
 import "./SitePortal.css";
 import { computeMonthlyLeaveBalance, isMonthlyLeaveRole } from "./leaveUtils.js";
-import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
-import { syncSiteUser, isSiteHead } from '../../lib/api';
+import { api, syncSiteUser, isSiteHead, isOfficeSiteViewer } from '../../lib/api';
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
 
@@ -435,13 +436,44 @@ const Ico = {
 function visAllows(visMap, key, user) {
   if (!visMap || !visMap[key]) return true;
   const row = visMap[key];
+  const role = String(user?.role || "").toLowerCase();
+  const blob = `${user?.department || ""} ${user?.designation || ""}`.toLowerCase();
+  if (role === "admin") return row.admin !== false;
+  if (user?.is_mis_executive || /\bmis\b/.test(blob)) return row.mis !== false;
   if (isSiteHead(user)) return row.site_head !== false;
+  if (isOfficeSiteViewer(user)) return row.employee !== false;
   return row.site !== false;
 }
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
+function reportMatchesTeam(rawName, teamNames) {
+  const n = String(rawName || "").toLowerCase().trim();
+  if (!n || !teamNames?.size) return false;
+  for (const t of teamNames) {
+    if (!t) continue;
+    if (n === t) return true;
+    if (t.length >= 4 && (n.includes(t) || t.includes(n))) return true;
+  }
+  return false;
+}
+
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
 function buildNav(user, visMap) {
+  if (isOfficeSiteViewer(user)) {
+    const items = [];
+    if (visAllows(visMap, "site-report", user)) {
+      items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
+    }
+    items.push({ key: "my-reports", label: "My Reports", icon: Ico.myRpt });
+    if (visAllows(visMap, "monthly-report", user)) {
+      items.push({ key: "monthly-report", label: "Monthly Report", icon: Ico.monthly });
+    }
+    if (visAllows(visMap, "site-team-submissions", user)) {
+      items.push({ key: "report-submissions", label: "Team Submissions", icon: Ico.myRpt });
+    }
+    return items;
+  }
+
   const leaveChildren = [
     { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
     { key: "my-leave", label: "My Leave", icon: Ico.leave },
@@ -463,6 +495,9 @@ function buildNav(user, visMap) {
     { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
     { key: "site-report", label: "Site Visit Report", icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
+    ...(visAllows(visMap, "monthly-report", user)
+      ? [{ key: "monthly-report", label: "Monthly Report", icon: Ico.monthly }]
+      : []),
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
   ];
   if (showTeam) {
@@ -562,11 +597,12 @@ function MyLeave({ user, onApply }) {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
-        .from("site_leaves")
-        .select("*")
-        .eq("user_name", user.user_name)
-        .order("created_at", { ascending: false });
+      const { data } = await fromMaybe('site_leaves', (q) =>
+        q
+          .select('*')
+          .eq('user_name', user.user_name)
+          .order('created_at', { ascending: false })
+      );
       setLeaves(data || []);
       setLoading(false);
     })();
@@ -954,11 +990,12 @@ function LeaveApprovals({ user }) {
   const load = useCallback(async () => {
     if (!user?.user_name) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("site_leaves")
-      .select("*")
-      .or(`level_approver_user_name.eq.${user.user_name},head_approver_user_name.eq.${user.user_name}`)
-      .order("created_at", { ascending: false });
+    const { data, error } = await fromMaybe('site_leaves', (q) =>
+      q
+        .select('*')
+        .or(`level_approver_user_name.eq.${user.user_name},head_approver_user_name.eq.${user.user_name}`)
+        .order('created_at', { ascending: false })
+    );
     if (!error) setLeaves(data || []);
     setLoading(false);
   }, [user?.user_name]);
@@ -1240,6 +1277,12 @@ const submit = async () => {
 
     const initialLevel = c.levelApprover ? null : true;
     const initialHead = c.autoApproved ? true : c.headApprover ? null : true;
+
+  if (!(await tableExists('site_leaves'))) {
+    setBusy(false);
+    setErr('Leave table is missing. Run backend/sql/fix_site_portal_missing.sql in Supabase SQL Editor, then try again.');
+    return;
+  }
 
   const { error } = await supabase.from("site_leaves").insert({
     user_name: user.user_name,
@@ -1526,22 +1569,6 @@ function WeeklyReport() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MONTHLY REPORT
 // ═══════════════════════════════════════════════════════════════════════════════
-function MonthlyReport() {
-  return (
-    <div className="empty-state" style={{ padding: "80px 24px" }}>
-      <div className="empty-ico" style={{ width: 64, height: 64 }}>
-        {Ico.monthly}
-      </div>
-      <div className="empty-title" style={{ fontSize: 16 }}>
-        Monthly Report
-      </div>
-      <div className="empty-sub">
-        This feature is coming soon. Monthly consolidated reports will appear
-        here.
-      </div>
-    </div>
-  );
-}
 export const ROLE_LEVELS = [
   "Site Engineer",
   "Site Incharge",
@@ -1633,6 +1660,7 @@ const NAV_COLORS = {
   "wpr-generator": "#db2777",
   "site-report": "#db2777",
   "my-reports": "#16a34a",
+  "monthly-report": "#7c3aed",
   "manpower-reports": "#16a34a",
   "report-submissions": "#0891b2",
   "profile": "#bd3c0a",
@@ -1666,7 +1694,9 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   const [userReady, setUserReady] = useState(false);
   const [visMap, setVisMap] = useState(null);
   const [activeTab, setActiveTab] = useState("clock-in");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth > 999 : true
+  );
   const [expanded, setExpanded] = useState({ leave: true, reports: true });
   const [siteReports, setSiteReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -1677,12 +1707,13 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   const canSwitchToAdmin = canAccessPortal(user, "admin");
   const checkIsApprover = useCallback(async (u) => {
     if (!u?.user_name) return;
-    const { count, error } = await supabase
-      .from("site_leaves")
-      .select("id", { count: "exact", head: true })
-      .or(
-        `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
-      );
+    const { count, error } = await fromMaybe('site_leaves', (q) =>
+      q
+        .select('id', { count: 'exact', head: true })
+        .or(
+          `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
+        )
+    );
     if (error) {
       setIsApprover(false);
       return;
@@ -1691,14 +1722,15 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   }, []);
   const checkApprovalsPending = useCallback(async (u) => {
     if (!u?.user_name) return;
-    const { data, error } = await supabase
-      .from("site_leaves")
-      .select(
-        "id, level_approver_user_name, level_approved, head_approver_user_name, head_approved",
-      )
-      .or(
-        `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
-      );
+    const { data, error } = await fromMaybe('site_leaves', (q) =>
+      q
+        .select(
+          'id, level_approver_user_name, level_approved, head_approver_user_name, head_approved',
+        )
+        .or(
+          `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
+        )
+    );
     if (error || !data) {
       setApprovalsPendingCount(0);
       return;
@@ -1724,17 +1756,16 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
 
 const getSeenLeaveStatuses = async (u) => {
   if (!u?.user_name) return {};
-  const { data, error } = await supabase
-    .from("leave_seen_status")
-    .select("snapshot")
-    .eq("user_name", u.user_name)
-    .maybeSingle();
+  const { data, error } = await fromMaybe('leave_seen_status', (q) =>
+    q.select('snapshot').eq('user_name', u.user_name).maybeSingle()
+  );
   if (error || !data) return {};
   return data.snapshot || {};
 };
 
 const setSeenLeaveStatuses = async (u, map) => {
   if (!u?.user_name) return;
+  if (!(await tableExists('leave_seen_status'))) return;
   await supabase
     .from("leave_seen_status")
     .upsert(
@@ -1746,10 +1777,11 @@ const setSeenLeaveStatuses = async (u, map) => {
   // Compares live leave rows against the last-seen snapshot and counts changes
 const checkLeaveUpdates = useCallback(async (u) => {
   if (!u?.user_name) return;
-  const { data } = await supabase
-    .from("site_leaves")
-    .select("id, level_approved, head_approved")
-    .eq("user_name", u.user_name);
+  const { data } = await fromMaybe('site_leaves', (q) =>
+    q
+      .select('id, level_approved, head_approved')
+      .eq('user_name', u.user_name)
+  );
   if (!data) return;
 
   const seen = await getSeenLeaveStatuses(u); // ← was sync
@@ -1767,10 +1799,11 @@ const checkLeaveUpdates = useCallback(async (u) => {
 
 const markLeavesSeen = useCallback(async (u) => {
   if (!u?.user_name) return;
-  const { data } = await supabase
-    .from("site_leaves")
-    .select("id, level_approved, head_approved")
-    .eq("user_name", u.user_name);
+  const { data } = await fromMaybe('site_leaves', (q) =>
+    q
+      .select('id, level_approved, head_approved')
+      .eq('user_name', u.user_name)
+  );
   const snapshot = {};
   (data || []).forEach(l => { snapshot[l.id] = leaveStatusKey(l); });
   await setSeenLeaveStatuses(u, snapshot); // ← was sync
@@ -1803,89 +1836,17 @@ const markLeavesSeen = useCallback(async (u) => {
     navigate("/login", { replace: true });
   };
   const fetchSiteReports = useCallback(async (u) => {
-    if (!u || !isSiteHead({ ...u, ...authUser, is_head: !!(u.is_head || authUser?.is_head) })) return;
+    const headUser = { ...u, ...authUser, is_head: !!(u?.is_head || authUser?.is_head) };
+    if (!u || !isSiteHead(headUser)) return;
     setLoadingReports(true);
-
-    const sites =
-      Array.isArray(u.site_names) && u.site_names.length
-        ? u.site_names
-        : u.site_name
-          ? [u.site_name]
-          : [];
-
-    if (!sites.length) {
+    try {
+      const rows = await api("/master/head-reports");
+      setSiteReports(Array.isArray(rows) ? rows : []);
+    } catch {
       setSiteReports([]);
-      setLoadingReports(false);
-      return;
     }
-
-    // Use case-insensitive comparison by fetching all and filtering client-side
-    const sitesLower = sites.map((s) => s.toLowerCase().trim());
-
-    const { data: dprData } = await supabase
-      .from("dpr_reports")
-      .select(
-        "id, site, engineer, report_type, date, pdf_url, payload, created_at",
-      )
-      .order("created_at", { ascending: false });
-
-    const { data: svrData } = await supabase
-      .from("site_reports")
-      .select(
-        "id, site_name, reporter_name, designation, visit_date, progress_of_work, quality_observations, safety_concerns, issues_concerns, site_visit_instructions, key_instructions, submitted_by_name, pdf_url, created_at",
-      )
-      .order("created_at", { ascending: false });
-
-    const { data: wprData } = await supabase
-      .from("wpr_reports")
-      .select(
-        "id, site_name, engineer_name, report_date, report_number, presentation_url, status, submitted_by, created_at",
-      )
-      .order("created_at", { ascending: false });
-
-    const normalized = [
-      ...(dprData || [])
-        .filter(
-          (r) =>
-            sitesLower.includes((r.site || "").toLowerCase().trim()) &&
-            r.report_type !== "morning",
-        )
-        .map((r) => ({ ...r, source: "dpr" })),
-      ...(svrData || [])
-        .filter((r) =>
-          sitesLower.includes((r.site_name || "").toLowerCase().trim()),
-        )
-        .map((r) => ({
-          id: r.id,
-          site: r.site_name,
-          engineer: r.reporter_name || r.submitted_by_name,
-          report_type: "site_visit",
-          date: r.visit_date,
-          pdf_url: r.pdf_url,
-          created_at: r.created_at,
-          source: "svr",
-          progress_of_work: r.progress_of_work,
-        })),
-      ...(wprData || [])
-        .filter((r) =>
-          sitesLower.includes((r.site_name || "").toLowerCase().trim()),
-        )
-        .map((r) => ({
-          id: r.id,
-          site: r.site_name,
-          engineer: r.engineer_name || r.submitted_by,
-          report_type: "wpr",
-          date: r.report_date,
-          pdf_url: r.presentation_url,
-          created_at: r.created_at,
-          source: "wpr",
-          report_number: r.report_number,
-        })),
-    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    setSiteReports(normalized);
     setLoadingReports(false);
-  }, []);
+  }, [authUser]);
 
   useEffect(() => {
     if (sidebarOpen && window.innerWidth <= 768) {
@@ -1980,12 +1941,30 @@ useEffect(() => {
         }
       })();
     const onResize = () => {
-      if (window.innerWidth <= 768) setSidebarOpen(false);
+      if (window.innerWidth <= 999) setSidebarOpen(false);
     };
     onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [fetchSiteReports]);
+
+  useEffect(() => {
+    if (!user) return;
+    const viewer = {
+      ...user,
+      ...authUser,
+      is_head: !!(user.is_head || authUser?.is_head),
+      role: authUser?.role || user.role,
+      designation: authUser?.designation || user.designation,
+      department: authUser?.department || user.department,
+    };
+    if (!isOfficeSiteViewer(viewer)) return;
+    setActiveTab((tab) =>
+      tab === "profile" || tab === "report-submissions" || tab === "site-report" || tab === "my-reports" || tab === "monthly-report"
+        ? tab
+        : "report-submissions",
+    );
+  }, [user, authUser]);
 
   useEffect(() => {
     if (!user?.user_name) return;
@@ -1997,6 +1976,23 @@ useEffect(() => {
   }, [user, checkLeaveUpdates, checkApprovalsPending]);
 
   const nav = (key) => {
+    const viewer = {
+      ...user,
+      ...authUser,
+      is_head: !!(user?.is_head || authUser?.is_head),
+    };
+    if (
+      isOfficeSiteViewer(viewer) &&
+      key !== "report-submissions" &&
+      key !== "site-report" &&
+      key !== "my-reports" &&
+      key !== "monthly-report" &&
+      key !== "profile"
+    ) {
+      setActiveTab("report-submissions");
+      if (window.innerWidth <= 999) setSidebarOpen(false);
+      return;
+    }
     setActiveTab(key);
     if (key === "my-leave") markLeavesSeen(user);
     if (window.innerWidth <= 999) setSidebarOpen(false);
@@ -2051,7 +2047,16 @@ useEffect(() => {
   const activeItem = ALL_ITEMS.find((i) => i.key === activeTab);
 
   const renderContent = () => {
-    switch (activeTab) {
+    const tab =
+      isOfficeSiteViewer(navUser) &&
+      activeTab !== "profile" &&
+      activeTab !== "site-report" &&
+      activeTab !== "my-reports" &&
+      activeTab !== "monthly-report" &&
+      activeTab !== "report-submissions"
+        ? "report-submissions"
+        : activeTab;
+    switch (tab) {
       case "team-chat":
         return <SiteTeamChat user={user} />;
       case "clock-in":
@@ -2072,8 +2077,8 @@ useEffect(() => {
 
       case "wpr-generator":
         return <WprGenerator user={user} supabase={supabase} />;
-      // case "monthly-report":
-      //   return <MonthlyReport />;
+      case "monthly-report":
+        return <MonthlyReport user={user} />;
       case "site-report":
         return <SiteReport user={user} />;
       // case "material-requirement":
@@ -2116,8 +2121,21 @@ useEffect(() => {
               })
             : "—";
 
+        const ownIds = new Set(
+          [user?.user_name, user?.username, user?.name, user?.full_name, authUser?.username, authUser?.full_name]
+            .map((s) => String(s || "").toLowerCase().trim())
+            .filter(Boolean)
+        );
+        const isOwnSvr = (r) => {
+          if (r.source !== "svr") return false;
+          return [r.engineer, r.reporter_name, r.submitted_by, r.submitted_by_name]
+            .map((s) => String(s || "").toLowerCase().trim())
+            .some((v) => v && ownIds.has(v));
+        };
+        const teamReports = siteReports.filter((r) => !isOwnSvr(r));
+
         // Filter by tab
-        const tabFiltered = siteReports.filter((r) => {
+        const tabFiltered = teamReports.filter((r) => {
           if (reportTab === "dpr")
             return r.source === "dpr" && r.report_type !== "morning";
           if (reportTab === "svr") return r.source === "svr";
@@ -2137,7 +2155,7 @@ useEffect(() => {
         });
 
         const reportSites = [
-          ...new Set(siteReports.map((r) => r.site).filter(Boolean)),
+          ...new Set(teamReports.map((r) => r.site).filter(Boolean)),
         ].sort();
         const withPdf = monthFiltered.filter((r) => r.pdf_url).length;
 
@@ -2184,129 +2202,42 @@ useEffect(() => {
 
         return (
           <div>
-            {/* ── Professional overview banner ── */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 16,
-                flexWrap: "wrap",
-                marginBottom: 20,
-                padding: "18px 22px",
-                borderRadius: 14,
-                background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)",
-                color: "#fff",
-              }}
-            >
-              <div style={{ minWidth: 200 }}>
-                <div
-                  style={{
-                    fontSize: 10.5,
-                    fontWeight: 800,
-                    letterSpacing: ".12em",
-                    textTransform: "uppercase",
-                    color: "#93c5fd",
-                    marginBottom: 6,
-                  }}
-                >
-                  Project Head Overview
-                </div>
-                <div style={{ fontSize: 19, fontWeight: 700, marginBottom: 5 }}>
-                  Report Submissions
-                </div>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: "var(--ink3)",
-                    lineHeight: 1.6,
-                    maxWidth: 480,
-                  }}
-                >
-                  Daily, weekly and site visit reports submitted across{" "}
-                  <strong style={{ color: "#fff" }}>
-                    {(user?.site_names?.length
-                      ? user.site_names
-                      : user?.site_name
-                        ? [user.site_name]
-                        : []
-                    ).join(", ") || "your sites"}
-                  </strong>
-                  .
-                </div>
+            <div className="head-sub-banner">
+              <div>
+                <div className="head-sub-kicker">Project Head Overview</div>
+                <h3>Report Submissions</h3>
+                <p>
+                  Daily, weekly and site visit reports from your team. Your own
+                  site visit reports are in My Reports.
+                </p>
               </div>
-
-              {/* Quick stat chips */}
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <div className="head-sub-stats">
                 {[
                   {
                     label: "DPR",
-                    count: siteReports.filter((r) => r.source === "dpr").length,
+                    count: teamReports.filter((r) => r.source === "dpr").length,
                     color: "#60a5fa",
                   },
                   {
                     label: "WPR",
-                    count: siteReports.filter((r) => r.source === "wpr").length,
+                    count: teamReports.filter((r) => r.source === "wpr").length,
                     color: "#c4b5fd",
                   },
                   {
                     label: "SVR",
-                    count: siteReports.filter((r) => r.source === "svr").length,
+                    count: teamReports.filter((r) => r.source === "svr").length,
                     color: "#86efac",
                   },
                 ].map((s) => (
-                  <div
-                    key={s.label}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: 64,
-                      padding: "8px 14px",
-                      borderRadius: 10,
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 800,
-                        fontFamily: "'DM Mono',monospace",
-                        color: s.color,
-                      }}
-                    >
-                      {s.count}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: ".08em",
-                        color: "var(--ink3)",
-                        marginTop: 2,
-                      }}
-                    >
-                      {s.label}
-                    </div>
+                  <div key={s.label} className="head-sub-stat">
+                    <b style={{ color: s.color }}>{s.count}</b>
+                    <span>{s.label}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* ── Tab bar ── */}
-            <div
-              style={{
-                display: "inline-flex",
-                gap: 4,
-                padding: 4,
-                borderRadius: 10,
-                background: "var(--paper)",
-                border: "1px solid var(--line)",
-                marginBottom: 20,
-              }}
-            >
+            <div className="head-sub-tabs">
               {TAB_CONFIG.map((t) => (
                 <button
                   key={t.key}
@@ -2343,7 +2274,7 @@ useEffect(() => {
                       color: reportTab === t.key ? t.color : "#94a3b8",
                     }}
                   >
-                    {siteReports.filter((r) => r.source === t.key).length}
+                    {teamReports.filter((r) => r.source === t.key).length}
                   </span>
                 </button>
               ))}
@@ -2351,7 +2282,7 @@ useEffect(() => {
 
             {/* ── WPR coming soon ── */}
             {reportTab === "wpr" &&
-              siteReports.filter((r) => r.source === "wpr").length === 0 && (
+              teamReports.filter((r) => r.source === "wpr").length === 0 && (
                 <div
                   className="op-empty-state"
                   style={{
@@ -2393,7 +2324,7 @@ useEffect(() => {
               )}
 
             {reportTab !== "wpr" ||
-            siteReports.filter((r) => r.source === "wpr").length > 0 ? (
+            teamReports.filter((r) => r.source === "wpr").length > 0 ? (
               <>
                 {/* ── Filters ── */}
                 <div
@@ -2413,7 +2344,6 @@ useEffect(() => {
                     style={{
                       fontFamily: "'DM Sans',sans-serif",
                       fontSize: 12.5,
-                      color: "#1e293b",
                       background: "var(--surface)",
                       border: "1px solid var(--line2)",
                       color: "var(--ink)",
@@ -2433,7 +2363,6 @@ useEffect(() => {
                       style={{
                         fontFamily: "'DM Sans',sans-serif",
                         fontSize: 12.5,
-                        color: "#1e293b",
                         background: "var(--surface)",
                         border: "1px solid var(--line2)",
                         color: "var(--ink)",

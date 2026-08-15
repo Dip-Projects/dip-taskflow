@@ -7,7 +7,11 @@ import { ensureSiteBucket, sanitizeBucketName, SITE_FILES_BUCKET, uploadViaApi }
 
 
 
-const todayStr = () => new Date().toISOString().split("T")[0];
+const todayStr = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
 const fmtDate = (d) =>
   d
     ? new Date(d + "T00:00:00").toLocaleDateString("en-IN", {
@@ -4778,7 +4782,12 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
             className="finput"
             type="date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            max={todayStr()}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (next && next > todayStr()) return;
+              setDate(next);
+            }}
           />
         </div>
 

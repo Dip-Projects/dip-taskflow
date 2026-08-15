@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
-const { addWorkingHours, addCalendarDays } = require('../lib/workingHours');
+const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel } = require('../lib/workingHours');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -274,11 +274,15 @@ if (!isMdoOffice && !project_id) {
         .maybeSingle();
 
       if (assigneeUser?.whatsapp_number) {
+        const dueLabel = fmtEmployeeDueLabel(
+          data.assigned_at || data.created_at,
+          data.hours_to_complete ?? hours_to_complete
+        );
         await notifyWa(assigneeUser.whatsapp_number, 'task_notification_v2', [
           assigneeUser.full_name || 'Team member',
           (description || 'New task').slice(0, 200),
           data.project?.name || '—',
-          String(target_date || '—').slice(0, 10),
+          dueLabel,
           priority || 'Medium',
         ]);
       } else {
@@ -303,26 +307,32 @@ if (!isMdoOffice && !project_id) {
 // ----------------------------- all delegated tasks (admin only) -----------------------------
 router.get('/all', requireAdmin, async (req, res) => {
   try {
-    let query = supabase.from('tasks').select(TASK_SELECT).order('target_date', { ascending: true });
-
     // Sirf MDO OFFICE ke admin (top-level) ko sab departments ka data dikhta
     // hai. Baaki har department ka admin (jaise Engg. Division ka head)
     // sirf apne hi department ke tasks dekh sakta hai.
-    if (req.user.department !== 'MDO OFFICE') {
-      if (!req.user.department_id) {
-        return res.json([]);
-      }
-      query = query.eq('department_id', req.user.department_id);
-    } else if (req.query.department_id) {
-      query = query.eq('department_id', req.query.department_id);
+    if (req.user.department !== 'MDO OFFICE' && !req.user.department_id) {
+      return res.json([]);
     }
 
-    if (req.query.employee_id) query = query.eq('assigned_to', req.query.employee_id);
-    if (req.query.status) query = query.eq('status', req.query.status);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    res.json(data);
+    // Supabase caps a single select at 1000 rows. Rebuild the query each page
+    // — the builder is not reusable after .range().
+    const pageSize = 1000;
+    const rows = [];
+    for (let from = 0; ; from += pageSize) {
+      let pageQuery = supabase.from('tasks').select(TASK_SELECT).order('target_date', { ascending: true });
+      if (req.user.department !== 'MDO OFFICE') {
+        pageQuery = pageQuery.eq('department_id', req.user.department_id);
+      } else if (req.query.department_id) {
+        pageQuery = pageQuery.eq('department_id', req.query.department_id);
+      }
+      if (req.query.employee_id) pageQuery = pageQuery.eq('assigned_to', req.query.employee_id);
+      if (req.query.status) pageQuery = pageQuery.eq('status', req.query.status);
+      const { data, error } = await pageQuery.range(from, from + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    res.json(rows);
   } catch (err) {
     console.error('List all tasks error:', err.message);
     res.status(500).json({ error: 'Could not load tasks' });
@@ -441,14 +451,10 @@ router.patch('/:id/start-verification', async (req, res) => {
     if (stampErr) throw stampErr;
 
     try {
-    try {
       await updateTaskTolerant(id, {
         first_verification_started_at: firstStamp(existing, 'first_verification_started_at', at),
         task_events: withTaskEvent(existing, 'start_verification', req.user.id),
       }, 'id');
-    } catch (extraErr) {
-      console.warn('Start verification extra fields skip:', extraErr.message);
-    }
     } catch (extraErr) {
       console.warn('Start verification extra fields skip:', extraErr.message);
     }
@@ -1098,6 +1104,12 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     } else if (range === 'month') {
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
       endDate   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (range === 'last-month') {
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    } else if (range === 'all') {
+      startDate = new Date(2000, 0, 1);
+      endDate   = new Date(now.getFullYear() + 1, 0, 1);
     } else if (range === 'custom' && from && to) {
       startDate = new Date(from); startDate.setHours(0, 0, 0, 0);
       endDate   = new Date(to);   endDate.setHours(23, 59, 59, 999);
@@ -1206,6 +1218,13 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         const valid = arr.filter((h) => h != null);
         return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
       };
+      const finished = allTasks.filter((t) => t.total_cycle_hrs != null);
+      const onTime = finished.filter((t) => {
+        const planned = Number(t.hours_to_complete || 0);
+        return planned > 0 ? t.total_cycle_hrs <= planned : t.total_cycle_hrs <= 24;
+      }).length;
+      const late = Math.max(0, finished.length - onTime);
+      const deptName = allTasks.find((t) => t.department?.name)?.department?.name || '';
       const portfolio = {
         total: allTasks.length,
         completed: allTasks.filter((t) => t.status === 'Completed' || t.verification_status === 'Verified').length,
@@ -1218,8 +1237,11 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         avgSubmitHrs: avg(allTasks.map((t) => t.time_to_submit_hrs)),
         avgVerifyHrs: avg(allTasks.map((t) => t.time_to_verify_hrs)),
         avgCycleHrs: avg(allTasks.map((t) => t.total_cycle_hrs)),
+        onTime,
+        late,
+        department: deptName,
       };
-      return { ...emp, projects, portfolio };
+      return { ...emp, department: deptName, projects, portfolio };
     });
 
     const byVerifier = {};

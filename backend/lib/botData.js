@@ -302,7 +302,7 @@ function formatTaskBlock(t) {
   );
 }
 
-function formatPersonWhy(tasks, people) {
+function formatPersonWhy(tasks, people, intents = {}) {
   const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
   const rows = tasks || [];
   if (!rows.length) return `TASKS FOR ${names}\n  (none on record)`;
@@ -328,16 +328,27 @@ function formatPersonWhy(tasks, people) {
   }
   const section = (title, list) =>
     list.length ? `${title} (${list.length})\n${list.map(formatTaskBlock).join('\n')}` : '';
+  if (intents.overdue && !intents.verify && !intents.company) {
+    return [
+      `OVERDUE — ${names} (${groups.overdue.length})`,
+      groups.overdue.length ? groups.overdue.map(formatTaskBlock).join('\n') : '  (none)',
+    ].join('\n');
+  }
+  if (intents.verify && !intents.overdue && !intents.company) {
+    return [
+      `PENDING VERIFICATION — ${names} (${groups.waiting.length})`,
+      groups.waiting.length ? groups.waiting.map(formatTaskBlock).join('\n') : '  (none)',
+    ].join('\n');
+  }
   return [
-    `WHOSE TASKS / WHY — ${names}`,
-    `These ${rows.length} tasks belong to ${names}. Why each one is in this state:`,
-    `Counts: overdue ${groups.overdue.length} | waiting on verifier ${groups.waiting.length} | correction/update ${groups.correction.length} | not started ${groups.notStarted.length} | in progress ${groups.inProgress.length} | done ${groups.done.length}`,
-    section('OVERDUE — due date passed, still open', groups.overdue),
+    `TASKS — ${names}`,
+    `Open ${groups.overdue.length + groups.waiting.length + groups.correction.length + groups.notStarted.length + groups.inProgress.length} · Overdue ${groups.overdue.length} · Verify ${groups.waiting.length}`,
+    section('OVERDUE', groups.overdue),
     section('WAITING ON VERIFIER', groups.waiting),
     section('CORRECTION / UPDATION', groups.correction),
     section('NOT STARTED', groups.notStarted),
     section('IN PROGRESS', groups.inProgress),
-    section('COMPLETED', groups.done),
+    intents.company ? section('COMPLETED', groups.done) : '',
   ]
     .filter(Boolean)
     .join('\n\n');
@@ -780,11 +791,11 @@ async function answerFromFacts(question, facts, name) {
         {
           role: 'system',
           content:
-            'You are DIP Bot for DIP Projects TaskFlow. Understand English, Hindi and Hinglish. Answer ONLY from Facts. If Facts do not contain it, say it is not in TaskFlow data. Keep every name, date, time and count. Use SECTION HEADINGS and "• " bullets. Do not invent tasks, leaves, meetings or times. If asked whose tasks or why they are in that state, explain owner + Why for each — do not dump unrelated company totals. If asked what was discussed on a call / MoM, quote the MINUTES and SPOKEN ON CALL lines. Reply in clear English.',
+            'You are DIP Bot. Answer ONLY the asked question from Facts. No extra sections, totals, advice, or greetings. If Facts do not have it, say it is not in TaskFlow. Keep names, dates, times and counts. Format: ALL-CAPS heading, then "• " bullets, then indented "Label: value" lines. English, Hindi or Hinglish to match the question. Do not invent data.',
         },
         {
           role: 'user',
-          content: `User ${name || ''} asked: ${question}\n\nFacts:\n${facts}\n\nAnswer the question from Facts:`,
+          content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nReply with only the answer to that question:`,
         },
       ],
     }),
@@ -795,14 +806,16 @@ async function answerFromFacts(question, facts, name) {
 }
 
 async function gatherAdminFacts({ ql, people, intents }) {
-  const wantAll = !intents.specific || intents.company;
+  const wantAll = intents.company && !people.length;
   const jobs = [];
-  if (wantAll || intents.tasks || intents.overdue || intents.verify || intents.company || people.length) {
+  if (wantAll || intents.tasks || intents.overdue || intents.verify || people.length) {
     jobs.push(companyTaskSummary().then((c) => ({ c })).catch(() => ({ c: null })));
   }
   if (wantAll || intents.overdue || intents.recurring) {
     jobs.push(overdueRecurring().then((recOverdue) => ({ recOverdue })).catch(() => ({ recOverdue: [] })));
-    jobs.push(recurringActiveList().then((recActive) => ({ recActive })).catch(() => ({ recActive: [] })));
+    if (intents.recurring && !intents.overdue) {
+      jobs.push(recurringActiveList().then((recActive) => ({ recActive })).catch(() => ({ recActive: [] })));
+    }
   }
   if (wantAll || intents.leave) {
     jobs.push(leaveSummary().then((leaves) => ({ leaves })).catch(() => ({ leaves: { pending: 0, rows: [], all: [] } })));
@@ -820,7 +833,9 @@ async function gatherAdminFacts({ ql, people, intents }) {
   if (people.length) {
     jobs.push(tasksForPeople(people).then((personTasks) => ({ personTasks })).catch(() => ({ personTasks: [] })));
   }
-  jobs.push(searchTasks(ql, people).then((hits) => ({ hits })).catch(() => ({ hits: [] })));
+  if (!people.length && (intents.tasks || !intents.specific)) {
+    jobs.push(searchTasks(ql, people).then((hits) => ({ hits })).catch(() => ({ hits: [] })));
+  }
   const parts = await Promise.all(jobs);
   return Object.assign({}, ...parts);
 }
@@ -830,28 +845,37 @@ function formatAdminFacts(pack, people, intents) {
   const named = people.length > 0;
   const c = pack.c;
   if (named && pack.personTasks) {
-    bits.push(formatPersonWhy(pack.personTasks, people));
+    bits.push(formatPersonWhy(pack.personTasks, people, intents));
+    if (intents.leave && pack.leaves) {
+      const src = (pack.leaves.all || []).filter((r) => personHit(r.user?.full_name, people));
+      bits.push(`LEAVE\n${formatLeaveRows(src.slice(0, 15), '  (none)')}`);
+    }
     return bits.filter(Boolean).join('\n\n');
   }
+  if (!intents.specific && !named) {
+    return 'Ask one thing: overdue, a person\'s name, leave, tickets, attendance, or company summary.';
+  }
   if (c) {
-    bits.push(
-      `TASK COUNTS\nDelegated total ${c.total} | open ${c.open} | overdue ${c.overdue} | pending verification ${c.pendingVerify}`
-    );
-    if (intents.overdue || !intents.specific) {
+    if (intents.company) {
       bits.push(
-        `DELEGATED OVERDUE\n` +
+        `TASK COUNTS\nDelegated total ${c.total} | open ${c.open} | overdue ${c.overdue} | pending verification ${c.pendingVerify}`
+      );
+    }
+    if (intents.overdue) {
+      bits.push(
+        `DELEGATED OVERDUE (${c.overdue || 0})\n` +
           (c.overdueTasks?.length ? c.overdueTasks.slice(0, 40).map(formatTaskBlock).join('\n') : '  (none)')
       );
     }
-    if (intents.verify || !intents.specific) {
+    if (intents.verify) {
       bits.push(
-        `PENDING VERIFICATION\n` +
+        `PENDING VERIFICATION (${c.pendingVerify || 0})\n` +
           (c.pendingVerifyTasks?.length
             ? c.pendingVerifyTasks.slice(0, 30).map(formatTaskBlock).join('\n')
             : '  (none)')
       );
     }
-    if (intents.company || (intents.tasks && !intents.overdue)) {
+    if (intents.company && !intents.overdue) {
       const peopleLines = Object.entries(c.byUser || {})
         .sort((a, b) => b[1].open - a[1].open)
         .slice(0, 25)
@@ -866,13 +890,13 @@ function formatAdminFacts(pack, people, intents) {
       bits.push(`BY PROJECT\n${projectLines || '  (none)'}`);
     }
   }
-  if (pack.recOverdue) {
+  if (pack.recOverdue && (intents.overdue || intents.recurring)) {
     bits.push(`RECURRING OVERDUE\n${formatRecurringOverdue(pack.recOverdue)}`);
   }
-  if (pack.recActive) {
+  if (pack.recActive && intents.recurring && !intents.overdue) {
     bits.push(`ACTIVE RECURRING TASKS\n${formatRecurringActive(pack.recActive)}`);
   }
-  if (pack.leaves) {
+  if (pack.leaves && intents.leave) {
     const src = people.length
       ? (pack.leaves.all || []).filter((r) => personHit(r.user?.full_name, people))
       : pack.leaves.all || pack.leaves.rows || [];
@@ -881,16 +905,16 @@ function formatAdminFacts(pack, people, intents) {
         formatLeaveRows(src.slice(0, 25), '  (none)')
     );
   }
-  if (pack.siteLeaves?.length) {
+  if (pack.siteLeaves?.length && intents.leave) {
     bits.push(`SITE LEAVES\n${formatLeaveRows(pack.siteLeaves.slice(0, 20), '  (none)')}`);
   }
-  if (pack.site) bits.push(formatSitePulse(pack.site));
-  if (pack.moms?.length) {
-    bits.push(`MEETINGS / MoM (what was discussed)\n${pack.moms.map(formatMomBlock).join('\n\n')}`);
+  if (pack.site && (intents.site || intents.clock)) bits.push(formatSitePulse(pack.site));
+  if (pack.moms?.length && intents.mom) {
+    bits.push(`MEETINGS / MoM\n${pack.moms.map(formatMomBlock).join('\n\n')}`);
   } else if (intents.mom) {
-    bits.push('MEETINGS / MoM\n  (no minutes stored yet — start a video call from Team chat and keep TaskFlow open)');
+    bits.push('MEETINGS / MoM\n  (no minutes stored yet)');
   }
-  if (pack.tickets) {
+  if (pack.tickets && intents.ticket) {
     bits.push(
       `OPEN TICKETS: ${pack.tickets.open}\n` +
         lines(
@@ -902,10 +926,7 @@ function formatAdminFacts(pack, people, intents) {
         )
     );
   }
-  if (pack.personTasks?.length) {
-    bits.push(formatPersonWhy(pack.personTasks, people));
-  }
-  if (pack.hits?.length && !(pack.personTasks?.length)) {
+  if (pack.hits?.length && !named && intents.tasks && !intents.overdue && !intents.company) {
     bits.push(`MATCHING TASKS\n${pack.hits.map(formatTaskBlock).join('\n')}`);
   }
   return bits.filter(Boolean).join('\n\n');
@@ -938,7 +959,27 @@ async function answerQuestion({ question, user, isAdmin }) {
   const wantsMom = /\bmom\b|minutes|meeting|video call|\bcall\b|baat hui|charcha|discussed|discussion/i.test(ql);
   const wantsTicket = /\bticket\b|complaint/i.test(ql);
   const wantsTasks = /\b(task|pending|due|assign|my work)\b/i.test(ql) || wantsOverdue || wantsVerify || wantsRecurring;
-  const wantsCompany = /\b(company|sab|all|overall|team|kitne|everyone|total|mis|summary|status)\b/i.test(ql);
+
+  let directory = [];
+  if (isAdmin) {
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, username, full_name')
+      .eq('is_active', true);
+    directory = users || [];
+  }
+  const people = matchPeople(directory, ql);
+  const monthsWanted = parseMonthsFromQuestion(ql);
+
+  const wantsCompany =
+    !people.length &&
+    (/\b(company|overall|everyone|summary|mis report|team summary)\b/i.test(ql) ||
+      (/\b(sab|all|total|kitne)\b/i.test(ql) &&
+        !wantsOverdue &&
+        !wantsLeave &&
+        !wantsTicket &&
+        !wantsMom &&
+        !wantsSite));
 
   const intents = {
     clock: wantsClock,
@@ -960,19 +1001,9 @@ async function answerQuestion({ question, user, isAdmin }) {
       wantsSite ||
       wantsTicket ||
       wantsTasks ||
-      wantsCompany,
+      wantsCompany ||
+      people.length > 0,
   };
-
-  let directory = [];
-  if (isAdmin) {
-    const { data: users } = await supabase
-      .from('users')
-      .select('id, username, full_name')
-      .eq('is_active', true);
-    directory = users || [];
-  }
-  const people = matchPeople(directory, ql);
-  const monthsWanted = parseMonthsFromQuestion(ql);
 
   const namedAttendance =
     isAdmin &&
@@ -1018,13 +1049,11 @@ async function answerQuestion({ question, user, isAdmin }) {
       const c = await companyTaskSummary();
       const rec = await overdueRecurring();
       answer =
-        `OVERDUE LIST\n` +
-        `Delegated tasks overdue: ${c.overdue}\n` +
-        `Recurring instances overdue: ${rec.length}\n` +
-        `Open (not overdue-only): ${c.open}   Pending verification: ${c.pendingVerify}\n\n` +
-        `DELEGATED OVERDUE\n` +
+        `OVERDUE\n` +
+        `Delegated: ${c.overdue}   Recurring: ${rec.length}\n\n` +
+        `DELEGATED\n` +
         (c.overdueTasks.length ? c.overdueTasks.map(formatTaskBlock).join('\n') : '  (none)') +
-        `\n\nRECURRING OVERDUE\n` +
+        `\n\nRECURRING\n` +
         formatRecurringOverdue(rec);
     } else {
       const s = await taskStatsForUser(user.id);
@@ -1043,17 +1072,23 @@ async function answerQuestion({ question, user, isAdmin }) {
     const pack = await gatherAdminFacts({ ql, people, intents });
     answer = formatAdminFacts(pack, people, intents) || 'No matching TaskFlow rows for that question.';
   } else if (wantsSite) {
-    answer =
-      'Site attendance, DPR and WPR company view is available only on admin DIP Bot.\n' +
-      'Open the site portal for your own clock-in, DPR and WPR.';
-  } else {
+    answer = 'Site attendance, DPR and WPR company view is admin-only. Use the site portal for your own clock-in, DPR and WPR.';
+  } else if (wantsLeave) {
+    answer = 'Use Apply Leave / My Leave in the sidebar for your leave.';
+  } else if (wantsTasks || wantsVerify) {
     const s = await taskStatsForUser(user.id);
     const rec = await overdueRecurring(user.id);
-    answer =
-      `Hi ${user.full_name || ''}\n\n` +
-      `Open: ${s.pending.length}   Overdue: ${s.overdue.length}\n` +
-      `Pending verification: ${s.pendingVerify.length}   Recurring overdue: ${rec.length}\n\n` +
-      (s.pending.length ? `OPEN TASKS\n` + s.pending.slice(0, 12).map(formatTaskBlock).join('\n') : 'No open tasks.');
+    if (wantsVerify) {
+      answer =
+        `YOUR VERIFICATION\nPending: ${s.pendingVerify.length}\n` +
+        (s.pendingVerify.length ? s.pendingVerify.slice(0, 12).map(formatTaskBlock).join('\n') : '  (none)');
+    } else {
+      answer =
+        `YOUR TASKS\nOpen: ${s.pending.length}   Overdue: ${s.overdue.length}   Recurring overdue: ${rec.length}\n\n` +
+        (s.pending.length ? `OPEN\n` + s.pending.slice(0, 12).map(formatTaskBlock).join('\n') : 'No open tasks.');
+    }
+  } else {
+    answer = 'Ask about your overdue or open tasks.';
   }
 
   if (process.env.OPENAI_API_KEY && useAnswerModel && answer) {
@@ -1089,11 +1124,11 @@ async function polishWithOpenAI(question, facts, name) {
         {
           role: 'system',
           content:
-            'You are DIP Bot. Reply in clear English. Keep Facts unchanged — every name, date, time and count. Keep the SECTION HEADINGS and "• " bullet lines. Do not invent data. Do not add extra sections. Do not turn lists into a single paragraph.',
+            'You are DIP Bot. Rewrite Facts neatly for the asked question only. Same names, dates, times and counts. Keep ALL-CAPS headings and "• " bullets. Do not add extra sections, advice, or greetings. Do not invent data.',
         },
         {
           role: 'user',
-          content: `User ${name || ''} asked: ${question}\n\nFacts:\n${facts}\n\nRewrite neatly, same facts:`,
+          content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nRewrite only the answer:`,
         },
       ],
     }),

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe } from '../../lib/supabase';
 import { uploadViaApi } from '../../lib/ensureBucket';
 import { computeMonthlyLeaveBalance, isMonthlyLeaveRole } from "./leaveUtils.js";
 // ─── Config: expected shift times ────────────────────────────────────────────
@@ -8,6 +8,8 @@ const SHIFT_END   = "19:00"; // HH:MM — on-time threshold for clock-out
 
 // ─── Extra CSS — append to your existing CSS string ──────────────────────────
 export const CLOCK_CSS = `
+@layer dip-site {
+.site-shell, .site-theme {
 /* ── Camera Modal ── */
 .cam-modal-bg{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;}
 .cam-modal{background:#1a1a1a;border-radius:20px;overflow:hidden;width:100%;max-width:480px;display:flex;flex-direction:column;gap:0;}
@@ -73,6 +75,8 @@ export const CLOCK_CSS = `
 .cal-cell.leave-day{background:#f5f3ff;border-color:#c4b5fd;}
 .cal-cell.leave-day .cal-dn{color:#6d28d9;}
 .cal-cell.half-day{background:#fffbeb;border-color:#fde68a;}
+.cal-cell.future{opacity:.38;cursor:not-allowed;background:#f8fafc;pointer-events:none;}
+.cal-nav-btn:disabled{opacity:.35;cursor:not-allowed;}
 .cal-dn{font-size:11.5px;font-weight:700;color:var(--ink);line-height:1;}
 .att-dot-row{display:flex;gap:2px;margin-top:3px;flex-wrap:wrap;justify-content:center;}
 .att-dot{width:6px;height:6px;border-radius:50%;}
@@ -105,6 +109,8 @@ export const CLOCK_CSS = `
 .task-list-modal::-webkit-scrollbar-track {background: transparent;}
 .task-list-modal::-webkit-scrollbar-thumb {background: #444;border-radius: 4px;}
 .task-list-modal::-webkit-scrollbar-thumb:hover {background: #555;}
+
+} /* .site-shell / .site-theme nest */
 
 /* ── Light theme overrides ── */
 [data-theme="light"] .cam-modal,
@@ -189,6 +195,7 @@ export const CLOCK_CSS = `
 /* in CLOCK_CSS */
 .select-all-label{color:#aaa;}  
 [data-theme="light"] .select-all-label{color:#374151;}
+} /* @layer dip-site */
 `;
 
 async function uploadClockPhoto(supabaseClient, base64, userName, type) {
@@ -1159,13 +1166,14 @@ useEffect(() => {
       .gte("date", from)
       .lte("date", to);
 
-   const { data: leaveData } = await supabase
-    .from("site_leaves")
-    .select("*")
-    .eq("user_name", user.user_name)
-    .in("status", ["approved", "Approved"])   // ← handles both
-    .lte("from_date", to)
-    .gte("to_date", from);
+   const { data: leaveData } = await fromMaybe('site_leaves', (q) =>
+    q
+      .select('*')
+      .eq('user_name', user.user_name)
+      .in('status', ['approved', 'Approved'])
+      .lte('from_date', to)
+      .gte('to_date', from)
+  );
 
     setAtt(attData || []);
     setLeaves(leaveData || []);
@@ -1197,7 +1205,11 @@ leaves.forEach(lv => {
 
   const firstDay    = new Date(cur.y, cur.m, 1).getDay();
   const daysInMonth = new Date(cur.y, cur.m+1, 0).getDate();
-  const todayStr    = new Date().toISOString().split("T")[0];
+  const nowLocal = new Date();
+  const todayStr = `${nowLocal.getFullYear()}-${pad(nowLocal.getMonth() + 1)}-${pad(nowLocal.getDate())}`;
+  const canGoNext =
+    cur.y < nowLocal.getFullYear() ||
+    (cur.y === nowLocal.getFullYear() && cur.m < nowLocal.getMonth());
   const dateStr     = d => `${cur.y}-${pad(cur.m+1)}-${pad(d)}`;
   const cells       = [...Array(firstDay).fill(null), ...Array(daysInMonth).keys()].map((v,i) => i < firstDay ? null : v+1);
 
@@ -1264,7 +1276,14 @@ leaves.forEach(lv => {
           </svg>
         </button>
         <div className="cal-nav-title">{MONTHS[cur.m]} {cur.y}</div>
-        <button className="cal-nav-btn" onClick={() => setCur(p => p.m===11 ? {y:p.y+1,m:0} : {y:p.y,m:p.m+1})}>
+        <button
+          className="cal-nav-btn"
+          disabled={!canGoNext}
+          onClick={() => {
+            if (!canGoNext) return;
+            setCur((p) => (p.m === 11 ? { y: p.y + 1, m: 0 } : { y: p.y, m: p.m + 1 }));
+          }}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <polyline points="9 18 15 12 9 6"/>
           </svg>
@@ -1280,12 +1299,13 @@ leaves.forEach(lv => {
             const rec    = attMap[ds];
             const cls    = getCellClass(rec, ds);
             const isToday = ds === todayStr;
+            const isFuture = ds > todayStr;
             const isSel   = ds === sel;
             return (
               <div
                 key={ds}
-                className={`cal-cell${isToday ? " today" : ""}${isSel ? " sel" : ""}${cls ? " " + cls : ""}`}
-                onClick={() => setSel(ds)}
+                className={`cal-cell${isToday ? " today" : ""}${isSel ? " sel" : ""}${isFuture ? " future" : ""}${cls ? " " + cls : ""}`}
+                onClick={() => { if (!isFuture) setSel(ds); }}
                 title={
                   leaveMap[ds] ? `On Leave · ${leaveMap[ds].leave_type || ""}` :
                   rec ? `${rec.status}${rec.clock_in_status ? " · " + rec.clock_in_status : ""}` :

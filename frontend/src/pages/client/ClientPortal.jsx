@@ -787,17 +787,13 @@ function FeedSkeletonRow() {
   );
 }
 // ─── Overview / dashboard panel ───────────────────────────────────────────────
-function Overview({ siteName, onNavigate, newRequestCount }) {
+function Overview({ siteName, onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    pending: 0,
-    accepted: 0,
-    rejected: 0,
     dpr: 0,
     wpr: 0,
     photos: 0,
   });
-  const [recent, setRecent] = useState([]);
 
   const load = useCallback(async () => {
     if (!siteName) {
@@ -808,17 +804,12 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
     try {
       const data = await api(`/client/overview?site=${encodeURIComponent(siteName)}`);
       setStats({
-        pending: data.pending || 0,
-        accepted: data.accepted || 0,
-        rejected: data.rejected || 0,
         dpr: data.dpr || 0,
         wpr: data.wpr || 0,
         photos: data.photos || 0,
       });
-      setRecent(data.recent || []);
     } catch (_) {
-      setStats({ pending: 0, accepted: 0, rejected: 0, dpr: 0, wpr: 0, photos: 0 });
-      setRecent([]);
+      setStats({ dpr: 0, wpr: 0, photos: 0 });
     }
     setLoading(false);
   }, [siteName]);
@@ -831,40 +822,18 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
     <div>
       <div className="cp-hero">
         <div>
-          <div className="cp-hero-label">{siteName || "Your project"}</div>
+          <div className="cp-hero-label">Operational snapshot</div>
           <div className="cp-hero-title">
-            Welcome to your DIP client portal
+            Coordinate site decisions with a polished, focused portal.
           </div>
           <div className="cp-hero-sub">
-            Approve material requests, open daily and weekly reports, and view
-            site photos for the project assigned to this login.
+            Review project documents and stay aligned with the latest site
+            activity in one place.
           </div>
-        </div>
-        <div className="cp-hero-pill">
-          <span>{stats.pending}</span>
-          <small>pending</small>
         </div>
       </div>
 
-      <div className="cp-stats cols-6">
-        <div className="cp-stat">
-          <div className="cp-stat-num amber">
-            {loading ? <StatSkeleton /> : stats.pending}
-          </div>
-          <div className="cp-stat-label">Pending</div>
-        </div>
-        <div className="cp-stat">
-          <div className="cp-stat-num green">
-            {loading ? <StatSkeleton /> : stats.accepted}
-          </div>
-          <div className="cp-stat-label">Accepted</div>
-        </div>
-        <div className="cp-stat">
-          <div className="cp-stat-num red">
-            {loading ? <StatSkeleton /> : stats.rejected}
-          </div>
-          <div className="cp-stat-label">Rejected</div>
-        </div>
+      <div className="cp-stats">
         <div className="cp-stat">
           <div className="cp-stat-num blue">
             {loading ? <StatSkeleton /> : stats.dpr}
@@ -886,24 +855,6 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
       </div>
 
       <div className="cp-quick-grid">
-        <button
-          className="cp-quick-card"
-          onClick={() => onNavigate("materials")}
-        >
-          {!!newRequestCount && (
-            <span className="cp-quick-badge">{newRequestCount}</span>
-          )}
-          <div className="cp-quick-icon">
-            <IcoBoxNav />
-          </div>
-          <div className="cp-quick-title">Material Requests</div>
-          <div className="cp-quick-sub">
-            Review and action pending procurement requests from site.
-          </div>
-          <div className="cp-quick-arrow">
-            Open <IcoArrow />
-          </div>
-        </button>
         <button className="cp-quick-card" onClick={() => onNavigate("media")}>
           <div className="cp-quick-icon">
             <IcoFolder />
@@ -917,67 +868,6 @@ function Overview({ siteName, onNavigate, newRequestCount }) {
           </div>
         </button>
       </div>
-
-      <div
-        className="cp-section-head"
-        style={{ justifyContent: "space-between" }}
-      >
-        <div
-          style={{
-            fontSize: 15,
-            fontWeight: 800,
-            color: "var(--ink)",
-            fontFamily: "var(--font-display)",
-          }}
-        >
-          Recent Activity
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="cp-loading">
-          <div className="cp-spinner" /> Loading activity…
-        </div>
-      ) : !recent.length ? (
-        <div className="cp-empty">
-          <IcoBox />
-          <div className="cp-empty-title">No activity yet</div>
-          <div className="cp-empty-sub">
-            Material requests from the site team will show up here.
-          </div>
-        </div>
-      ) : (
-        <div className="cp-feed">
-          {recent.map((r) => (
-            <div className="cp-feed-row" key={r.id}>
-              <div className={`cp-feed-icon ${r.status}`}>
-                {r.status === "pending" ? (
-                  <IcoClock />
-                ) : r.status === "received" ? (
-                  <IcoCheck />
-                ) : (
-                  <IcoX />
-                )}
-              </div>
-              <div className="cp-feed-main">
-                <div className="cp-feed-title">
-                  {r.material_name} — {r.quantity} {r.unit_name}
-                </div>
-                <div className="cp-feed-meta">
-                  {r.status === "pending"
-                    ? "Awaiting your review"
-                    : r.status === "received"
-                      ? "Accepted"
-                      : "Rejected"}
-                </div>
-              </div>
-              <div className="cp-feed-time">
-                {fmtDateShort(r.actioned_at || r.created_at)}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -1960,10 +1850,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
 // ─── Nav config ───────────────────────────────────────────────────────────────
 const SECTIONS = {
   overview: { title: "Overview", sub: "" },
-  materials: {
-    title: "Material Requests",
-    sub: "Review and action procurement requests from site.",
-  },
   media: {
     title: "Reports & Photos",
     sub: "Daily reports, weekly reports and site photos.",
@@ -2308,30 +2194,37 @@ function ProfilePage({ siteName, onLogout, theme, onToggleTheme }) {
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
+function assignedSitesFromUser(u) {
+  if (!u) return [];
+  const sites = parseSiteNames(u.site_names);
+  const primary = String(u.site_name || "").trim();
+  const combined =
+    primary && !sites.some((s) => s.toLowerCase() === primary.toLowerCase())
+      ? [primary, ...sites]
+      : sites.length
+        ? sites
+        : primary
+          ? [primary]
+          : [];
+  const seen = new Set();
+  return combined.filter((s) => {
+    const key = String(s || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function ClientPortal() {
   const [user, setUser] = useState(null);
   const [activeSite, setActiveSite] = useState("");
   const [allSites, setAllSites] = useState([]);
   const [section, setSection] = useState("overview");
-  const [pendingCount, setPendingCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // state additions in ClientPortal
   const [theme, setTheme] = useState(
     () => localStorage.getItem("cp_theme") || "light",
   );
-  const loadPendingCount = useCallback(async () => {
-    if (!activeSite) return;
-    try {
-      const data = await api(`/client/materials?site=${encodeURIComponent(activeSite)}&status=pending`);
-      setPendingCount((data || []).length);
-    } catch (_) {
-      setPendingCount(0);
-    }
-  }, [activeSite]);
-
-  useEffect(() => {
-    loadPendingCount();
-  }, [loadPendingCount]);
   useEffect(() => {
     localStorage.setItem("cp_theme", theme);
   }, [theme]);
@@ -2363,7 +2256,10 @@ export default function ClientPortal() {
       try {
         const portal = await api("/client/portal");
         if (cancelled) return;
-        const sites = portal.sites || [];
+        const sites = assignedSitesFromUser({
+          site_name: portal.user?.site_name,
+          site_names: portal.sites || portal.user?.site_names,
+        });
         const u = portal.user || {};
         setUser({
           name: u.full_name || authUser?.full_name || "Client",
@@ -2382,29 +2278,22 @@ export default function ClientPortal() {
           try {
             const u = JSON.parse(stored);
             setUser({ ...u, role: "Client", designation: "Client", name: u.name || authUser?.full_name });
-            const sites = parseSiteNames(u.site_names);
-            const primary = (u.site_name || "").trim();
-            const combined = primary && !sites.some((s) => s.toLowerCase() === primary.toLowerCase())
-              ? [primary, ...sites]
-              : sites.length ? sites : primary ? [primary] : [];
-            setAllSites(combined);
-            setActiveSite(combined[0] || "");
+            const sites = assignedSitesFromUser(u);
+            setAllSites(sites);
+            setActiveSite(sites[0] || "");
             return;
           } catch (_) {}
         }
         if (authUser) {
+          const sites = assignedSitesFromUser(authUser);
           setUser({
             name: authUser.full_name,
             username: authUser.username,
             role: "Client",
             designation: "Client",
-            site_name: authUser.site_name || "",
-            site_names: parseSiteNames(authUser.site_names),
+            site_name: sites[0] || "",
+            site_names: sites,
           });
-          const sites = [
-            ...(authUser.site_name ? [authUser.site_name] : []),
-            ...parseSiteNames(authUser.site_names),
-          ];
           setAllSites(sites);
           setActiveSite(sites[0] || "");
         }
@@ -2439,12 +2328,6 @@ export default function ClientPortal() {
 
   const NAV_ITEMS = [
     { key: "overview", label: "Overview", icon: IcoHome },
-    {
-      key: "materials",
-      label: "Material Requests",
-      icon: IcoBoxNav,
-      badge: pendingCount,
-    },
     { key: "media", label: "Reports & Photos", icon: IcoFolder },
   ];
 
@@ -2463,17 +2346,8 @@ export default function ClientPortal() {
           />
 
           <div className={`cp-mobile-drawer${mobileNavOpen ? " open" : ""}`}>
-            <div className="cp-drawer-head">
-              <button
-                className="cp-drawer-close"
-                onClick={() => setMobileNavOpen(false)}
-                aria-label="Close menu"
-              >
-                ✕
-              </button>
-            </div>
             <div className="cp-drawer-scroll">
-              {allSites.length > 0 && (
+              {allSites.length > 1 && (
                 <div
                   className="cp-sidebar-section"
                   style={{ padding: "0 4px 8px" }}
@@ -2510,9 +2384,6 @@ export default function ClientPortal() {
                     >
                       <Icon />
                       {item.label}
-                      {!!item.badge && (
-                        <span className="cp-nav-badge">{item.badge}</span>
-                      )}
                     </button>
                   );
                 })}
@@ -2551,7 +2422,7 @@ export default function ClientPortal() {
           {activeSite && (
             <aside className="cp-sidebar">
               <div className="cp-sidebar-scroll">
-                {allSites.length > 0 && (
+                {allSites.length > 1 && (
                   <div className="cp-sidebar-section">
                     <div className="cp-sidebar-eyebrow">Site</div>
                     <div className="cp-site-list">
@@ -2579,9 +2450,6 @@ export default function ClientPortal() {
                       >
                         <Icon />
                         {item.label}
-                        {!!item.badge && (
-                          <span className="cp-nav-badge">{item.badge}</span>
-                        )}
                       </button>
                     );
                   })}
@@ -2633,14 +2501,6 @@ export default function ClientPortal() {
                     <Overview
                       siteName={activeSite}
                       onNavigate={goToSection}
-                      newRequestCount={pendingCount}
-                    />
-                  )}
-                  {section === "materials" && (
-                    <MaterialRequests
-                      siteName={activeSite}
-                      userName={displayName}
-                      onStatsChange={setPendingCount}
                     />
                   )}
                   {section === "media" && (

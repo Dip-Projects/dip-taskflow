@@ -1,4 +1,4 @@
-import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
+import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe } from '../../lib/supabase';
 export const MONTHLY_LEAVE_QUOTA = 4;
 const MONTHLY_LEAVE_ROLES = ["site engineer", "site incharge", "site coordinator"]; // Site Engineering department roles
 
@@ -51,11 +51,12 @@ export async function computeMonthlyLeaveBalance(supabase, user, targetMonth) {
 
   const fromStr = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, "0")}-01`;
 
-  const { data: leaves } = await supabase
-    .from("site_leaves")
-    .select("from_date, to_date, level_approved, head_approved")
-    .eq("user_name", user.user_name)
-    .gte("to_date", fromStr);
+  const { data: leaves } = await fromMaybe('site_leaves', (q) =>
+    q
+      .select('from_date, to_date, level_approved, head_approved')
+      .eq('user_name', user.user_name)
+      .gte('to_date', fromStr)
+  );
 
   const usedByMonth = {};
   (leaves || []).filter(isLeaveApproved).forEach((l) => {

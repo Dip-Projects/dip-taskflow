@@ -192,19 +192,19 @@ async function setCoverNeeded(leaveId, needed) {
   return !error;
 }
 
-async function transferTasksToBuddy(leave, { targetDate } = {}) {
+async function transferTasksToBuddy(leave) {
   if (!leave?.buddy_id || leave.buddy_status !== 'Accepted') {
     return { transferred: 0 };
   }
   const tasks = await fetchLeaveWindowTasks(leave);
   if (!tasks.length) return { transferred: 0 };
 
-  const acceptDay = targetDate || todayYmd();
+  // Keep each task's original target_date. Accept day must not pull a
+  // 20 Aug task forward to 15 Aug just because the buddy said Yes today.
   let transferred = 0;
   for (const t of tasks) {
     const fullPatch = {
       assigned_to: leave.buddy_id,
-      target_date: acceptDay,
       leave_cover_id: leave.id,
       leave_cover_from: leave.user_id,
     };
@@ -219,7 +219,7 @@ async function transferTasksToBuddy(leave, { targetDate } = {}) {
     }
     const { error: up2 } = await supabase
       .from('tasks')
-      .update({ assigned_to: leave.buddy_id, target_date: acceptDay })
+      .update({ assigned_to: leave.buddy_id })
       .eq('id', t.id)
       .eq('assigned_to', leave.user_id);
     if (!up2) transferred += 1;
@@ -346,11 +346,11 @@ router.post('/', async (req, res) => {
     }
 
     const insertPayload = {
-      user_id: req.user.id,
-      from_date,
-      to_date,
-      is_half_day: !!is_half_day,
-      reason: reason.trim(),
+        user_id: req.user.id,
+        from_date,
+        to_date,
+        is_half_day: !!is_half_day,
+        reason: reason.trim(),
       status: 'Pending',
       buddy_id,
       buddy_status: 'Pending',
@@ -368,7 +368,7 @@ router.post('/', async (req, res) => {
           'Leave buddy setup is not ready in the database yet. Ask admin to run add_leave_buddy.sql in Supabase, then try again.',
       });
     }
-    if (error) throw error;
+if (error) throw error;
 
     try {
       await notifyLeaveStakeholders({
@@ -386,9 +386,9 @@ router.post('/', async (req, res) => {
       if (buddy.whatsapp_number) {
         await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
           buddy.full_name,
-          req.user.full_name,
-          from_date,
-          to_date,
+        req.user.full_name,
+        from_date,
+        to_date,
           reason.trim(),
         ]);
       }
@@ -485,20 +485,17 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     let tasksMoved = 0;
     const acceptDay = todayYmd();
     if (accept) {
-      const transfer = await transferTasksToBuddy(
-        {
-          ...existing,
-          buddy_id: req.user.id,
-          buddy_status: 'Accepted',
-        },
-        { targetDate: acceptDay }
-      );
+      const transfer = await transferTasksToBuddy({
+        ...existing,
+        buddy_id: req.user.id,
+        buddy_status: 'Accepted',
+      });
       tasksMoved = transfer.transferred || 0;
       if (tasksMoved > 0) {
         try {
           await notifyHeadAndChirag(
             existing.user_id,
-            `${tasksMoved} task(s) moved to buddy ${req.user.full_name} with target date ${acceptDay}`,
+            `${tasksMoved} task(s) moved to buddy ${req.user.full_name}. Target dates stay as they were.`,
             existing.from_date,
             existing.to_date
           );
@@ -762,9 +759,9 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
 
     const coverNeeded = !!(existing.buddy_id && existing.buddy_status === 'Declined');
     const updatePayload = {
-      status: 'Approved',
-      decided_by: req.user.id,
-      decided_at: new Date().toISOString(),
+        status: 'Approved',
+        decided_by: req.user.id,
+        decided_at: new Date().toISOString(),
       decision_note: null,
     };
     // Prefer writing cover flags when column exists
@@ -802,7 +799,7 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
 
     let transferred = 0;
     if (existing.buddy_status === 'Accepted') {
-      const transfer = await transferTasksToBuddy(existing, { targetDate: todayYmd() });
+      const transfer = await transferTasksToBuddy(existing);
       transferred = transfer.transferred;
       if (transferred > 0) {
         const { data: buddy } = await supabase

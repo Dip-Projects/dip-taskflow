@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Navbar from "../../components/Navbar";
-import { supabase } from "../../lib/supabase";
+import { supabase, fromMaybe } from "../../lib/supabase";
+import { api } from "../../lib/api";
 import "../site/SitePortal.css";
 
 import jsPDF from "jspdf";
@@ -19,6 +20,86 @@ const MONTHS_SHORT = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const pad = (n) => String(n).padStart(2, "0");
 const todayISO = () => toISODateLocal(new Date());
+
+function addSiteName(set, value) {
+  const s = String(value || "").trim();
+  if (s) set.add(s);
+}
+
+function sitesOfRow(row) {
+  const out = [];
+  if (row?.site_name) out.push(String(row.site_name).trim());
+  let arr = row?.site_names;
+  if (typeof arr === "string") {
+    try {
+      arr = JSON.parse(arr);
+    } catch {
+      arr = arr ? [arr] : [];
+    }
+  }
+  if (!Array.isArray(arr)) arr = [];
+  arr.forEach((s) => s && out.push(String(s).trim()));
+  return [...new Set(out.filter(Boolean))];
+}
+
+function rowTouchesSites(row, sites) {
+  if (!sites?.length) return true;
+  const have = new Set(sitesOfRow(row).map((s) => s.toLowerCase()));
+  return sites.some((s) => have.has(String(s).toLowerCase()));
+}
+
+/** Process Controller is office-wide — pull sites from TaskFlow tables, not only user_details. */
+async function collectAllSiteNames() {
+  const set = new Set();
+  try {
+    const projects = await api("/sites");
+    (projects || []).forEach((p) => addSiteName(set, p.name));
+  } catch {
+    /* token/API optional */
+  }
+  const { data: users } = await fromMaybe("users", (q) => q.select("site_name, site_names"));
+  (users || []).forEach((u) => sitesOfRow(u).forEach((s) => addSiteName(set, s)));
+
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) => q.select("site_name"));
+  (assigns || []).forEach((a) => addSiteName(set, a.site_name));
+
+  const { data: details } = await fromMaybe("user_details", (q) => q.select("site_name, site_names"));
+  (details || []).forEach((u) => sitesOfRow(u).forEach((s) => addSiteName(set, s)));
+
+  const { data: dprs } = await fromMaybe("dpr_reports", (q) => q.select("site"));
+  (dprs || []).forEach((r) => addSiteName(set, r.site));
+
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+async function resolvePeopleForSites(sites) {
+  const people = new Map();
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("username, full_name, site_name, site_names, is_active")
+  );
+  (users || []).forEach((u) => {
+    if (!u?.username || u.is_active === false) return;
+    if (rowTouchesSites(u, sites)) people.set(u.username, u.full_name || u.username);
+  });
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+    q.select("user_name, full_name, site_name")
+  );
+  (assigns || []).forEach((a) => {
+    if (!a?.user_name) return;
+    const hit =
+      !sites?.length ||
+      sites.some((s) => s.toLowerCase() === String(a.site_name || "").toLowerCase());
+    if (hit) people.set(a.user_name, a.full_name || people.get(a.user_name) || a.user_name);
+  });
+  const { data: details } = await fromMaybe("user_details", (q) =>
+    q.select("username, name, site_name, site_names")
+  );
+  (details || []).forEach((u) => {
+    if (!u?.username) return;
+    if (rowTouchesSites(u, sites)) people.set(u.username, u.name || people.get(u.username) || u.username);
+  });
+  return people;
+}
 
 function fmtDDMMYYYY(iso) {
   if (!iso) return "—";
@@ -224,39 +305,29 @@ apply: (
 // DATA FETCHERS
 // ═══════════════════════════════════════════════════════════════════════════
 
+function isLateAttendance(row) {
+  const mark = String(row?.clock_in_status || row?.status || "").toLowerCase();
+  return mark === "late";
+}
+
 async function fetchAttendanceSummary(sites, from, to) {
-  if (!sites.length || !from || !to) return [];
+  if (!from || !to) return [];
 
-  // attendance rows don't store site_name (SitePortal's clock-in insert
-  // never sets it) — resolve relevant usernames via user_details instead.
-  const { data: users, error: userErr } = await supabase
-    .from("user_details")
-    .select("username, name, site_names")
-    .overlaps("site_names", sites);
-
-  if (userErr) throw userErr;
-
-  const usernames = [...new Set((users || []).map((u) => u.username))];
-  if (!usernames.length) return [];
-
-  const nameByUsername = {};
-  (users || []).forEach((u) => { nameByUsername[u.username] = u.name; });
-
+  const people = await resolvePeopleForSites(sites);
   const { data, error } = await supabase
     .from("attendance")
-    .select("user_name, name, date, clock_in, clock_out, clock_in_status")
-    .in("user_name", usernames)
+    .select("user_name, date, clock_in, clock_out, status, clock_in_status")
     .gte("date", from)
     .lte("date", to);
-
   if (error) throw error;
+  const nameByUsername = Object.fromEntries(people);
 
   const byUser = new Map();
   (data || []).forEach((r) => {
     const key = r.user_name;
     if (!byUser.has(key)) {
       byUser.set(key, {
-        name: r.name || nameByUsername[key] || key,
+        name: nameByUsername[key] || key,
         clockIn: 0,
         clockOut: 0,
         late: 0,
@@ -265,7 +336,7 @@ async function fetchAttendanceSummary(sites, from, to) {
     const bucket = byUser.get(key);
     if (r.clock_in) bucket.clockIn += 1;
     if (r.clock_out) bucket.clockOut += 1;
-    if (r.clock_in_status === "late") bucket.late += 1;
+    if (isLateAttendance(r)) bucket.late += 1;
   });
 
 return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -273,24 +344,13 @@ return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
 
 // Per-date, per-employee attendance rows: Date · Name · Clock In · Clock Out
 async function fetchAttendanceLog(sites, from, to) {
-  if (!sites.length || !from || !to) return [];
+  if (!from || !to) return [];
 
-  const { data: users, error: userErr } = await supabase
-    .from("user_details")
-    .select("username, name, site_names")
-    .overlaps("site_names", sites);
-  if (userErr) throw userErr;
-
-  const usernames = [...new Set((users || []).map((u) => u.username))];
-  if (!usernames.length) return [];
-
-  const nameByUsername = {};
-  (users || []).forEach((u) => { nameByUsername[u.username] = u.name; });
-
+  const people = await resolvePeopleForSites(sites);
+  const nameByUsername = Object.fromEntries(people);
   const { data, error } = await supabase
     .from("attendance")
-    .select("user_name, name, date, clock_in, clock_out, clock_in_status")
-    .in("user_name", usernames)
+    .select("user_name, date, clock_in, clock_out, status, clock_in_status")
     .gte("date", from)
     .lte("date", to);
   if (error) throw error;
@@ -298,10 +358,10 @@ async function fetchAttendanceLog(sites, from, to) {
   return (data || [])
     .map((r) => ({
       date: r.date,
-      name: r.name || nameByUsername[r.user_name] || r.user_name,
+      name: nameByUsername[r.user_name] || r.user_name,
       clockIn: r.clock_in,
       clockOut: r.clock_out,
-      late: r.clock_in_status === "late",
+      late: isLateAttendance(r),
     }))
     .sort((a, b) =>
       a.date === b.date ? a.name.localeCompare(b.name) : a.date.localeCompare(b.date)
@@ -313,21 +373,39 @@ const ENGINEER_ROLES = ["Site Engineer", "Site Incharge", "Site Coordinator"];
 async function resolveEngineers(sites) {
   if (!sites.length) return {};
 
-  const { data, error } = await supabase
-    .from("user_details")
-    .select("name, role, site_names")
-    .overlaps("site_names", sites)
-    .in("role", ENGINEER_ROLES);
-
-  if (error) throw error;
+  const rows = [];
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("full_name, designation, role, department, site_name, site_names")
+  );
+  (users || []).forEach((u) => {
+    const role = String(u.designation || u.role || u.department || "");
+    rows.push({ name: u.full_name, role, site_names: sitesOfRow(u) });
+  });
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+    q.select("full_name, user_name, site_name")
+  );
+  (assigns || []).forEach((a) => {
+    rows.push({ name: a.full_name || a.user_name, role: "Site Engineer", site_names: a.site_name ? [a.site_name] : [] });
+  });
+  const { data: details } = await fromMaybe("user_details", (q) =>
+    q.select("name, role, site_names, site_name")
+  );
+  (details || []).forEach((u) => {
+    rows.push({ name: u.name, role: u.role, site_names: sitesOfRow(u) });
+  });
 
   const map = {};
   sites.forEach((site) => {
-    const names = (data || [])
-      .filter((u) => Array.isArray(u.site_names) && u.site_names.includes(site))
+    const siteLc = String(site).toLowerCase();
+    const names = rows
+      .filter((u) => {
+        const onSite = (u.site_names || []).some((s) => String(s).toLowerCase() === siteLc);
+        if (!onSite) return false;
+        const role = String(u.role || "");
+        return ENGINEER_ROLES.some((r) => role.toLowerCase().includes(r.toLowerCase())) || /engineer|incharge|coordinator/i.test(role);
+      })
       .map((u) => u.name)
       .filter(Boolean);
-
     const unique = [...new Set(names)];
     map[site] = unique.length ? unique.join(", ") : "—";
   });
@@ -337,8 +415,12 @@ async function resolveEngineers(sites) {
 
 // DPR sheet: one row per site (deduped), DONE/PEND for each day in range.
 async function fetchDprSheet(sites, from, to) {
-  const uniqueSites = [...new Set(sites)];
-  if (!uniqueSites.length || !from || !to) return { rows: [], dates: [] };
+  let uniqueSites = [...new Set((sites || []).filter(Boolean))];
+  if (!from || !to) return { rows: [], dates: [] };
+  if (!uniqueSites.length) {
+    uniqueSites = await collectAllSiteNames();
+  }
+  if (!uniqueSites.length) return { rows: [], dates: [] };
 
   const dates = dateRange(from, to);
 
@@ -570,7 +652,7 @@ function RangeFilter({ from, to, setFrom, setTo, onGenerate, busy }) {
           type="date"
           className="finput"
           value={from}
-          max={to || todayISO()}
+          max={to && to < todayISO() ? to : todayISO()}
           onChange={(e) => setFrom(e.target.value)}
         />
       </div>
@@ -580,7 +662,7 @@ function RangeFilter({ from, to, setFrom, setTo, onGenerate, busy }) {
           type="date"
           className="finput"
           value={to}
-          min={from}
+          min={from || undefined}
           max={todayISO()}
           onChange={(e) => setTo(e.target.value)}
         />
@@ -1255,14 +1337,16 @@ function ProxyLeaveApproval({ user }) {
 // MDO leaves skip the site-role chain entirely and go straight to
 // whichever user_details row has role = "Admin".
 async function findAdminApprover() {
-  const { data } = await supabase
-    .from("user_details")
-    .select("username, name, role")
-    .ilike("role", "Admin")
-    .eq("status", "Active")
-    .limit(1)
-    .maybeSingle();
-  return data || null;
+  const { data: fromUsers } = await fromMaybe("users", (q) =>
+    q.select("username, full_name, role").ilike("role", "admin").eq("is_active", true).limit(1)
+  );
+  const u = Array.isArray(fromUsers) ? fromUsers[0] : fromUsers;
+  if (u?.username) return { username: u.username, name: u.full_name, role: u.role };
+  const { data } = await fromMaybe("user_details", (q) =>
+    q.select("username, name, role").ilike("role", "Admin").limit(1)
+  );
+  const d = Array.isArray(data) ? data[0] : data;
+  return d || null;
 }
 function ApplyLeave({ user }) {
   const empty = { leave_type: "", from_date: "", to_date: "", reason: "", proxy_user_name: "" };
@@ -1296,20 +1380,28 @@ useEffect(() => {
   }, []);
 
   useEffect(() => {
-    supabase
-      .from("user_details")
-      .select("username, name, department")
-      .then(({ data, error }) => {
-        if (error || !data) return;
-        const pool = data.filter((u) => {
+    (async () => {
+      const { data: users } = await fromMaybe("users", (q) =>
+        q.select("username, full_name, department, designation, role, is_active")
+      );
+      const fromUsers = (users || [])
+        .filter((u) => u.is_active !== false && u.username && u.username !== user.user_name)
+        .filter((u) => {
           const dept = String(u.department || "").trim().toLowerCase();
-          return (
-            (dept === "mdo office" || dept === "engineer office") &&
-            u.username !== user.user_name
-          );
-        });
-        setProxyCandidates(pool.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+          return dept === "mdo office" || dept === "engineer office" || /process controller/i.test(`${u.designation} ${u.role} ${u.department}`);
+        })
+        .map((u) => ({ username: u.username, name: u.full_name || u.username, department: u.department }));
+      if (fromUsers.length) {
+        setProxyCandidates(fromUsers.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+        return;
+      }
+      const { data } = await fromMaybe("user_details", (q) => q.select("username, name, department"));
+      const pool = (data || []).filter((u) => {
+        const dept = String(u.department || "").trim().toLowerCase();
+        return (dept === "mdo office" || dept === "engineer office") && u.username !== user.user_name;
       });
+      setProxyCandidates(pool.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+    })();
   }, [user.user_name]);
 
   const days =
@@ -1400,7 +1492,7 @@ const submit = async () => {
         </div>
         <div className="fgroup">
           <label className="flabel">To Date <span className="req">*</span></label>
-          <input type="date" className="finput" value={form.to_date} min={form.from_date}
+          <input type="date" className="finput" value={form.to_date} min={form.from_date || undefined}
             onChange={(e) => { set("to_date", e.target.value); setInvalidFields((f) => f.filter((x) => x !== "To Date")); }}
             style={invalidFields.includes("To Date") ? { borderColor: "var(--red)" } : undefined} />
         </div>
@@ -1608,20 +1700,16 @@ export default function MDOPortal({ onLogout }) {
   const [loadingDrawings, setLoadingDrawings] = useState(false);
   const [allSites, setAllSites] = useState([]);
 
-  const fetchDrawings = useCallback(async (u) => {
+  const fetchDrawings = useCallback(async (u, siteList) => {
   if (!u) return;
   setLoadingDrawings(true);
-  const drawingSites = u.site_names?.length ? u.site_names : u.site_name ? [u.site_name] : [];
-  if (!drawingSites.length) {
-    setAllDrawings([]);
-    setLoadingDrawings(false);
-    return;
-  }
-  const { data, error } = await supabase
-    .from("drawings")
-    .select("*")
-    .in("site_name", drawingSites)
-    .order("date", { ascending: false });
+  const drawingSites =
+    (siteList && siteList.length)
+      ? siteList
+      : (u.site_names?.length ? u.site_names : u.site_name ? [u.site_name] : []);
+  let q = supabase.from("drawings").select("*").order("date", { ascending: false });
+  if (drawingSites.length) q = q.in("site_name", drawingSites);
+  const { data, error } = await q;
   if (!error) setAllDrawings(data || []);
   setLoadingDrawings(false);
 }, []);
@@ -1644,7 +1732,7 @@ const handleDrawingSubmit = async () => {
     ]);
     if (error) throw error;
     setDrawingForm({ site_name: "", date: "", files: [] });
-    fetchDrawings(user);
+    fetchDrawings(user, allSites);
     setActiveTab("all-drawings");
   } catch (err) {
     alert(err.message);
@@ -1653,9 +1741,18 @@ const handleDrawingSubmit = async () => {
 };
 
   const loadUser = useCallback(async () => {
-    const stored = localStorage.getItem("user") || localStorage.getItem("tf_user");
-    if (!stored) return;
-    const parsed = JSON.parse(stored);
+    let parsed = null;
+    try {
+      const tf = localStorage.getItem("tf_user");
+      if (tf) parsed = JSON.parse(tf);
+    } catch { /* ignore */ }
+    if (!parsed) {
+      try {
+        const stored = localStorage.getItem("user");
+        if (stored) parsed = JSON.parse(stored);
+      } catch { /* ignore */ }
+    }
+    if (!parsed) return;
     const shaped = {
       id: parsed.id,
       user_name: parsed.user_name || parsed.username,
@@ -1671,59 +1768,58 @@ const handleDrawingSubmit = async () => {
     const uname = shaped.user_name;
     let data = null;
     if (uname) {
-      const fromDetails = await supabase
-        .from("user_details")
-        .select("site_name, site_names, department, role, name")
-        .eq("username", uname)
-        .maybeSingle();
-      if (fromDetails.data) data = fromDetails.data;
+      const { data: fromUsers } = await fromMaybe("users", (q) =>
+        q.select("site_name, site_names, department, designation, full_name, role").eq("username", uname).maybeSingle()
+      );
+      const urow = fromUsers && !Array.isArray(fromUsers) ? fromUsers : (fromUsers || [])[0];
+      if (urow) {
+        data = {
+          site_name: urow.site_name,
+          site_names: urow.site_names,
+          department: urow.department,
+          role: urow.designation || urow.role || shaped.role,
+          name: urow.full_name,
+        };
+      }
       if (!data) {
-        const fromUsers = await supabase
-          .from("users")
-          .select("site_name, site_names, department, designation, full_name")
-          .eq("username", uname)
-          .maybeSingle();
-        if (fromUsers.data) {
-          data = {
-            site_name: fromUsers.data.site_name,
-            site_names: fromUsers.data.site_names,
-            department: fromUsers.data.department,
-            role: fromUsers.data.designation || shaped.role,
-            name: fromUsers.data.full_name,
-          };
-        }
+        const { data: fromDetails } = await fromMaybe("user_details", (q) =>
+          q.select("site_name, site_names, department, role, name").eq("username", uname).maybeSingle()
+        );
+        const drow = fromDetails && !Array.isArray(fromDetails) ? fromDetails : (fromDetails || [])[0];
+        if (drow) data = drow;
+      }
+      const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+        q.select("site_name").eq("user_name", uname)
+      );
+      const assigned = (assigns || []).map((a) => a.site_name).filter(Boolean);
+      if (assigned.length) {
+        data = {
+          ...(data || {}),
+          site_name: data?.site_name || assigned[0],
+          site_names: [...new Set([...sitesOfRow(data), ...assigned])],
+        };
       }
     }
 
-    if (data) {
-      const updated = {
-        ...shaped,
-        name: data.name || shaped.name,
-        role: data.role || shaped.role,
-        site_name: data.site_name ?? shaped.site_name,
-        site_names: data.site_names ?? (shaped.site_name ? [shaped.site_name] : []),
-        department: data.department ?? shaped.department,
-      };
-      setUser(updated);
-      localStorage.setItem("user", JSON.stringify(updated));
-    }
+    const ownSites = sitesOfRow(data || shaped);
+    const all = await collectAllSiteNames();
+    const site_names = ownSites.length ? ownSites : all;
+    const updated = {
+      ...shaped,
+      name: data?.name || shaped.name,
+      role: data?.role || shaped.role,
+      site_name: site_names[0] || shaped.site_name,
+      site_names,
+      department: data?.department ?? shaped.department,
+    };
+    setUser(updated);
+    setAllSites(all.length ? all : site_names);
+    localStorage.setItem("user", JSON.stringify(updated));
   }, []);
 useEffect(() => {
-  supabase
-    .from("user_details")
-    .select("site_name, site_names")
-    .then(({ data, error }) => {
-      if (error || !data) return;
-      const set = new Set();
-      data.forEach((u) => {
-        if (Array.isArray(u.site_names)) {
-          u.site_names.forEach((s) => s && set.add(s));
-        } else if (u.site_name) {
-          set.add(u.site_name);
-        }
-      });
-      setAllSites([...set].sort((a, b) => a.localeCompare(b)));
-    });
+  collectAllSiteNames().then((names) => {
+    if (names.length) setAllSites(names);
+  });
 }, []);
 useEffect(() => {
     loadUser();
@@ -1737,8 +1833,8 @@ useEffect(() => {
 
   // ← add it here
   useEffect(() => {
-    if (user) fetchDrawings(user);
-  }, [user, fetchDrawings]);
+    if (user) fetchDrawings(user, allSites);
+  }, [user, allSites, fetchDrawings]);
 
   if (!user) {
     return (
@@ -1749,12 +1845,13 @@ useEffect(() => {
     );
   }
 
-  const sites =
+  const ownSites =
     Array.isArray(user.site_names) && user.site_names.length
       ? user.site_names
       : user.site_name
         ? [user.site_name]
         : [];
+  const sites = ownSites.length ? ownSites : allSites;
 
   const activeItem = NAV.find((n) => n.key === activeTab);
 

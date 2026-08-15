@@ -23,7 +23,7 @@ export default function Navbar({ onMenuToggle, menuOpen, onLogout }) {
       }
     : null;
   const portalName = isClientLogin
-    ? "Client Portal"
+    ? "Client"
     : /process controller/i.test(displayRole)
       ? "Process Controller"
       : user?.role
@@ -93,7 +93,7 @@ export default function Navbar({ onMenuToggle, menuOpen, onLogout }) {
         </div>
       )}
 
-      <nav className="app-navbar">
+      <nav className={`app-navbar${isClientLogin ? " client-navbar" : ""}`}>
         <div className="navbar-left">
           {onMenuToggle && (
             <button className="navbar-ham" onClick={onMenuToggle} aria-label="Toggle sidebar">

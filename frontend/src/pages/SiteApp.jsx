@@ -6,7 +6,7 @@ import SitePortal from './site/SitePortal';
 import './SurfaceToggle.css';
 
 export default function SiteApp() {
-  const { user, isAuthenticated, logout, canToggleSite, isSiteEngineer, isProcessController } = useAuth();
+  const { user, isAuthenticated, logout, canToggleSite, canToggleMdo, isSiteEngineer } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,8 +19,9 @@ export default function SiteApp() {
     return <Navigate to="/client" replace />;
   }
 
-  if (isProcessController) {
-    return <Navigate to="/mdo" replace />;
+  if (canToggleMdo && !canToggleSite) {
+    const last = localStorage.getItem('tf_surface');
+    return <Navigate to={last === 'app' || last === 'office' ? '/app' : '/mdo'} replace />;
   }
 
   // Only site engineers and heads (can_access_site / is_head) may open /site
@@ -34,7 +35,7 @@ export default function SiteApp() {
   };
 
   return (
-    <div className="site-shell">
+    <div className="site-shell site-theme">
       {canToggleSite && (
         <div className="tf-surface-bar">
           <span className="tf-surface-label">Switch view</span>

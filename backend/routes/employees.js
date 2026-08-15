@@ -71,10 +71,16 @@ async function attachReportingHead(rows) {
 // ----------------------------- list employees -----------------------------
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('users')
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .order('created_at', { ascending: true });
+    if (error && /can_switch_office_mdo/i.test(error.message || '')) {
+      ({ data, error } = await supabase
+        .from('users')
+        .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+        .order('created_at', { ascending: true }));
+    }
     if (error) throw error;
     res.json(await attachReportingHead(data));
   } catch (err) {
@@ -170,7 +176,7 @@ router.patch('/:id', async (req, res) => {
     const {
       full_name, department, designation, role, is_active, can_verify,
       is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets,
-      can_switch_office_site, reporting_head_id,
+      can_switch_office_site, can_switch_office_mdo, reporting_head_id,
       is_head, site_name, site_names, whatsapp_number
     } = req.body || {};
 
@@ -204,6 +210,7 @@ router.patch('/:id', async (req, res) => {
     if (can_add_employee !== undefined) updates.can_add_employee = can_add_employee;
     if (can_resolve_tickets !== undefined) updates.can_resolve_tickets = !!can_resolve_tickets;
     if (can_switch_office_site !== undefined) updates.can_switch_office_site = !!can_switch_office_site;
+    if (can_switch_office_mdo !== undefined) updates.can_switch_office_mdo = !!can_switch_office_mdo;
     // reporting_head_id is optional — '' / null clears it back to "no head / top level".
     // Can't be your own reporting head — guard against that here too (frontend already excludes it).
     if (reporting_head_id !== undefined) {
@@ -221,7 +228,7 @@ router.patch('/:id', async (req, res) => {
       .from('users')
       .update(updates)
       .eq('id', id)
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .single();
 
     if (error) throw error;

@@ -38,6 +38,20 @@ function parseSiteNames(raw) {
   return [];
 }
 
+function uniqueSiteNames(names) {
+  const sites = [];
+  const seen = new Set();
+  for (const raw of names || []) {
+    const s = String(raw || '').trim();
+    const key = s.toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    sites.push(s);
+  }
+  return sites;
+}
+
+/** Only sites assigned on the client login — never every project. */
 async function loadClientSites(userId, jwtUser) {
   const { data: dbUser } = await supabase
     .from('users')
@@ -46,39 +60,22 @@ async function loadClientSites(userId, jwtUser) {
     .maybeSingle();
 
   const u = dbUser || jwtUser || {};
-  const listed = [
-    ...(u.site_name ? [u.site_name] : []),
+  const sites = uniqueSiteNames([
+    u.site_name,
     ...parseSiteNames(u.site_names),
-  ].map((s) => String(s).trim()).filter(Boolean);
+  ]);
 
-  const { data: projects } = await supabase
-    .from('projects')
-    .select('id, name, client_name, location, status')
-    .order('name');
-
-  const nameLc = String(u.full_name || '').toLowerCase().trim();
-  const unLc = String(u.username || '').toLowerCase().trim();
-  const listedLc = listed.map((s) => s.toLowerCase());
-
-  const fromProjects = (projects || []).filter((p) => {
-    const pname = String(p.name || '').toLowerCase();
-    const cname = String(p.client_name || '').toLowerCase();
-    if (listedLc.some((s) => s === pname || pname.includes(s) || s.includes(pname))) return true;
-    if (nameLc && (cname === nameLc || cname.includes(nameLc) || nameLc.includes(cname))) return true;
-    if (unLc && cname.includes(unLc)) return true;
-    return false;
-  });
-
-  const sites = [];
-  const seen = new Set();
-  for (const s of [...listed, ...fromProjects.map((p) => p.name)]) {
-    const key = String(s).toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    sites.push(s);
+  let projects = [];
+  if (sites.length) {
+    const { data } = await supabase
+      .from('projects')
+      .select('id, name, client_name, location, status')
+      .order('name');
+    const allowed = new Set(sites.map((s) => s.toLowerCase()));
+    projects = (data || []).filter((p) => allowed.has(String(p.name || '').toLowerCase()));
   }
 
-  return { user: u, sites, projects: fromProjects };
+  return { user: u, sites, projects };
 }
 
 async function assertSite(req, siteName) {

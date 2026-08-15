@@ -32,6 +32,8 @@
     { "source": "/app/(.*)", "destination": "/index.html" },
     { "source": "/site", "destination": "/index.html" },
     { "source": "/site/(.*)", "destination": "/index.html" },
+    { "source": "/mdo", "destination": "/index.html" },
+    { "source": "/mdo/(.*)", "destination": "/index.html" },
     { "source": "/client", "destination": "/index.html" },
     { "source": "/client/(.*)", "destination": "/index.html" }
   ]

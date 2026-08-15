@@ -100,6 +100,8 @@ function collectEls() {
     overdueTabTodayCount: document.getElementById('overdueTabTodayCount'),
     overdueTabPendingCount: document.getElementById('overdueTabPendingCount'),
     overdueDrawerBody: document.getElementById('overdueDrawerBody'),
+    overdueFilterEmployee: document.getElementById('overdue-filter-employee'),
+    clearOverdueFilters: document.getElementById('clearOverdueFilters'),
     departmentsTableBody: document.getElementById('departmentsTableBody'),
     addDepartmentForm: document.getElementById('addDepartmentForm'),
     addDepartmentMsg: document.getElementById('addDepartmentMsg'),
@@ -429,22 +431,22 @@ export async function mountTaskflowApp(opts = {}) {
   //   let remainingMs = (Number(hours) || 0) * 3600000;
   //   let current = snapToWorkingMoment(parseLocalDate(startDate));
   //   if (remainingMs <= 0) return current;
-  function addWorkingHours(startDate, hours) {
+  function addWorkingHours(startDate, hours, { fromNowIfToday = true } = {}) {
     let remainingMs = (Number(hours) || 0) * 3600000;
     let current = snapToWorkingMoment(parseLocalDate(startDate));
   
-    // Agar target date AAJ ka din hai aur abhi ka actual time us din ke
-    // business-start (9:30 AM) se aage nikal chuka hai, to 9:30 AM se ginna
-    // shuru mat karo — warna deadline banate hi past mein dikhega. Isi din
-    // "abhi" se ginti shuru karo. Future target dates is se untouched rehte
-    // hain (unka 9:30 AM abhi se aage hi hoga, to Math.max khud sambhal lega).
-    const now = snapToWorkingMoment(new Date());
-    const targetDay = parseLocalDate(startDate);
-    const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
-      && targetDay.getMonth() === new Date().getMonth()
-      && targetDay.getDate() === new Date().getDate();
-    if (isSameCalendarDay && now > current) {
-      current = now;
+    // For a target date of today, start from "now" so the preview is not already
+    // in the past. Employee due dates pass fromNowIfToday:false so they stay
+    // anchored to the real assign/create time.
+    if (fromNowIfToday) {
+      const now = snapToWorkingMoment(new Date());
+      const targetDay = parseLocalDate(startDate);
+      const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
+        && targetDay.getMonth() === new Date().getMonth()
+        && targetDay.getDate() === new Date().getDate();
+      if (isSameCalendarDay && now > current) {
+        current = now;
+      }
     }
   
     if (remainingMs <= 0) return current;
@@ -473,18 +475,13 @@ export async function mountTaskflowApp(opts = {}) {
     return hours != null ? `${d} · ${hours}h` : d;
   }
   
-  // ── "My Tasks" due date: Due Date = task's target_date + hours_to_complete ──
-  // (office-hours aware, same working-time calculator as everywhere else).
-  // IMPORTANT: this must anchor to target_date, not created_at — target_date is
-  // what changes when a reschedule request is approved (see tasks.js
-  // /reschedule-request/approve), so anchoring here to created_at meant an
-  // employee's own "My Tasks" due date never updated after an approved
-  // reschedule, even though the admin's own views (which already used
-  // target_date) showed the new date correctly.
+  // Employee due date = when the task was assigned/created + hours_to_complete
+  // (office-hours aware). Target date is admin-only.
   function fmtDueDateFromCreated(task) {
-    if (!task.target_date) return task.created_at ? fmtDate(task.created_at) : '—';
-    if (task.hours_to_complete == null) return fmtDate(task.target_date);
-    const due = addWorkingHours(task.target_date, task.hours_to_complete);
+    const start = task.assigned_at || task.created_at;
+    if (!start) return '—';
+    if (task.hours_to_complete == null) return fmtDate(start);
+    const due = addWorkingHours(start, task.hours_to_complete, { fromNowIfToday: false });
     return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
   }
   function toDatetimeLocalValue(iso) {
@@ -664,24 +661,27 @@ export async function mountTaskflowApp(opts = {}) {
   
     els.navList.innerHTML = '';
     if (taskItems.length) {
-      const taskLabel = document.createElement('div');
-      taskLabel.className = 'nav-section-label'; taskLabel.textContent = 'Tasks';
-      els.navList.appendChild(taskLabel);
-      taskItems.forEach((t) => els.navList.appendChild(makeNavButton(t.key, t.label)));
+      appendCollapsibleNav(
+        'Tasks',
+        taskItems.map((t) => makeNavButton(t.key, t.label)),
+        { collapsed: true, sectionId: 'tasks' }
+      );
     }
   
     if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis)) {
-      const verifyLabel = document.createElement('div');
-      verifyLabel.className = 'nav-section-label'; verifyLabel.textContent = 'Verification';
-      els.navList.appendChild(verifyLabel);
-      els.navList.appendChild(makeNavButton('verifications', '🔎 Verification requests'));
+      appendCollapsibleNav(
+        'Verification',
+        [makeNavButton('verifications', '🔎 Verification requests')],
+        { collapsed: true, sectionId: 'verification' }
+      );
     }
   
     if (visOk('reschedule-requests') !== false) {
-      const reschedLabel = document.createElement('div');
-      reschedLabel.className = 'nav-section-label'; reschedLabel.textContent = 'Reschedule';
-      els.navList.appendChild(reschedLabel);
-      els.navList.appendChild(makeNavButton('reschedule-requests', '🗓️ Reschedule requests'));
+      appendCollapsibleNav(
+        'Reschedule',
+        [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
+        { collapsed: true, sectionId: 'reschedule' }
+      );
     }
   
     const showAdminBlock = visOk('employees') && (isAdmin || canAddEmployee)
@@ -696,67 +696,138 @@ export async function mountTaskflowApp(opts = {}) {
       || visOk('fms') && (isAdmin || isMis);
 
     if (showAdminBlock) {
-      const adminLabel = document.createElement('div');
-      adminLabel.className = 'nav-section-label';
-      adminLabel.textContent = isMis && !isAdmin ? 'MIS' : 'Administration';
-      els.navList.appendChild(adminLabel);
-      if (visOk('employees') && (isAdmin || canAddEmployee)) els.navList.appendChild(makeNavButton('employees', '👥 Manage employees'));
+      const adminBtns = [];
+      if (visOk('employees') && (isAdmin || canAddEmployee)) adminBtns.push(makeNavButton('employees', '👥 Manage employees'));
       if (visOk('hierarchy') && isAdmin) {
-        els.navList.appendChild(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
-        if (visOk('project-mgmt')) els.navList.appendChild(makeNavButton('project-mgmt', '🗂️ Project management'));
+        adminBtns.push(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
+        if (visOk('project-mgmt')) adminBtns.push(makeNavButton('project-mgmt', '🗂️ Project management'));
       }
-      if (visOk('sites') && (isAdmin || canAddSite)) els.navList.appendChild(makeNavButton('sites', '🏗️ Manage sites'));
-      if (visOk('masterdata') && isAdmin) els.navList.appendChild(makeNavButton('masterdata', '🗂️ Departments & task types'));
-      if (visOk('permissions') && isAdmin) els.navList.appendChild(makeNavButton('permissions', '🔐 Permissions'));
-      if (visOk('daily-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('daily-report', '📋 Daily Report'));
-      if (visOk('mis-report') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('mis-report', '📊 MIS Report'));
-      if (visOk('time-dashboard') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('time-dashboard', '⏱ Time dashboard'));
-      if (visOk('fms') && (isAdmin || isMis)) els.navList.appendChild(makeNavButton('fms', '📑 FMS tracker'));
+      if (visOk('sites') && (isAdmin || canAddSite)) adminBtns.push(makeNavButton('sites', '🏗️ Manage sites'));
+      if (visOk('masterdata') && isAdmin) adminBtns.push(makeNavButton('masterdata', '🗂️ Departments & task types'));
+      if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', '🔐 Permissions'));
+      if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
+      if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
+      if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Time dashboard'));
+      if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
+      appendCollapsibleNav(
+        isMis && !isAdmin ? 'MIS' : 'Administration',
+        adminBtns,
+        { collapsed: true, sectionId: 'administration' }
+      );
+    }
+
+    if (visOk('monthly-report')) {
+      appendCollapsibleNav(
+        'Reports',
+        [makeNavButton('monthly-report', '📁 Monthly Report')],
+        { collapsed: true, sectionId: 'reports' }
+      );
     }
   
     if (isMis && state.user?.role !== 'admin') {
-      const misLabel = document.createElement('div');
-      misLabel.className = 'nav-section-label';
-      misLabel.textContent = 'MIS Support';
-      els.navList.appendChild(misLabel);
-      els.navList.appendChild(makeNavButton('visibility', '👁 Who sees what'));
+      appendCollapsibleNav(
+        'MIS Support',
+        [makeNavButton('visibility', '👁 Who sees what')],
+        { collapsed: true, sectionId: 'mis-support' }
+      );
     }
 
-    if (visOk('applyleave') || visOk('buddyrequests') || (visOk('leaveapprovals') && isAdmin)) {
-      const leaveLabel = document.createElement('div');
-      leaveLabel.className = 'nav-section-label'; leaveLabel.textContent = 'Leave';
-      els.navList.appendChild(leaveLabel);
-      if (visOk('applyleave')) els.navList.appendChild(makeNavButton('applyleave', '🌴 Apply Leave'));
-      if (visOk('buddyrequests')) els.navList.appendChild(makeNavButton('buddyrequests', '🤝 Buddy requests'));
-      if (visOk('leaveapprovals') && isAdmin) els.navList.appendChild(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+    const leaveBtns = [];
+    if (visOk('applyleave')) leaveBtns.push(makeNavButton('applyleave', '🌴 Apply Leave'));
+    if (visOk('buddyrequests')) leaveBtns.push(makeNavButton('buddyrequests', '🤝 Buddy requests'));
+    if (visOk('leaveapprovals') && isAdmin) leaveBtns.push(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+    if (leaveBtns.length) {
+      appendCollapsibleNav('Leave', leaveBtns, { collapsed: true, sectionId: 'leave' });
     }
 
     if (!isAdmin && visOk('corrections')) {
-      const corrLabel = document.createElement('div');
-      corrLabel.className = 'nav-section-label'; corrLabel.textContent = 'Corrections';
-      els.navList.appendChild(corrLabel);
-      els.navList.appendChild(makeNavButton('corrections', '↩ Corrections'));
-      els.navList.appendChild(makeNavButton('updations', '📝 Updations'));
+      appendCollapsibleNav(
+        'Corrections',
+        [makeNavButton('corrections', '↩ Corrections'), makeNavButton('updations', '📝 Updations')],
+        { collapsed: true, sectionId: 'corrections' }
+      );
     }
   
     if (visOk('tickets')) {
-      const supportLabel = document.createElement('div');
-      supportLabel.className = 'nav-section-label';
-      supportLabel.textContent = isMis ? 'MIS — Ticket Tracking' : 'Support';
-      els.navList.appendChild(supportLabel);
-      els.navList.appendChild(makeNavButton('tickets-open', '🟠 Open Tickets'));
-      els.navList.appendChild(makeNavButton('tickets-resolved', '✅ Resolved Tickets'));
+      appendCollapsibleNav(
+        isMis ? 'MIS — Ticket Tracking' : 'Support',
+        [makeNavButton('tickets-open', '🟠 Open Tickets'), makeNavButton('tickets-resolved', '✅ Resolved Tickets')],
+        { collapsed: true, sectionId: 'support' }
+      );
     }
   
     if (visOk('drawings') && isAdmin) {
-      const drawLabel = document.createElement('div');
-      drawLabel.className = 'nav-section-label'; drawLabel.textContent = 'Drawings';
-      els.navList.appendChild(drawLabel);
-      els.navList.appendChild(makeNavButton('drawings-add', '➕ Add Drawing'));
-      els.navList.appendChild(makeNavButton('drawings-all', '📐 All Drawings'));
+      appendCollapsibleNav(
+        'Drawings',
+        [makeNavButton('drawings-add', '➕ Add Drawing'), makeNavButton('drawings-all', '📐 All Drawings')],
+        { collapsed: true, sectionId: 'drawings' }
+      );
     }
   }
   
+  const NAV_SECTION_BY_VIEW = {
+    add: 'tasks', all: 'tasks', overdue: 'tasks', my: 'tasks', recurring: 'tasks',
+    verifications: 'verification',
+    'reschedule-requests': 'reschedule',
+    employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
+    sites: 'administration', masterdata: 'administration', permissions: 'administration',
+    'daily-report': 'administration', 'mis-report': 'administration',
+    'time-dashboard': 'administration', fms: 'administration',
+    'monthly-report': 'reports',
+    visibility: 'mis-support',
+    applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
+    corrections: 'corrections', updations: 'corrections',
+    'tickets-open': 'support', 'tickets-resolved': 'support', tickets: 'support',
+    'drawings-add': 'drawings', 'drawings-all': 'drawings',
+  };
+
+  function appendCollapsibleNav(title, buttons, { collapsed = true, sectionId } = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-group' + (collapsed ? ' is-collapsed' : '');
+    wrap.dataset.section = sectionId || title.toLowerCase();
+    const hdr = document.createElement('button');
+    hdr.type = 'button';
+    hdr.className = 'nav-section-toggle';
+    hdr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    hdr.innerHTML = `<span class="nav-section-toggle-label">${title}</span><span class="nav-section-chev" aria-hidden="true"></span>`;
+    const kids = document.createElement('div');
+    kids.className = 'nav-group-kids';
+    if (collapsed) kids.hidden = true;
+    buttons.forEach((b) => kids.appendChild(b));
+    hdr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const shut = !kids.hidden;
+      if (!shut) setNavGroupOpen(wrap, true);
+      else setNavGroupOpen(wrap, false);
+    });
+    wrap.appendChild(hdr);
+    wrap.appendChild(kids);
+    els.navList.appendChild(wrap);
+  }
+
+  function setNavGroupOpen(group, open, { accordion = true } = {}) {
+    if (!group) return;
+    if (open && accordion) {
+      document.querySelectorAll('#appScreen .nav-group').forEach((g) => {
+        if (g === group) return;
+        setNavGroupOpen(g, false, { accordion: false });
+      });
+    }
+    const kids = group.querySelector('.nav-group-kids');
+    const hdr = group.querySelector('.nav-section-toggle');
+    if (kids) kids.hidden = !open;
+    group.classList.toggle('is-collapsed', !open);
+    hdr?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function ensureNavSectionOpen(viewKey) {
+    const sectionId = NAV_SECTION_BY_VIEW[viewKey];
+    if (!sectionId) return;
+    const group = document.querySelector(`#appScreen .nav-group[data-section="${sectionId}"]`);
+    if (!group) return;
+    setNavGroupOpen(group, true);
+  }
+
   function makeNavButton(key, label, badge) {
     const btn = document.createElement('button');
     btn.className = 'nav-btn'; btn.dataset.view = key;
@@ -952,6 +1023,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     state.activeView = viewKey;
+    ensureNavSectionOpen(viewKey);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   
     // tickets-open and tickets-resolved share the same view-tickets section
@@ -1045,6 +1117,17 @@ export async function mountTaskflowApp(opts = {}) {
     if (prev && list.some((e) => e.id === prev)) els.filterEmployee.value = prev;
   }
 
+  function syncOverdueEmployeeDropdown() {
+    if (!els.overdueFilterEmployee) return;
+    const list = state.master.employees || [];
+    const prev = els.overdueFilterEmployee.value;
+    fillSelect(els.overdueFilterEmployee, list, {
+      placeholder: 'All employees',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) els.overdueFilterEmployee.value = prev;
+  }
+
   function syncRecurringEmployeeDropdown() {
     const empSel = recEls.employee?.();
     const deptSel = recEls.department?.();
@@ -1079,6 +1162,7 @@ export async function mountTaskflowApp(opts = {}) {
       fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
+      syncOverdueEmployeeDropdown();
       fillRecurringDropdowns();
     } catch (err) { showToast(err.message, 'error'); }
   }
@@ -1103,6 +1187,7 @@ export async function mountTaskflowApp(opts = {}) {
       state.master.employees = employees;
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
+      syncOverdueEmployeeDropdown();
       syncRecurringEmployeeDropdown();
       fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
@@ -1176,7 +1261,8 @@ export async function mountTaskflowApp(opts = {}) {
     const params = new URLSearchParams();
     if (els.filterDepartment.value) params.set('department_id', els.filterDepartment.value);
     if (els.filterEmployee.value)   params.set('employee_id',   els.filterEmployee.value);
-    if (els.filterStatus.value)     params.set('status',        els.filterStatus.value);
+    const st = els.filterStatus.value;
+    if (st && st !== 'open') params.set('status', st);
     return params.toString();
   }
   
@@ -1188,17 +1274,8 @@ export async function mountTaskflowApp(opts = {}) {
       const query = buildAllTasksQuery();
       let tasks = await api(`/tasks/all${query ? `?${query}` : ''}`);
   
-      if (!els.filterStatus.value) {
-        // Default view: everything still "active" — Pending, In Progress,
-        // Ticket Raised, and anything sitting under verification. Only
-        // Completed (and Rejected) tasks are hidden by default; pick the
-        // "Completed" status filter explicitly to see those.
-        tasks = tasks.filter(
-          (t) => t.status === 'Pending'
-            || t.status === 'In Progress'
-            || t.status === 'Ticket Raised'
-            || t.verification_status === 'Pending Verification'
-        );
+      if (els.filterStatus.value === 'open') {
+        tasks = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
       }
   
       const from = els.filterCreatedFrom.value ? new Date(els.filterCreatedFrom.value) : null;
@@ -1231,7 +1308,7 @@ export async function mountTaskflowApp(opts = {}) {
   );
   els.clearAllFilters?.addEventListener('click', () => {
     els.filterDepartment.value = ''; els.filterEmployee.value = '';
-    els.filterStatus.value = ''; els.filterCreatedFrom.value = '';
+    els.filterStatus.value = 'open'; els.filterCreatedFrom.value = '';
     els.filterCreatedTo.value = ''; els.dateRangeCount.hidden = true;
     loadAllTasks();
   });
@@ -1259,7 +1336,9 @@ export async function mountTaskflowApp(opts = {}) {
       // Planned date
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
-      tdDate.textContent = fmtDeadlineDateOnlyWithHours(task.target_date, task.hours_to_complete);
+      tdDate.textContent = task.target_date
+        ? fmtDateOnly(task.target_date)
+        : '—';
   
       // Assigned to
       const tdAssigned = document.createElement('td');
@@ -1338,16 +1417,23 @@ export async function mountTaskflowApp(opts = {}) {
     return !!task.overdue_extended_until && new Date(task.overdue_extended_until) > new Date();
   }
   
+  function overdueAssigneeId(task) {
+    return task.assigned_to || task.assigned_to_user?.id || '';
+  }
+
   async function loadOverdueTasks() {
     els.overdueTasksList.innerHTML = `<tr><td colspan="9" class="empty-state">Loading overdue tasks…</td></tr>`;
     els.overdueTasksCards.innerHTML = `<div class="empty-state">Loading overdue tasks…</div>`;
     try {
+      syncOverdueEmployeeDropdown();
+      const empId = els.overdueFilterEmployee?.value || '';
       const tasks = await api('/tasks/all');
       const now = new Date();
       const overdue = tasks.filter((t) => {
         if (!t.target_date) return false;
         if (t.status === 'Completed' || t.status === 'Rejected') return false;
         if (t.verification_status === 'Verified') return false;
+        if (empId && overdueAssigneeId(t) !== empId) return false;
         return parseLocalDate(t.target_date) < now;
       }).sort((a, b) => parseLocalDate(a.target_date) - parseLocalDate(b.target_date));
   
@@ -1361,12 +1447,20 @@ export async function mountTaskflowApp(opts = {}) {
       // a different kind of record (instances, not delegated tasks).
       const recurringAll = await api('/recurring-tasks/all').catch(() => []);
       const overdueRecurring = recurringAll
-        .filter(t => t.is_overdue)
+        .filter((t) => t.is_overdue && (!empId || overdueAssigneeId(t) === empId))
         .sort((a, b) => b.overdue_days - a.overdue_days);
       renderOverdueRecurringSection(overdueRecurring);
       setBadge('overdueRecurringBadge', overdueRecurring.length);
     } catch (err) { showToast(err.message, 'error'); }
   }
+
+  els.overdueFilterEmployee?.addEventListener('change', () => {
+    if (state.activeView === 'overdue') loadOverdueTasks();
+  });
+  els.clearOverdueFilters?.addEventListener('click', () => {
+    if (els.overdueFilterEmployee) els.overdueFilterEmployee.value = '';
+    if (state.activeView === 'overdue') loadOverdueTasks();
+  });
   
   // ─── Overdue tab switching: Task ↔ Recurring Task ──────────────────────────
   __tfReadyFns.push(() => {
@@ -1459,7 +1553,7 @@ export async function mountTaskflowApp(opts = {}) {
       tdDate.style.wordBreak = 'break-word';
       const daysOverdue = Math.floor((new Date() - parseLocalDate(task.target_date)) / 86400000);
       tdDate.innerHTML = `
-        <div>${fmtDeadlineDateOnlyWithHours(task.target_date, task.hours_to_complete)}</div>
+        <div>${fmtDateOnly(task.target_date)}</div>
         <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
         ${isOverdueExtensionActive(task) ? `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>` : ''}
       `;
@@ -1606,7 +1700,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
         <div class="task-detail-line"><span class="task-detail-label">Assigned to:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
         ${task.verifier?.full_name ? `<div class="task-detail-line"><span class="task-detail-label">Verifier:</span> ${escapeHtml(task.verifier.full_name)}</div>` : ''}
-        <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDeadlineDateOnlyWithHours(task.target_date, task.hours_to_complete))}</div>
+        <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDateOnly(task.target_date))}</div>
         ${overdueDrawerTab === 'pending' ? `
           <div class="drawer-extension-note">
             ⏱ Extended to <strong>${escapeHtml(fmtDate(task.overdue_extended_until))}</strong>
@@ -1944,9 +2038,8 @@ export async function mountTaskflowApp(opts = {}) {
   
   function getDeadlineHtml(task, showAssignee, useCreatedDate = false) {
     if (useCreatedDate) return fmtDueDateFromCreated(task);
-    return showAssignee
-      ? fmtDeadlineDateOnlyWithHours(task.target_date, task.hours_to_complete)
-      : fmtCalculatedDeadline(task.target_date, task.hours_to_complete);
+    // Admin views: target date only. Employee My Tasks uses useCreatedDate.
+    return task.target_date ? fmtDateOnly(task.target_date) : '—';
   }
   
   function verificationBadgeHtml(task) {
@@ -2112,14 +2205,7 @@ export async function mountTaskflowApp(opts = {}) {
         startVerificationInline(task, actionsEl);
       } else {
         const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
-          startBtn.disabled = true;
-          try {
-            await startVerification(task.id);
-            await loadVerifications();
-          } catch (err) {
-            startBtn.disabled = false;
-            showToast(err.message, 'error');
-          }
+          await clickStartVerification(task, actionsEl, startBtn);
         });
         actionsEl.appendChild(startBtn);
       }
@@ -2354,11 +2440,27 @@ export async function mountTaskflowApp(opts = {}) {
     }
   });
   
-  // "Start Verification" state now lives on the task itself (verification_started_at /
-  // verification_started_by, set via PATCH /tasks/:id/start-verification) instead of
-  // browser storage. This is permanent — once started, it stays started for that
-  // task everywhere (any tab, any device, any browser) until the task cycles back
-  // through send-for-verification. See tasks.js for the server-side logic.
+  const _startVerifyBusy = new Set();
+
+  function showBusyOverlay(msg) {
+    let el = document.getElementById('tfBusyOverlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tfBusyOverlay';
+      el.className = 'tf-busy-overlay';
+      el.innerHTML = '<div class="tf-busy-card"><div class="tf-busy-spinner"></div><span class="tf-busy-msg"></span></div>';
+      (document.getElementById('appScreen') || document.body).appendChild(el);
+    }
+    const msgEl = el.querySelector('.tf-busy-msg');
+    if (msgEl) msgEl.textContent = msg || 'Loading…';
+    el.hidden = false;
+  }
+
+  function hideBusyOverlay() {
+    const el = document.getElementById('tfBusyOverlay');
+    if (el) el.hidden = true;
+  }
+
   function verificationHasStarted(task) {
     return !!(task?.verification_started_at || task?.verification_started_by);
   }
@@ -2366,10 +2468,52 @@ export async function mountTaskflowApp(opts = {}) {
   async function startVerification(taskId) {
     return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
   }
-  
-  async function loadVerifications() {
-    els.verificationsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
-    els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
+
+  async function clickStartVerification(task, actionsEl, btn) {
+    const id = task?.id;
+    if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
+    _startVerifyBusy.add(id);
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.style.pointerEvents = 'none';
+      btn.textContent = 'Starting…';
+    }
+    showBusyOverlay('Starting verification…');
+    try {
+      const updated = await startVerification(id);
+      const next = {
+        ...task,
+        ...(updated || {}),
+        verification_started_at: updated?.verification_started_at || new Date().toISOString(),
+        verification_started_by: updated?.verification_started_by || state.user?.id,
+      };
+      startVerificationInline(next, actionsEl);
+      showToast('Verification started', 'success');
+      await loadVerifications({ quiet: true });
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.style.pointerEvents = '';
+        btn.textContent = '🔎 Start Verification';
+      }
+      showToast(err.message, 'error');
+    } finally {
+      _startVerifyBusy.delete(id);
+      hideBusyOverlay();
+    }
+  }
+
+  async function loadVerifications(opts = {}) {
+    if (!opts.quiet) {
+      if (els.verificationsTableBody) {
+        els.verificationsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
+      }
+      if (els.verificationsList) {
+        els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
+      }
+    }
     try {
       const tasks = await api('/tasks/verifications');
       renderVerificationsTable(els.verificationsTableBody, tasks);
@@ -2699,14 +2843,7 @@ export async function mountTaskflowApp(opts = {}) {
         showVerifyActions();
       } else {
         const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
-          startBtn.disabled = true;
-          try {
-            await startVerification(task.id);
-            await loadVerifications();
-          } catch (err) {
-            startBtn.disabled = false;
-            showToast(err.message, 'error');
-          }
+          await clickStartVerification(task, tdActions, startBtn);
         });
         tdActions.appendChild(startBtn);
       }
@@ -3266,8 +3403,7 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
         const n = res.tasks_moved || 0;
-        const day = res.accept_date || 'today';
-        showToast(n ? `${n} task(s) moved to you · target date ${day}` : 'You accepted buddy cover ✅', 'success');
+        showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
         loadBuddyRequests();
         refreshNavBadges();
       } catch (err) { showToast(err.message, 'error'); }
@@ -4091,7 +4227,7 @@ export async function mountTaskflowApp(opts = {}) {
   });
   // ─── Permissions (admin only) ──────────────────────────────────────────────────
   async function loadPermissions() {
-    els.permissionsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading employees…</td></tr>`;
+    els.permissionsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
     try {
       const employees = await api('/employees');
       renderPermissionsTable(employees);
@@ -4099,7 +4235,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function renderPermissionsTable(employees) {
     if (!employees.length) {
-      els.permissionsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No employees yet</td></tr>`;
+      els.permissionsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">No employees yet</td></tr>`;
       return;
     }
     els.permissionsTableBody.innerHTML = '';
@@ -4117,6 +4253,7 @@ export async function mountTaskflowApp(opts = {}) {
         ['can_verify', 'Verify tasks'],
         ['is_mis_executive', 'MIS Executive'],
         ['can_switch_office_site', 'Office ↔ Site'],
+        ['can_switch_office_mdo', 'Office ↔ MDO'],
       ];
       flags.forEach(([flag, label]) => {
         const td = document.createElement('td');
@@ -4126,15 +4263,20 @@ export async function mountTaskflowApp(opts = {}) {
         const autoSite =
           flag === 'can_switch_office_site' &&
           (emp.role === 'head' || !!emp.is_head);
-        const checked = isAdminRow || autoSite || !!emp[flag];
+        const autoMdo =
+          flag === 'can_switch_office_mdo' &&
+          /process controller/i.test(`${emp.designation || ''} ${emp.role || ''} ${emp.department || ''}`);
+        const checked = isAdminRow || autoSite || autoMdo || !!emp[flag];
         btn.className = `status-toggle ${checked ? 'active' : 'inactive'}`;
         btn.textContent = checked ? 'Yes' : 'No';
         btn.title = isAdminRow
           ? 'Admins already have full access'
           : autoSite
             ? 'Head role already has Office ↔ Site'
+            : autoMdo
+              ? 'Process Controller already has Office ↔ MDO'
             : `Toggle "${label}" for ${emp.full_name}`;
-        if (isAdminRow || autoSite) {
+        if (isAdminRow || autoSite || autoMdo) {
           btn.disabled = true;
         } else {
           btn.addEventListener('click', () => togglePermission(emp, flag));
@@ -5823,7 +5965,23 @@ export async function mountTaskflowApp(opts = {}) {
 
   function fmtHrs(h) {
     if (h == null || h === '') return '—';
-    return `${h}h`;
+    const n = Number(h);
+    if (Number.isNaN(n)) return '—';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    const d = Math.floor(abs / 24);
+    const hrs = Math.round((abs - d * 24) * 10) / 10;
+    if (d >= 1) return hrs ? `${sign}${d}d ${hrs}h` : `${sign}${d}d`;
+    return `${sign}${abs}h`;
+  }
+
+  function tdHeat(h, good, warn) {
+    if (h == null || h === '') return '';
+    const n = Number(h);
+    if (Number.isNaN(n)) return '';
+    if (n <= good) return ' td-heat-good';
+    if (n <= warn) return ' td-heat-mid';
+    return ' td-heat-bad';
   }
 
   let _tdLastData = null;
@@ -5848,6 +6006,8 @@ export async function mountTaskflowApp(opts = {}) {
     };
     const total = sum('total');
     const done = sum('completed');
+    const onTime = sum('onTime');
+    const late = sum('late');
     const slowest = [...emps]
       .filter((e) => e.portfolio?.avgCycleHrs != null)
       .sort((a, b) => b.portfolio.avgCycleHrs - a.portfolio.avgCycleHrs)[0];
@@ -5855,12 +6015,12 @@ export async function mountTaskflowApp(opts = {}) {
       <div class="td-stat"><span>Tasks in range</span><strong>${total}</strong><small>${emps.length} people</small></div>
       <div class="td-stat"><span>Completed</span><strong>${done}</strong>
         <div class="td-bar"><i style="width:${tdPct(done, total)}%"></i></div>
-        <small>${tdPct(done, total)}% of range</small></div>
+        <small>${tdPct(done, total)}% closed</small></div>
       <div class="td-stat"><span>Still open</span><strong>${sum('pending') + sum('inProgress')}</strong><small>pending + in progress</small></div>
-      <div class="td-stat"><span>Planned hours</span><strong>${Math.round(sum('plannedHours'))}h</strong><small>+${Math.round(sum('extraHours'))}h / ${sum('extraDays')}d extra given</small></div>
+      <div class="td-stat"><span>On time</span><strong>${onTime}</strong><small>${late} late vs planned hours</small></div>
+      <div class="td-stat"><span>Planned hours</span><strong>${fmtHrs(sum('plannedHours'))}</strong><small>+${fmtHrs(sum('extraHours'))} / ${sum('extraDays')}d extra</small></div>
       <div class="td-stat"><span>Avg accept</span><strong>${fmtHrs(avgOf('avgAcceptHrs'))}</strong><small>assign → accept</small></div>
       <div class="td-stat"><span>Avg submit</span><strong>${fmtHrs(avgOf('avgSubmitHrs'))}</strong><small>accept → send for verify</small></div>
-      <div class="td-stat"><span>Avg verify</span><strong>${fmtHrs(avgOf('avgVerifyHrs'))}</strong><small>verifier turnaround</small></div>
       <div class="td-stat"><span>Longest cycle</span><strong>${fmtHrs(slowest?.portfolio?.avgCycleHrs)}</strong><small>${escapeHtml(slowest?.name || '—')}</small></div>`;
   }
 
@@ -5889,20 +6049,76 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  async function loadTimeDashboard() {
+  function filterTdEmps(allEmps) {
+    const personId = document.getElementById('tdPerson')?.value || '';
+    const dept = document.getElementById('tdDept')?.value || '';
+    const sort = document.getElementById('tdSort')?.value || 'name';
+    let emps = allEmps.filter((e) => {
+      if (personId && String(e.id) !== String(personId)) return false;
+      if (dept && String(e.department || e.portfolio?.department || '') !== dept) return false;
+      return true;
+    });
+    emps = [...emps].sort((a, b) => {
+      const pa = a.portfolio || {};
+      const pb = b.portfolio || {};
+      if (sort === 'cycle') return (pb.avgCycleHrs || 0) - (pa.avgCycleHrs || 0);
+      if (sort === 'open') return ((pb.pending || 0) + (pb.inProgress || 0)) - ((pa.pending || 0) + (pa.inProgress || 0));
+      if (sort === 'hours') return (pb.plannedHours || 0) - (pa.plannedHours || 0);
+      if (sort === 'late') return (pb.late || 0) - (pa.late || 0);
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+    return emps;
+  }
+
+  function renderTdPeopleSheet(emps) {
+    if (!emps.length) return '';
+    const rows = emps.map((e) => {
+      const pf = e.portfolio || {};
+      const open = (pf.pending || 0) + (pf.inProgress || 0);
+      return `<tr>
+        <td class="td-sticky">${escapeHtml(e.name)}</td>
+        <td>${escapeHtml(e.department || pf.department || '—')}</td>
+        <td>${pf.total || 0}</td>
+        <td>${pf.completed || 0}</td>
+        <td>${open}</td>
+        <td>${pf.onTime || 0}</td>
+        <td class="${(pf.late || 0) ? 'td-heat-bad' : ''}">${pf.late || 0}</td>
+        <td>${fmtHrs(pf.plannedHours)}</td>
+        <td>${Number(pf.extraHours || 0) || Number(pf.extraDays || 0) ? `${fmtHrs(pf.extraHours)} / ${pf.extraDays || 0}d` : '—'}</td>
+        <td class="${tdHeat(pf.avgAcceptHrs, 4, 24)}">${fmtHrs(pf.avgAcceptHrs)}</td>
+        <td class="${tdHeat(pf.avgSubmitHrs, 24, 72)}">${fmtHrs(pf.avgSubmitHrs)}</td>
+        <td class="${tdHeat(pf.avgVerifyHrs, 8, 24)}">${fmtHrs(pf.avgVerifyHrs)}</td>
+        <td class="${tdHeat(pf.avgCycleHrs, 24, 72)}">${fmtHrs(pf.avgCycleHrs)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="td-sheet-wrap"><div class="td-sheet-scroll">
+      <table class="td-sheet">
+        <thead><tr>
+          <th class="td-sticky">Employee</th><th>Dept</th><th>Tasks</th><th>Done</th><th>Open</th>
+          <th>On time</th><th>Late</th><th>Planned</th><th>Extra</th>
+          <th>Avg accept</th><th>Avg submit</th><th>Avg verify</th><th>Avg cycle</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div></div>`;
+  }
+
+  async function loadTimeDashboard(opts = {}) {
     const body = document.getElementById('tdBody');
     const rangeEl = document.getElementById('tdRange');
     if (!body) return;
     const range = rangeEl?.value || 'month';
-    const personId = document.getElementById('tdPerson')?.value || '';
-    body.innerHTML = '<div class="empty-state">Loading time data…</div>';
     try {
-      const data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+      let data = opts.fromCache ? _tdLastData : null;
+      if (!data) {
+        if (!opts.quiet) body.innerHTML = '<div class="empty-state">Loading time data…</div>';
+        data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+      }
       _tdLastData = data;
       const allEmps = data.report || [];
-      const emps = personId ? allEmps.filter((e) => String(e.id) === String(personId)) : allEmps;
-      const vers = data.verifiers || [];
-      fillTdPeople(allEmps, personId);
+      fillTdFilters(allEmps);
+      const emps = filterTdEmps(allEmps);
+      const vers = personFilteredVerifiers(data.verifiers || []);
       renderTimeDashboardSummary(emps);
       if (!emps.length && !vers.length) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
@@ -5910,26 +6126,34 @@ export async function mountTaskflowApp(opts = {}) {
       }
       const empHtml = `<div class="td-grid">${emps.map((emp) => {
         const pf = emp.portfolio || {};
+        const open = (pf.pending || 0) + (pf.inProgress || 0);
         const projBlocks = (emp.projects || []).map((p) => {
-          const rows = (p.tasks || []).map((t) => `
+          const rows = (p.tasks || []).map((t) => {
+            const planned = Number(t.hours_to_complete || 0);
+            const cycle = t.total_cycle_hrs;
+            const late = cycle != null && planned > 0 && cycle > planned;
+            return `
             <tr>
-              <td>${escapeHtml((t.description || '').slice(0, 70))}</td>
+              <td class="td-sticky" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || '').slice(0, 70))}</td>
+              <td>${escapeHtml(t.status || '—')}</td>
+              <td>${planned ? fmtHrs(planned) : '—'}</td>
               <td>${escapeHtml(fmtDate(t.assigned_at || t.created_at))}</td>
               <td>${escapeHtml(t.accepted_at ? fmtDate(t.accepted_at) : '—')}</td>
-              <td>${fmtHrs(t.time_to_accept_hrs)}</td>
-              <td>${fmtHrs(t.time_to_submit_hrs)}</td>
-              <td>${fmtHrs(t.time_to_start_verify_hrs)}</td>
-              <td>${fmtHrs(t.time_to_verify_hrs)}</td>
-              <td>${fmtHrs(t.total_cycle_hrs)}</td>
+              <td class="${tdHeat(t.time_to_accept_hrs, 4, 24)}">${fmtHrs(t.time_to_accept_hrs)}</td>
+              <td class="${tdHeat(t.time_to_submit_hrs, planned || 24, (planned || 24) * 1.5)}">${fmtHrs(t.time_to_submit_hrs)}</td>
+              <td class="${tdHeat(t.time_to_start_verify_hrs, 4, 24)}">${fmtHrs(t.time_to_start_verify_hrs)}</td>
+              <td class="${tdHeat(t.time_to_verify_hrs, 8, 24)}">${fmtHrs(t.time_to_verify_hrs)}</td>
+              <td class="${late ? 'td-heat-bad' : tdHeat(cycle, planned || 24, (planned || 24) * 1.25)}">${fmtHrs(cycle)}</td>
               <td>${Number(t.extra_hours || 0) || Number(t.extra_days || 0)
                 ? `${t.extra_hours || 0}h / ${t.extra_days || 0}d`
                 : '—'}</td>
-            </tr>`).join('');
+            </tr>`;
+          }).join('');
           return `<div class="td-project">
             <h4>${escapeHtml(p.name)} <span class="td-muted">${p.summary?.total || 0} tasks · avg cycle ${fmtHrs(p.summary?.avgCycleHrs)}</span></h4>
-            <div class="table-scroll"><table class="data-table td-table">
+            <div class="td-sheet-scroll"><table class="td-sheet td-table">
               <thead><tr>
-                <th>Task</th><th>Assigned</th><th>Accepted</th>
+                <th class="td-sticky">Task</th><th>Status</th><th>Planned</th><th>Assigned</th><th>Accepted</th>
                 <th>Accept</th><th>Submit</th><th>Start verify</th><th>Verified</th><th>Cycle</th><th>Extra</th>
               </tr></thead>
               <tbody>${rows}</tbody>
@@ -5938,14 +6162,17 @@ export async function mountTaskflowApp(opts = {}) {
         }).join('');
         return `<article class="td-card">
           <header class="td-card-head">
-            <h3>${escapeHtml(emp.name)}</h3>
-            <span class="td-muted">${pf.total || 0} tasks in range</span>
+            <div>
+              <h3>${escapeHtml(emp.name)}</h3>
+              <span class="td-muted">${escapeHtml(emp.department || pf.department || '')}${emp.department || pf.department ? ' · ' : ''}${pf.total || 0} tasks</span>
+            </div>
+            <span class="td-pill ${open ? 'td-pill-open' : 'td-pill-done'}">${open ? `${open} open` : 'clear'}</span>
           </header>
           <div class="td-kpis">
-            <div class="td-kpi"><span>Planned</span><strong>${pf.plannedHours || 0}h</strong></div>
-            <div class="td-kpi"><span>Extra</span><strong>${pf.extraHours || 0}h / ${pf.extraDays || 0}d</strong></div>
+            <div class="td-kpi"><span>Planned</span><strong>${fmtHrs(pf.plannedHours)}</strong></div>
+            <div class="td-kpi"><span>Extra</span><strong>${fmtHrs(pf.extraHours)} / ${pf.extraDays || 0}d</strong></div>
             <div class="td-kpi"><span>Done</span><strong>${pf.completed || 0}</strong></div>
-            <div class="td-kpi"><span>Open</span><strong>${(pf.pending || 0) + (pf.inProgress || 0)}</strong></div>
+            <div class="td-kpi"><span>On time / late</span><strong>${pf.onTime || 0} / ${pf.late || 0}</strong></div>
             <div class="td-kpi"><span>Avg accept</span><strong>${fmtHrs(pf.avgAcceptHrs)}</strong></div>
             <div class="td-kpi"><span>Avg submit</span><strong>${fmtHrs(pf.avgSubmitHrs)}</strong></div>
             <div class="td-kpi"><span>Avg verify</span><strong>${fmtHrs(pf.avgVerifyHrs)}</strong></div>
@@ -5957,35 +6184,61 @@ export async function mountTaskflowApp(opts = {}) {
 
       const verHtml = vers.length
         ? `<div class="td-emp"><h3>Verification time by person</h3>
-            <div class="table-scroll"><table class="data-table td-table">
-              <thead><tr><th>Verifier</th><th>Tasks</th><th>Avg verify hrs</th><th>By project</th></tr></thead>
+            <div class="td-sheet-scroll"><table class="td-sheet td-table">
+              <thead><tr><th class="td-sticky">Verifier</th><th>Tasks</th><th>Avg verify</th><th>By project</th></tr></thead>
               <tbody>${vers.map((v) => `<tr>
-                <td>${escapeHtml(v.name)}</td>
+                <td class="td-sticky">${escapeHtml(v.name)}</td>
                 <td>${v.total}</td>
-                <td>${fmtHrs(v.avgVerifyHrs)}</td>
+                <td class="${tdHeat(v.avgVerifyHrs, 8, 24)}">${fmtHrs(v.avgVerifyHrs)}</td>
                 <td>${(v.projects || []).map((p) => `${escapeHtml(p.name)} (${p.count}, avg ${fmtHrs(p.avgVerifyHrs)})`).join('<br>')}</td>
               </tr>`).join('')}</tbody>
             </table></div></div>`
         : '';
 
-      body.innerHTML = `<p class="td-muted">${escapeHtml(data.from?.slice(0,10) || '')} → ${escapeHtml(data.to?.slice(0,10) || '')} · employee portfolios</p>${empHtml}${verHtml}`;
+      body.innerHTML = `<div class="td-range-note">${escapeHtml(data.from?.slice(0,10) || '')} – ${escapeHtml(data.to?.slice(0,10) || '')} · ${emps.length} people</div>
+        <div class="td-section-title">Team overview</div>
+        ${renderTdPeopleSheet(emps)}
+        <div class="td-section-title">By person</div>
+        ${empHtml}${verHtml}`;
     } catch (err) {
       body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
   }
 
-  function fillTdPeople(emps, selected) {
-    const sel = document.getElementById('tdPerson');
-    if (!sel) return;
-    const opts = ['<option value="">All employees</option>']
-      .concat(emps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`));
-    sel.innerHTML = opts.join('');
-    sel.value = selected || '';
+  function personFilteredVerifiers(vers) {
+    const personId = document.getElementById('tdPerson')?.value || '';
+    if (!personId) return vers;
+    return vers.filter((v) => String(v.id) === String(personId));
+  }
+
+  function fillTdFilters(emps) {
+    const personSel = document.getElementById('tdPerson');
+    const deptSel = document.getElementById('tdDept');
+    const personId = personSel?.value || '';
+    const dept = deptSel?.value || '';
+    if (personSel) {
+      personSel.innerHTML = ['<option value="">All employees</option>']
+        .concat(emps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`)).join('');
+      personSel.value = personId;
+    }
+    if (deptSel && !deptSel.dataset.filled) {
+      const depts = [...new Set(emps.map((e) => e.department || e.portfolio?.department).filter(Boolean))].sort();
+      deptSel.innerHTML = ['<option value="">All departments</option>']
+        .concat(depts.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)).join('');
+      deptSel.dataset.filled = '1';
+      deptSel.value = dept;
+    }
   }
 
   document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
-  document.getElementById('tdRange')?.addEventListener('change', () => loadTimeDashboard());
-  document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard());
+  document.getElementById('tdRange')?.addEventListener('change', () => {
+    const deptSel = document.getElementById('tdDept');
+    if (deptSel) delete deptSel.dataset.filled;
+    loadTimeDashboard();
+  });
+  document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
+  document.getElementById('tdDept')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
+  document.getElementById('tdSort')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
   document.getElementById('tdCsvBtn')?.addEventListener('click', () => downloadTimeCsv(_tdLastData));
 
   // ─── FMS step tracker (Planned vs Actual per workflow step) ─────────────────
@@ -6071,7 +6324,7 @@ export async function mountTaskflowApp(opts = {}) {
         return;
       }
       const metaRow = (key, cls) =>
-        `<th class="fms-meta-label">${key}</th>` +
+        `<th class="fms-meta-label fms-sticky">${key}</th>` +
         '<th></th><th></th><th></th><th></th><th></th>' +
         steps.map((s, i) =>
           `<th class="fms-meta-cell${i % 2 ? ' fms-meta-cell--alt' : ''} ${cls}" colspan="4">${escapeHtml(s[key.toLowerCase()] || s.label)}</th>`
@@ -6090,7 +6343,7 @@ export async function mountTaskflowApp(opts = {}) {
       </tr>`).join('');
 
       body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
-        <table class="data-table fms-table">
+        <table class="fms-table">
           <thead>
             <tr class="fms-meta-row">${metaRow('What', '')}</tr>
             <tr class="fms-meta-row">${metaRow('Who', '')}</tr>
@@ -6161,6 +6414,16 @@ export async function mountTaskflowApp(opts = {}) {
         list = [];
       }
     };
+    const attachKv = (label, value) => {
+      if (list.length) {
+        list[list.length - 1] = list[list.length - 1].replace(
+          /<\/li>$/,
+          `<span class="bot-kv"><em>${escapeHtml(label)}</em> ${escapeHtml(value)}</span></li>`
+        );
+        return true;
+      }
+      return false;
+    };
     raw.split('\n').forEach((lineRaw) => {
       const line = lineRaw.replace(/\s+$/, '');
       const trimmed = line.trim();
@@ -6168,10 +6431,16 @@ export async function mountTaskflowApp(opts = {}) {
         flushList();
         return;
       }
-      const isHeading = /^[A-Z0-9 \/()&·—-]{4,}$/.test(trimmed) && !/^[•-]/.test(trimmed);
+      const headingText = trimmed
+        .replace(/^#{1,3}\s+/, '')
+        .replace(/^\*\*(.+)\*\*$/, '$1');
+      const isHeading =
+        (!/^[•*-]/.test(trimmed) && /^[A-Z0-9 \/()&·—-]{3,}$/.test(headingText)) ||
+        /^#{1,3}\s+/.test(trimmed) ||
+        /^\*\*.+\*\*$/.test(trimmed);
       if (isHeading) {
         flushList();
-        out.push(`<div class="bot-heading">${escapeHtml(trimmed)}</div>`);
+        out.push(`<div class="bot-heading">${escapeHtml(headingText)}</div>`);
         return;
       }
       if (/^[•*-]\s+/.test(trimmed)) {
@@ -6184,12 +6453,12 @@ export async function mountTaskflowApp(opts = {}) {
         list.push(`<li>${inner}</li>`);
         return;
       }
-      const kv = /^([A-Za-z][A-Za-z \/]{2,24}):\s*(.+)$/.exec(trimmed);
-      if (kv && list.length) {
-        list[list.length - 1] = list[list.length - 1].replace(
-          /<\/li>$/,
-          `<span class="bot-kv"><em>${escapeHtml(kv[1])}</em> ${escapeHtml(kv[2])}</span></li>`
-        );
+      const kv = /^([A-Za-z][A-Za-z0-9 \/]{1,28}):\s*(.+)$/.exec(trimmed);
+      if (kv) {
+        if (!attachKv(kv[1], kv[2])) {
+          flushList();
+          out.push(`<p class="bot-line bot-kv-line"><em>${escapeHtml(kv[1])}</em> ${escapeHtml(kv[2])}</p>`);
+        }
         return;
       }
       flushList();
@@ -6244,10 +6513,10 @@ export async function mountTaskflowApp(opts = {}) {
             if (row.answer) appendBotBubble('bot', row.answer);
           });
         } else {
-          appendBotBubble('bot', 'Hello. I am DIP Bot. Ask overdue tasks, a person\'s June/July attendance, DPR, or company summary — I answer from live TaskFlow data.');
+          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets.');
         }
       } catch (_) {
-        appendBotBubble('bot', 'Hello. I am DIP Bot. Ask overdue tasks, attendance, DPR, or company summary.');
+        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets.');
       }
     }
     try {

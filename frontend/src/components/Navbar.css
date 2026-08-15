@@ -322,4 +322,5 @@
           
         @media (min-width: 901px) {
           .navbar-ham { display: flex !important; }
+          .app-navbar.client-navbar .navbar-ham { display: none !important; }
         }

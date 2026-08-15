@@ -318,7 +318,7 @@
   height: 100vh;
   height: 100dvh;
   z-index: 9999;
-  background: #ffffff00;
+  background: #fffdfb;
   transform: translateX(-105%);
   transition: transform .24s ease;
   display: flex;
@@ -363,7 +363,7 @@
   min-height: 0;
   overflow-y: auto;
   background: var(--bg);
-  padding: 14px 12px;
+  padding: 70px 12px 14px;
 }
 
 .cp-drawer-footer {
@@ -1277,6 +1277,11 @@
 @media (min-width: 901px) {
   .cp-main {
     margin-left: 280px;
+  }
+
+  .cp-mobile-drawer,
+  .cp-menu-backdrop {
+    display: none !important;
   }
 }
 
