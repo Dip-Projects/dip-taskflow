@@ -302,10 +302,20 @@ function formatTaskBlock(t) {
   );
 }
 
-function formatPersonWhy(tasks, people, intents = {}) {
-  const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
-  const rows = tasks || [];
-  if (!rows.length) return `TASKS FOR ${names}\n  (none on record)`;
+/** One overdue task on two short lines — no repeated "Why" sentence. */
+function formatOverdueBlock(t, { showAssignee = false } = {}) {
+  const days = t.target_date
+    ? Math.max(0, Math.floor((Date.now() - new Date(t.target_date).getTime()) / 86400000))
+    : 0;
+  const late = days > 0 ? `${days} day${days === 1 ? '' : 's'} late` : 'due today';
+  const who = showAssignee && t.assigned_to_user?.full_name ? ` | ${t.assigned_to_user.full_name}` : '';
+  return (
+    `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
+    `    Due: ${fmtDate(t.target_date)} (${late}) | ${t.status || 'Open'} | ${t.project?.name || 'No project'}${who}`
+  );
+}
+
+function groupPersonTasks(rows) {
   const now = new Date();
   const groups = {
     overdue: [],
@@ -313,6 +323,7 @@ function formatPersonWhy(tasks, people, intents = {}) {
     correction: [],
     notStarted: [],
     inProgress: [],
+    rejected: [],
     done: [],
   };
   for (const t of rows) {
@@ -320,19 +331,35 @@ function formatPersonWhy(tasks, people, intents = {}) {
     const st = String(t.status || '');
     const due = t.target_date ? new Date(t.target_date) : null;
     if (vs === 'Verified' || st === 'Completed') groups.done.push(t);
+    else if (st === 'Rejected') groups.rejected.push(t);
     else if (vs === 'Pending Verification') groups.waiting.push(t);
     else if (vs === 'Verification Rejected' || vs === 'Updation Required') groups.correction.push(t);
     else if (due && due < now) groups.overdue.push(t);
     else if (st === 'Pending') groups.notStarted.push(t);
     else groups.inProgress.push(t);
   }
+  return groups;
+}
+
+function formatPersonOverdue(tasks, people) {
+  const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
+  const g = groupPersonTasks(tasks || []);
+  if (!g.overdue.length) return `OVERDUE — ${names}\n  No overdue tasks.`;
+  return (
+    `OVERDUE — ${names} (${g.overdue.length})\n` +
+    g.overdue.map(formatOverdueBlock).join('\n')
+  );
+}
+
+function formatPersonWhy(tasks, people, intents = {}) {
+  const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
+  const rows = tasks || [];
+  if (!rows.length) return `TASKS — ${names}\n  (none on record)`;
+  const groups = groupPersonTasks(rows);
   const section = (title, list) =>
     list.length ? `${title} (${list.length})\n${list.map(formatTaskBlock).join('\n')}` : '';
   if (intents.overdue && !intents.verify && !intents.company) {
-    return [
-      `OVERDUE — ${names} (${groups.overdue.length})`,
-      groups.overdue.length ? groups.overdue.map(formatTaskBlock).join('\n') : '  (none)',
-    ].join('\n');
+    return formatPersonOverdue(rows, people);
   }
   if (intents.verify && !intents.overdue && !intents.company) {
     return [
@@ -340,9 +367,15 @@ function formatPersonWhy(tasks, people, intents = {}) {
       groups.waiting.length ? groups.waiting.map(formatTaskBlock).join('\n') : '  (none)',
     ].join('\n');
   }
+  const openCount =
+    groups.overdue.length +
+    groups.waiting.length +
+    groups.correction.length +
+    groups.notStarted.length +
+    groups.inProgress.length;
   return [
     `TASKS — ${names}`,
-    `Open ${groups.overdue.length + groups.waiting.length + groups.correction.length + groups.notStarted.length + groups.inProgress.length} · Overdue ${groups.overdue.length} · Verify ${groups.waiting.length}`,
+    `Open ${openCount} · Overdue ${groups.overdue.length} · Verify ${groups.waiting.length}`,
     section('OVERDUE', groups.overdue),
     section('WAITING ON VERIFIER', groups.waiting),
     section('CORRECTION / UPDATION', groups.correction),
@@ -864,7 +897,12 @@ function formatAdminFacts(pack, people, intents) {
     if (intents.overdue) {
       bits.push(
         `DELEGATED OVERDUE (${c.overdue || 0})\n` +
-          (c.overdueTasks?.length ? c.overdueTasks.slice(0, 40).map(formatTaskBlock).join('\n') : '  (none)')
+          (c.overdueTasks?.length
+            ? c.overdueTasks
+                .slice(0, 40)
+                .map((t) => formatOverdueBlock(t, { showAssignee: true }))
+                .join('\n')
+            : '  (none)')
       );
     }
     if (intents.verify) {
@@ -952,7 +990,11 @@ async function answerQuestion({ question, user, isAdmin }) {
     wantsWpr ||
     wantsAttendance ||
     /\b(manpower|site report|labour|labor|site)\b/i.test(ql);
-  const wantsOverdue = /\b(overdue|late|delay)\b|time nikal|due ho gaya/i.test(ql);
+  // Typo-tolerant: overdue / overue / ovedue / overdu / over due, plus Hinglish.
+  const wantsOverdue =
+    /over\s*-?\s*d?ue|ove?rdu|overue|ovedue|\blate\b|\bdelay|\bpending se\b|time nikal|due ho gaya|due nikal/i.test(
+      ql
+    );
   const wantsVerify = /verif|verifier|check kar/i.test(ql);
   const wantsLeave = /\bleave\b|chutti|chhutti|chhuti|chhutiya/i.test(ql);
   const wantsRecurring = /recurr|rozana|rojana|daily task|weekly task|checkpoint/i.test(ql);
@@ -1042,6 +1084,12 @@ async function answerQuestion({ question, user, isAdmin }) {
       const rows = await attendanceForPeople(people);
       answer = formatClockAnswer(people, rows);
     }
+  } else if (isAdmin && people.length && wantsOverdue && !wantsMom && !wantsLeave) {
+    // "overdue of <name>" — answer only that person, never the company dump.
+    adminOnly = true;
+    skipPolish = true;
+    const personTasks = await tasksForPeople(people);
+    answer = formatPersonOverdue(personTasks, people);
   } else if (wantsOverdue && !wantsMom && !wantsLeave && !wantsSite && !wantsVerify) {
     skipPolish = true;
     if (isAdmin) {
@@ -1052,7 +1100,9 @@ async function answerQuestion({ question, user, isAdmin }) {
         `OVERDUE\n` +
         `Delegated: ${c.overdue}   Recurring: ${rec.length}\n\n` +
         `DELEGATED\n` +
-        (c.overdueTasks.length ? c.overdueTasks.map(formatTaskBlock).join('\n') : '  (none)') +
+        (c.overdueTasks.length
+          ? c.overdueTasks.map((t) => formatOverdueBlock(t, { showAssignee: true })).join('\n')
+          : '  (none)') +
         `\n\nRECURRING\n` +
         formatRecurringOverdue(rec);
     } else {
@@ -1061,7 +1111,7 @@ async function answerQuestion({ question, user, isAdmin }) {
       answer =
         `YOUR OVERDUE\n` +
         `Delegated overdue: ${s.overdue.length}   Recurring overdue: ${rec.length}\n\n` +
-        (s.overdue.length ? `DELEGATED\n` + s.overdue.map(formatTaskBlock).join('\n') : 'No delegated overdue.') +
+        (s.overdue.length ? `DELEGATED\n` + s.overdue.map(formatOverdueBlock).join('\n') : 'No delegated overdue.') +
         `\n\nRECURRING\n` +
         formatRecurringOverdue(rec);
     }

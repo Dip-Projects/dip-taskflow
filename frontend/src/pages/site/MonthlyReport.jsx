@@ -31,9 +31,9 @@ function FolderIco({ size = 44 }) {
 function ChartIco() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="12" width="4" height="8" rx="1" fill="#FBBF24"/>
-      <rect x="10" y="8" width="4" height="12" rx="1" fill="#34D399"/>
-      <rect x="17" y="4" width="4" height="16" rx="1" fill="#60A5FA"/>
+      <rect x="3" y="12" width="4" height="8" rx="1" fill="#F2C49A"/>
+      <rect x="10" y="8" width="4" height="12" rx="1" fill="#DC6900"/>
+      <rect x="17" y="4" width="4" height="16" rx="1" fill="#561501"/>
     </svg>
   );
 }
@@ -299,13 +299,15 @@ export default function MonthlyReport({ user }) {
                   onChange={(e) => takeFileList(e.target.files)}
                 />
               </div>
-              <div className="mr-progress-wrap">
-                <div className="mr-progress-row">
-                  <span>{uploading ? "Uploading..." : files.length ? "Ready" : "Uploading..."}</span>
-                  <span>{pct}%</span>
+              {(uploading || files.length > 0) && (
+                <div className="mr-progress-wrap">
+                  <div className="mr-progress-row">
+                    <span>{uploading ? "Uploading…" : "Folder ready"}</span>
+                    <span>{uploading ? `${pct}%` : `${files.length} files`}</span>
+                  </div>
+                  <div className="mr-bar"><i style={{ width: uploading ? `${pct}%` : "100%" }} /></div>
                 </div>
-                <div className="mr-bar"><i style={{ width: `${pct}%` }} /></div>
-              </div>
+              )}
             </div>
             {formErr && <p className="mr-err">{formErr}</p>}
             <div className="mr-footer">

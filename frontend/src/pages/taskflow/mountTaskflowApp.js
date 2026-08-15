@@ -805,7 +805,7 @@ export async function mountTaskflowApp(opts = {}) {
     els.navList.appendChild(wrap);
   }
 
-  function setNavGroupOpen(group, open, { accordion = true } = {}) {
+  function setNavGroupOpen(group, open, { accordion = false } = {}) {
     if (!group) return;
     if (open && accordion) {
       document.querySelectorAll('#appScreen .nav-group').forEach((g) => {

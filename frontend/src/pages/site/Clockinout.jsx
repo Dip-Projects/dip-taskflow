@@ -8,8 +8,6 @@ const SHIFT_END   = "19:00"; // HH:MM — on-time threshold for clock-out
 
 // ─── Extra CSS — append to your existing CSS string ──────────────────────────
 export const CLOCK_CSS = `
-@layer dip-site {
-.site-shell, .site-theme {
 /* ── Camera Modal ── */
 .cam-modal-bg{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;}
 .cam-modal{background:#1a1a1a;border-radius:20px;overflow:hidden;width:100%;max-width:480px;display:flex;flex-direction:column;gap:0;}
@@ -110,8 +108,6 @@ export const CLOCK_CSS = `
 .task-list-modal::-webkit-scrollbar-thumb {background: #444;border-radius: 4px;}
 .task-list-modal::-webkit-scrollbar-thumb:hover {background: #555;}
 
-} /* .site-shell / .site-theme nest */
-
 /* ── Light theme overrides ── */
 [data-theme="light"] .cam-modal,
 [data-theme="light"] .task-panel {
@@ -195,7 +191,6 @@ export const CLOCK_CSS = `
 /* in CLOCK_CSS */
 .select-all-label{color:#aaa;}  
 [data-theme="light"] .select-all-label{color:#374151;}
-} /* @layer dip-site */
 `;
 
 async function uploadClockPhoto(supabaseClient, base64, userName, type) {

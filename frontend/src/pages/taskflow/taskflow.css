@@ -52,7 +52,10 @@
   --topbar-h:  58px;
 }
 
-*  { box-sizing: border-box; margin: 0; padding: 0; }
+/* Office only. This stylesheet also loads on /site and /mdo (shared chunk), so
+   nothing here may target bare *, body or element selectors. */
+.tf-shell,
+.tf-shell *  { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* Global safety net: the [hidden] attribute must always win over any
    component's own `display` rule, regardless of class. Without this,
@@ -61,17 +64,23 @@
    class rule beats the browser's built-in [hidden] rule at equal
    specificity. This was the cause of the "+ Add recurring task" button
    staying visible to employees even when JS correctly set hidden = true. */
-[hidden] { display: none !important; }
+.tf-shell [hidden] { display: none !important; }
 
-body {
+.tf-shell {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
 }
-h1,h2,h3,h4 { font-family: var(--font-display); line-height: 1.25; }
-input,select,textarea,button { font-family: var(--font-body); font-size: 0.875rem; }
+.tf-shell h1,
+.tf-shell h2,
+.tf-shell h3,
+.tf-shell h4 { font-family: var(--font-display); line-height: 1.25; }
+.tf-shell input,
+.tf-shell select,
+.tf-shell textarea,
+.tf-shell button { font-family: var(--font-body); font-size: 0.875rem; }
 .screen { min-height: 100vh; }
 .screen[hidden] { display: none; }
 
@@ -2945,11 +2954,22 @@ body.sidebar-open { overflow: hidden; }
 #appScreen .nav-group-kids[hidden] { display: none !important; }
 #appScreen .nav-group-kids .nav-btn { font-size: 0.8rem; }
 
-#appScreen .mr-page { max-width: 920px; padding: 4px 2px 24px; }
-#appScreen .mr-head h2 { color: var(--ink); font-family: var(--font-display); }
+#appScreen .mr-page { max-width: 920px; padding: 0 0 24px; }
+#appScreen .mr-head { margin-bottom: 16px; }
+#appScreen .mr-head > div:first-child { display: none; }
+#appScreen .mr-add-btn {
+  background: linear-gradient(135deg, #DC6900, #561501);
+  color: #fff;
+  box-shadow: 0 4px 12px -4px rgba(220, 105, 0, .45);
+}
 #appScreen .mr-card,
 #appScreen .mr-empty,
-#appScreen .mr-modal { background: #fff; }
+#appScreen .mr-modal { background: #fff; border-color: #E2E5F0; }
+#appScreen .mr-modal-hdr {
+  background: linear-gradient(135deg, #561501 0%, #B85A00 60%, #DC6900 100%);
+}
+#appScreen .mr-drop { border-color: #F2C49A; background: #FDF0E4; }
+#appScreen .mr-btn-go { background: linear-gradient(135deg, #DC6900, #561501); }
 
 .tf-busy-overlay {
   position: fixed; inset: 0; z-index: 4000;

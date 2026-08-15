@@ -1176,6 +1176,10 @@ export default function TaskflowDom() {
         </section>
 
         <section id="view-monthly-report" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">Monthly reports</h2>
+            <p className="view-sub">Submitted monthly packs. Add a folder when a new month is ready.</p>
+          </div>
           <OfficeMonthlyReport />
         </section>
 

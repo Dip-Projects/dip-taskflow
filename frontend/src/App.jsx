@@ -4,10 +4,32 @@ import { AuthProvider, useAuth } from './auth/AuthContext';
 import { postLoginPath } from './lib/api';
 import Login from './pages/Login';
 
-const TaskflowApp = lazy(() => import('./pages/TaskflowApp'));
-const SiteApp = lazy(() => import('./pages/SiteApp'));
-const MdoApp = lazy(() => import('./pages/MdoApp'));
-const ClientApp = lazy(() => import('./pages/ClientApp'));
+// After a deploy the old index.html still points at chunk names that no longer
+// exist, so the first navigation 404s and the screen stays blank. Reload once
+// (guarded by sessionStorage) to pick up the new build.
+function lazyChunk(loader) {
+  const key = 'tf_chunk_reloaded';
+  return lazy(() =>
+    loader()
+      .then((mod) => {
+        sessionStorage.removeItem(key);
+        return mod;
+      })
+      .catch((err) => {
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, '1');
+          window.location.reload();
+          return new Promise(() => {});
+        }
+        throw err;
+      })
+  );
+}
+
+const TaskflowApp = lazyChunk(() => import('./pages/TaskflowApp'));
+const SiteApp = lazyChunk(() => import('./pages/SiteApp'));
+const MdoApp = lazyChunk(() => import('./pages/MdoApp'));
+const ClientApp = lazyChunk(() => import('./pages/ClientApp'));
 
 function RequireAuth({ children }) {
   const { isAuthenticated } = useAuth();
