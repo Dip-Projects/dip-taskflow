@@ -993,7 +993,7 @@ function renderAllTasksTable(tbody, tasks) {
     } else if (task.verification_status === 'Verified') {
       statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
     } else if (task.verification_status === 'Verification Rejected') {
-      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Correction</span>`;
     }
     tdStatus.innerHTML = statusHtml;
 
@@ -1174,7 +1174,7 @@ function renderOverdueTasksTable(tbody, tasks) {
     if (task.verification_status === 'Pending Verification') {
       statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
     } else if (task.verification_status === 'Verification Rejected') {
-      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Correction</span>`;
     }
     tdStatus.innerHTML = statusHtml;
 
@@ -1539,7 +1539,7 @@ function renderMyTasksTable(tbody, tasks, recurringTasks = []) {
     } else if (task.verification_status === 'Verified') {
       statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
     } else if (task.verification_status === 'Verification Rejected') {
-      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+      statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Correction</span>`;
     }
     tdStatus.innerHTML = statusHtml;
 

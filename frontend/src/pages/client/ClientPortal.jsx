@@ -643,14 +643,45 @@ const MONTH_NAMES = [
   "December",
 ];
 
+function ymdKey(iso) {
+  if (!iso) return "";
+  const s = String(iso);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function todayYmd() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function shiftYmd(key, days) {
+  const [y, m, d] = String(key).split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const dt = new Date(y, m - 1, d + days);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function parseYmd(key) {
+  const [y, m, d] = String(key).split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function daysAgo(key, today) {
+  return Math.round((parseYmd(today) - parseYmd(key)) / 86400000);
+}
+
 function buildDateTree(dates) {
   const years = {};
+  const today = todayYmd();
   dates.filter(Boolean).forEach((iso) => {
-    const d = new Date(iso);
-    if (isNaN(d)) return;
-    const y = d.getFullYear(),
-      m = d.getMonth();
-    const dayKey = `${y}-${String(m + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const dayKey = ymdKey(iso);
+    if (!dayKey || dayKey > today) return;
+    const [yStr, mStr] = dayKey.split("-");
+    const y = Number(yStr);
+    const m = Number(mStr) - 1;
     years[y] = years[y] || {};
     years[y][m] = years[y][m] || {};
     years[y][m][dayKey] = (years[y][m][dayKey] || 0) + 1;
@@ -678,7 +709,7 @@ function buildDateTree(dates) {
             .map(([dayKey, count]) => ({
               key: dayKey,
               count,
-              label: new Date(dayKey).toLocaleDateString("en-IN", {
+              label: parseYmd(dayKey).toLocaleDateString("en-IN", {
                 day: "2-digit",
                 month: "short",
               }),
@@ -1347,33 +1378,55 @@ function isOfficeFile(url) {
   const ext = clean.split(".").pop().toLowerCase();
   return ["ppt", "pptx", "doc", "docx", "xls", "xlsx"].includes(ext);
 }
+
+const MONTHLY_FILE_RE = /\.(pdf|png|jpe?g|webp|gif|bmp|svg|ppt|pptx|doc|docx|xls|xlsx)$/i;
+
+async function loadLatestMonthlyFiles(row) {
+  if (!row?.folder_path) return [];
+  try {
+    let current = row.folder_path;
+    let items = [];
+    for (let i = 0; i < 6; i += 1) {
+      const qs = new URLSearchParams({ path: current, bucket: "site-files" });
+      const data = await api(`/storage/list?${qs.toString()}`);
+      items = data.items || [];
+      const folders = items.filter((it) => it.isFolder);
+      const files = items.filter((it) => !it.isFolder);
+      if (!files.length && folders.length === 1) {
+        current = folders[0].path;
+        continue;
+      }
+      break;
+    }
+    const useful = items.filter(
+      (it) => !it.isFolder && it.publicUrl && MONTHLY_FILE_RE.test(it.name || ""),
+    );
+    return useful.slice(0, 24).map((it) => ({
+      name: it.name,
+      url: it.publicUrl,
+      date: it.updatedAt || row.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
 // ─── Reports & Photos panel ────────────────────────────────────────────────
 function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
   const [dprs, setDprs] = useState([]);
   const [wprs, setWprs] = useState([]);
+  const [monthlies, setMonthlies] = useState([]);
+  const [monthlyFiles, setMonthlyFiles] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [officeDrawings, setOfficeDrawings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [viewMode, setViewMode] = useState("recent"); // recent | day | month | year
-  const [typeFilter, setTypeFilter] = useState("all"); // all | dpr | wpr | photo
+  const [typeFilter, setTypeFilter] = useState("photo");
+  const [tabPicked, setTabPicked] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
-  const [filterOpen, setFilterOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
-  const IcoFilter = () => (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  );
   useEffect(() => {
     if (jumpDate) setViewMode("day");
   }, [jumpDate]);
@@ -1384,6 +1437,8 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
       return;
     }
     setLoading(true);
+    setLoadError("");
+    setTabPicked(false);
     try {
       const data = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
       const dprData = data.dprs || [];
@@ -1391,22 +1446,46 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
       const drawingData = data.drawings || [];
       setDprs(dprData);
       setWprs(wprData);
+      const monthlyRows = [...(data.monthlies || [])].sort(
+        (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
+      );
+      setMonthlies(monthlyRows);
+      setMonthlyFiles(await loadLatestMonthlyFiles(monthlyRows[0]));
 
-      const drawingPhotoRows = drawingData.flatMap((d) => {
-        const files = Array.isArray(d.file_urls) ? d.file_urls : [];
-        return files.map((f, i) => ({
-          id: `drw-${d.id}-${i}`,
-          public_url: f.url || f.publicUrl || null,
-          caption: f.name || "Drawing",
-          created_at: d.date || d.created_at,
-          source: "drawing",
-          image_type: "graphical",
-        }));
+      const drawingPhotoRows = drawingData
+        .slice()
+        .sort((a, b) => new Date(b.created_at || b.drawing_date || 0) - new Date(a.created_at || a.drawing_date || 0))
+        .flatMap((d) => {
+        let files = d.file_urls;
+        if (typeof files === "string") {
+          try { files = JSON.parse(files); } catch { files = [files]; }
+        }
+        if (!Array.isArray(files)) files = [];
+        return files.map((f, i) => {
+          const url = typeof f === "string" ? f : f?.url || f?.publicUrl || f?.public_url || null;
+          const name = typeof f === "string"
+            ? (f.split("/").pop()?.replace(/^\d+_/, "") || d.category || "Drawing")
+            : f?.name || d.category || "Drawing";
+          return {
+            id: `drw-${d.id}-${i}`,
+            public_url: url,
+            caption: [d.category, d.revision, name].filter(Boolean).join(" · "),
+            created_at: d.created_at || d.drawing_date || d.date,
+            source: "drawing",
+            image_type: "graphical",
+          };
+        });
       });
-      setPhotos([...(data.photos || []), ...drawingPhotoRows]);
-    } catch (_) {
+      setOfficeDrawings(drawingPhotoRows);
+      setPhotos((data.photos || []).filter((p) => p.source !== "drawing"));
+    } catch (err) {
+      console.error("client media:", err);
+      setLoadError(err?.message || "Could not load reports");
       setDprs([]);
       setWprs([]);
+      setMonthlies([]);
+      setMonthlyFiles([]);
+      setOfficeDrawings([]);
       setPhotos([]);
     }
     setLoading(false);
@@ -1420,7 +1499,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
 
   const unified = [
     ...dprs
-      .filter((r) => r.report_type !== "morning")
       .map((r) => ({
         type: "dpr",
         date: r.date || r.created_at,
@@ -1429,60 +1507,116 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         url: r.pdf_url,
         kind: "doc",
       })),
-...wprs.map((r) => ({
-  type: "wpr",
-  date: r.report_date || r.created_at,       // used for sorting/grouping by report period
-  displayDate: r.created_at || r.report_date, // used for showing actual time
-  title: `Weekly Report #${r.report_number || ""}`,
-  meta: r.engineer_name,
-  url: r.presentation_url,
-  kind: "doc",
-  isOffice: isOfficeFile(r.presentation_url),
-})),
-    ...photos.map((p) => {
-      const isGraphical = p.image_type === "graphical";
-      const isActualImage = !isGraphical || isImageFile(p.public_url);
-      return {
-        type: isGraphical ? "graphical" : "photo",
-        date: p.created_at,
-        displayDate: p.actual_created_at || p.created_at,
-        title:
-          p.caption ||
-          (isGraphical ? "Graphical Drawing" : "Site Photo"),
-        meta:
-          isGraphical
-            ? "Weekly Report"
-            : p.source === "dpr"
-              ? "Daily Report"
-              : "Weekly Report",
-        url: p.public_url,
-        kind: isActualImage ? "image" : "doc",
-        isOffice: isOfficeFile(p.public_url),
-      };
-    }),
+    ...wprs.map((r) => ({
+      type: "wpr",
+      date: r.created_at || r.report_date,
+      displayDate: r.created_at || r.report_date,
+      title: `Weekly Report #${r.report_number || ""}`,
+      meta: r.engineer_name,
+      url: r.presentation_url,
+      kind: "doc",
+      isOffice: isOfficeFile(r.presentation_url),
+    })),
+    ...monthlies.map((r) => ({
+      type: "mpr",
+      date: r.created_at,
+      displayDate: r.created_at,
+      title: `Monthly Report — ${MONTH_NAMES[(Number(r.month) || 1) - 1] || ""} ${r.year || ""}`.trim(),
+      meta: `${r.submitted_by_name || r.project_name || ""}${r.file_count ? ` · ${r.file_count} files` : ""}`,
+      url: MONTHLY_FILE_RE.test(r.folder_url || "") ? r.folder_url : null,
+      kind: "folder",
+      fileCount: r.file_count,
+    })),
+    ...monthlyFiles.map((f) => ({
+      type: "mpr",
+      date: f.date,
+      displayDate: f.date,
+      title: f.name,
+      meta: "Monthly Report",
+      url: f.url,
+      kind: isImageFile(f.url) ? "image" : "doc",
+      isOffice: isOfficeFile(f.url),
+      openOnly: true,
+    })),
+    ...officeDrawings.map((p) => ({
+      type: "graphical",
+      date: p.created_at,
+      displayDate: p.created_at,
+      title: p.caption || "Drawing",
+      meta: "Office Drawing",
+      url: p.public_url,
+      kind: isImageFile(p.public_url) ? "image" : "doc",
+      isOffice: isOfficeFile(p.public_url),
+    })),
+    ...photos.map((p) => ({
+      type: "photo",
+      date: p.created_at,
+      displayDate: p.actual_created_at || p.created_at,
+      title: p.caption || "Site Photo",
+      meta: p.source === "dpr" ? "Daily Report" : "Weekly Report",
+      url: p.public_url,
+      kind: isImageFile(p.public_url) ? "image" : "doc",
+      isOffice: isOfficeFile(p.public_url),
+    })),
   ].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-  const dateScoped = jumpDate
-    ? unified.filter((it) => it.date && it.date.slice(0, 10) === jumpDate)
-    : unified;
+  const ofType = (type) => unified.filter((it) => it.type === type);
 
-  const counts = {
-    all: dateScoped.length,
-    dpr: dateScoped.filter((it) => it.type === "dpr").length,
-    wpr: dateScoped.filter((it) => it.type === "wpr").length,
-    photo: dateScoped.filter((it) => it.type === "photo").length,
-    graphical: dateScoped.filter((it) => it.type === "graphical").length,
+  const forType = (type) => {
+    const rows = ofType(type);
+    if (jumpDate) {
+      return rows.filter((it) => ymdKey(it.date) === jumpDate);
+    }
+    const today = todayYmd();
+    const yesterday = shiftYmd(today, -1);
+    if (type === "photo") {
+      const todayRows = rows.filter((it) => ymdKey(it.date) === today);
+      if (todayRows.length) return todayRows;
+      const yestRows = rows.filter((it) => ymdKey(it.date) === yesterday);
+      if (yestRows.length) return yestRows;
+      const latest = rows.map((it) => ymdKey(it.date)).filter(Boolean).sort().pop();
+      return latest ? rows.filter((it) => ymdKey(it.date) === latest) : [];
+    }
+    if (type === "dpr") {
+      return rows.filter((it) => {
+        const k = ymdKey(it.date);
+        return k && daysAgo(k, today) >= 0 && daysAgo(k, today) < 7;
+      });
+    }
+    if (type === "wpr") {
+      const month = today.slice(0, 7);
+      return rows.filter((it) => (ymdKey(it.date) || "").slice(0, 7) === month);
+    }
+    return rows;
   };
 
-  const scoped = dateScoped
-    .filter((it) => typeFilter === "all" || it.type === typeFilter)
-    .filter((it) => {
-      if (viewMode !== "range") return true;
-      if (!it.date) return false;
-      const d = it.date.slice(0, 10);
-      if (rangeStart && d < rangeStart) return false;
-      if (rangeEnd && d > rangeEnd) return false;
-      return true;
-    });
+  const counts = {
+    dpr: forType("dpr").length,
+    wpr: forType("wpr").length,
+    mpr: forType("mpr").length,
+    photo: forType("photo").length,
+    graphical: forType("graphical").length,
+  };
+
+  useEffect(() => {
+    if (loading || tabPicked) return;
+    const order = ["photo", "dpr", "wpr", "mpr", "graphical"];
+    if (counts[typeFilter] > 0) {
+      setTabPicked(true);
+      return;
+    }
+    const next = order.find((key) => counts[key] > 0);
+    if (next) setTypeFilter(next);
+    setTabPicked(true);
+  }, [loading, tabPicked, typeFilter, counts.photo, counts.dpr, counts.wpr, counts.mpr, counts.graphical]);
+
+  const scoped = forType(typeFilter).filter((it) => {
+    if (viewMode !== "range") return true;
+    const d = ymdKey(it.date);
+    if (!d) return false;
+    if (rangeStart && d < rangeStart) return false;
+    if (rangeEnd && d > rangeEnd) return false;
+    return true;
+  });
   const grouped = groupItems(scoped, viewMode);
   const monthlySeries = buildMonthlySeries(unified);
   const monthItems = selectedMonth
@@ -1491,12 +1625,6 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
   const groupLabels = Object.keys(grouped);
 
   const TYPE_FILTERS = [
-    {
-      key: "all",
-      label: `All (${counts.all})`,
-      cls: "type-all",
-      icon: <IcoLayers />,
-    },
     {
       key: "photo",
       label: ` Site Photos (${counts.photo})`,
@@ -1517,7 +1645,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
     },
     {
       key: "mpr",
-      label: ` Monthly Reports (${counts.wpr})`,
+      label: ` Monthly Reports (${counts.mpr})`,
       cls: "type-mpr",
       icon: <IcoDocCalendar />,
     },
@@ -1530,7 +1658,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
   ];
 
   const activeTypeLabel =
-    TYPE_FILTERS.find((f) => f.key === typeFilter)?.label || "All";
+    TYPE_FILTERS.find((f) => f.key === typeFilter)?.label || "Site Photos";
   return (
     <div>
       {jumpDate && (
@@ -1548,67 +1676,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
       )}
 
       <div className="cp-filter-bar">
-        <button
-          type="button"
-          className={`cp-filter-toggle${filterOpen ? " open" : ""}`}
-          onClick={() => setFilterOpen((o) => !o)}
-        >
-          <IcoFilter />
-          <span className="cp-filter-toggle-text">
-            {activeTypeLabel}
-            {viewMode === "range" ? " · Date range" : ""}
-          </span>
-          <span className="cp-filter-toggle-chevron">
-            <IcoChevron open={filterOpen} />
-          </span>
-        </button>
-
-        <div className={`cp-filter-panel${filterOpen ? " open" : ""}`}>
-          {viewMode === "range" && (
-            <div className="cp-range-picker">
-              <div className="cp-range-field">
-                <label>From</label>
-                <div className="cp-date-wrap">
-                  <input
-                    type="date"
-                    value={rangeStart}
-                    max={rangeEnd || undefined}
-                    onChange={(e) => setRangeStart(e.target.value)}
-                  />
-                  {!rangeStart && (
-                    <span className="cp-date-placeholder">dd-mm-yyyy</span>
-                  )}
-                </div>
-              </div>
-              <span className="cp-range-sep">→</span>
-              <div className="cp-range-field">
-                <label>To</label>
-                <div className="cp-date-wrap">
-                  <input
-                    type="date"
-                    value={rangeEnd}
-                    min={rangeStart || undefined}
-                    onChange={(e) => setRangeEnd(e.target.value)}
-                  />
-                  {!rangeEnd && (
-                    <span className="cp-date-placeholder">dd-mm-yyyy</span>
-                  )}
-                </div>
-              </div>
-              {(rangeStart || rangeEnd) && (
-                <button
-                  className="cp-range-clear"
-                  onClick={() => {
-                    setRangeStart("");
-                    setRangeEnd("");
-                  }}
-                >
-                  <IcoX /> Clear
-                </button>
-              )}
-            </div>
-          )}
-
+        <div className="cp-filter-panel open">
           <div className="cp-typefilters">
             {TYPE_FILTERS.map((f) => (
               <button
@@ -1616,28 +1684,14 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                 className={`cp-chip${typeFilter === f.key ? " act " + f.cls : ""}`}
                 onClick={() => {
                   setTypeFilter(f.key);
+                  setTabPicked(true);
+                  if (jumpDate) onClearJump?.();
                   scrollToTop();
                 }}
               >
                 {f.icon} {f.label}
               </button>
             ))}
-            <button
-              className={`cp-chip${viewMode === "range" ? " act" : ""}`}
-              onClick={() => {
-                if (viewMode === "range") {
-                  setViewMode("recent");
-                  setRangeStart("");
-                  setRangeEnd("");
-                } else {
-                  setViewMode("range");
-                  if (jumpDate && onClearJump) onClearJump();
-                }
-                scrollToTop();
-              }}
-            >
-              <IcoDocCalendar /> Date range
-            </button>
             <button className="cp-refresh-btn" onClick={load}>
               <IcoRefresh /> Refresh
             </button>
@@ -1645,20 +1699,25 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
         </div>
       </div>
 
+      {loadError && (
+        <div className="cp-empty" style={{ marginBottom: 16 }}>
+          <div className="cp-empty-title">Could not load files</div>
+          <div className="cp-empty-sub">{loadError}. Log out, log in again, then refresh.</div>
+        </div>
+      )}
+
       {loading ? (
         <MediaSkeletonGrid count={8} />
       ) : !scoped.length ? (
         <div className="cp-empty">
           <IcoBox />
           <div className="cp-empty-title">
-            {viewMode === "range" && (rangeStart || rangeEnd)
-              ? "No results in this range"
-              : "Nothing here yet"}
+            {`No ${activeTypeLabel.replace(/\s*\(\d+\)\s*$/, "").trim()} for ${siteName}`}
           </div>
           <div className="cp-empty-sub">
-            {viewMode === "range" && (rangeStart || rangeEnd)
-              ? "Try widening the date range or clearing a filter."
-              : "Daily reports, weekly reports and site photos will appear here once submitted."}
+            {counts.graphical || counts.mpr || counts.dpr || counts.wpr || counts.photo
+              ? "This site has files in another tab above."
+              : "Nothing uploaded for this site yet."}
           </div>
         </div>
       ) : (
@@ -1670,7 +1729,25 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
             <div className="cp-media-grid">
               {grouped[label].map((it, i) => (
                 <div key={i} className={`cp-media-card type-${it.type}`}>
-                  {it.kind === "image" ? (
+                  {it.kind === "folder" ? (
+                    <div
+                      className="cp-media-photo"
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        background: "#f3e8ff",
+                        color: "#6d28d9",
+                      }}
+                    >
+                      <IcoDocCalendar w={32} h={32} />
+                      <span style={{ fontSize: 12, fontWeight: 700 }}>
+                        {it.fileCount ? `${it.fileCount} files` : "Monthly pack"}
+                      </span>
+                    </div>
+                  ) : it.kind === "image" ? (
                     it.url ? (
                       <img
                         className="cp-media-photo"
@@ -1692,7 +1769,27 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                       </div>
                     )
                   ) : it.url ? (
-                    it.isOffice ? (
+                    it.openOnly || it.type === "mpr" ? (
+                      <div
+                        className="cp-media-photo"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: "#ecfdf5",
+                          color: "#0f766e",
+                          cursor: "pointer",
+                        }}
+                        onClick={() =>
+                          window.open(resolveViewUrl(it.url, it.isOffice), "_blank", "noopener")
+                        }
+                      >
+                        <IcoDocCalendar w={32} h={32} />
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>Open</span>
+                      </div>
+                    ) : it.isOffice ? (
                       <div
                         className="cp-media-photo"
                         style={{
@@ -1766,9 +1863,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                   )}
                   <div className="cp-media-body">
                     <span className={`cp-media-badge ${it.type}`}>
-                      {it.type === "dpr" ? (
-                        <IcoDoc />
-                      ) : it.type === "wpr" ? (
+                      {it.type === "dpr" || it.type === "wpr" || it.type === "mpr" ? (
                         <IcoDoc />
                       ) : (
                         <IcoImg />
@@ -1777,15 +1872,17 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                         ? "Daily Report"
                         : it.type === "wpr"
                           ? "Weekly Report"
-                          : it.type === "graphical"
-                            ? "Graphical Drawing"
-                            : "Site Photo"}
+                          : it.type === "mpr"
+                            ? "Monthly Report"
+                            : it.type === "graphical"
+                              ? "Drawing"
+                              : "Site Photo"}
                     </span>
                     <div className="cp-media-title">{it.title}</div>
                     <div className="cp-media-meta">
                       <IcoClock /> {fmtDateTime(it.displayDate || it.date)}
                     </div>
-                    {it.kind === "doc" &&
+                    {(it.kind === "doc" || it.kind === "folder") &&
                       (it.url ? (
                         <div className="cp-media-actions">
                           <a
@@ -1796,6 +1893,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
                           >
                             <IcoEye /> View
                           </a>
+                          {it.type !== "mpr" && !it.openOnly && (
                          <button
   type="button"
   className="cp-media-link dl"
@@ -1803,6 +1901,7 @@ function ReportsAndPhotos({ siteName, jumpDate, onClearJump }) {
 >
   <IcoDl /> Download
 </button>
+                          )}
                         </div>
                       ) : (
                         <span

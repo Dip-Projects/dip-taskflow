@@ -174,6 +174,95 @@ const TASK_SELECT = `
   reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
 `;
 
+function parseCheckpointLabels(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => String(typeof x === 'string' ? x : x?.label || '').trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      return parseCheckpointLabels(JSON.parse(raw));
+    } catch {
+      return raw.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function normalizeCheckpointRows(rows) {
+  return (rows || []).map((r, i) => ({
+    id: r.id,
+    label: r.label || r.meta?.label || 'Checkpoint',
+    sort_order: r.sort_order ?? r.meta?.sort_order ?? i,
+    is_done: !!(r.is_done ?? r.completed ?? r.meta?.is_done),
+  }));
+}
+
+function isMissingRelation(err) {
+  const m = String(err?.message || err || '');
+  return /schema cache|could not find the table|does not exist|relation .* does not exist/i.test(m);
+}
+
+async function saveTaskCheckpoints(taskId, labels) {
+  const clean = (labels || []).map((l) => String(l || '').trim()).filter(Boolean);
+  if (!clean.length) return [];
+
+  const delPrimary = await supabase.from('task_checkpoints').delete().eq('task_id', taskId);
+  if (!delPrimary.error || !isMissingRelation(delPrimary.error)) {
+    const attempts = [
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i, is_done: false, completed: false })),
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i, is_done: false })),
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i })),
+      clean.map((label) => ({ task_id: taskId, label })),
+    ];
+    for (const rows of attempts) {
+      const { data, error } = await supabase
+        .from('task_checkpoints')
+        .insert(rows)
+        .select('id, label');
+      if (!error) return normalizeCheckpointRows(data);
+      if (isMissingRelation(error)) break;
+    }
+  }
+
+  const delFallback = await supabase.from('checkpoints').delete().eq('task_id', taskId);
+  if (!delFallback.error || !isMissingRelation(delFallback.error)) {
+    const fallback = clean.map((label, i) => ({
+      task_id: taskId,
+      label,
+      meta: { sort_order: i, is_done: false },
+    }));
+    const { data, error } = await supabase.from('checkpoints').insert(fallback).select('id, label, meta');
+    if (!error) return normalizeCheckpointRows(data);
+    if (!isMissingRelation(error)) throw error;
+  }
+
+  return [];
+}
+
+async function loadTaskCheckpoints(taskId) {
+  const primary = await supabase
+    .from('task_checkpoints')
+    .select('id, label, sort_order, is_done, completed, meta')
+    .eq('task_id', taskId)
+    .order('sort_order', { ascending: true });
+  if (!primary.error && (primary.data || []).length) return normalizeCheckpointRows(primary.data);
+  if (primary.error && !isMissingRelation(primary.error)) {
+    console.warn('Load task_checkpoints:', primary.error.message);
+  }
+  const fallback = await supabase.from('checkpoints').select('id, label, meta').eq('task_id', taskId);
+  if (!fallback.error && (fallback.data || []).length) return normalizeCheckpointRows(fallback.data);
+  return [];
+}
+
+async function upsertTypeCheckpointTemplate(taskTypeId, labels) {
+  if (!taskTypeId) return;
+  await supabase.from('task_type_checkpoint_templates').delete().eq('task_type_id', taskTypeId);
+  const rows = (labels || [])
+    .map((label, i) => ({ task_type_id: taskTypeId, label: String(label || '').trim(), sort_order: i }))
+    .filter((r) => r.label);
+  if (rows.length) await supabase.from('task_type_checkpoint_templates').insert(rows);
+}
+
 async function uploadFile(file, folder) {
   if (!file) return null;
   const safeName = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -266,6 +355,28 @@ if (!isMdoOffice && !project_id) {
     //   console.error('Create task error:', err.message);
       if (error) throw error;
 
+      let cpLabels = parseCheckpointLabels(req.body.checkpoints);
+      if (!cpLabels.length && task_type_id) {
+        const { data: tmpl } = await supabase
+          .from('task_type_checkpoint_templates')
+          .select('label')
+          .eq('task_type_id', task_type_id)
+          .order('sort_order', { ascending: true });
+        cpLabels = (tmpl || []).map((r) => r.label).filter(Boolean);
+      }
+      if (cpLabels.length) {
+        try {
+          data.checkpoints = await saveTaskCheckpoints(data.id, cpLabels);
+          await upsertTypeCheckpointTemplate(task_type_id, cpLabels).catch(() => {});
+        } catch (cpErr) {
+          console.warn('Task checkpoints skip:', cpErr.message);
+          data.checkpoints = [];
+          data.checkpoint_error = cpErr.message;
+        }
+      } else {
+        data.checkpoints = [];
+      }
+
       // Assignee WhatsApp (best-effort)
       const { data: assigneeUser } = await supabase
         .from('users')
@@ -345,6 +456,7 @@ router.get('/my', async (req, res) => {
       .from('tasks')
       .select(TASK_SELECT)
       .eq('assigned_to', req.user.id)
+      .neq('status', 'Rejected')
       .order('target_date', { ascending: true });
 
     if (req.query.status) query = query.eq('status', req.query.status);
@@ -575,6 +687,54 @@ router.patch('/:id/status', async (req, res) => {
   } catch (err) {
     console.error('Update status error:', err.message);
     res.status(500).json({ error: 'Could not update task' });
+  }
+});
+
+router.get('/:id/checkpoints', async (req, res) => {
+  try {
+    const rows = await loadTaskCheckpoints(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load checkpoints' });
+  }
+});
+
+router.post('/:id/checkpoints', requireAdmin, async (req, res) => {
+  try {
+    const labels = parseCheckpointLabels(req.body?.labels || req.body?.checkpoints);
+    const rows = await saveTaskCheckpoints(req.params.id, labels);
+    if (req.body?.task_type_id) {
+      await upsertTypeCheckpointTemplate(req.body.task_type_id, labels).catch(() => {});
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save checkpoints' });
+  }
+});
+
+router.post('/:id/checkpoints/submit', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+    const isOwn = existing.assigned_to === req.user.id;
+    if (!isOwn && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only update checkpoints on your own tasks' });
+    }
+    const all = await loadTaskCheckpoints(id);
+    const submitted = new Set((req.body?.checkpoint_ids || []).map(String));
+    const at = nowIso();
+    for (const cp of all) {
+      const done = submitted.has(String(cp.id));
+      await supabase
+        .from('task_checkpoints')
+        .update({ is_done: done, done_at: done ? at : null, done_by: done ? req.user.id : null })
+        .eq('id', cp.id);
+    }
+    const rows = await loadTaskCheckpoints(id);
+    res.json({ checkpoints: rows, all_done: rows.length > 0 && rows.every((c) => c.is_done) });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save checkpoints' });
   }
 });
 
@@ -932,27 +1092,6 @@ router.post('/:id/reschedule-request', async (req, res) => {
       .single();
 
     if (error) throw error;
-
-    // Notify Chirag Sir on every reschedule request
-    try {
-      const { data: chirag } = await supabase
-        .from('users')
-        .select('whatsapp_number')
-        .eq('username', 'chirag.s')
-        .maybeSingle();
-      if (chirag?.whatsapp_number) {
-        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
-          data.description || 'Task',
-          data.project?.name || '—',
-          req.user.full_name,
-          reason && reason.trim() ? reason.trim() : 'Reschedule requested',
-          data.target_date || '—',
-          requested_date,
-        ]);
-      }
-    } catch (waErr) {
-      console.warn('Reschedule WhatsApp skip:', waErr.message);
-    }
 
     res.status(201).json(data);
   } catch (err) {

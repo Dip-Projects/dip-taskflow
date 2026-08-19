@@ -53,6 +53,11 @@ export default function MonthlyReport({ user }) {
   const [uploading, setUploading] = useState(false);
   const [pct, setPct] = useState(0);
   const [formErr, setFormErr] = useState("");
+  const [viewer, setViewer] = useState(null);
+  const [viewerItems, setViewerItems] = useState([]);
+  const [viewerPath, setViewerPath] = useState("");
+  const [viewerLoading, setViewerLoading] = useState(false);
+  const [viewerErr, setViewerErr] = useState("");
   const inputRef = useRef(null);
 
   const years = useMemo(() => {
@@ -212,15 +217,60 @@ export default function MonthlyReport({ user }) {
     setUploading(false);
   }
 
-  const folderUrl = (r) => {
-    if (!r.folder_path) return r.folder_url;
-    const base = import.meta.env.VITE_SUPABASE_URL || "";
-    if (!base) return r.folder_url;
-    return `${base}/storage/v1/object/public/${SITE_FILES_BUCKET}/${r.folder_path}`;
-  };
+  async function loadFolder(path, { skipNest = false } = {}) {
+    setViewerLoading(true);
+    setViewerErr("");
+    try {
+      let current = path;
+      let items = [];
+      for (let i = 0; i < 8; i += 1) {
+        const q = new URLSearchParams({ path: current, bucket: SITE_FILES_BUCKET });
+        const data = await api(`/storage/list?${q.toString()}`);
+        items = data.items || [];
+        current = data.path || current;
+        const folders = items.filter((it) => it.isFolder);
+        const files = items.filter((it) => !it.isFolder);
+        if (!skipNest && files.length === 0 && folders.length === 1) {
+          current = folders[0].path;
+          continue;
+        }
+        break;
+      }
+      setViewerPath(current);
+      setViewerItems(items);
+    } catch (e) {
+      setViewerErr(e.message || "Could not open folder");
+      setViewerItems([]);
+    }
+    setViewerLoading(false);
+  }
+
+  function openReport(r) {
+    if (!r.folder_path) {
+      if (r.folder_url) window.open(r.folder_url, "_blank", "noopener");
+      return;
+    }
+    setViewer(r);
+    setViewerPath(r.folder_path);
+    setViewerItems([]);
+    loadFolder(r.folder_path);
+  }
+
+  function viewerUp() {
+    if (!viewer?.folder_path) return;
+    if (viewerPath === viewer.folder_path) return;
+    const parent = viewerPath.replace(/\/[^/]+$/, "");
+    if (!parent || parent.length < viewer.folder_path.length) {
+      loadFolder(viewer.folder_path);
+      return;
+    }
+    loadFolder(parent);
+  }
 
   return (
-    <div className="mr-page">
+    <div className={`mr-page${viewer ? " is-viewing" : ""}`}>
+      {!viewer && (
+        <>
       <div className="mr-head">
         <div>
           <h2>Monthly Reports</h2>
@@ -249,11 +299,13 @@ export default function MonthlyReport({ user }) {
                 </div>
               </div>
               {(r.folder_url || r.folder_path) && (
-                <a className="mr-open" href={folderUrl(r)} target="_blank" rel="noreferrer">Open</a>
+                <button type="button" className="mr-open" onClick={() => openReport(r)}>Open</button>
               )}
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
 
       {open && (
@@ -330,6 +382,66 @@ export default function MonthlyReport({ user }) {
                 {uploading ? "Uploading…" : "Upload Report"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {viewer && (
+        <div className="mr-viewer">
+          <div className="mr-viewer-bar">
+            <div className="mr-viewer-title">
+              <FolderIco size={22} />
+              <div>
+                <strong>{viewer.project_name} · {MONTHS[(viewer.month || 1) - 1]} {viewer.year}</strong>
+                <span>
+                  {viewerPath.replace(`${viewer.folder_path}`, "").replace(/^\//, "") || viewer.folder_path}
+                  {viewerItems.length ? ` · ${viewerItems.length} items` : ""}
+                </span>
+              </div>
+            </div>
+            <div className="mr-viewer-actions">
+              {viewerPath !== viewer.folder_path && (
+                <button type="button" className="mr-open" onClick={viewerUp}>← Back</button>
+              )}
+              <button type="button" className="mr-x mr-viewer-x" onClick={() => setViewer(null)} aria-label="Close">×</button>
+            </div>
+          </div>
+          <div className="mr-viewer-body">
+            {viewerLoading && <div className="mr-empty">Loading folder…</div>}
+            {viewerErr && <div className="mr-empty" style={{ color: "#dc2626" }}>{viewerErr}</div>}
+            {!viewerLoading && !viewerErr && viewerItems.length === 0 && (
+              <div className="mr-empty">This folder is empty.</div>
+            )}
+            {!viewerLoading && viewerItems.length > 0 && (
+              <table className="mr-file-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {viewerItems.map((it) => (
+                    <tr key={it.path}>
+                      <td>
+                        {it.isFolder ? (
+                          <button type="button" className="mr-file-link" onClick={() => loadFolder(it.path, { skipNest: true })}>
+                            📁 {it.name}
+                          </button>
+                        ) : (
+                          <a className="mr-file-link" href={it.publicUrl} target="_blank" rel="noreferrer">
+                            📄 {it.name}
+                          </a>
+                        )}
+                      </td>
+                      <td>{it.isFolder ? "Folder" : (it.name.split(".").pop() || "file").toUpperCase()}</td>
+                      <td>{it.isFolder ? "—" : fmtBytes(it.size)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}

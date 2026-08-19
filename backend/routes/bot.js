@@ -15,17 +15,22 @@ const router = express.Router();
 const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 function isSchemaMissing(err) {
-  const m = String(err?.message || err?.details || '').toLowerCase();
-  return (
-    m.includes('chat_rooms') ||
-    m.includes('chat_messages') ||
-    m.includes('bot_qa') ||
-    m.includes('bot_alerts') ||
-    m.includes('project_members') ||
-    m.includes('meeting_moms') ||
-    m.includes('overdue_wa_log') ||
-    m.includes('does not exist') ||
-    m.includes('schema cache')
+  const m = String(err?.message || err?.details || err?.hint || '').toLowerCase();
+  const tables = [
+    'chat_rooms',
+    'chat_room_members',
+    'chat_messages',
+    'bot_qa',
+    'bot_alerts',
+    'project_members',
+    'meeting_moms',
+    'overdue_wa_log',
+  ];
+  return tables.some(
+    (t) =>
+      m.includes(`could not find the table 'public.${t}'`) ||
+      m.includes(`relation "${t}" does not exist`) ||
+      m.includes(`relation "public.${t}" does not exist`)
   );
 }
 
@@ -196,7 +201,6 @@ router.post('/ask', requireAuth, requireAdmin, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Bot ask error:', err.message);
-    if (isSchemaMissing(err)) return res.status(503).json({ error: schemaHint() });
     res.status(500).json({ error: err.message || 'Bot could not answer' });
   }
 });
@@ -283,7 +287,7 @@ router.get('/chats', requireAuth, async (req, res) => {
       .select('room_id, last_read_at, chat_rooms(id, kind, title, project_id, invite_code, created_at)')
       .eq('user_id', req.user.id);
     if (error) {
-      if (isSchemaMissing(error)) return res.status(503).json({ error: schemaHint() });
+      if (isSchemaMissing(error)) return res.json([]);
       throw error;
     }
 

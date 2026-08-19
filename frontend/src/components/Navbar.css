@@ -147,9 +147,8 @@
         }
         .logout-modal {
           background: #fff;
-          border: 1px solid #f0dcc8;
-          border-radius: 18px;
-          padding: 30px 26px 22px;
+          border: 1.5px solid #c96a10;
+          padding: 32px 28px 24px;
           max-width: 360px;
           width: 100%;
           display: flex;
@@ -172,9 +171,8 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          margin-bottom: 6px;
+          margin-bottom: 4px;
           flex-shrink: 0;
-          box-shadow: 0 0 0 7px rgba(201,106,16,.1);
         }
         .logout-modal-title {
           font-family: 'DM Sans', sans-serif;
@@ -194,12 +192,11 @@
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 10px 14px;
-          background: linear-gradient(135deg,rgba(61,18,0,0.05),rgba(201,106,16,0.07));
-          border: 1px solid #f0dcc8;
-          border-radius: 12px;
+          padding: 10px 16px;
+          background: linear-gradient(135deg,rgba(61,18,0,0.06),rgba(201,106,16,0.08));
+          border: 1px solid #c96a10;
           width: 100%;
-          margin: 10px 0 2px;
+          margin: 4px 0;
         }
         .logout-modal-avatar {
           width: 34px;
@@ -233,13 +230,12 @@
           display: flex;
           gap: 10px;
           width: 100%;
-          margin-top: 14px;
+          margin-top: 6px;
         }
         .logout-btn-cancel {
           flex: 1;
           height: 44px;
-          border-radius: 11px;
-          border: 1.5px solid #e7d3bf;
+          border: 1.5px solid #c96a10;
           background: #fff;
           color: #7a2e00;
           font-family: 'DM Sans', sans-serif;
@@ -256,7 +252,6 @@
         .logout-btn-confirm {
           flex: 1;
           height: 44px;
-          border-radius: 11px;
           border: none;
           background: linear-gradient(135deg,#3d1200,#7a2e00,#c96a10);
           color: #fff;
@@ -324,7 +319,7 @@
           .navbar-ham:hover { background: rgba(255, 255, 255, 0); }
           .navbar-ham:active { background: rgba(255, 255, 255, 0); }
         }
-          
+
         @media (min-width: 901px) {
           .navbar-ham { display: flex !important; }
           .app-navbar.client-navbar .navbar-ham { display: none !important; }

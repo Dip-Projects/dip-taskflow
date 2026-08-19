@@ -5,38 +5,74 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const router = express.Router();
 router.use(requireAuth);
 
-const SITE_SELECT = `
+const SITE_SELECT_BASE = `
   id, name, client_name, project_type, location, start_date, expected_end_date,
   status, description, created_at,
   team_leader_id, coordinator_id, site_incharge_id
 `;
+const SITE_SELECT = `${SITE_SELECT_BASE}, pc_id`;
 
-// ----------------------------- list sites (everyone, for dropdowns + table) -----------------------------
+function isMissingPcColumn(err) {
+  return /pc_id/i.test(String(err?.message || err?.details || ''));
+}
+
+async function fetchProjects(order = true) {
+  let q = supabase.from('projects').select(SITE_SELECT);
+  if (order) q = q.order('created_at', { ascending: false });
+  let { data, error } = await q;
+  if (error && isMissingPcColumn(error)) {
+    let retry = supabase.from('projects').select(SITE_SELECT_BASE);
+    if (order) retry = retry.order('created_at', { ascending: false });
+    ({ data, error } = await retry);
+  }
+  if (error) throw error;
+  return data || [];
+}
+
+async function fetchProjectById(id) {
+  let { data, error } = await supabase.from('projects').select(SITE_SELECT).eq('id', id).maybeSingle();
+  if (error && isMissingPcColumn(error)) {
+    ({ data, error } = await supabase.from('projects').select(SITE_SELECT_BASE).eq('id', id).maybeSingle());
+  }
+  if (error) throw error;
+  return data;
+}
+
+async function withPeople(row) {
+  if (!row) return row;
+  const ids = [
+    row.team_leader_id,
+    row.coordinator_id,
+    row.site_incharge_id,
+    row.pc_id,
+  ].filter(Boolean);
+  const userMap = {};
+  if (ids.length) {
+    const { data: users } = await supabase.from('users').select('id, full_name').in('id', ids);
+    (users || []).forEach((u) => { userMap[u.id] = u; });
+  }
+  return {
+    ...row,
+    team_leader: userMap[row.team_leader_id] || null,
+    coordinator: userMap[row.coordinator_id] || null,
+    site_incharge: userMap[row.site_incharge_id] || null,
+    pc: userMap[row.pc_id] || null,
+  };
+}
+
+async function countLinked(table, column, id) {
+  const { count, error } = await supabase
+    .from(table)
+    .select('id', { count: 'exact', head: true })
+    .eq(column, id);
+  if (error) return 0;
+  return count || 0;
+}
+
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('projects')
-      .select(SITE_SELECT)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-
-    // Fetch all user names in one shot and attach them
-    const userIds = [...new Set(
-      data.flatMap(s => [s.team_leader_id, s.coordinator_id, s.site_incharge_id]).filter(Boolean)
-    )];
-    let userMap = {};
-    if (userIds.length) {
-      const { data: users } = await supabase.from('users').select('id, full_name').in('id', userIds);
-      (users || []).forEach(u => { userMap[u.id] = u; });
-    }
-
-    const enriched = data.map(s => ({
-      ...s,
-      team_leader:  userMap[s.team_leader_id]  || null,
-      coordinator:  userMap[s.coordinator_id]  || null,
-      site_incharge: userMap[s.site_incharge_id] || null,
-    }));
-
+    const data = await fetchProjects(true);
+    const enriched = await Promise.all(data.map(withPeople));
     res.json(enriched);
   } catch (err) {
     console.error('List sites error:', err.message);
@@ -44,60 +80,49 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ----------------------------- add site (admin only) -----------------------------
 router.post('/', requireAdmin, async (req, res) => {
   try {
     const {
       name, client_name, project_type, location,
       start_date, expected_end_date,
-      team_leader_id, coordinator_id, site_incharge_id,
+      team_leader_id, coordinator_id, site_incharge_id, pc_id,
       description
     } = req.body || {};
 
     if (!name || !client_name || !project_type || !location || !start_date ||
-        !team_leader_id || !coordinator_id || !site_incharge_id) {
+        !team_leader_id || !coordinator_id || !site_incharge_id || !pc_id) {
       return res.status(400).json({ error: 'Please fill in all required fields' });
     }
 
-    const { data, error } = await supabase
-      .from('projects')
-      .insert({
-        name, client_name, project_type, location,
-        start_date, expected_end_date: expected_end_date || null,
-        team_leader_id, coordinator_id, site_incharge_id,
-        description: description || null,
-        status: 'Planning'
-      })
-      .select(SITE_SELECT)
-      .single();
+    const payload = {
+      name, client_name, project_type, location,
+      start_date, expected_end_date: expected_end_date || null,
+      team_leader_id, coordinator_id, site_incharge_id, pc_id,
+      description: description || null,
+      status: 'Planning'
+    };
 
+    let { data, error } = await supabase.from('projects').insert(payload).select(SITE_SELECT).single();
+    if (error && isMissingPcColumn(error)) {
+      const { pc_id: _drop, ...withoutPc } = payload;
+      ({ data, error } = await supabase.from('projects').insert(withoutPc).select(SITE_SELECT_BASE).single());
+    }
     if (error) throw error;
 
-    const { data: users } = await supabase.from('users').select('id, full_name')
-      .in('id', [team_leader_id, coordinator_id, site_incharge_id].filter(Boolean));
-    const userMap = {};
-    (users || []).forEach(u => { userMap[u.id] = u; });
-
-    res.status(201).json({
-      ...data,
-      team_leader:   userMap[team_leader_id]   || null,
-      coordinator:   userMap[coordinator_id]   || null,
-      site_incharge: userMap[site_incharge_id] || null,
-    });
+    res.status(201).json(await withPeople(data));
   } catch (err) {
     console.error('Add site error:', err.message);
     res.status(500).json({ error: err.message || 'Could not add site' });
   }
 });
 
-// ----------------------------- update site team / details (admin only) -----------------------------
 router.patch('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const allowedFields = [
       'name', 'client_name', 'project_type', 'location', 'start_date',
       'expected_end_date', 'team_leader_id', 'coordinator_id',
-      'site_incharge_id', 'description', 'status'
+      'site_incharge_id', 'pc_id', 'description', 'status'
     ];
 
     const updates = {};
@@ -109,39 +134,59 @@ router.patch('/:id', requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Nothing to update' });
     }
 
-    const { data, error } = await supabase
-      .from('projects')
-      .update(updates)
-      .eq('id', id)
-      .select(SITE_SELECT)
-      .single();
-
+    let { data, error } = await supabase.from('projects').update(updates).eq('id', id).select(SITE_SELECT).single();
+    if (error && isMissingPcColumn(error)) {
+      const { pc_id: _drop, ...withoutPc } = updates;
+      if (!Object.keys(withoutPc).length) {
+        data = await fetchProjectById(id);
+        error = null;
+      } else {
+        ({ data, error } = await supabase.from('projects').update(withoutPc).eq('id', id).select(SITE_SELECT_BASE).single());
+      }
+    }
     if (error) throw error;
 
-    const ids = [data.team_leader_id, data.coordinator_id, data.site_incharge_id].filter(Boolean);
-    const userMap = {};
-    if (ids.length) {
-      const { data: users } = await supabase.from('users').select('id, full_name').in('id', ids);
-      (users || []).forEach(u => { userMap[u.id] = u; });
-    }
-    res.json({
-      ...data,
-      team_leader:   userMap[data.team_leader_id]   || null,
-      coordinator:   userMap[data.coordinator_id]   || null,
-      site_incharge: userMap[data.site_incharge_id] || null,
-    });
+    res.json(await withPeople(data));
   } catch (err) {
     console.error('Update site error:', err.message);
     res.status(500).json({ error: err.message || 'Could not update site' });
   }
 });
 
-// ----------------------------- delete site (admin only) -----------------------------
 router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    const taskCount = await countLinked('tasks', 'project_id', id);
+    if (taskCount > 0) {
+      return res.status(409).json({
+        error: `Cannot delete this site — ${taskCount} task(s) are still linked to it. Use Edit to update the site, or reassign those tasks first.`,
+      });
+    }
+
+    const recCount = await countLinked('recurring_tasks', 'project_id', id);
+    if (recCount > 0) {
+      return res.status(409).json({
+        error: `Cannot delete this site — ${recCount} recurring task(s) are still linked to it. Use Edit instead.`,
+      });
+    }
+
+    const drawingCount = await countLinked('drawings', 'project_id', id);
+    if (drawingCount > 0) {
+      return res.status(409).json({
+        error: `Cannot delete this site — ${drawingCount} drawing(s) are still linked to it. Use Edit instead.`,
+      });
+    }
+
     const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (error) throw error;
+    if (error) {
+      if (/foreign key|violates/i.test(error.message || '')) {
+        return res.status(409).json({
+          error: 'Cannot delete this site because other records still use it. Use Edit instead.',
+        });
+      }
+      throw error;
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error('Delete site error:', err.message);

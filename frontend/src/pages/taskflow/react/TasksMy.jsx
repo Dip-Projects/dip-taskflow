@@ -21,7 +21,8 @@ export default function TasksMy() {
     setError('');
     try {
       const data = await api('/tasks/my');
-      setTasks(Array.isArray(data) ? data : data.tasks || []);
+      const list = Array.isArray(data) ? data : data.tasks || [];
+      setTasks(list.filter((t) => String(t.status || '').toLowerCase() !== 'rejected'));
     } catch (e) {
       setError(e.message || 'Failed to load tasks');
     } finally {

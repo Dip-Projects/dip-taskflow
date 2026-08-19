@@ -55,11 +55,18 @@ export default function TaskflowDom() {
             <h2 className="view-title">Assign a new task</h2>
             <p className="view-sub">Fill in the details below to delegate a task to a team member.</p>
           </div>
-          <form id="addTaskForm" className="task-form">
+          <form id="addTaskForm" className="task-form add-task-form">
             <div className="field-grid">
               <div className="field">
                 <label htmlFor="f-department">Department <span className="req">*</span></label>
-                <select id="f-department" required><option value="">Select department</option></select>
+                <div className="field-with-add">
+                  <select id="f-department" required><option value="">Select department</option></select>
+                  <button type="button" className="field-add-btn" id="f-add-dept" title="Add department">+ Add</button>
+                </div>
+                <div className="inline-add-row" id="f-add-dept-row" hidden>
+                  <input type="text" id="f-new-dept" placeholder="New department name…" />
+                  <button type="button" className="primary-btn primary-btn-inline" id="f-save-dept">Save</button>
+                </div>
               </div>
               <div className="field">
                 <label htmlFor="f-employee">Assign to <span className="req">*</span></label>
@@ -68,13 +75,26 @@ export default function TaskflowDom() {
             </div>
             <div className="field-grid">
               <div className="field">
-              
                 <label htmlFor="f-project">Project <span className="req" id="f-project-req">*</span></label>
-<select id="f-project"><option value="">Select project</option></select>
+                <div className="field-with-add">
+                  <select id="f-project"><option value="">Select project</option></select>
+                  <button type="button" className="field-add-btn" id="f-add-project" title="Add project">+ Add</button>
+                </div>
+                <div className="inline-add-row" id="f-add-project-row" hidden>
+                  <input type="text" id="f-new-project" placeholder="New project name…" />
+                  <button type="button" className="primary-btn primary-btn-inline" id="f-save-project">Save</button>
+                </div>
               </div>
               <div className="field">
                 <label htmlFor="f-tasktype">Task type <span className="req">*</span></label>
-                <select id="f-tasktype" required><option value="">Select task type</option></select>
+                <div className="field-with-add">
+                  <select id="f-tasktype" required><option value="">Select task type</option></select>
+                  <button type="button" className="field-add-btn" id="f-add-tasktype" title="Add task type">+ Add</button>
+                </div>
+                <div className="inline-add-row" id="f-add-tasktype-row" hidden>
+                  <input type="text" id="f-new-tasktype" placeholder="New task type name…" />
+                  <button type="button" className="primary-btn primary-btn-inline" id="f-save-tasktype">Save</button>
+                </div>
               </div>
             </div>
             <div className="field">
@@ -334,7 +354,6 @@ export default function TaskflowDom() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th className="col-reqid">Request ID</th>
                         <th className="col-tasksr">Task Sr No</th>
                         <th className="col-vproject">Project</th>
                         <th className="col-vtasktype">Task Type</th>
@@ -443,7 +462,6 @@ export default function TaskflowDom() {
               <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
               <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
             </form>
-            <div id="botAlerts" className="bot-alerts"></div>
           </div>
         </section>
 
@@ -660,7 +678,6 @@ export default function TaskflowDom() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th className="col-reqid">Request ID</th>
                     <th className="col-tasksr">Task Sr No</th>
                     <th className="col-vproject">Project</th>
                     <th className="col-vtasktype">Task Type</th>
@@ -1338,10 +1355,11 @@ export default function TaskflowDom() {
   <div id="siteModal" className="modal-backdrop" hidden={true}>
     <div className="modal modal-wide">
       <div className="modal-header">
-        <h3>Add new construction site</h3>
+        <h3 id="siteModalTitle">Add new construction site</h3>
         <button className="modal-close" id="closeSiteModal">&times;</button>
       </div>
       <form id="siteForm" className="modal-body">
+        <input type="hidden" id="site-edit-id" value="" />
         <div className="field-grid">
           <div className="field">
             <label htmlFor="site-client">Client name <span className="req">*</span></label>
@@ -1388,9 +1406,16 @@ export default function TaskflowDom() {
             <select id="site-coordinator" required><option value="">Select coordinator</option></select>
           </div>
         </div>
-        <div className="field">
-          <label htmlFor="site-incharge">Site incharge <span className="req">*</span></label>
-          <select id="site-incharge" required><option value="">Select site incharge</option></select>
+        <div className="field-grid">
+          <div className="field">
+            <label htmlFor="site-incharge">Site incharge <span className="req">*</span></label>
+            <select id="site-incharge" required><option value="">Select site incharge</option></select>
+          </div>
+          <div className="field">
+            <label htmlFor="site-pc">PC <span className="req">*</span></label>
+            <select id="site-pc" required><option value="">Select PC</option></select>
+            <p className="form-note">People whose role or designation is PC.</p>
+          </div>
         </div>
         <div className="field">
           <label htmlFor="site-description">Project description</label>
@@ -1399,7 +1424,7 @@ export default function TaskflowDom() {
         <p id="siteFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelSiteModal">Cancel</button>
-          <button type="submit" className="primary-btn primary-btn-inline">Add site</button>
+          <button type="submit" className="primary-btn primary-btn-inline" id="siteFormSubmit">Add site</button>
         </div>
       </form>
     </div>
@@ -1622,6 +1647,43 @@ export default function TaskflowDom() {
         <p id="leaveCoverFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="laterLeaveCoverModal">Remind me later</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="typeCpEditModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3 id="typeCpEditTitle">Add checkpoints</h3>
+        <button className="modal-close" id="closeTypeCpEditModal" type="button">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p className="form-note">Add as many checkpoints as you need for this task type.</p>
+        <div id="typeCpEditList"></div>
+        <button type="button" id="typeCpEditAdd" className="ghost-btn-text" style={{marginTop: 8}}>+ Add checkpoint</button>
+        <p id="typeCpEditMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelTypeCpEditModal">Skip</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="saveTypeCpEditModal">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="taskCpModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3 id="taskCpModalTitle">Task type checkpoints</h3>
+        <button className="modal-close" id="closeTaskCpModal" type="button">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p className="form-note" id="taskCpModalSub">Tick every checkpoint. The task is assigned only after all are ticked.</p>
+        <div id="taskCpModalList"></div>
+        <p id="taskCpModalMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelTaskCpModal">Cancel</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="submitTaskCpModal" disabled>Assign task</button>
         </div>
       </div>
     </div>

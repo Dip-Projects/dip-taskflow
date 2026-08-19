@@ -437,9 +437,9 @@
 }
 
 .cp-main-inner {
-  max-width: 1560px;
+  max-width: 1520px;
   margin: 0 auto;
-  padding: 24px 32px 70px;
+  padding: 24px 28px 70px;
 }
 
 .cp-page-header {
@@ -760,7 +760,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  margin-bottom: 14px;
+  margin-bottom: 0px;
+  margin-left: 35rem;
   flex-wrap: wrap;
   gap: 10px;
 }
@@ -1120,14 +1121,14 @@
 
 .cp-media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 12px;
 }
 
 .cp-media-card {
   background: var(--surface);
   border: 1.5px solid var(--border);
-  border-radius: var(--r-md);
+  /* border-radius: var(--r-md); */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1149,17 +1150,17 @@
 
 .cp-media-photo {
   width: 100%;
-  height: 132px;
+  height: 150px;
   object-fit: cover;
   display: block;
   cursor: zoom-in;
 }
 
 .cp-media-body {
-  padding: 11px 12px;
+  padding: 13px 15px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
   flex: 1;
 }
 
@@ -1785,6 +1786,7 @@
   gap: 6px;
   flex-wrap: wrap;
   margin-bottom: 16px;
+  margin-left: 10px;
   position: static;
   background: transparent;
   padding: 0;
@@ -1815,10 +1817,25 @@
   color: #fff;
 }
 
+.cp-chip.act.type-mpr {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+
 .cp-chip.act.type-graphical {
   background: #6d4aa8;
   border-color: #6d4aa8;
   color: #fff;
+}
+
+.cp-media-card.type-mpr {
+  border-top: 3px solid #0f766e;
+}
+
+.cp-media-badge.mpr {
+  background: #ecfdf5;
+  color: #0f766e;
 }
 
 /* Media card + badge styling for the new graphical type */
@@ -1959,26 +1976,15 @@
     align-items: center;
   }
 
-  /* Collapsed panel by default on mobile */
-  .cp-filter-panel {
-    
-    max-height: 0;
-    background: linear-gradient(135deg, #fffdfb 0%, #f5e4d5 100%);
-    overflow: hidden;
-    opacity: 0;
-    padding: 0;
-    margin-top: 0;
-    transition: max-height 0.25s ease, opacity 0.2s ease, margin-top 0.2s ease;
-  }
-
+  .cp-filter-panel,
   .cp-filter-panel.open {
-    max-height: 600px;
+    max-height: none;
+    overflow: visible;
     opacity: 1;
     margin-top: 8px;
     padding: 10px 12px;
-    background: linear-gradient(135deg, #fffdfb 0%, #f5e4d5 100%);    
+    background: linear-gradient(135deg, #fffdfb 0%, #f5e4d5 100%);
     border: 1px solid #e1e5eb;
-    
   }
 
   /* Inside the panel, let chips wrap into rows instead of one-per-line pills */

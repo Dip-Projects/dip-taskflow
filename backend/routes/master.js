@@ -28,6 +28,34 @@ router.get('/projects', async (req, res) => {
   res.json(data);
 });
 
+router.post('/projects', requireAdmin, async (req, res) => {
+  const name = String((req.body || {}).name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Project name is required' });
+  let { data, error } = await supabase.from('projects').insert({ name }).select('id, name').single();
+  if (error && /null value|not-null|violates/i.test(error.message || '')) {
+    const today = new Date().toISOString().slice(0, 10);
+    const retry = await supabase
+      .from('projects')
+      .insert({
+        name,
+        client_name: name,
+        project_type: 'Other',
+        location: '—',
+        start_date: today,
+        team_leader_id: req.user.id,
+        coordinator_id: req.user.id,
+        site_incharge_id: req.user.id,
+        status: 'Planning',
+      })
+      .select('id, name')
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data);
+});
+
 router.get('/task-types', async (req, res) => {
   const { data, error } = await supabase.from('task_types').select('id, name').order('name');
   if (error) return res.status(500).json({ error: error.message });
@@ -40,6 +68,39 @@ router.post('/task-types', requireAdmin, async (req, res) => {
   const { data, error } = await supabase.from('task_types').insert({ name }).select('id, name').single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json(data);
+});
+
+router.get('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('task_type_checkpoint_templates')
+      .select('id, label, sort_order')
+      .eq('task_type_id', req.params.id)
+      .order('sort_order', { ascending: true });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load checkpoints' });
+  }
+});
+
+router.put('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
+  try {
+    const taskTypeId = req.params.id;
+    const labels = (req.body?.labels || [])
+      .map((x) => String(typeof x === 'string' ? x : x?.label || '').trim())
+      .filter(Boolean);
+    await supabase.from('task_type_checkpoint_templates').delete().eq('task_type_id', taskTypeId);
+    if (labels.length) {
+      const { error } = await supabase.from('task_type_checkpoint_templates').insert(
+        labels.map((label, i) => ({ task_type_id: taskTypeId, label, sort_order: i }))
+      );
+      if (error) throw error;
+    }
+    res.json({ ok: true, count: labels.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save checkpoints' });
+  }
 });
 
 // Used to populate the "Assign to" dropdown and the employee filter.

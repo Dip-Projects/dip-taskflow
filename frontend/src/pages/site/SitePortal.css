@@ -2,9 +2,11 @@
 
   @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
   /* Site/MDO only. Never use bare *, :root or body here — this stylesheet also
-     loads on the Office page and would repaint it. */
+     loads on the Office page and would repaint it.
+     Only box-sizing is scoped here. margin/padding must stay on the global
+     `*` reset (index.css) or every .card / .main / .svr-* padding loses. */
   .site-shell,.site-shell *,.site-shell *::before,.site-shell *::after,
-  .site-theme,.site-theme *,.site-theme *::before,.site-theme *::after{box-sizing:border-box;margin:0;padding:0}
+  .site-theme,.site-theme *,.site-theme *::before,.site-theme *::after{box-sizing:border-box}
 
   .site-shell,.site-theme{
     --ink:#0f0d0a;--ink2:#4a4540;--ink3:#9a9289;
@@ -590,7 +592,7 @@
   .sni { position: relative; }
   .sni-badge {margin-left: auto;min-width: 18px;height: 18px;padding: 0 5px;border-radius: 9px;background: var(--red);color: #fff;font-size: 10.5px;font-weight: 800;display: flex;align-items: center;justify-content: center;flex-shrink: 0;line-height: 1;}
   /* ── Card ── */
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);width:100%;}
   .card-hdr{display:flex;align-items:center;gap:10px;margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--line);}
   .card-ico{width:36px;height:36px;border-radius:9px;background:var(--amber-bg);display:flex;align-items:center;justify-content:center;color:var(--amber2);flex-shrink:0;}
   .card-title{font-size:15px;font-weight:800;color:var(--ink);}

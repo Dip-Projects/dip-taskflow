@@ -224,7 +224,8 @@ async function generatePmsRangeReport(from, to) {
     // ── Summary cards (already responsive via .drpt-summary-row in CSS) ──
     const doneTasks    = rangeTasks.filter(t => t.status === 'Completed' || t.verification_status === 'Verified');
     const overdueTasks = rangeTasks.filter(t => {
-      if (t.status === 'Completed' || t.verification_status === 'Verified') return false;
+      if (t.status === 'Completed' || t.status === 'Rejected') return false;
+      if (t.verification_status === 'Verified' || t.verification_status === 'Verification Rejected') return false;
       return t.target_date && new Date(t.target_date) < now;
     });
     const pendingTasks = rangeTasks.filter(t => t.status === 'Pending' || t.status === 'In Progress');

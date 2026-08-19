@@ -127,28 +127,6 @@ router.get('/checkpoint-templates/:taskTypeId', requireAdmin, async (req, res) =
   }
 });
 
-// Replace the saved template for a task type with a new set of labels.
-// Called automatically whenever a recurring task with a task_type_id is
-// created/updated, so the template always reflects the latest checkpoints
-// used for that type.
-async function upsertCheckpointTemplate(taskTypeId, labels) {
-  if (!taskTypeId) return;
-  await supabase
-    .from('task_type_checkpoint_templates')
-    .delete()
-    .eq('task_type_id', taskTypeId);
-
-  const rows = (labels || [])
-    .map((label, i) => ({ task_type_id: taskTypeId, label: (label || '').trim(), sort_order: i }))
-    .filter(r => r.label);
-
-  if (rows.length) {
-    const { error } = await supabase.from('task_type_checkpoint_templates').insert(rows);
-    if (error) throw error;
-  }
-}
-
-
 // ─── Admin: create recurring task ──────────────────────────────────────────
 router.post('/', requireAdmin, async (req, res) => {
   try {
@@ -205,11 +183,6 @@ router.post('/', requireAdmin, async (req, res) => {
           .insert(cpRows);
         if (cpErr) throw cpErr;
       }
-    }
-
-    // Keep this task type's checkpoint template in sync with what was used
-    if (task_type_id) {
-      await upsertCheckpointTemplate(task_type_id, checkpoints);
     }
 
     // Return full task
@@ -368,17 +341,6 @@ router.patch('/:id', requireAdmin, async (req, res) => {
           await supabase.from('recurring_task_checkpoints').insert(cpRows);
         }
       }
-    }
-
-    // Keep this task type's checkpoint template in sync with what was used.
-    // Use whichever task_type_id is now in effect (just updated, or the
-    // existing one if task_type_id wasn't part of this request).
-    const effectiveTaskTypeId = updates.task_type_id !== undefined
-      ? updates.task_type_id
-      : data.task_type?.id;
-    if (effectiveTaskTypeId && req.body.checkpoints !== undefined) {
-      const labels = req.body.checkpoints.map(c => typeof c === 'string' ? c : c.label);
-      await upsertCheckpointTemplate(effectiveTaskTypeId, labels);
     }
 
     // Return updated full

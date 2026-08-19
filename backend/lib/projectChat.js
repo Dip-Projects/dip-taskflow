@@ -3,12 +3,13 @@ const supabase = require('./supabaseClient');
 const { sendWhatsAppTemplate } = require('./whatsapp');
 
 function isSchemaMissing(err) {
-  const m = String(err?.message || err?.details || '').toLowerCase();
-  return (
-    m.includes('chat_rooms') ||
-    m.includes('project_members') ||
-    m.includes('does not exist') ||
-    m.includes('schema cache')
+  const m = String(err?.message || err?.details || err?.hint || '').toLowerCase();
+  const tables = ['chat_rooms', 'chat_room_members', 'chat_messages', 'project_members'];
+  return tables.some(
+    (t) =>
+      m.includes(`could not find the table 'public.${t}'`) ||
+      m.includes(`relation "${t}" does not exist`) ||
+      m.includes(`relation "public.${t}" does not exist`)
   );
 }
 

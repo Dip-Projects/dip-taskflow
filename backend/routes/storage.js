@@ -30,6 +30,44 @@ async function ensurePublicBucket(bucketName) {
   return { bucket: bucketName, created: true };
 }
 
+router.get('/list', requireAuth, async (req, res) => {
+  try {
+    const prefix = String(req.query.path || '').replace(/^\/+|\/+$/g, '');
+    if (!prefix) return res.status(400).json({ error: 'Missing path' });
+    const bucket = req.query.bucket || SHARED_BUCKET;
+    const rows = [];
+    for (let offset = 0; offset < 8000; offset += 1000) {
+      const { data, error } = await supabase.storage.from(bucket).list(prefix, {
+        limit: 1000,
+        offset,
+        sortBy: { column: 'name', order: 'asc' },
+      });
+      if (error) return res.status(500).json({ error: error.message });
+      rows.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    const items = rows
+      .filter((it) => it.name && it.name !== '.emptyFolderPlaceholder')
+      .map((it) => {
+        const isFolder = !it.id;
+        const fullPath = `${prefix}/${it.name}`;
+        const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(fullPath);
+        return {
+          name: it.name,
+          path: fullPath,
+          isFolder,
+          size: it.metadata?.size || 0,
+          updatedAt: it.updated_at || it.created_at || null,
+          publicUrl: isFolder ? null : urlData.publicUrl,
+        };
+      });
+    res.json({ path: prefix, items });
+  } catch (err) {
+    console.error('storage list error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not list folder' });
+  }
+});
+
 router.post('/ensure-bucket', requireAuth, async (req, res) => {
   try {
     const result = await ensurePublicBucket(SHARED_BUCKET);

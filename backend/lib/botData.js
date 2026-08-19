@@ -8,6 +8,36 @@ function fmtDate(v) {
   return String(v).slice(0, 10);
 }
 
+/** Local calendar date — same rule as Office overdue page (no UTC shift). */
+function parseLocalDate(iso) {
+  if (!iso) return null;
+  const s = String(iso);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  const dt = new Date(s);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function isFinishedTask(t) {
+  const st = String(t.status || '').trim().toLowerCase();
+  const vs = String(t.verification_status || '').trim().toLowerCase();
+  return (
+    st === 'completed' ||
+    st === 'rejected' ||
+    vs === 'verified' ||
+    vs === 'verification rejected'
+  );
+}
+
+/** Matches Office Overdue: unfinished + due date passed. Rejected never counts. */
+function isDelegatedOverdue(t, now = new Date()) {
+  if (isFinishedTask(t)) return false;
+  const due = parseLocalDate(t.target_date);
+  return !!(due && due < now);
+}
+
 function fmtTimeIst(iso) {
   if (!iso) return '—';
   try {
@@ -31,7 +61,7 @@ function matchPeople(users, ql) {
       let score = 0;
       if (fn && q.includes(fn)) score += 10;
       if (un && (q.includes(un) || q.includes(un.replace(/\./g, ' ')))) score += 8;
-      const parts = fn.split(/[\s.]+/).filter((p) => p.length >= 4);
+      const parts = fn.split(/[\s.]+/).filter((p) => p.length >= 3);
       const hits = parts.filter((p) => q.includes(p));
       score += hits.length * 3;
       return { u, score, hits: hits.length };
@@ -118,7 +148,7 @@ async function taskStatsForUser(userId) {
   const tasks = data || [];
   const now = new Date();
   const pending = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
-  const overdue = pending.filter((t) => t.target_date && new Date(t.target_date) < now);
+  const overdue = tasks.filter((t) => isDelegatedOverdue(t, now));
   const pendingVerify = tasks.filter((t) => t.verification_status === 'Pending Verification');
   const completed = tasks.filter((t) => t.status === 'Completed' || t.verification_status === 'Verified');
   return { tasks, pending, overdue, pendingVerify, completed };
@@ -134,7 +164,7 @@ async function companyTaskSummary() {
   const tasks = data || [];
   const now = new Date();
   const open = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
-  const overdue = open.filter((t) => t.target_date && new Date(t.target_date) < now);
+  const overdue = tasks.filter((t) => isDelegatedOverdue(t, now));
   const pendingVerify = tasks.filter((t) => t.verification_status === 'Pending Verification');
   const byUser = {};
   const byProject = {};
@@ -145,14 +175,14 @@ async function companyTaskSummary() {
     if (t.status === 'Completed' || t.verification_status === 'Verified') byUser[name].done += 1;
     else if (t.status === 'Pending' || t.status === 'In Progress') {
       byUser[name].open += 1;
-      if (t.target_date && new Date(t.target_date) < now) byUser[name].overdue += 1;
+      if (isDelegatedOverdue(t, now)) byUser[name].overdue += 1;
     }
     const pn = t.project?.name || 'No project';
     if (!byProject[pn]) byProject[pn] = { open: 0, done: 0, overdue: 0 };
     if (t.status === 'Completed' || t.verification_status === 'Verified') byProject[pn].done += 1;
     else {
       byProject[pn].open += 1;
-      if (t.target_date && new Date(t.target_date) < now) byProject[pn].overdue += 1;
+      if (isDelegatedOverdue(t, now)) byProject[pn].overdue += 1;
     }
   }
   return {
@@ -304,14 +334,18 @@ function formatTaskBlock(t) {
 
 /** One overdue task on two short lines — no repeated "Why" sentence. */
 function formatOverdueBlock(t, { showAssignee = false } = {}) {
-  const days = t.target_date
-    ? Math.max(0, Math.floor((Date.now() - new Date(t.target_date).getTime()) / 86400000))
-    : 0;
+  const due = parseLocalDate(t.target_date);
+  const days = due ? Math.max(0, Math.floor((Date.now() - due.getTime()) / 86400000)) : 0;
   const late = days > 0 ? `${days} day${days === 1 ? '' : 's'} late` : 'due today';
   const who = showAssignee && t.assigned_to_user?.full_name ? ` | ${t.assigned_to_user.full_name}` : '';
+  const vs = String(t.verification_status || '');
+  const state =
+    vs === 'Pending Verification' || vs === 'Verification Rejected' || vs === 'Updation Required'
+      ? vs
+      : t.status || 'Open';
   return (
     `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-    `    Due: ${fmtDate(t.target_date)} (${late}) | ${t.status || 'Open'} | ${t.project?.name || 'No project'}${who}`
+    `    Due: ${fmtDate(t.target_date)} (${late}) | ${state} | ${t.project?.name || 'No project'}${who}`
   );
 }
 
@@ -329,26 +363,30 @@ function groupPersonTasks(rows) {
   for (const t of rows) {
     const vs = String(t.verification_status || '');
     const st = String(t.status || '');
-    const due = t.target_date ? new Date(t.target_date) : null;
     if (vs === 'Verified' || st === 'Completed') groups.done.push(t);
     else if (st === 'Rejected') groups.rejected.push(t);
-    else if (vs === 'Pending Verification') groups.waiting.push(t);
     else if (vs === 'Verification Rejected' || vs === 'Updation Required') groups.correction.push(t);
-    else if (due && due < now) groups.overdue.push(t);
+    else if (isDelegatedOverdue(t, now)) groups.overdue.push(t);
+    else if (vs === 'Pending Verification') groups.waiting.push(t);
     else if (st === 'Pending') groups.notStarted.push(t);
     else groups.inProgress.push(t);
   }
   return groups;
 }
 
-function formatPersonOverdue(tasks, people) {
+function formatPersonOverdue(tasks, people, recRows = []) {
   const names = (people || []).map((p) => p.full_name).filter(Boolean).join(', ') || 'this person';
-  const g = groupPersonTasks(tasks || []);
-  if (!g.overdue.length) return `OVERDUE — ${names}\n  No overdue tasks.`;
-  return (
-    `OVERDUE — ${names} (${g.overdue.length})\n` +
-    g.overdue.map(formatOverdueBlock).join('\n')
-  );
+  const overdue = (tasks || []).filter((t) => isDelegatedOverdue(t));
+  const rec = recRows || [];
+  const total = overdue.length + rec.length;
+  if (!total) return `OVERDUE — ${names}\n  No overdue tasks.`;
+  return [
+    `OVERDUE — ${names} (${total})`,
+    overdue.length ? overdue.map(formatOverdueBlock).join('\n') : '',
+    rec.length ? `RECURRING OVERDUE (${rec.length})\n${formatRecurringOverdue(rec)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function formatPersonWhy(tasks, people, intents = {}) {
@@ -356,8 +394,8 @@ function formatPersonWhy(tasks, people, intents = {}) {
   const rows = tasks || [];
   if (!rows.length) return `TASKS — ${names}\n  (none on record)`;
   const groups = groupPersonTasks(rows);
-  const section = (title, list) =>
-    list.length ? `${title} (${list.length})\n${list.map(formatTaskBlock).join('\n')}` : '';
+  const section = (title, list, fmt = formatTaskBlock) =>
+    list.length ? `${title} (${list.length})\n${list.map(fmt).join('\n')}` : '';
   if (intents.overdue && !intents.verify && !intents.company) {
     return formatPersonOverdue(rows, people);
   }
@@ -373,10 +411,21 @@ function formatPersonWhy(tasks, people, intents = {}) {
     groups.correction.length +
     groups.notStarted.length +
     groups.inProgress.length;
+  // Name-only / "X tasks" → counts + overdue + verify. Full dump only if they asked.
+  if (!intents.company && !intents.full) {
+    return [
+      `TASKS — ${names}`,
+      `Open ${openCount} · Overdue ${groups.overdue.length} · Verify ${groups.waiting.length}`,
+      section('OVERDUE', groups.overdue, formatOverdueBlock),
+      groups.waiting.length ? section('WAITING ON VERIFIER', groups.waiting) : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
   return [
     `TASKS — ${names}`,
     `Open ${openCount} · Overdue ${groups.overdue.length} · Verify ${groups.waiting.length}`,
-    section('OVERDUE', groups.overdue),
+    section('OVERDUE', groups.overdue, formatOverdueBlock),
     section('WAITING ON VERIFIER', groups.waiting),
     section('CORRECTION / UPDATION', groups.correction),
     section('NOT STARTED', groups.notStarted),
@@ -761,8 +810,9 @@ async function tasksForPeople(people) {
       'id, status, verification_status, target_date, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(full_name), verifier:users!tasks_verifier_id_fkey(full_name)'
     )
     .in('assigned_to', ids)
+    .in('status', ['Pending', 'In Progress'])
     .order('target_date', { ascending: true })
-    .limit(80);
+    .limit(1000);
   if (error) return [];
   return data || [];
 }
@@ -824,7 +874,7 @@ async function answerFromFacts(question, facts, name) {
         {
           role: 'system',
           content:
-            'You are DIP Bot. Answer ONLY the asked question from Facts. No extra sections, totals, advice, or greetings. If Facts do not have it, say it is not in TaskFlow. Keep names, dates, times and counts. Format: ALL-CAPS heading, then "• " bullets, then indented "Label: value" lines. English, Hindi or Hinglish to match the question. Do not invent data.',
+            'You are DIP Bot. Answer ONLY from Facts. Use this exact shape:\nHEADING IN ALL CAPS\n• item title\n    Label: value\nNo greetings, no advice, no extra sections. If Facts do not have it, say it is not in TaskFlow. Do not invent data. Match the question language.',
         },
         {
           role: 'user',
@@ -886,7 +936,14 @@ function formatAdminFacts(pack, people, intents) {
     return bits.filter(Boolean).join('\n\n');
   }
   if (!intents.specific && !named) {
-    return 'Ask one thing: overdue, a person\'s name, leave, tickets, attendance, or company summary.';
+    return (
+      'HOW TO ASK\n' +
+      '  • overdue of Charmy\n' +
+      '  • Charmy leave\n' +
+      '  • company summary\n' +
+      '  • open tickets\n' +
+      '  • attendance of a name'
+    );
   }
   if (c) {
     if (intents.company) {
@@ -996,11 +1053,17 @@ async function answerQuestion({ question, user, isAdmin }) {
       ql
     );
   const wantsVerify = /verif|verifier|check kar/i.test(ql);
-  const wantsLeave = /\bleave\b|chutti|chhutti|chhuti|chhutiya/i.test(ql);
+  const wantsLeave = /\bleave\b|chutti|chhutti|chhuti|chhutiya|on leave|kitni leave/i.test(ql);
   const wantsRecurring = /recurr|rozana|rojana|daily task|weekly task|checkpoint/i.test(ql);
   const wantsMom = /\bmom\b|minutes|meeting|video call|\bcall\b|baat hui|charcha|discussed|discussion/i.test(ql);
-  const wantsTicket = /\bticket\b|complaint/i.test(ql);
-  const wantsTasks = /\b(task|pending|due|assign|my work)\b/i.test(ql) || wantsOverdue || wantsVerify || wantsRecurring;
+  const wantsTicket = /\bticket\b|complaint|shikayat/i.test(ql);
+  const wantsFull = /\ball tasks\b|sab task|poori list|full list|correction|updation|not started/i.test(ql);
+  const wantsTasks =
+    /\b(task|tasks|pending|assign|my work|kaam)\b/i.test(ql) ||
+    wantsOverdue ||
+    wantsVerify ||
+    wantsRecurring ||
+    wantsFull;
 
   let directory = [];
   if (isAdmin) {
@@ -1033,6 +1096,7 @@ async function answerQuestion({ question, user, isAdmin }) {
     mom: wantsMom,
     ticket: wantsTicket,
     tasks: wantsTasks,
+    full: wantsFull,
     company: wantsCompany,
     specific:
       wantsOverdue ||
@@ -1089,7 +1153,11 @@ async function answerQuestion({ question, user, isAdmin }) {
     adminOnly = true;
     skipPolish = true;
     const personTasks = await tasksForPeople(people);
-    answer = formatPersonOverdue(personTasks, people);
+    let rec = [];
+    for (const p of people) {
+      rec = rec.concat(await overdueRecurring(p.id));
+    }
+    answer = formatPersonOverdue(personTasks, people, rec);
   } else if (wantsOverdue && !wantsMom && !wantsLeave && !wantsSite && !wantsVerify) {
     skipPolish = true;
     if (isAdmin) {
@@ -1118,7 +1186,7 @@ async function answerQuestion({ question, user, isAdmin }) {
   } else if (isAdmin) {
     adminOnly = true;
     skipPolish = true;
-    useAnswerModel = true;
+    useAnswerModel = false;
     const pack = await gatherAdminFacts({ ql, people, intents });
     answer = formatAdminFacts(pack, people, intents) || 'No matching TaskFlow rows for that question.';
   } else if (wantsSite) {
@@ -1126,6 +1194,7 @@ async function answerQuestion({ question, user, isAdmin }) {
   } else if (wantsLeave) {
     answer = 'Use Apply Leave / My Leave in the sidebar for your leave.';
   } else if (wantsTasks || wantsVerify) {
+    skipPolish = true;
     const s = await taskStatsForUser(user.id);
     const rec = await overdueRecurring(user.id);
     if (wantsVerify) {
@@ -1193,12 +1262,12 @@ async function listOverdueTasksForWa() {
   const { data, error } = await supabase
     .from('tasks')
     .select(
-      'id, description, target_date, priority, assigned_to, project:projects(name), assignee:users!tasks_assigned_to_fkey(id, full_name, whatsapp_number)'
+      'id, description, target_date, priority, status, verification_status, assigned_to, project:projects(name), assignee:users!tasks_assigned_to_fkey(id, full_name, whatsapp_number)'
     )
     .in('status', ['Pending', 'In Progress'])
     .lt('target_date', nowIso);
   if (error) throw error;
-  return data || [];
+  return (data || []).filter((t) => !isFinishedTask(t));
 }
 
 function startOfToday() {

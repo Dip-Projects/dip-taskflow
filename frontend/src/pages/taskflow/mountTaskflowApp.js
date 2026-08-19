@@ -205,6 +205,10 @@ function collectEls() {
     siteTeamleader: document.getElementById('site-teamleader'),
     siteCoordinator: document.getElementById('site-coordinator'),
     siteIncharge: document.getElementById('site-incharge'),
+    sitePc: document.getElementById('site-pc'),
+    siteModalTitle: document.getElementById('siteModalTitle'),
+    siteFormSubmit: document.getElementById('siteFormSubmit'),
+    siteEditId: document.getElementById('site-edit-id'),
     toast: document.getElementById('toast')
   };
 }
@@ -350,6 +354,24 @@ export async function mountTaskflowApp(opts = {}) {
       return new Date(y, m - 1, d); // local midnight — no UTC shift
     }
     return new Date(iso);
+  }
+
+  function isRejectedTask(t) {
+    return String(t?.status || '').trim().toLowerCase() === 'rejected';
+  }
+
+  function isClosedOrRejectedTask(t) {
+    const st = String(t?.status || '').trim().toLowerCase();
+    const vs = String(t?.verification_status || '').trim().toLowerCase();
+    if (st === 'completed' || st === 'rejected') return true;
+    if (vs === 'verified' || vs === 'verification rejected') return true;
+    return false;
+  }
+
+  function isDelegatedOverdueTask(t, now = new Date()) {
+    if (!t?.target_date || isClosedOrRejectedTask(t)) return false;
+    const due = parseLocalDate(t.target_date);
+    return !!(due && due < now);
   }
   
   function fmtDate(iso) {
@@ -951,12 +973,7 @@ export async function mountTaskflowApp(opts = {}) {
         const allTasks = await api('/tasks/all');
         const now = new Date();
         const pendingCount = allTasks.filter(t => t.status === 'Pending' || t.verification_status === 'Pending Verification').length;
-        const overdueCount = allTasks.filter(t => {
-          if (!t.target_date) return false;
-          if (t.status === 'Completed' || t.status === 'Rejected') return false;
-          if (t.verification_status === 'Verified') return false;
-          return parseLocalDate(t.target_date) < now;
-        }).length;
+        const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
   
         const recurringAll = await api('/recurring-tasks/all').catch(() => []);
         const overdueRecurringCount = recurringAll.filter(t => t.is_overdue).length;
@@ -1160,6 +1177,7 @@ export async function mountTaskflowApp(opts = {}) {
       fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
       fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
+      fillSitePcDropdown(employees);
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
       syncOverdueEmployeeDropdown();
@@ -1192,6 +1210,7 @@ export async function mountTaskflowApp(opts = {}) {
       fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
       fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
+      fillSitePcDropdown(employees);
       // Reporting Head — optional field on the employee form. Add form shows everyone;
       // Edit form additionally excludes the employee being edited (can't report to self).
       fillSelect(els.empReportingHead, employees, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
@@ -1230,6 +1249,14 @@ export async function mountTaskflowApp(opts = {}) {
   els.addTaskForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     hideFormMsg(els.addTaskMsg);
+    if (!els.fDepartment.value || !els.fEmployee.value || !els.fTaskType.value) {
+      showFormMsg(els.addTaskMsg, 'Please fill in all required fields');
+      return;
+    }
+    await openAssignCheckpointGate();
+  });
+
+  async function actuallyAssignTask(cpLabels) {
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
@@ -1244,15 +1271,128 @@ export async function mountTaskflowApp(opts = {}) {
     const voiceNote  = document.getElementById('f-voicenote').files[0];
     if (attachment) formData.append('attachment', attachment);
     if (voiceNote)  formData.append('voice_note', voiceNote);
+    if (cpLabels.length) formData.append('checkpoints', JSON.stringify(cpLabels));
+    const created = await api('/tasks', { method: 'POST', body: formData, isForm: true });
+    if (cpLabels.length && created?.id && !(created.checkpoints || []).length && !created.checkpoint_error) {
+      try {
+        await api(`/tasks/${created.id}/checkpoints`, {
+          method: 'POST',
+          body: { labels: cpLabels, task_type_id: els.fTaskType.value },
+        });
+      } catch (_) { /* table missing — task is still assigned */ }
+    }
+    showToast('Task assigned ✅', 'success');
+    els.addTaskForm.reset();
+    document.getElementById('f-priority').value = 'Medium';
+    document.getElementById('f-reschedule').value = 'false';
+    updateTaskDeadlinePreview();
+  }
+
+  function toggleInlineAdd(rowId) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    row.hidden = !row.hidden;
+    if (!row.hidden) row.querySelector('input')?.focus();
+  }
+
+  document.getElementById('f-add-dept')?.addEventListener('click', () => toggleInlineAdd('f-add-dept-row'));
+  document.getElementById('f-add-project')?.addEventListener('click', () => toggleInlineAdd('f-add-project-row'));
+  document.getElementById('f-add-tasktype')?.addEventListener('click', () => toggleInlineAdd('f-add-tasktype-row'));
+
+  document.getElementById('f-save-dept')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-dept');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a department name', 'error');
     try {
-      await api('/tasks', { method: 'POST', body: formData, isForm: true });
-      showToast('Task assigned ✅', 'success');
-      els.addTaskForm.reset();
-      document.getElementById('f-priority').value = 'Medium';
-      document.getElementById('f-reschedule').value = 'false';
-      updateTaskDeadlinePreview();
+      const created = await api('/master/departments', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fDepartment) els.fDepartment.value = created.id;
+      els.fDepartment?.dispatchEvent(new Event('change'));
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-dept-row');
+      if (row) row.hidden = true;
+      showToast('Department added', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('f-save-project')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-project');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a project name', 'error');
+    try {
+      const created = await api('/master/projects', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fProject) els.fProject.value = created.id;
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-project-row');
+      if (row) row.hidden = true;
+      showToast('Project added', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('f-save-tasktype')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-tasktype');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a task type name', 'error');
+    try {
+      const created = await api('/master/task-types', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fTaskType) els.fTaskType.value = created.id;
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-tasktype-row');
+      if (row) row.hidden = true;
+      showToast('Task type added', 'success');
+      openTypeCheckpointEditModal(created.id, created.name || name);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  let _typeCpEditId = null;
+  function addTypeCpEditRow(value = '') {
+    const list = document.getElementById('typeCpEditList');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'checkpoint-row';
+    row.innerHTML = `
+      <input type="text" class="checkpoint-input type-cp-edit-input" placeholder="Checkpoint label…" value="${escapeHtml(value)}" />
+      <button type="button" class="ghost-btn-text type-cp-edit-remove">Remove</button>
+    `;
+    row.querySelector('.type-cp-edit-remove').addEventListener('click', () => row.remove());
+    list.appendChild(row);
+    row.querySelector('input')?.focus();
+  }
+  function openTypeCheckpointEditModal(typeId, typeName) {
+    _typeCpEditId = typeId;
+    const modal = document.getElementById('typeCpEditModal');
+    const title = document.getElementById('typeCpEditTitle');
+    const list = document.getElementById('typeCpEditList');
+    const msg = document.getElementById('typeCpEditMsg');
+    if (title) title.textContent = `Add checkpoints — ${typeName || 'task type'}`;
+    if (list) list.innerHTML = '';
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
+    addTypeCpEditRow();
+    if (modal) modal.hidden = false;
+  }
+  function closeTypeCpEditModal() {
+    const modal = document.getElementById('typeCpEditModal');
+    if (modal) modal.hidden = true;
+    _typeCpEditId = null;
+  }
+  document.getElementById('typeCpEditAdd')?.addEventListener('click', () => addTypeCpEditRow());
+  document.getElementById('closeTypeCpEditModal')?.addEventListener('click', closeTypeCpEditModal);
+  document.getElementById('cancelTypeCpEditModal')?.addEventListener('click', closeTypeCpEditModal);
+  document.getElementById('saveTypeCpEditModal')?.addEventListener('click', async () => {
+    const msg = document.getElementById('typeCpEditMsg');
+    const labels = [...document.querySelectorAll('#typeCpEditList .type-cp-edit-input')]
+      .map((el) => el.value.trim())
+      .filter(Boolean);
+    if (!_typeCpEditId) return closeTypeCpEditModal();
+    if (!labels.length) return closeTypeCpEditModal();
+    try {
+      await api(`/master/task-types/${_typeCpEditId}/checkpoints`, { method: 'PUT', body: { labels } });
+      showToast('Checkpoints saved on this task type', 'success');
+      closeTypeCpEditModal();
     } catch (err) {
-      showFormMsg(els.addTaskMsg, err.message);
+      if (msg) { msg.textContent = err.message || 'Could not save'; msg.hidden = false; }
     }
   });
   
@@ -1380,7 +1520,9 @@ export async function mountTaskflowApp(opts = {}) {
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
-        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
   
@@ -1430,11 +1572,9 @@ export async function mountTaskflowApp(opts = {}) {
       const tasks = await api('/tasks/all');
       const now = new Date();
       const overdue = tasks.filter((t) => {
-        if (!t.target_date) return false;
-        if (t.status === 'Completed' || t.status === 'Rejected') return false;
-        if (t.verification_status === 'Verified') return false;
+        if (!isDelegatedOverdueTask(t, now)) return false;
         if (empId && overdueAssigneeId(t) !== empId) return false;
-        return parseLocalDate(t.target_date) < now;
+        return true;
       }).sort((a, b) => parseLocalDate(a.target_date) - parseLocalDate(b.target_date));
   
       overdueTasksCache = overdue;
@@ -1578,7 +1718,9 @@ export async function mountTaskflowApp(opts = {}) {
       if (task.verification_status === 'Pending Verification') {
         statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
-        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
   
@@ -1730,7 +1872,7 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const allTasks = await api('/tasks/my');
       const visibleTasks = allTasks.filter(
-        (task) => task.status !== 'Completed' && task.status !== 'Rejected'
+        (task) => task.status !== 'Completed' && !isRejectedTask(task)
       );
   
       // Admin can be personally assigned recurring tasks too — those never
@@ -1797,7 +1939,7 @@ export async function mountTaskflowApp(opts = {}) {
   
     leavesWrap.innerHTML = '<div class="empty-state">Loading…</div>';
     verifWrap.innerHTML = '<div class="empty-state">Loading…</div>';
-    if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
+    if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
     ticketsWrap.innerHTML = '<div class="empty-state">Loading…</div>';
   
     try {
@@ -1948,7 +2090,9 @@ export async function mountTaskflowApp(opts = {}) {
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
-        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">↩ Rej.</span>`;
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
   
@@ -2053,7 +2197,7 @@ export async function mountTaskflowApp(opts = {}) {
       return `<div class="verify-badge pending">⏳ Sent for verification to <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>`;
     }
     if (task.verification_status === 'Verification Rejected') {
-      return `<div class="verify-badge rejected">↩ Verification rejected${task.verification_note ? `: ${escapeHtml(task.verification_note)}` : ''}</div>`;
+      return `<div class="verify-badge rejected">Correction${task.verification_note ? `: ${escapeHtml(task.verification_note)}` : ''}</div>`;
     }
     if (task.verification_status === 'Verified') {
       return `<div class="verify-badge verified">✅ Verified by <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>`;
@@ -2132,7 +2276,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (task.status === 'In Progress' && state.user.role === 'admin') {
       buttons.push(makeActionBtn('action-complete', 'Mark complete', () => updateStatus(task.id, 'Completed')));
     }
-    if (task.status === 'Rejected') {
+    if (task.status === 'Rejected' && state.user.role === 'admin') {
       buttons.push(makeActionBtn('action-start', 'Re-open', () => updateStatus(task.id, 'Pending')));
     }
     return buttons;
@@ -2264,6 +2408,92 @@ export async function mountTaskflowApp(opts = {}) {
     document.querySelectorAll('.card-menu-list').forEach((l) => { l.hidden = true; });
   });
   
+  async function openAssignCheckpointGate() {
+    const typeId = els.fTaskType.value;
+    const typeName = els.fTaskType.options[els.fTaskType.selectedIndex]?.text || 'this task type';
+    const modal = document.getElementById('taskCpModal');
+    const listEl = document.getElementById('taskCpModalList');
+    const msgEl = document.getElementById('taskCpModalMsg');
+    const titleEl = document.getElementById('taskCpModalTitle');
+    const assignBtn = document.getElementById('submitTaskCpModal');
+    if (!modal || !listEl) {
+      showFormMsg(els.addTaskMsg, 'Could not open checkpoint popup');
+      return;
+    }
+    if (titleEl) titleEl.textContent = `Checkpoints — ${typeName}`;
+    if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+    listEl.innerHTML = '<p class="form-note">Loading checkpoints…</p>';
+    if (assignBtn) { assignBtn.disabled = true; assignBtn.hidden = false; }
+    modal.hidden = false;
+
+    let labels = [];
+    try {
+      const template = await api(`/master/task-types/${typeId}/checkpoints`);
+      labels = (template || []).map((r) => r.label).filter(Boolean);
+    } catch (err) {
+      if (msgEl) { msgEl.textContent = err.message || 'Could not load checkpoints'; msgEl.hidden = false; }
+    }
+
+    if (!labels.length) {
+      listEl.innerHTML = '<p class="form-note">No checkpoints for this task type. You can assign it now.</p>';
+      if (assignBtn) assignBtn.disabled = false;
+      return;
+    }
+
+    listEl.innerHTML = `<div class="checkpoint-list">${labels.map((label, i) => `
+      <label class="checkpoint-item">
+        <input type="checkbox" data-cp-label="${escapeHtml(label)}" data-cp-i="${i}" />
+        <span>${escapeHtml(label)}</span>
+      </label>`).join('')}</div>`;
+
+    const syncAssignBtn = () => {
+      const boxes = [...listEl.querySelectorAll('input[type=checkbox]')];
+      const allTicked = boxes.length > 0 && boxes.every((b) => b.checked);
+      if (assignBtn) assignBtn.disabled = !allTicked;
+      if (msgEl) {
+        if (allTicked) {
+          msgEl.hidden = true;
+          msgEl.textContent = '';
+        } else {
+          msgEl.textContent = 'Tick every checkpoint to assign this task.';
+          msgEl.hidden = false;
+        }
+      }
+    };
+    listEl.querySelectorAll('input[type=checkbox]').forEach((box) => {
+      box.addEventListener('change', () => {
+        box.closest('.checkpoint-item')?.classList.toggle('cp-done', box.checked);
+        syncAssignBtn();
+      });
+    });
+    syncAssignBtn();
+  }
+
+  function closeTaskCpModal() {
+    const modal = document.getElementById('taskCpModal');
+    if (modal) modal.hidden = true;
+  }
+  document.getElementById('closeTaskCpModal')?.addEventListener('click', closeTaskCpModal);
+  document.getElementById('cancelTaskCpModal')?.addEventListener('click', closeTaskCpModal);
+  document.getElementById('submitTaskCpModal')?.addEventListener('click', async () => {
+    const msgEl = document.getElementById('taskCpModalMsg');
+    const assignBtn = document.getElementById('submitTaskCpModal');
+    const boxes = [...document.querySelectorAll('#taskCpModalList input[type=checkbox]')];
+    const labels = boxes.map((b) => b.dataset.cpLabel || '').filter(Boolean);
+    if (boxes.length && !boxes.every((b) => b.checked)) {
+      if (msgEl) { msgEl.textContent = 'Tick every checkpoint to assign this task.'; msgEl.hidden = false; }
+      return;
+    }
+    if (assignBtn) assignBtn.disabled = true;
+    try {
+      await actuallyAssignTask(labels);
+      closeTaskCpModal();
+    } catch (err) {
+      if (msgEl) { msgEl.textContent = err.message || 'Could not assign task'; msgEl.hidden = false; }
+      if (assignBtn) assignBtn.disabled = false;
+    }
+  });
+
   // ─── Send for verification ───────────────────────────────────────────────────
   async function openVerifyModal(taskId) {
     state.pendingTaskId = taskId;
@@ -2508,7 +2738,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadVerifications(opts = {}) {
     if (!opts.quiet) {
       if (els.verificationsTableBody) {
-        els.verificationsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
+        els.verificationsTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
       }
       if (els.verificationsList) {
         els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -2780,16 +3010,12 @@ export async function mountTaskflowApp(opts = {}) {
   
   function renderVerificationsTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
-  
-      // Request ID
-      const tdReqId = document.createElement('td');
-      tdReqId.innerHTML = `<span class="sr-number">#${task.id}</span>`;
   
       // Task Sr No
       const tdSr = document.createElement('td');
@@ -2847,7 +3073,7 @@ export async function mountTaskflowApp(opts = {}) {
         });
         tdActions.appendChild(startBtn);
       }
-      tr.append(tdReqId, tdSr, tdProject, tdTaskType, tdSubmittedBy, tdAttach, tdDate, tdActions);
+      tr.append(tdSr, tdProject, tdTaskType, tdSubmittedBy, tdAttach, tdDate, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -3012,6 +3238,8 @@ export async function mountTaskflowApp(opts = {}) {
       showToast('Ticket raised ✅', 'success');
       els.ticketModal.hidden = true;
       if (state.activeView === 'tickets') loadTickets();
+      reloadCurrentTaskView();
+      refreshNavBadges();
     } catch (err) {
       els.ticketFormMsg.textContent = err.message;
       els.ticketFormMsg.hidden = false;
@@ -3990,6 +4218,11 @@ export async function mountTaskflowApp(opts = {}) {
     const role = document.getElementById('emp-role').value;
     let department = document.getElementById('emp-department').value.trim();
     if (role === 'client' && !department) department = 'Client';
+    if (role === 'client' && !siteName) {
+      els.employeeFormMsg.textContent = 'Please select the project for this client';
+      els.employeeFormMsg.hidden = false;
+      return;
+    }
     const body = {
       full_name:   document.getElementById('emp-fullname').value.trim(),
       department,
@@ -4072,6 +4305,11 @@ export async function mountTaskflowApp(opts = {}) {
       is_active:   els.editEmpStatusToggle.dataset.active === 'true'
     };
     const siteName = (els.editEmpSite || document.getElementById('edit-emp-site'))?.value?.trim() || '';
+    if (role === 'client' && !siteName) {
+      els.editEmployeeFormMsg.textContent = 'Please select the project for this client';
+      els.editEmployeeFormMsg.hidden = false;
+      return;
+    }
     body.site_name = siteName || null;
     body.site_names = siteName ? [siteName] : null;
     body.whatsapp_number = (document.getElementById('edit-emp-whatsapp')?.value || '').trim() || null;
@@ -4391,6 +4629,57 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // ─── Manage Sites ─────────────────────────────────────────────────────────────
+  function dateInputValue(raw) {
+    if (!raw) return '';
+    return String(raw).slice(0, 10);
+  }
+
+  function isPcEmployee(emp) {
+    const role = String(emp?.role || '').toLowerCase().trim();
+    const des = String(emp?.designation || '').toLowerCase().trim();
+    const blob = `${role} ${des}`;
+    if (role === 'pc' || des === 'pc') return true;
+    if (/\bpc\b/.test(blob)) return true;
+    if (blob.includes('process controller')) return true;
+    return false;
+  }
+
+  function fillSitePcDropdown(employees, keepId) {
+    const pcs = (employees || []).filter(isPcEmployee);
+    if (keepId && !pcs.some((e) => e.id === keepId)) {
+      const extra = (employees || []).find((e) => e.id === keepId);
+      if (extra) pcs.unshift(extra);
+    }
+    fillSelect(els.sitePc, pcs, { placeholder: 'Select PC', labelKey: 'full_name' });
+  }
+
+  function openSiteModal(site) {
+    els.siteForm?.reset();
+    if (els.siteFormMsg) els.siteFormMsg.hidden = true;
+    fillSitePcDropdown(state.master.employees || [], site?.pc_id);
+    if (site) {
+      if (els.siteEditId) els.siteEditId.value = site.id;
+      if (els.siteModalTitle) els.siteModalTitle.textContent = 'Edit site';
+      if (els.siteFormSubmit) els.siteFormSubmit.textContent = 'Save changes';
+      document.getElementById('site-client').value = site.client_name || '';
+      document.getElementById('site-name').value = site.name || '';
+      document.getElementById('site-type').value = site.project_type || '';
+      document.getElementById('site-location').value = site.location || '';
+      document.getElementById('site-start').value = dateInputValue(site.start_date);
+      document.getElementById('site-end').value = dateInputValue(site.expected_end_date);
+      if (els.siteTeamleader) els.siteTeamleader.value = site.team_leader_id || '';
+      if (els.siteCoordinator) els.siteCoordinator.value = site.coordinator_id || '';
+      if (els.siteIncharge) els.siteIncharge.value = site.site_incharge_id || '';
+      if (els.sitePc) els.sitePc.value = site.pc_id || '';
+      document.getElementById('site-description').value = site.description || '';
+    } else {
+      if (els.siteEditId) els.siteEditId.value = '';
+      if (els.siteModalTitle) els.siteModalTitle.textContent = 'Add new construction site';
+      if (els.siteFormSubmit) els.siteFormSubmit.textContent = 'Add site';
+    }
+    els.siteModal.hidden = false;
+  }
+
   async function loadSites() {
     els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
     try { const sites = await api('/sites'); renderSitesTable(sites); }
@@ -4414,9 +4703,14 @@ export async function mountTaskflowApp(opts = {}) {
         <td class="row-actions"></td>
       `;
       const actionsCell = tr.children[6];
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-accept';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openSiteModal(site));
       const deleteBtn = document.createElement('button');
       deleteBtn.className = 'action-btn action-reject'; deleteBtn.textContent = '🗑️ Delete';
       deleteBtn.addEventListener('click', () => deleteSite(site));
+      actionsCell.appendChild(editBtn);
       actionsCell.appendChild(deleteBtn);
       els.sitesTableBody.appendChild(tr);
     });
@@ -4428,13 +4722,12 @@ export async function mountTaskflowApp(opts = {}) {
       showToast('Site deleted', 'success'); loadSites(); loadMasterData();
     } catch (err) { showToast(err.message, 'error'); }
   }
-  els.openAddSite?.addEventListener('click', () => {
-    els.siteForm.reset(); els.siteFormMsg.hidden = true; els.siteModal.hidden = false;
-  });
+  els.openAddSite?.addEventListener('click', () => openSiteModal(null));
   els.closeSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
   els.cancelSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
   els.siteForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.siteFormMsg.hidden = true;
+    const editId = (els.siteEditId?.value || '').trim();
     const body = {
       client_name:       document.getElementById('site-client').value.trim(),
       name:              document.getElementById('site-name').value.trim(),
@@ -4445,11 +4738,18 @@ export async function mountTaskflowApp(opts = {}) {
       team_leader_id:    els.siteTeamleader.value,
       coordinator_id:    els.siteCoordinator.value,
       site_incharge_id:  els.siteIncharge.value,
+      pc_id:             els.sitePc?.value || '',
       description:       document.getElementById('site-description').value.trim()
     };
     try {
-      await api('/sites', { method: 'POST', body });
-      showToast('Site added ✅', 'success'); els.siteModal.hidden = true;
+      if (editId) {
+        await api(`/sites/${editId}`, { method: 'PATCH', body });
+        showToast('Site updated ✅', 'success');
+      } else {
+        await api('/sites', { method: 'POST', body });
+        showToast('Site added ✅', 'success');
+      }
+      els.siteModal.hidden = true;
       loadSites(); loadMasterData();
     } catch (err) { els.siteFormMsg.textContent = err.message; els.siteFormMsg.hidden = false; }
   });
@@ -5511,6 +5811,7 @@ export async function mountTaskflowApp(opts = {}) {
 
     (allTasks || []).forEach((t) => {
       if (t.status === 'Rejected') return;
+      if (t.verification_status === 'Verification Rejected') return;
 
       const verified = isReportVerified(t);
       const doneDay = taskVerifiedDay(t);
@@ -6404,8 +6705,29 @@ export async function mountTaskflowApp(opts = {}) {
   // Bot answers arrive as plain text with SECTION HEADINGS, "• bullet" lines and
   // "  Label: value" detail lines. Turn that into readable blocks instead of a
   // wall of <br>s.
+  function stripBotMd(s) {
+    return String(s || '')
+      .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, ''))
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  }
+  function isBotHeading(trimmed) {
+    if (/^[•*\u2022-]/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed)) return false;
+    if (/^#{1,3}\s+/.test(trimmed)) return true;
+    if (/^\*\*.+\*\*$/.test(trimmed)) return true;
+    // OVERDUE — Charmy Desai (5)  /  TASK COUNTS  /  DELEGATED OVERDUE (12)
+    if (
+      /^[A-Z][A-Z0-9 /&()]{1,48}( — | —|- |:|\s*\(|$)/.test(trimmed) &&
+      trimmed.length < 90
+    ) {
+      return true;
+    }
+    return false;
+  }
   function renderBotAnswer(text) {
-    const raw = String(text || '').replace(/\r/g, '');
+    const raw = stripBotMd(String(text || '').replace(/\r/g, ''));
     const out = [];
     let list = [];
     const flushList = () => {
@@ -6431,20 +6753,14 @@ export async function mountTaskflowApp(opts = {}) {
         flushList();
         return;
       }
-      const headingText = trimmed
-        .replace(/^#{1,3}\s+/, '')
-        .replace(/^\*\*(.+)\*\*$/, '$1');
-      const isHeading =
-        (!/^[•*-]/.test(trimmed) && /^[A-Z0-9 \/()&·—-]{3,}$/.test(headingText)) ||
-        /^#{1,3}\s+/.test(trimmed) ||
-        /^\*\*.+\*\*$/.test(trimmed);
-      if (isHeading) {
+      const headingText = trimmed.replace(/^#{1,3}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1');
+      if (isBotHeading(trimmed)) {
         flushList();
         out.push(`<div class="bot-heading">${escapeHtml(headingText)}</div>`);
         return;
       }
-      if (/^[•*-]\s+/.test(trimmed)) {
-        const body = trimmed.replace(/^[•*-]\s+/, '');
+      if (/^[•*\u2022-]\s+/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed)) {
+        const body = trimmed.replace(/^[•*\u2022-]\s+/, '').replace(/^\d+[.)]\s+/, '');
         const parts = body.split('|').map((p) => p.trim()).filter(Boolean);
         const inner = parts.length > 1
           ? `<strong>${escapeHtml(parts[0])}</strong>` +
@@ -6458,6 +6774,14 @@ export async function mountTaskflowApp(opts = {}) {
         if (!attachKv(kv[1], kv[2])) {
           flushList();
           out.push(`<p class="bot-line bot-kv-line"><em>${escapeHtml(kv[1])}</em> ${escapeHtml(kv[2])}</p>`);
+        }
+        return;
+      }
+      if (/^\([^)]+\)$/.test(trimmed) || /^none\.?$/i.test(trimmed)) {
+        if (list.length) {
+          list.push(`<li class="bot-empty">${escapeHtml(trimmed)}</li>`);
+        } else {
+          out.push(`<p class="bot-line bot-empty">${escapeHtml(trimmed)}</p>`);
         }
         return;
       }
@@ -6519,23 +6843,6 @@ export async function mountTaskflowApp(opts = {}) {
         appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets.');
       }
     }
-    try {
-      const alerts = await api('/bot/alerts').catch(() => []);
-      const box = document.getElementById('botAlerts');
-      if (box) {
-        const unread = (alerts || []).filter((a) => !a.is_read);
-        box.innerHTML = unread.length
-          ? `<div class="subsection-title">Alerts</div>` +
-            unread
-              .slice(0, 8)
-              .map(
-                (a) =>
-                  `<div class="ticket-card"><strong>${escapeHtml(a.title)}</strong><p class="ticket-desc">${escapeHtml(a.body)}</p></div>`
-              )
-              .join('')
-          : '';
-      }
-    } catch (_) {}
   }
 
   if (!window._botAskBound) {
@@ -6864,14 +7171,9 @@ export async function mountTaskflowApp(opts = {}) {
       } catch (err) {
         const msg = err?.message || String(err);
         if (list) {
-          list.innerHTML = `<div class="empty-state" style="padding:12px;font-size:0.85rem">
-            <strong>Team chat setup pending</strong><br/>
-            Supabase pe SQL run karo:<br/>
-            <code>add_dip_bot.sql</code> then <code>add_chat_unread_meet.sql</code><br/>
-            <span style="color:var(--muted)">${escapeHtml(msg)}</span>
-          </div>`;
+          list.innerHTML = `<div class="empty-state" style="padding:12px;font-size:0.85rem">No chats yet — pick a colleague and Start chat.</div>`;
         }
-        showToast('Run chat SQL in Supabase first', 'error');
+        if (msg && !/run backend\/sql/i.test(msg)) showToast(msg, 'error');
         return;
       }
       try {
@@ -7217,7 +7519,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     let tasks = [];
     try {
-      tasks = await api('/tasks/my');
+      tasks = (await api('/tasks/my')).filter((t) => !isRejectedTask(t));
     } catch (err) {
       grid.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
       return;
