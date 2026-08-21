@@ -25,6 +25,7 @@ app.use('/api/auth',            require('./routes/auth'));
 app.use('/api/tasks',           require('./routes/tasks'));
 app.use('/api/master',          require('./routes/master'));
 app.use('/api/employees',       require('./routes/employees'));
+app.use('/api/clients',         require('./routes/clients_admin'));
 app.use('/api/sites',           require('./routes/sites'));
 app.use('/api/recurring-tasks', require('./routes/recurring_tasks'));
 app.use('/api/leaves',          require('./routes/leaves'));

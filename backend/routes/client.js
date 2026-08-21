@@ -11,11 +11,28 @@ function isClientUser(user) {
   return role === 'client' || dept === 'client';
 }
 
-function requireClient(req, res, next) {
+async function requireClient(req, res, next) {
   if (!isClientUser(req.user)) {
     return res.status(403).json({ error: 'This area is for client logins only' });
   }
-  next();
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, is_active, role, department')
+      .eq('id', req.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data || data.is_active === false) {
+      return res.status(401).json({ error: 'This client account is inactive. Contact office.' });
+    }
+    if (!isClientUser(data)) {
+      return res.status(403).json({ error: 'This area is for client logins only' });
+    }
+    next();
+  } catch (err) {
+    console.error('requireClient:', err.message);
+    return res.status(500).json({ error: 'Could not verify client access' });
+  }
 }
 
 router.use(requireClient);

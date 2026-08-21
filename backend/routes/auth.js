@@ -95,7 +95,16 @@ router.post('/login', async (req, res) => {
     const user = await loadUserByUsername(username.trim());
 
     if (!user || user.is_active === false) {
-      return res.status(401).json({ error: 'Invalid username or password' });
+      const inactiveClient =
+        user &&
+        user.is_active === false &&
+        ((user.role || '').toLowerCase() === 'client' ||
+          (user.department || '').toLowerCase() === 'client');
+      return res.status(401).json({
+        error: inactiveClient
+          ? 'This client account is inactive. Contact office.'
+          : 'Invalid username or password',
+      });
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password_hash);

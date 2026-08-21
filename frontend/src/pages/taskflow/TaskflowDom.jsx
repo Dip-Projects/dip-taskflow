@@ -569,6 +569,36 @@ export default function TaskflowDom() {
           </div>
         </section>
 
+        {/* MANAGE CLIENTS */}
+        <section id="view-clients" className="view" hidden={true}>
+          <div className="view-header-row">
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">Manage clients</h2>
+              <p className="view-sub">Create client logins and set Head / Coordinator / PC shown on their portal.</p>
+            </div>
+            <button id="openAddClient" className="primary-btn primary-btn-inline">+ Add client</button>
+          </div>
+          <div className="table-card table-card--stack" style={{marginTop: 20}}>
+            <div className="table-scroll">
+              <table className="data-table" id="clientsTable">
+                <thead>
+                  <tr>
+                    <th>Client name</th>
+                    <th>Username</th>
+                    <th>Project / Site</th>
+                    <th>Head</th>
+                    <th>Coordinator</th>
+                    <th>PC</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="clientsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         {/* MASTER DATA */}
         <section id="view-masterdata" className="view" hidden={true}>
           <div className="view-heading">
@@ -1230,7 +1260,6 @@ export default function TaskflowDom() {
             <option value="">Select role</option>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
-            <option value="client">Client</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -1288,7 +1317,6 @@ export default function TaskflowDom() {
           <select id="edit-emp-role" required>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
-            <option value="client">Client</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -1335,11 +1363,11 @@ export default function TaskflowDom() {
   <div id="credsModal" className="modal-backdrop" hidden={true}>
     <div className="modal">
       <div className="modal-header">
-        <h3>Employee added ✅</h3>
+        <h3 id="credsModalTitle">Login created ✅</h3>
         <button className="modal-close" id="closeCredsModal">&times;</button>
       </div>
       <div className="modal-body">
-        <p>Share these login details with the employee — they won't be shown again.</p>
+        <p id="credsModalNote">Share these login details — they won't be shown again.</p>
         <div className="creds-box">
           <div><span>Username</span><strong id="credsUsername"></strong></div>
           <div><span>Password</span><strong id="credsPassword"></strong></div>
@@ -1408,8 +1436,8 @@ export default function TaskflowDom() {
         </div>
         <div className="field-grid">
           <div className="field">
-            <label htmlFor="site-incharge">Site incharge <span className="req">*</span></label>
-            <select id="site-incharge" required><option value="">Select site incharge</option></select>
+            <label htmlFor="site-incharge">Site incharge (Head) <span className="req">*</span></label>
+            <select id="site-incharge" required><option value="">Select head</option></select>
           </div>
           <div className="field">
             <label htmlFor="site-pc">PC <span className="req">*</span></label>
@@ -1425,6 +1453,51 @@ export default function TaskflowDom() {
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelSiteModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline" id="siteFormSubmit">Add site</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Add / Edit Client Modal */}
+  <div id="clientModal" className="modal-backdrop" hidden={true}>
+    <div className="modal modal-wide">
+      <div className="modal-header">
+        <h3 id="clientModalTitle">Add client</h3>
+        <button className="modal-close" id="closeClientModal">&times;</button>
+      </div>
+      <form id="clientForm" className="modal-body">
+        <input type="hidden" id="client-edit-id" value="" />
+        <div className="field">
+          <label htmlFor="client-fullname">Client name <span className="req">*</span></label>
+          <input id="client-fullname" type="text" placeholder="Enter client name" required />
+        </div>
+        <div className="field">
+          <label htmlFor="client-site">Project / Site <span className="req">*</span></label>
+          <select id="client-site" required>
+            <option value="">Select project</option>
+          </select>
+          <p className="form-note">Client login only shows this project’s reports and materials.</p>
+        </div>
+        <div className="field-grid">
+          <div className="field">
+            <label htmlFor="client-head">Head <span className="req">*</span></label>
+            <select id="client-head" required><option value="">Select head</option></select>
+          </div>
+          <div className="field">
+            <label htmlFor="client-coordinator">Coordinator <span className="req">*</span></label>
+            <select id="client-coordinator" required><option value="">Select coordinator</option></select>
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="client-pc">PC <span className="req">*</span></label>
+          <select id="client-pc" required><option value="">Select PC</option></select>
+          <p className="form-note">These names (and WhatsApp if saved on employee) show on client My Profile.</p>
+        </div>
+        <p className="form-note" id="clientCredsNote">Username and password will be auto-generated after save.</p>
+        <p id="clientFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelClientModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline" id="clientFormSubmit">Add client</button>
         </div>
       </form>
     </div>

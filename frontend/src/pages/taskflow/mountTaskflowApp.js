@@ -209,6 +209,22 @@ function collectEls() {
     siteModalTitle: document.getElementById('siteModalTitle'),
     siteFormSubmit: document.getElementById('siteFormSubmit'),
     siteEditId: document.getElementById('site-edit-id'),
+    clientsTableBody: document.getElementById('clientsTableBody'),
+    openAddClient: document.getElementById('openAddClient'),
+    clientModal: document.getElementById('clientModal'),
+    clientForm: document.getElementById('clientForm'),
+    clientFormMsg: document.getElementById('clientFormMsg'),
+    closeClientModal: document.getElementById('closeClientModal'),
+    cancelClientModal: document.getElementById('cancelClientModal'),
+    clientModalTitle: document.getElementById('clientModalTitle'),
+    clientFormSubmit: document.getElementById('clientFormSubmit'),
+    clientEditId: document.getElementById('client-edit-id'),
+    clientFullname: document.getElementById('client-fullname'),
+    clientSite: document.getElementById('client-site'),
+    clientHead: document.getElementById('client-head'),
+    clientCoordinator: document.getElementById('client-coordinator'),
+    clientPc: document.getElementById('client-pc'),
+    clientCredsNote: document.getElementById('clientCredsNote'),
     toast: document.getElementById('toast')
   };
 }
@@ -262,6 +278,16 @@ export async function mountTaskflowApp(opts = {}) {
     els.toast.hidden = false;
     clearTimeout(showToast._t);
     showToast._t = setTimeout(() => { els.toast.hidden = true; }, 3200);
+  }
+
+  function showCredsModal(username, password, { title, note } = {}) {
+    const titleEl = document.getElementById('credsModalTitle');
+    const noteEl = document.getElementById('credsModalNote');
+    if (titleEl) titleEl.textContent = title || 'Login created ✅';
+    if (noteEl) noteEl.textContent = note || "Share these login details — they won't be shown again.";
+    els.credsUsername.textContent = username;
+    els.credsPassword.textContent = password;
+    els.credsModal.hidden = false;
   }
 
   function hideFormMsg(el) {
@@ -724,6 +750,7 @@ export async function mountTaskflowApp(opts = {}) {
   
     const showAdminBlock = visOk('employees') && (isAdmin || canAddEmployee)
       || visOk('sites') && (isAdmin || canAddSite)
+      || visOk('clients') && isAdmin
       || visOk('hierarchy') && isAdmin
       || visOk('project-mgmt') && isAdmin
       || visOk('masterdata') && isAdmin
@@ -741,6 +768,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (visOk('project-mgmt')) adminBtns.push(makeNavButton('project-mgmt', '🗂️ Project management'));
       }
       if (visOk('sites') && (isAdmin || canAddSite)) adminBtns.push(makeNavButton('sites', '🏗️ Manage sites'));
+      if (visOk('clients') && isAdmin) adminBtns.push(makeNavButton('clients', '👤 Manage clients'));
       if (visOk('masterdata') && isAdmin) adminBtns.push(makeNavButton('masterdata', '🗂️ Departments & task types'));
       if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', '🔐 Permissions'));
       if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
@@ -792,7 +820,7 @@ export async function mountTaskflowApp(opts = {}) {
     verifications: 'verification',
     'reschedule-requests': 'reschedule',
     employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
-    sites: 'administration', masterdata: 'administration', permissions: 'administration',
+    sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
     'time-dashboard': 'administration', fms: 'administration',
     'monthly-report': 'reports',
@@ -1057,6 +1085,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'employees')     loadEmployees();
     if (viewKey === 'hierarchy')     loadHierarchy();
     if (viewKey === 'sites')         loadSites();
+    if (viewKey === 'clients')       loadClients();
     if (viewKey === 'masterdata')    loadMasterDataView();
     if (viewKey === 'permissions')   loadPermissions();
     if (viewKey === 'visibility')    loadVisibility();
@@ -1169,15 +1198,17 @@ export async function mountTaskflowApp(opts = {}) {
         api('/master/departments'), api('/master/projects'),
         api('/master/task-types'),  api('/master/employees')
       ]);
-      state.master = { departments, projects, taskTypes, employees };
+      state.master = {
+        departments,
+        projects,
+        taskTypes,
+        employees: (employees || []).filter((e) => !isClientUserRow(e)),
+      };
       fillSelect(els.fDepartment, departments, { placeholder: 'Select department' });
       fillSelect(els.fProject, projects, { placeholder: 'Select project' });
       fillSelect(els.fTaskType, taskTypes, { placeholder: 'Select task type' });
       fillSelect(els.filterDepartment, departments, { placeholder: 'All departments' });
-      fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
-      fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
-      fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
-      fillSitePcDropdown(employees);
+      fillSitePeopleDropdowns(employees);
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
       syncOverdueEmployeeDropdown();
@@ -1201,15 +1232,15 @@ export async function mountTaskflowApp(opts = {}) {
   
   async function refreshEmployeeDropdowns() {
     try {
-      const employees = await api('/master/employees');
+      const employees = (await api('/master/employees')).filter((e) => !isClientUserRow(e));
       state.master.employees = employees;
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
       syncOverdueEmployeeDropdown();
       syncRecurringEmployeeDropdown();
-      fillSelect(els.siteTeamleader, employees, { placeholder: 'Select team leader', labelKey: 'full_name' });
-      fillSelect(els.siteCoordinator, employees, { placeholder: 'Select coordinator', labelKey: 'full_name' });
-      fillSelect(els.siteIncharge, employees, { placeholder: 'Select site incharge', labelKey: 'full_name' });
+      fillSelect(els.siteTeamleader, siteTeamLeaderOptions(employees), { placeholder: 'Select team leader', labelKey: 'full_name' });
+      fillSelect(els.siteCoordinator, siteCoordinatorOptions(employees), { placeholder: 'Select coordinator', labelKey: 'full_name' });
+      fillSelect(els.siteIncharge, siteInchargeOptions(employees), { placeholder: 'Select site incharge (Head)', labelKey: 'full_name' });
       fillSitePcDropdown(employees);
       // Reporting Head — optional field on the employee form. Add form shows everyone;
       // Edit form additionally excludes the employee being edited (can't report to self).
@@ -4061,11 +4092,20 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // ─── Manage Employees ─────────────────────────────────────────────────────────
+  function isClientUserRow(u) {
+    const role = String(u?.role || '').toLowerCase().trim();
+    const dept = String(u?.department || '').toLowerCase().trim();
+    const des = String(u?.designation || '').toLowerCase().trim();
+    return role === 'client' || dept === 'client' || des === 'client';
+  }
+
   async function loadEmployees() {
     els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
     els.employeesCards.innerHTML = `<div class="empty-state">Loading employees…</div>`;
     try {
-      const employees = await api('/employees');
+      const all = await api('/employees');
+      // Clients belong only in Manage clients — never here
+      const employees = (all || []).filter((e) => !isClientUserRow(e));
       renderEmployeesTable(employees);
       renderEmployeesCards(employees);
     } catch (err) { showToast(err.message, 'error'); }
@@ -4197,8 +4237,10 @@ export async function mountTaskflowApp(opts = {}) {
     if (!confirm(`Reset password for ${emp.full_name}?`)) return;
     try {
       const { generated_password } = await api(`/employees/${emp.id}/reset-password`, { method: 'POST' });
-      els.credsUsername.textContent = emp.username; els.credsPassword.textContent = generated_password;
-      els.credsModal.hidden = false;
+      showCredsModal(emp.username, generated_password, {
+        title: 'Password reset ✅',
+        note: 'Share the new password with them — it won’t be shown again.',
+      });
     } catch (err) { showToast(err.message, 'error'); }
   }
   
@@ -4237,8 +4279,10 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const created = await api('/employees', { method: 'POST', body });
       els.employeeModal.hidden = true;
-      els.credsUsername.textContent = created.username; els.credsPassword.textContent = created.generated_password;
-      els.credsModal.hidden = false;
+      showCredsModal(created.username, created.generated_password, {
+        title: 'Employee added ✅',
+        note: 'Share these login details with the employee — they won’t be shown again.',
+      });
       loadEmployees(); refreshEmployeeDropdowns();
     } catch (err) { els.employeeFormMsg.textContent = err.message; els.employeeFormMsg.hidden = false; }
   });
@@ -4332,7 +4376,7 @@ export async function mountTaskflowApp(opts = {}) {
     els.hierarchyTreeContainer.innerHTML = `<div class="empty-state">Loading hierarchy…</div>`;
     try {
       const employees = await api('/employees'); // admin-only, includes is_active + reporting_head_id
-      const active = employees.filter((e) => e.is_active !== false);
+      const active = employees.filter((e) => e.is_active !== false && !isClientUserRow(e));
       renderOrgTree(active);
     } catch (err) { showToast(err.message, 'error'); }
   }
@@ -4467,7 +4511,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadPermissions() {
     els.permissionsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
     try {
-      const employees = await api('/employees');
+      const employees = (await api('/employees')).filter((e) => !isClientUserRow(e));
       renderPermissionsTable(employees);
     } catch (err) { showToast(err.message, 'error'); }
   }
@@ -4634,7 +4678,48 @@ export async function mountTaskflowApp(opts = {}) {
     return String(raw).slice(0, 10);
   }
 
+  function empRoleBlob(emp) {
+    return [emp?.department, emp?.designation, emp?.role]
+      .map((s) => String(s || '').toLowerCase())
+      .join(' ');
+  }
+
+  function isClientEmployee(emp) {
+    const role = String(emp?.role || '').toLowerCase();
+    const dept = String(emp?.department || '').toLowerCase();
+    return role === 'client' || dept === 'client';
+  }
+
+  function isMdoEmployee(emp) {
+    const blob = empRoleBlob(emp);
+    return /\bmdo\b/.test(blob) || blob.includes('mdo office');
+  }
+
+  function isHeadEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const role = String(emp?.role || '').toLowerCase();
+    if (role === 'head' || emp?.is_head) return true;
+    const des = String(emp?.designation || '').toLowerCase().trim();
+    if (des === 'head' || des === 'project head' || des === 'site head') return true;
+    return /project head|site head/.test(empRoleBlob(emp));
+  }
+
+  function isSitePeopleEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const blob = empRoleBlob(emp);
+    if (/site engineer|site incharge|site coordinator|site execution|team leader|\bsite\b/.test(blob)) return true;
+    if (emp?.site_name || (Array.isArray(emp?.site_names) && emp.site_names.length)) return true;
+    return false;
+  }
+
+  function isCoordinatorEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const blob = empRoleBlob(emp);
+    return /co-?ordinator|coordinator/.test(blob);
+  }
+
   function isPcEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
     const role = String(emp?.role || '').toLowerCase().trim();
     const des = String(emp?.designation || '').toLowerCase().trim();
     const blob = `${role} ${des}`;
@@ -4644,19 +4729,64 @@ export async function mountTaskflowApp(opts = {}) {
     return false;
   }
 
+  function keepSelected(list, employees, keepId) {
+    if (!keepId || list.some((e) => e.id === keepId)) return list;
+    const extra = (employees || []).find((e) => e.id === keepId);
+    return extra ? [extra, ...list] : list;
+  }
+
+  /** Team leader: all site people + heads (no MDO). */
+  function siteTeamLeaderOptions(employees, keepId) {
+    const list = (employees || []).filter((e) => isSitePeopleEmployee(e) || isHeadEmployee(e));
+    return keepSelected(list, employees, keepId);
+  }
+
+  /** Co-ordinator: coordinators + site people + heads (no MDO). */
+  function siteCoordinatorOptions(employees, keepId) {
+    const list = (employees || []).filter(
+      (e) => isCoordinatorEmployee(e) || isSitePeopleEmployee(e) || isHeadEmployee(e)
+    );
+    return keepSelected(list, employees, keepId);
+  }
+
+  /** Site incharge (Head slot): heads only (no MDO). */
+  function siteInchargeOptions(employees, keepId) {
+    const list = (employees || []).filter((e) => isHeadEmployee(e));
+    return keepSelected(list, employees, keepId);
+  }
+
+  function fillSitePeopleDropdowns(employees, keep = {}) {
+    const emps = employees || state.master.employees || [];
+    fillSelect(els.siteTeamleader, siteTeamLeaderOptions(emps, keep.team_leader_id), {
+      placeholder: 'Select team leader', labelKey: 'full_name',
+    });
+    fillSelect(els.siteCoordinator, siteCoordinatorOptions(emps, keep.coordinator_id), {
+      placeholder: 'Select coordinator', labelKey: 'full_name',
+    });
+    fillSelect(els.siteIncharge, siteInchargeOptions(emps, keep.site_incharge_id), {
+      placeholder: 'Select site incharge (Head)', labelKey: 'full_name',
+    });
+    fillSitePcDropdown(emps, keep.pc_id);
+    if (keep.team_leader_id && els.siteTeamleader) els.siteTeamleader.value = keep.team_leader_id;
+    if (keep.coordinator_id && els.siteCoordinator) els.siteCoordinator.value = keep.coordinator_id;
+    if (keep.site_incharge_id && els.siteIncharge) els.siteIncharge.value = keep.site_incharge_id;
+    if (keep.pc_id && els.sitePc) els.sitePc.value = keep.pc_id;
+  }
+
   function fillSitePcDropdown(employees, keepId) {
-    const pcs = (employees || []).filter(isPcEmployee);
-    if (keepId && !pcs.some((e) => e.id === keepId)) {
-      const extra = (employees || []).find((e) => e.id === keepId);
-      if (extra) pcs.unshift(extra);
-    }
+    const pcs = keepSelected((employees || []).filter(isPcEmployee), employees, keepId);
     fillSelect(els.sitePc, pcs, { placeholder: 'Select PC', labelKey: 'full_name' });
   }
 
   function openSiteModal(site) {
     els.siteForm?.reset();
     if (els.siteFormMsg) els.siteFormMsg.hidden = true;
-    fillSitePcDropdown(state.master.employees || [], site?.pc_id);
+    fillSitePeopleDropdowns(state.master.employees || [], site ? {
+      team_leader_id: site.team_leader_id,
+      coordinator_id: site.coordinator_id,
+      site_incharge_id: site.site_incharge_id,
+      pc_id: site.pc_id,
+    } : {});
     if (site) {
       if (els.siteEditId) els.siteEditId.value = site.id;
       if (els.siteModalTitle) els.siteModalTitle.textContent = 'Edit site';
@@ -4667,10 +4797,6 @@ export async function mountTaskflowApp(opts = {}) {
       document.getElementById('site-location').value = site.location || '';
       document.getElementById('site-start').value = dateInputValue(site.start_date);
       document.getElementById('site-end').value = dateInputValue(site.expected_end_date);
-      if (els.siteTeamleader) els.siteTeamleader.value = site.team_leader_id || '';
-      if (els.siteCoordinator) els.siteCoordinator.value = site.coordinator_id || '';
-      if (els.siteIncharge) els.siteIncharge.value = site.site_incharge_id || '';
-      if (els.sitePc) els.sitePc.value = site.pc_id || '';
       document.getElementById('site-description').value = site.description || '';
     } else {
       if (els.siteEditId) els.siteEditId.value = '';
@@ -4745,13 +4871,190 @@ export async function mountTaskflowApp(opts = {}) {
       if (editId) {
         await api(`/sites/${editId}`, { method: 'PATCH', body });
         showToast('Site updated ✅', 'success');
+        els.siteModal.hidden = true;
       } else {
-        await api('/sites', { method: 'POST', body });
+        const created = await api('/sites', { method: 'POST', body });
+        els.siteModal.hidden = true;
         showToast('Site added ✅', 'success');
+        if (created?.client_login?.username && created?.client_login?.generated_password) {
+          showCredsModal(created.client_login.username, created.client_login.generated_password, {
+            title: 'Client login created ✅',
+            note: 'Share these client portal login details — they won’t be shown again.',
+          });
+        } else {
+          showToast('Site added, but client login was not created — add from Manage clients', 'error');
+        }
       }
-      els.siteModal.hidden = true;
       loadSites(); loadMasterData();
     } catch (err) { els.siteFormMsg.textContent = err.message; els.siteFormMsg.hidden = false; }
+  });
+
+  // ─── Manage Clients ───────────────────────────────────────────────────────────
+  function fillClientPeopleDropdowns(employees) {
+    const list = employees || state.master.employees || [];
+    fillSelect(els.clientHead, list, { placeholder: 'Select head', labelKey: 'full_name' });
+    fillSelect(els.clientCoordinator, list, { placeholder: 'Select coordinator', labelKey: 'full_name' });
+    fillSitePcDropdownFor(els.clientPc, list);
+  }
+
+  function fillSitePcDropdownFor(selectEl, employees, keepId) {
+    const pcs = (employees || []).filter(isPcEmployee);
+    if (keepId && !pcs.some((e) => e.id === keepId)) {
+      const extra = (employees || []).find((e) => e.id === keepId);
+      if (extra) pcs.unshift(extra);
+    }
+    fillSelect(selectEl, pcs, { placeholder: 'Select PC', labelKey: 'full_name' });
+  }
+
+  function matchEmployeeIdByName(employees, name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return '';
+    const hit = (employees || []).find((e) => String(e.full_name || '').trim().toLowerCase() === n);
+    return hit?.id || '';
+  }
+
+  function openClientModal(client) {
+    els.clientForm?.reset();
+    if (els.clientFormMsg) els.clientFormMsg.hidden = true;
+    fillSelect(els.clientSite, state.master.projects || [], {
+      placeholder: 'Select project', labelKey: 'name', valueKey: 'name'
+    });
+    fillClientPeopleDropdowns(state.master.employees || []);
+    if (client) {
+      if (els.clientEditId) els.clientEditId.value = client.id;
+      if (els.clientModalTitle) els.clientModalTitle.textContent = 'Edit client';
+      if (els.clientFormSubmit) els.clientFormSubmit.textContent = 'Save changes';
+      if (els.clientCredsNote) els.clientCredsNote.textContent = 'Username stays the same. Use Reset password from the list if needed.';
+      if (els.clientFullname) els.clientFullname.value = client.full_name || '';
+      if (els.clientSite) els.clientSite.value = client.site_name || '';
+      const sc = client.site_contacts || {};
+      const emps = state.master.employees || [];
+      if (els.clientHead) els.clientHead.value = matchEmployeeIdByName(emps, sc.head_name);
+      if (els.clientCoordinator) els.clientCoordinator.value = matchEmployeeIdByName(emps, sc.incharge_name);
+      fillSitePcDropdownFor(els.clientPc, emps, matchEmployeeIdByName(emps, sc.pc_name));
+      if (els.clientPc) els.clientPc.value = matchEmployeeIdByName(emps, sc.pc_name);
+    } else {
+      if (els.clientEditId) els.clientEditId.value = '';
+      if (els.clientModalTitle) els.clientModalTitle.textContent = 'Add client';
+      if (els.clientFormSubmit) els.clientFormSubmit.textContent = 'Add client';
+      if (els.clientCredsNote) els.clientCredsNote.textContent = 'Username and password will be auto-generated after save.';
+    }
+    if (els.clientModal) els.clientModal.hidden = false;
+  }
+
+  async function loadClients() {
+    if (!els.clientsTableBody) return;
+    els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading clients…</td></tr>`;
+    try {
+      const clients = await api('/clients');
+      renderClientsTable(clients);
+    } catch (err) {
+      showToast(err.message, 'error');
+      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  function renderClientsTable(clients) {
+    if (!clients.length) {
+      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No clients yet</td></tr>`;
+      return;
+    }
+    els.clientsTableBody.innerHTML = '';
+    clients.forEach((c) => {
+      const sc = c.site_contacts || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="font-weight:600">${escapeHtml(c.full_name || '—')}</strong></td>
+        <td>${escapeHtml(c.username || '—')}</td>
+        <td>${escapeHtml(c.site_name || '—')}</td>
+        <td>${escapeHtml(sc.head_name || '—')}</td>
+        <td>${escapeHtml(sc.incharge_name || '—')}</td>
+        <td>${escapeHtml(sc.pc_name || '—')}</td>
+        <td></td>
+        <td class="row-actions"></td>
+      `;
+      const statusCell = tr.children[6];
+      const statusBtn = document.createElement('button');
+      statusBtn.className = `status-toggle ${c.is_active === false ? 'inactive' : 'active'}`;
+      statusBtn.textContent = c.is_active === false ? 'Inactive' : 'Active';
+      statusBtn.title = 'Click to toggle. Inactive clients cannot open client portal.';
+      statusBtn.addEventListener('click', () => toggleClientStatus(c));
+      statusCell.appendChild(statusBtn);
+
+      const actions = tr.children[7];
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-accept';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openClientModal(c));
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'action-btn action-start';
+      resetBtn.textContent = '🔑 Reset password';
+      resetBtn.addEventListener('click', () => resetClientPassword(c));
+      actions.appendChild(editBtn);
+      actions.appendChild(resetBtn);
+      els.clientsTableBody.appendChild(tr);
+    });
+  }
+
+  async function toggleClientStatus(client) {
+    const next = client.is_active === false;
+    try {
+      await api(`/clients/${client.id}`, { method: 'PATCH', body: { is_active: next } });
+      showToast(
+        `${client.full_name} marked ${next ? 'active' : 'inactive'} ✅` +
+          (next ? '' : ' — client portal login blocked'),
+        'success'
+      );
+      loadClients();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function resetClientPassword(client) {
+    if (!confirm(`Reset password for ${client.full_name}?`)) return;
+    try {
+      const { generated_password } = await api(`/employees/${client.id}/reset-password`, { method: 'POST' });
+      showCredsModal(client.username, generated_password, {
+        title: 'Password reset ✅',
+        note: 'Share the new password with the client — it won’t be shown again.',
+      });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  els.openAddClient?.addEventListener('click', () => openClientModal(null));
+  els.closeClientModal?.addEventListener('click', () => { if (els.clientModal) els.clientModal.hidden = true; });
+  els.cancelClientModal?.addEventListener('click', () => { if (els.clientModal) els.clientModal.hidden = true; });
+  els.clientForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (els.clientFormMsg) els.clientFormMsg.hidden = true;
+    const editId = (els.clientEditId?.value || '').trim();
+    const body = {
+      full_name: els.clientFullname?.value.trim() || '',
+      site_name: els.clientSite?.value || '',
+      head_id: els.clientHead?.value || '',
+      coordinator_id: els.clientCoordinator?.value || '',
+      pc_id: els.clientPc?.value || '',
+    };
+    try {
+      if (editId) {
+        await api(`/clients/${editId}`, { method: 'PATCH', body });
+        showToast('Client updated ✅', 'success');
+        if (els.clientModal) els.clientModal.hidden = true;
+        loadClients();
+      } else {
+        const created = await api('/clients', { method: 'POST', body });
+        if (els.clientModal) els.clientModal.hidden = true;
+        showCredsModal(created.username, created.generated_password, {
+          title: 'Client added ✅',
+          note: 'Share these client portal login details — they won’t be shown again.',
+        });
+        loadClients();
+      }
+    } catch (err) {
+      if (els.clientFormMsg) {
+        els.clientFormMsg.textContent = err.message;
+        els.clientFormMsg.hidden = false;
+      } else showToast(err.message, 'error');
+    }
   });
   
   // boot deferred to mountTaskflowApp

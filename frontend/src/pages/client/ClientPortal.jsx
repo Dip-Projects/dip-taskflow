@@ -2084,7 +2084,7 @@ function ProfilePage({ siteName, onLogout, theme, onToggleTheme }) {
   const contacts = [
     { role: "Project Head", name: site.head_name, phone: site.head_contact_no },
     {
-      role: "Site Incharge",
+      role: "Coordinator",
       name: site.incharge_name,
       phone: site.incharge_contact_no,
     },

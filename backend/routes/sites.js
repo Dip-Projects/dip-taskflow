@@ -1,6 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { createClientAccount } = require('../lib/createClientAccount');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -107,9 +108,41 @@ router.post('/', requireAdmin, async (req, res) => {
       const { pc_id: _drop, ...withoutPc } = payload;
       ({ data, error } = await supabase.from('projects').insert(withoutPc).select(SITE_SELECT_BASE).single());
     }
-    if (error) throw error;
+    if (error) {
+      if (/projects_name_key|duplicate key|unique/i.test(error.message || '')) {
+        return res.status(409).json({
+          error: `Site name "${name}" already exists. Choose a different site name, or edit the existing site.`,
+        });
+      }
+      throw error;
+    }
 
-    res.status(201).json(await withPeople(data));
+    const siteRow = await withPeople(data);
+    let clientLogin = null;
+    try {
+      const created = await createClientAccount({
+        full_name: client_name,
+        site_name: name,
+        // Manage site people → client My Profile contacts
+        head_id: team_leader_id,
+        coordinator_id: coordinator_id,
+        pc_id: pc_id,
+      });
+      clientLogin = {
+        id: created.user.id,
+        username: created.user.username,
+        full_name: created.user.full_name,
+        generated_password: created.generated_password,
+        site_name: created.user.site_name,
+      };
+    } catch (clientErr) {
+      console.error('Auto-create client for site failed:', clientErr.message);
+    }
+
+    res.status(201).json({
+      ...siteRow,
+      client_login: clientLogin,
+    });
   } catch (err) {
     console.error('Add site error:', err.message);
     res.status(500).json({ error: err.message || 'Could not add site' });

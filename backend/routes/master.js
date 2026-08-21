@@ -106,11 +106,18 @@ router.put('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
 // Used to populate the "Assign to" dropdown and the employee filter.
 // Only active users — matches what the frontend should offer.
 router.get('/employees', async (req, res) => {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('users')
-    .select('id, full_name, role, department, designation')
+    .select('id, full_name, role, department, designation, is_head, site_name, site_names')
     .eq('is_active', true)
     .order('full_name');
+  if (error && /is_head|site_name|site_names/i.test(error.message || '')) {
+    ({ data, error } = await supabase
+      .from('users')
+      .select('id, full_name, role, department, designation')
+      .eq('is_active', true)
+      .order('full_name'));
+  }
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
