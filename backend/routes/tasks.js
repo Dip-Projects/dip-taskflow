@@ -1540,7 +1540,7 @@ const FMS_STEPS = [
     what: 'Verify, send correction, or request update',
     who: 'Verifier',
     how: 'In TaskFlow',
-    why: 'Close the task or send it back',
+    why: 'Close the task or send it back — Done only after Verify click; 2h SLA from Start Verification',
     when: '3',
   },
 ];
@@ -1603,6 +1603,32 @@ function fmsStep(planned, actual, isApplicable) {
   };
 }
 
+const FMS_VERIFICATION_SLA_MS = 2 * 60 * 60 * 1000;
+
+/** Verification FMS: planned = Start Verification + 2h; actual = Verify/Correction/Updation only. */
+function fmsVerifyStep(t) {
+  const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
+  if (!sentAt) {
+    return { planned: null, actual: null, status: 'NA', delayHrs: null, actor: null };
+  }
+  const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
+  const verifiedAt = t.verified_at || t.first_verified_at;
+  const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
+  const verifyActual = decidedAt || null;
+  const verifyPlanned = startVerifyAt
+    ? new Date(new Date(startVerifyAt).getTime() + FMS_VERIFICATION_SLA_MS)
+    : null;
+  const step = fmsStep(
+    verifyPlanned ? verifyPlanned.toISOString() : null,
+    verifyActual,
+    true
+  );
+  return {
+    ...step,
+    actor: t.verifier?.full_name || null,
+  };
+}
+
 router.get('/fms', requireAdminOrMis, async (req, res) => {
   try {
     const { range, from, to, project, person } = req.query;
@@ -1660,20 +1686,13 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       .map((t) => {
         const assigned = t.assigned_at || t.created_at;
         const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
-        const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
-        const verifiedAt = t.verified_at || t.first_verified_at;
-        const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
         const pid = t.project?.id || 'none';
         seqByProject[pid] = (seqByProject[pid] || 0) + 1;
 
         const steps = {
           accept: fmsStep(assigned, t.accepted_at, true),
           submit: fmsStep(t.target_date, sentAt, true),
-          verify: {
-            // Planned = day it was sent to the verifier. Actual = verify / correction / updation.
-            ...fmsStep(sentAt, decidedAt || startVerifyAt, !!sentAt),
-            actor: t.verifier?.full_name || null,
-          },
+          verify: fmsVerifyStep(t),
         };
 
         return {
