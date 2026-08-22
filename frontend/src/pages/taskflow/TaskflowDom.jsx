@@ -1401,13 +1401,20 @@ export default function TaskflowDom() {
         <div className="field-grid">
           <div className="field">
             <label htmlFor="site-type">Type of project <span className="req">*</span></label>
-            <select id="site-type" required>
-              <option value="">Select project type</option>
-              <option value="Residential">Residential</option>
-              <option value="Commercial">Commercial</option>
-              <option value="Industrial">Industrial</option>
-              <option value="Institutional">Institutional</option>
-            </select>
+            <div className="field-with-add">
+              <select id="site-type" required>
+                <option value="">Select project type</option>
+                <option value="Residential">Residential</option>
+                <option value="Commercial">Commercial</option>
+                <option value="Industrial">Industrial</option>
+                <option value="Institutional">Institutional</option>
+              </select>
+              <button type="button" className="field-add-btn" id="site-add-type" title="Add project type">+ Add</button>
+            </div>
+            <div className="inline-add-row" id="site-add-type-row" hidden>
+              <input type="text" id="site-new-type" placeholder="New project type…" />
+              <button type="button" className="primary-btn primary-btn-inline" id="site-save-type">Save</button>
+            </div>
           </div>
           <div className="field">
             <label htmlFor="site-location">Site location <span className="req">*</span></label>
@@ -1442,7 +1449,7 @@ export default function TaskflowDom() {
           <div className="field">
             <label htmlFor="site-pc">PC <span className="req">*</span></label>
             <select id="site-pc" required><option value="">Select PC</option></select>
-            <p className="form-note">People whose role or designation is PC.</p>
+            <p className="form-note">Employees whose designation is PC (including MDO Office).</p>
           </div>
         </div>
         <div className="field">

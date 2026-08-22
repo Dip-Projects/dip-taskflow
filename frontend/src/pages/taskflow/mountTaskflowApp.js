@@ -4783,6 +4783,31 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // ─── Manage Sites ─────────────────────────────────────────────────────────────
+  const DEFAULT_SITE_PROJECT_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional'];
+  let siteProjectTypeOptions = [...DEFAULT_SITE_PROJECT_TYPES];
+
+  function mergeSiteProjectTypesFromSites(sites) {
+    const set = new Set(DEFAULT_SITE_PROJECT_TYPES);
+    (sites || []).forEach((s) => {
+      const t = String(s.project_type || '').trim();
+      if (t) set.add(t);
+    });
+    siteProjectTypeOptions = [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  function fillSiteProjectTypeSelect(selected) {
+    const sel = document.getElementById('site-type');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select project type</option>';
+    siteProjectTypeOptions.forEach((name) => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (selected) sel.value = selected;
+  }
+
   function dateInputValue(raw) {
     if (!raw) return '';
     return String(raw).slice(0, 10);
@@ -4829,11 +4854,11 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function isPcEmployee(emp) {
-    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    if (isClientEmployee(emp)) return false;
     const role = String(emp?.role || '').toLowerCase().trim();
     const des = String(emp?.designation || '').toLowerCase().trim();
-    const blob = `${role} ${des}`;
     if (role === 'pc' || des === 'pc') return true;
+    const blob = `${role} ${des}`;
     if (/\bpc\b/.test(blob)) return true;
     if (blob.includes('process controller')) return true;
     return false;
@@ -4897,6 +4922,7 @@ export async function mountTaskflowApp(opts = {}) {
       site_incharge_id: site.site_incharge_id,
       pc_id: site.pc_id,
     } : {});
+    fillSiteProjectTypeSelect(site?.project_type || '');
     if (site) {
       if (els.siteEditId) els.siteEditId.value = site.id;
       if (els.siteModalTitle) els.siteModalTitle.textContent = 'Edit site';
@@ -4918,7 +4944,11 @@ export async function mountTaskflowApp(opts = {}) {
 
   async function loadSites() {
     els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
-    try { const sites = await api('/sites'); renderSitesTable(sites); }
+    try {
+      const sites = await api('/sites');
+      mergeSiteProjectTypesFromSites(sites);
+      renderSitesTable(sites);
+    }
     catch (err) { showToast(err.message, 'error'); }
   }
   function renderSitesTable(sites) {
@@ -4959,6 +4989,21 @@ export async function mountTaskflowApp(opts = {}) {
     } catch (err) { showToast(err.message, 'error'); }
   }
   els.openAddSite?.addEventListener('click', () => openSiteModal(null));
+  document.getElementById('site-add-type')?.addEventListener('click', () => toggleInlineAdd('site-add-type-row'));
+  document.getElementById('site-save-type')?.addEventListener('click', () => {
+    const input = document.getElementById('site-new-type');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter project type name', 'error');
+    if (!siteProjectTypeOptions.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      siteProjectTypeOptions.push(name);
+      siteProjectTypeOptions.sort((a, b) => a.localeCompare(b));
+    }
+    fillSiteProjectTypeSelect(name);
+    if (input) input.value = '';
+    const row = document.getElementById('site-add-type-row');
+    if (row) row.hidden = true;
+    showToast('Project type added', 'success');
+  });
   els.closeSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
   els.cancelSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
   els.siteForm?.addEventListener('submit', async (e) => {
