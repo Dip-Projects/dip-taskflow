@@ -32,10 +32,18 @@ function isFinishedTask(t) {
 }
 
 /** Matches Office Overdue: unfinished + due date passed. Rejected never counts. */
-function isDelegatedOverdue(t, now = new Date()) {
-  if (isFinishedTask(t)) return false;
-  const due = parseLocalDate(t.target_date);
-  return !!(due && due < now);
+const {
+  isDelegatedOverdue,
+  isVerificationOverdue,
+  isAssignmentOverdue,
+  overdueSource,
+  employeeWorkDueDate,
+  VERIFICATION_SLA_MS,
+} = require('./taskOverdue');
+
+/** Prefer new rules; keep legacy name for callers. */
+function isDelegatedOverdueTask(t, now = new Date()) {
+  return isDelegatedOverdue(t, now);
 }
 
 function fmtTimeIst(iso) {
@@ -334,15 +342,37 @@ function formatTaskBlock(t) {
 
 /** One overdue task on two short lines — no repeated "Why" sentence. */
 function formatOverdueBlock(t, { showAssignee = false } = {}) {
-  const due = parseLocalDate(t.target_date);
-  const days = due ? Math.max(0, Math.floor((Date.now() - due.getTime()) / 86400000)) : 0;
-  const late = days > 0 ? `${days} day${days === 1 ? '' : 's'} late` : 'due today';
+  const now = new Date();
+  const source = overdueSource(t, now);
   const who = showAssignee && t.assigned_to_user?.full_name ? ` | ${t.assigned_to_user.full_name}` : '';
   const vs = String(t.verification_status || '');
   const state =
     vs === 'Pending Verification' || vs === 'Verification Rejected' || vs === 'Updation Required'
       ? vs
       : t.status || 'Open';
+
+  if (source === 'verification' && isVerificationOverdue(t, now)) {
+    const started = new Date(t.verification_started_at);
+    const hrsPast = Math.max(0, Math.floor((now - started) / 3600000) - 2);
+    const verifier = t.verifier?.full_name || 'Verifier';
+    return (
+      `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
+      `    Verify overdue: ${hrsPast}h past 2h limit | with ${verifier} | ${state}${who}`
+    );
+  }
+
+  const workDue = employeeWorkDueDate(t);
+  if (workDue && isAssignmentOverdue(t, now)) {
+    const hrsLate = Math.max(0, Math.floor((now - workDue) / 3600000));
+    return (
+      `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
+      `    Work overdue: ${hrsLate}h late (accepted + ${t.hours_to_complete}h) | ${state} | ${t.project?.name || 'No project'}${who}`
+    );
+  }
+
+  const due = parseLocalDate(t.target_date);
+  const days = due ? Math.max(0, Math.floor((Date.now() - due.getTime()) / 86400000)) : 0;
+  const late = days > 0 ? `${days} day${days === 1 ? '' : 's'} late` : 'due today';
   return (
     `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
     `    Due: ${fmtDate(t.target_date)} (${late}) | ${state} | ${t.project?.name || 'No project'}${who}`

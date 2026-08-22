@@ -394,10 +394,63 @@ export async function mountTaskflowApp(opts = {}) {
     return false;
   }
 
+  const VERIFICATION_SLA_MS = 2 * 60 * 60 * 1000;
+
+  function isVerificationOverdueTask(t, now = new Date()) {
+    if (t?.verification_status !== 'Pending Verification') return false;
+    if (!t?.verification_started_at) return false;
+    const started = parseLocalDate(t.verification_started_at);
+    if (!started || Number.isNaN(started.getTime())) return false;
+    return (now - started) >= VERIFICATION_SLA_MS;
+  }
+
+  function isAssignmentOverdueTask(t, now = new Date()) {
+    if (isClosedOrRejectedTask(t)) return false;
+    if (t?.is_on_hold) return false;
+    if (t?.verification_status === 'Pending Verification') return false;
+    if (!t?.accepted_at) return false;
+    const hours = Number(t.hours_to_complete);
+    if (!hours || hours <= 0) return false;
+    const due = addWorkingHours(t.accepted_at, hours, { fromNowIfToday: false });
+    return now > due;
+  }
+
   function isDelegatedOverdueTask(t, now = new Date()) {
-    if (!t?.target_date || isClosedOrRejectedTask(t)) return false;
-    const due = parseLocalDate(t.target_date);
-    return !!(due && due < now);
+    if (isClosedOrRejectedTask(t)) return false;
+    return isVerificationOverdueTask(t, now) || isAssignmentOverdueTask(t, now);
+  }
+
+  function employeeWorkDueDate(task) {
+    if (!task?.accepted_at) return null;
+    const hours = Number(task.hours_to_complete);
+    if (!hours || hours <= 0) return null;
+    return addWorkingHours(task.accepted_at, hours, { fromNowIfToday: false });
+  }
+
+  function fmtOverdueDateCell(task, now = new Date()) {
+    if (isVerificationOverdueTask(task, now)) {
+      const started = parseLocalDate(task.verification_started_at);
+      const hrsPast = Math.max(0, Math.floor((now - started) / 3600000) - 2);
+      return `
+        <div>Started verify: ${fmtDate(task.verification_started_at)}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2h verify limit 🔴` : 'Verify limit crossed 🔴'}</div>
+      `;
+    }
+    const workDue = employeeWorkDueDate(task);
+    if (workDue && isAssignmentOverdueTask(task, now)) {
+      const hrsLate = Math.max(0, Math.floor((now - workDue) / 3600000));
+      return `
+        <div>Work due: ${fmtDate(workDue.toISOString())}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsLate > 0 ? `${hrsLate}h work overdue 🔴` : 'Work overdue today 🔴'}</div>
+      `;
+    }
+    const daysOverdue = task.target_date
+      ? Math.floor((now - parseLocalDate(task.target_date)) / 86400000)
+      : 0;
+    return `
+      <div>${task.target_date ? fmtDateOnly(task.target_date) : '—'}</div>
+      <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
+    `;
   }
   
   function fmtDate(iso) {
@@ -523,13 +576,16 @@ export async function mountTaskflowApp(opts = {}) {
     return hours != null ? `${d} · ${hours}h` : d;
   }
   
-  // Employee due date = when the task was assigned/created + hours_to_complete
-  // (office-hours aware). Target date is admin-only.
+  // Employee due date = when the task was ACCEPTED + hours_to_complete
+  // (office-hours aware). Timer does not run until Accept.
   function fmtDueDateFromCreated(task) {
-    const start = task.assigned_at || task.created_at;
-    if (!start) return '—';
-    if (task.hours_to_complete == null) return fmtDate(start);
-    const due = addWorkingHours(start, task.hours_to_complete, { fromNowIfToday: false });
+    if (task.is_on_hold) {
+      const rem = task.hold_remaining_hours ?? task.hours_to_complete;
+      return `⏸ On hold · ${rem}h remaining`;
+    }
+    if (!task.accepted_at) return 'Accept task to start timer';
+    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
+    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
     return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
   }
   function toDatetimeLocalValue(iso) {
@@ -1546,7 +1602,9 @@ export async function mountTaskflowApp(opts = {}) {
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
-      if (task.verification_status === 'Pending Verification') {
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
         statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
@@ -1583,7 +1641,9 @@ export async function mountTaskflowApp(opts = {}) {
   let overdueDrawerTab = 'today';
   
   function taskOverdueSource(task) {
-    return task.verification_status === 'Pending Verification' ? 'verification' : 'assignment';
+    if (isVerificationOverdueTask(task)) return 'verification';
+    if (isAssignmentOverdueTask(task)) return 'assignment';
+    return 'assignment';
   }
   
   function isOverdueExtensionActive(task) {
@@ -1606,7 +1666,14 @@ export async function mountTaskflowApp(opts = {}) {
         if (!isDelegatedOverdueTask(t, now)) return false;
         if (empId && overdueAssigneeId(t) !== empId) return false;
         return true;
-      }).sort((a, b) => parseLocalDate(a.target_date) - parseLocalDate(b.target_date));
+      }).sort((a, b) => {
+        const aVerify = isVerificationOverdueTask(a, now) ? 0 : 1;
+        const bVerify = isVerificationOverdueTask(b, now) ? 0 : 1;
+        if (aVerify !== bVerify) return aVerify - bVerify;
+        const aDue = employeeWorkDueDate(a) || parseLocalDate(a.target_date) || now;
+        const bDue = employeeWorkDueDate(b) || parseLocalDate(b.target_date) || now;
+        return aDue - bDue;
+      });
   
       overdueTasksCache = overdue;
       renderOverdueTasksTable(els.overdueTasksList, overdue);
@@ -1719,25 +1786,30 @@ export async function mountTaskflowApp(opts = {}) {
         ? `<span class="source-badge source-verification">⏳ Verification</span>`
         : `<span class="source-badge source-assignment">📋 Assignment</span>`;
   
-      // Planned date (how overdue, shown in red) + extension note if active
+      // Overdue detail (assignment work hours or verification 2h SLA)
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
-      const daysOverdue = Math.floor((new Date() - parseLocalDate(task.target_date)) / 86400000);
-      tdDate.innerHTML = `
-        <div>${fmtDateOnly(task.target_date)}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
-        ${isOverdueExtensionActive(task) ? `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>` : ''}
-      `;
+      tdDate.innerHTML = fmtOverdueDateCell(task);
+      if (isOverdueExtensionActive(task)) {
+        tdDate.innerHTML += `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>`;
+      }
   
       // Assigned to
       const tdAssigned = document.createElement('td');
       tdAssigned.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
   
-      // Verifier — who the task is (or was) sent to for verification, if any
+      // Verifier — who must verify (highlight when verification overdue)
       const tdVerifier = document.createElement('td');
-      tdVerifier.innerHTML = task.verifier?.full_name
-        ? `<strong style="font-weight:600">${escapeHtml(task.verifier.full_name)}</strong>`
-        : `<span class="media-none">—</span>`;
+      if (task.verifier?.full_name) {
+        const verifyNote = isVerificationOverdueTask(task)
+          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2h</div>`
+          : (task.verification_status === 'Pending Verification' && !task.verification_started_at
+            ? `<div style="color:var(--muted);font-size:0.75rem;margin-top:2px">Not started yet</div>`
+            : '');
+        tdVerifier.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier.full_name)}</strong>${verifyNote}`;
+      } else {
+        tdVerifier.innerHTML = `<span class="media-none">—</span>`;
+      }
   
       // Priority
       const tdPriority = document.createElement('td');
@@ -1746,7 +1818,9 @@ export async function mountTaskflowApp(opts = {}) {
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
-      if (task.verification_status === 'Pending Verification') {
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
         statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
         statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
@@ -2116,7 +2190,9 @@ export async function mountTaskflowApp(opts = {}) {
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
-      if (task.verification_status === 'Pending Verification') {
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
         statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
@@ -2240,20 +2316,16 @@ export async function mountTaskflowApp(opts = {}) {
     const isActuallyMine = task.assigned_to_user?.id === state.user.id;
     const canManageThisTask = state.user.role === 'admin' || isActuallyMine;
     const isPendingVerification = task.verification_status === 'Pending Verification';
+    const isOnHold = !!task.is_on_hold;
     const isAdminManaging = showAssignee && state.user.role === 'admin';
-    // A ticket is open on this task, or a reschedule request is awaiting a
-    // decision — both temporarily lock out "Request reschedule" and "Send for
-    // verification" until resolved/decided (mirrored on the backend too).
     const isTicketRaised = task.status === 'Ticket Raised';
     const isReschedulePending = task.reschedule_status === 'Pending';
     const items = [];
-  
-    // Employee hasn't accepted/rejected this task yet — no extra options until
-    // they make that call via the primary Accept/Reject buttons.
+
     if (!isAdminManaging && task.status === 'Pending') {
       return items;
     }
-  
+
     if (isAdminManaging) {
       if (task.status !== 'Completed') {
         items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
@@ -2266,7 +2338,22 @@ export async function mountTaskflowApp(opts = {}) {
           updateStatus(task.id, 'Rejected', reason);
         }});
       }
-    } else if (task.rescheduling_possible && task.status !== 'Completed' && !isPendingVerification && canManageThisTask) {
+    } else if (isOnHold && isActuallyMine) {
+      items.push({ label: '▶️ Resume task', onClick: () => resumeTask(task.id) });
+    } else if (
+      !isOnHold
+      && task.status === 'In Progress'
+      && isActuallyMine
+      && task.accepted_at
+      && Number(task.hours_to_complete) > 0
+      && !isPendingVerification
+      && !isTicketRaised
+      && !isReschedulePending
+    ) {
+      items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
+    }
+
+    if (task.rescheduling_possible && task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
       if (isTicketRaised) {
         items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
@@ -2276,7 +2363,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
   
-    if (task.status !== 'Completed' && !isPendingVerification && canManageThisTask) {
+    if (task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
       if (isTicketRaised) {
         items.push({ label: '🔎 Verification blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
@@ -2292,11 +2379,16 @@ export async function mountTaskflowApp(opts = {}) {
   function buildPrimaryStatusButtons(task, { showAssignee, allowActions }) {
     const isOwnTask = state.user.role !== 'admin' || (showAssignee === false);
     const isPendingVerification = task.verification_status === 'Pending Verification';
+    const isOnHold = !!task.is_on_hold;
     const isAdminManaging = showAssignee && state.user.role === 'admin';
     const canAct = allowActions && (state.user.role === 'admin' || isOwnTask)
       && task.status !== 'Completed' && !isPendingVerification && !isAdminManaging;
     const buttons = [];
     if (!canAct) return buttons;
+    if (isOnHold && isOwnTask) {
+      buttons.push(makeActionBtn('action-start', '▶ Resume', () => resumeTask(task.id)));
+      return buttons;
+    }
     if (task.status === 'Pending') {
       buttons.push(makeActionBtn('action-start', 'Accept', () => updateStatus(task.id, 'In Progress')));
       buttons.push(makeActionBtn('action-reject', 'Reject', () => {
@@ -2424,6 +2516,24 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
       showToast('Task updated ✅', 'success'); reloadCurrentTaskView(); refreshNavBadges();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function holdTask(taskId) {
+    try {
+      await api(`/tasks/${taskId}/hold`, { method: 'PATCH' });
+      showToast('Task on hold — timer paused ⏸', 'success');
+      reloadCurrentTaskView();
+      refreshNavBadges();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function resumeTask(taskId) {
+    try {
+      await api(`/tasks/${taskId}/resume`, { method: 'PATCH' });
+      showToast('Task resumed — countdown restarted ▶', 'success');
+      reloadCurrentTaskView();
+      refreshNavBadges();
     } catch (err) { showToast(err.message, 'error'); }
   }
   

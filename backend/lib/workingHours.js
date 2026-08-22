@@ -51,6 +51,25 @@ function addWorkingHours(startDate, hours) {
   return current;
 }
 
+/** Working hours elapsed between two instants (office hours, minus lunch, Sun off). */
+function elapsedWorkingHours(startDate, endDate) {
+  const start = snapToWorkingMoment(new Date(startDate));
+  const end = snapToWorkingMoment(new Date(endDate));
+  if (!start || !end || end <= start) return 0;
+  let totalMs = 0;
+  let current = new Date(start);
+  for (let guard = 0; guard < 1000 && current < end; guard++) {
+    const dayEnd = atTime(current, 18, 30);
+    const lunchStart = atTime(current, 13, 0);
+    const segmentEnd = current < lunchStart ? lunchStart : dayEnd;
+    const effectiveEnd = end < segmentEnd ? end : segmentEnd;
+    if (effectiveEnd > current) totalMs += effectiveEnd - current;
+    if (end <= segmentEnd) break;
+    current = snapToWorkingMoment(segmentEnd);
+  }
+  return totalMs / 3600000;
+}
+
 function addCalendarDays(startDate, days) {
   const d = new Date(startDate);
   d.setDate(d.getDate() + Number(days || 0));
@@ -75,4 +94,10 @@ function fmtEmployeeDueLabel(startIso, hours) {
   return hours != null && hours !== '' ? `${label} · ${hours}h` : label;
 }
 
-module.exports = { addWorkingHours, addCalendarDays, snapToWorkingMoment, fmtEmployeeDueLabel };
+module.exports = {
+  addWorkingHours,
+  addCalendarDays,
+  snapToWorkingMoment,
+  fmtEmployeeDueLabel,
+  elapsedWorkingHours,
+};

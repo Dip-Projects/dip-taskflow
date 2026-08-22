@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
-const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel } = require('../lib/workingHours');
+const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -113,7 +113,7 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at';
 
 async function loadTaskForStamp(id) {
   let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
@@ -159,6 +159,7 @@ const TASK_SELECT = `
   id, description, hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
   assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -611,6 +612,86 @@ router.patch('/:id/accept', async (req, res) => {
   }
 });
 
+// ----------------------------- hold task (employee pauses remaining work hours) -----------------------------
+router.patch('/:id/hold', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only hold your own tasks' });
+    }
+    if (existing.status !== 'In Progress') {
+      return res.status(400).json({ error: 'Only in-progress tasks can be put on hold' });
+    }
+    if (existing.is_on_hold) {
+      return res.status(400).json({ error: 'This task is already on hold' });
+    }
+    if (existing.verification_status === 'Pending Verification') {
+      return res.status(400).json({ error: 'Cannot hold while awaiting verification' });
+    }
+    if (existing.status === 'Ticket Raised' || existing.reschedule_status === 'Pending') {
+      return res.status(400).json({ error: 'Cannot hold this task right now' });
+    }
+    if (!existing.accepted_at) {
+      return res.status(400).json({ error: 'Accept the task first before putting it on hold' });
+    }
+    const totalHours = Number(existing.hours_to_complete);
+    if (!totalHours || totalHours <= 0) {
+      return res.status(400).json({ error: 'This task has no work hours to pause' });
+    }
+
+    const at = nowIso();
+    const elapsed = elapsedWorkingHours(existing.accepted_at, at);
+    const remaining = Math.max(0, Math.round((totalHours - elapsed) * 100) / 100);
+
+    const data = await updateTaskTolerant(id, {
+      is_on_hold: true,
+      held_at: at,
+      hold_remaining_hours: remaining,
+      task_events: withTaskEvent(existing, 'hold', req.user.id, { remaining_hours: remaining }),
+    }, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Hold task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not hold task' });
+  }
+});
+
+// ----------------------------- resume task (restart countdown with remaining hours) -----------------------------
+router.patch('/:id/resume', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only resume your own tasks' });
+    }
+    if (!existing.is_on_hold) {
+      return res.status(400).json({ error: 'This task is not on hold' });
+    }
+
+    const remaining = Number(existing.hold_remaining_hours ?? existing.hours_to_complete) || 0;
+    const at = nowIso();
+    const data = await updateTaskTolerant(id, {
+      is_on_hold: false,
+      held_at: null,
+      hold_remaining_hours: null,
+      accepted_at: at,
+      hours_to_complete: remaining,
+      task_events: withTaskEvent(existing, 'resume', req.user.id, { remaining_hours: remaining }),
+    }, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Resume task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not resume task' });
+  }
+});
+
 // ----------------------------- reject task (assignee declines — reason required) -----------------------------
 router.patch('/:id/reject', async (req, res) => {
   try {
@@ -763,6 +844,9 @@ router.patch(
       }
       if (existing.reschedule_status === 'Pending') {
         return res.status(400).json({ error: 'Cannot send for verification while a reschedule request is pending approval' });
+      }
+      if (existing.is_on_hold) {
+        return res.status(400).json({ error: 'Resume the task before sending for verification' });
       }
 
       const files = req.files || [];
