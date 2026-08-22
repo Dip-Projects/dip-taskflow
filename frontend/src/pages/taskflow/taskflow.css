@@ -630,6 +630,23 @@ body.sidebar-open { overflow: hidden; }
 #allTasksTable th:nth-child(9),
 #allTasksTable td:nth-child(9) { width: 15%; }
 
+/* Empty / loading rows: full-width centered (Sr No 4% rule squeezes message to the side) */
+#allTasksTable td.empty-state,
+#allTasksTable td[colspan],
+#myTasksTable td.empty-state,
+#myTasksTable td[colspan],
+#overdueTasksTable td.empty-state,
+#overdueTasksTable td[colspan],
+.data-table tbody td.empty-state[colspan] {
+  width: 100% !important;
+  max-width: none !important;
+  text-align: center !important;
+  vertical-align: middle;
+  white-space: normal;
+  word-break: normal;
+  justify-content: center;
+}
+
 /* Overdue tasks table: Sr No, Task details, Source, Planned date,
    Assigned to, Verifier, Priority, Status, Actions (9 cols) —
    reuses "col-status" for Source+Status and "col-assigned" for
