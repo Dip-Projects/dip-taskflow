@@ -1100,6 +1100,61 @@ body.sidebar-open { overflow: hidden; }
 }
 .empty-state .emoji { font-size: 2.4rem; display: block; margin-bottom: 10px; }
 
+/* Employee task work timer (My Tasks) */
+.task-timer-cell,
+.task-timer-wrap {
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.task-timer-due { color: var(--ink); font-weight: 600; }
+.task-timer-left {
+  color: var(--emerald);
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.task-timer-urgent { color: #c05621; }
+.task-timer-overdue {
+  color: #c53030;
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.task-timer-hold {
+  color: #5b6b8a;
+  font-weight: 700;
+  font-size: 0.84rem;
+}
+.task-timer-sub {
+  color: var(--muted);
+  font-size: 0.74rem;
+  margin-top: 2px;
+}
+.task-timer-wait {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
+.task-meta-due {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.task-meta-due-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.task-meta-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
 /* ================================================================
    TOAST
    ================================================================ */

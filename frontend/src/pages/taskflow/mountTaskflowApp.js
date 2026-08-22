@@ -568,6 +568,108 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return current;
   }
+
+  /** Working hours elapsed between two instants (office hours, minus lunch, Sun off). */
+  function elapsedWorkingHoursBetween(startDate, endDate) {
+    const start = snapToWorkingMoment(parseLocalDate(startDate));
+    const end = snapToWorkingMoment(new Date(endDate));
+    if (!start || !end || end <= start) return 0;
+    let totalMs = 0;
+    let current = new Date(start);
+    for (let guard = 0; guard < 1000 && current < end; guard++) {
+      const dayEnd = atTime(current, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
+      const lunchStart = atTime(current, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
+      const segmentEnd = current < lunchStart ? lunchStart : dayEnd;
+      const effectiveEnd = end < segmentEnd ? end : segmentEnd;
+      if (effectiveEnd > current) totalMs += effectiveEnd - current;
+      if (end <= segmentEnd) break;
+      current = snapToWorkingMoment(segmentEnd);
+    }
+    return totalMs / 3600000;
+  }
+
+  function formatDurationShort(ms) {
+    if (!ms || ms <= 0) return '~0m';
+    const totalMin = Math.ceil(ms / 60000);
+    if (totalMin < 60) return `~${totalMin}m`;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m > 0 ? `~${h}h ${m}m` : `~${h}h`;
+  }
+
+  function formatHoursLabel(h) {
+    const n = Number(h);
+    if (!n || Number.isNaN(n)) return '—';
+    return n % 1 === 0 ? `${n}h` : `${n.toFixed(1)}h`;
+  }
+
+  /** Employee My Tasks: due line + live time-left / hold / overdue (HTML). */
+  function fmtEmployeeTimerHtml(task, now = new Date()) {
+    if (task.is_on_hold) {
+      const rem = task.hold_remaining_hours ?? task.hours_to_complete;
+      return `
+        <div class="task-timer-hold">⏸ Timer paused</div>
+        <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
+      `;
+    }
+    if (!task.accepted_at) {
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    }
+    if (task.verification_status === 'Pending Verification') {
+      return `
+        <div class="task-timer-due">Sent for verification</div>
+        <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
+      `;
+    }
+    const hours = Number(task.hours_to_complete);
+    if (!hours || hours <= 0) {
+      return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
+    }
+    const due = employeeWorkDueDate(task);
+    if (!due) return `<div class="task-timer-wait">Accept task to start timer</div>`;
+
+    if (isAssignmentOverdueTask(task, now)) {
+      const overdueMs = now - due;
+      return `
+        <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+        <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
+      `;
+    }
+
+    const msLeft = due - now;
+    const urgent = msLeft < 30 * 60 * 1000;
+    return `
+      <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+      <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
+    `;
+  }
+
+  // Employee due date plain text (fallback)
+  function fmtDueDateFromCreated(task) {
+    if (task.is_on_hold) {
+      return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
+    }
+    if (!task.accepted_at) return 'Accept task to start timer';
+    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
+    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
+    return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
+  }
+
+  let myTasksTimerCache = [];
+
+  function refreshEmployeeTimerDisplays() {
+    const now = new Date();
+    document.querySelectorAll('[data-task-timer-id]').forEach((el) => {
+      const id = el.dataset.taskTimerId;
+      const task = myTasksTimerCache.find((t) => t.id === id);
+      if (task) el.innerHTML = fmtEmployeeTimerHtml(task, now);
+    });
+    document.querySelectorAll('[data-task-timer-card-id]').forEach((el) => {
+      const id = el.dataset.taskTimerCardId;
+      const task = myTasksTimerCache.find((t) => t.id === id);
+      if (task) el.innerHTML = fmtEmployeeTimerHtml(task, now);
+    });
+  }
   
   function fmtCalculatedDeadline(targetDateIso, hours) {
     if (!targetDateIso) return '—';
@@ -575,19 +677,7 @@ export async function mountTaskflowApp(opts = {}) {
     const d = fmtDate(due.toISOString());
     return hours != null ? `${d} · ${hours}h` : d;
   }
-  
-  // Employee due date = when the task was ACCEPTED + hours_to_complete
-  // (office-hours aware). Timer does not run until Accept.
-  function fmtDueDateFromCreated(task) {
-    if (task.is_on_hold) {
-      const rem = task.hold_remaining_hours ?? task.hours_to_complete;
-      return `⏸ On hold · ${rem}h remaining`;
-    }
-    if (!task.accepted_at) return 'Accept task to start timer';
-    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
-    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
-    return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
-  }
+
   function toDatetimeLocalValue(iso) {
     if (!iso) return '';
     const d = new Date(iso);
@@ -730,6 +820,10 @@ export async function mountTaskflowApp(opts = {}) {
     refreshNavBadges();
     if (window._badgeInterval) clearInterval(window._badgeInterval);
     window._badgeInterval = setInterval(refreshNavBadges, 15000);
+    if (window._timerInterval) clearInterval(window._timerInterval);
+    window._timerInterval = setInterval(() => {
+      if (state.activeView === 'my') refreshEmployeeTimerDisplays();
+    }, 60000);
     try {
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
         Notification.requestPermission().catch(() => {});
@@ -1986,7 +2080,9 @@ export async function mountTaskflowApp(opts = {}) {
       // this same table/list — one unified "My Task" view, not a separate
       // section — with a 🔁 marker so they're still easy to tell apart.
       const recurringTasks = isAdmin ? await api('/recurring-tasks/my').catch(() => []) : [];
-  
+
+      myTasksTimerCache = visibleTasks;
+
       renderMyTasksTable(els.myTasksTableBody, visibleTasks, recurringTasks);
   
       els.myTasksList.innerHTML = '';
@@ -2154,10 +2250,12 @@ export async function mountTaskflowApp(opts = {}) {
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: false });
   
-      // Due date (My Tasks rule: created date + hours_to_complete, office-hours aware)
+      // Due date + live timer (office-hours aware)
       const tdDate = document.createElement('td');
+      tdDate.className = 'task-timer-cell';
       tdDate.style.wordBreak = 'break-word';
-      tdDate.textContent = fmtDueDateFromCreated(task);
+      tdDate.dataset.taskTimerId = task.id;
+      tdDate.innerHTML = fmtEmployeeTimerHtml(task);
   
       // Voice note
       const tdVoice = document.createElement('td');
@@ -2288,8 +2386,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   function getDeadlineHtml(task, showAssignee, useCreatedDate = false) {
-    if (useCreatedDate) return fmtDueDateFromCreated(task);
-    // Admin views: target date only. Employee My Tasks uses useCreatedDate.
+    if (useCreatedDate) return fmtEmployeeTimerHtml(task);
     return task.target_date ? fmtDateOnly(task.target_date) : '—';
   }
   
@@ -2450,8 +2547,11 @@ export async function mountTaskflowApp(opts = {}) {
         <span class="pill pill-${task.priority}">${task.priority}</span>
       </div>
       <p class="task-card-desc">${escapeHtml(task.description)}</p>
-      <div class="task-meta">
-        <span>Due <strong>${getDeadlineHtml(task, showAssignee, useCreatedDueDate)}</strong></span>
+      <div class="task-meta task-meta-due">
+        <span class="task-meta-due-label">Due</span>
+        <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : (task.target_date ? fmtDateOnly(task.target_date) : '—')}</div>
+      </div>
+      <div class="task-meta task-meta-files">
         ${task.attachment_url ? `<a class="attachment-link" href="${task.attachment_url}" target="_blank" rel="noopener">📎 Attachment</a>` : ''}
         ${task.voice_note_url ? `<a class="attachment-link" href="${task.voice_note_url}" target="_blank" rel="noopener">🎤 Voice note</a>` : ''}
       </div>
