@@ -540,13 +540,13 @@ export async function mountTaskflowApp(opts = {}) {
     // in the past. Employee due dates pass fromNowIfToday:false so they stay
     // anchored to the real assign/create time.
     if (fromNowIfToday) {
-      const now = snapToWorkingMoment(new Date());
-      const targetDay = parseLocalDate(startDate);
-      const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
-        && targetDay.getMonth() === new Date().getMonth()
-        && targetDay.getDate() === new Date().getDate();
-      if (isSameCalendarDay && now > current) {
-        current = now;
+    const now = snapToWorkingMoment(new Date());
+    const targetDay = parseLocalDate(startDate);
+    const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
+      && targetDay.getMonth() === new Date().getMonth()
+      && targetDay.getDate() === new Date().getDate();
+    if (isSameCalendarDay && now > current) {
+      current = now;
       }
     }
   
@@ -677,7 +677,7 @@ export async function mountTaskflowApp(opts = {}) {
     const d = fmtDate(due.toISOString());
     return hours != null ? `${d} · ${hours}h` : d;
   }
-
+  
   function toDatetimeLocalValue(iso) {
     if (!iso) return '';
     const d = new Date(iso);
@@ -842,7 +842,7 @@ export async function mountTaskflowApp(opts = {}) {
     const who = role === 'admin' ? 'admin' : (state.user?.is_mis_executive || /\bmis\b/.test(deptDesig)) ? 'mis' : 'employee';
     return row[who] !== false;
   }
-
+  
   function buildNav() {
     const isAdmin = state.user.role === 'admin';
     const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
@@ -1027,7 +1027,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!group) return;
     setNavGroupOpen(group, true);
   }
-
+  
   function makeNavButton(key, label, badge) {
     const btn = document.createElement('button');
     btn.className = 'nav-btn'; btn.dataset.view = key;
@@ -1462,11 +1462,11 @@ export async function mountTaskflowApp(opts = {}) {
         });
       } catch (_) { /* table missing — task is still assigned */ }
     }
-    showToast('Task assigned ✅', 'success');
-    els.addTaskForm.reset();
-    document.getElementById('f-priority').value = 'Medium';
-    document.getElementById('f-reschedule').value = 'false';
-    updateTaskDeadlinePreview();
+      showToast('Task assigned ✅', 'success');
+      els.addTaskForm.reset();
+      document.getElementById('f-priority').value = 'Medium';
+      document.getElementById('f-reschedule').value = 'false';
+      updateTaskDeadlinePreview();
   }
 
   function toggleInlineAdd(rowId) {
@@ -1747,7 +1747,7 @@ export async function mountTaskflowApp(opts = {}) {
   function overdueAssigneeId(task) {
     return task.assigned_to || task.assigned_to_user?.id || '';
   }
-
+  
   async function loadOverdueTasks() {
     els.overdueTasksList.innerHTML = `<tr><td colspan="9" class="empty-state">Loading overdue tasks…</td></tr>`;
     els.overdueTasksCards.innerHTML = `<div class="empty-state">Loading overdue tasks…</div>`;
@@ -2082,7 +2082,7 @@ export async function mountTaskflowApp(opts = {}) {
       const recurringTasks = isAdmin ? await api('/recurring-tasks/my').catch(() => []) : [];
 
       myTasksTimerCache = visibleTasks;
-
+  
       renderMyTasksTable(els.myTasksTableBody, visibleTasks, recurringTasks);
   
       els.myTasksList.innerHTML = '';
@@ -2418,11 +2418,11 @@ export async function mountTaskflowApp(opts = {}) {
     const isTicketRaised = task.status === 'Ticket Raised';
     const isReschedulePending = task.reschedule_status === 'Pending';
     const items = [];
-
+  
     if (!isAdminManaging && task.status === 'Pending') {
       return items;
     }
-
+  
     if (isAdminManaging) {
       if (task.status !== 'Completed') {
         items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
@@ -2734,7 +2734,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (assignBtn) assignBtn.disabled = false;
     }
   });
-
+  
   // ─── Send for verification ───────────────────────────────────────────────────
   async function openVerifyModal(taskId) {
     state.pendingTaskId = taskId;
@@ -2797,8 +2797,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.correctionNote) els.correctionNote.value = '';
     if (els.correctionFormMsg) els.correctionFormMsg.hidden = true;
     if (els.corrVoicePlayback) {
-      els.corrVoicePlayback.hidden = true;
-      els.corrVoicePlayback.src = '';
+    els.corrVoicePlayback.hidden = true;
+    els.corrVoicePlayback.src = '';
     }
     if (els.corrRecordStatus) els.corrRecordStatus.textContent = '';
     if (els.corrStartRecord) els.corrStartRecord.disabled = false;
@@ -2830,8 +2830,8 @@ export async function mountTaskflowApp(opts = {}) {
         corrVoiceBlob = new Blob(chunks, { type: 'audio/webm' });
         const url = URL.createObjectURL(corrVoiceBlob);
         if (els.corrVoicePlayback) {
-          els.corrVoicePlayback.src = url;
-          els.corrVoicePlayback.hidden = false;
+        els.corrVoicePlayback.src = url;
+        els.corrVoicePlayback.hidden = false;
         }
         if (els.corrRecordStatus) els.corrRecordStatus.textContent = '✅ Recording saved';
         if (els.corrStartRecord) els.corrStartRecord.disabled = false;
@@ -2939,7 +2939,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function startVerification(taskId) {
     return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
   }
-
+  
   async function clickStartVerification(task, actionsEl, btn) {
     const id = task?.id;
     if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
@@ -2982,7 +2982,7 @@ export async function mountTaskflowApp(opts = {}) {
         els.verificationsTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
       }
       if (els.verificationsList) {
-        els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
+    els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
       }
     }
     try {
@@ -3513,8 +3513,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (msgEl) msgEl.hidden = true;
     if (!note) {
       if (msgEl) {
-        msgEl.textContent = 'Please write an updation note before sending';
-        msgEl.hidden = false;
+      msgEl.textContent = 'Please write an updation note before sending';
+      msgEl.hidden = false;
       }
       return;
     }
@@ -3539,8 +3539,8 @@ export async function mountTaskflowApp(opts = {}) {
       loadVerifications();
     } catch (err) {
       if (msgEl) {
-        msgEl.textContent = err.message;
-        msgEl.hidden = false;
+      msgEl.textContent = err.message;
+      msgEl.hidden = false;
       } else {
         showToast(err.message, 'error');
       }
@@ -4649,7 +4649,7 @@ export async function mountTaskflowApp(opts = {}) {
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
       .forEach((root) => treeEl.appendChild(renderOrgNode(root, true)));
     els.hierarchyTreeContainer.appendChild(treeEl);
-
+  
     requestAnimationFrame(() => {
       centerOrgTreeView();
       drawOrgTreeLines(treeEl);
@@ -6315,9 +6315,9 @@ export async function mountTaskflowApp(opts = {}) {
       const prevDate = new Date(rDate); prevDate.setDate(prevDate.getDate() - 1);
 
       const allForDay = classifyDailyReportTasks(allTasks, rDate);
-
+  
       body.innerHTML = '';
-
+  
       // ── PMS-style header (matching image format) ──
       const periodLabel = `${d.toLocaleDateString('en-IN', {day:'2-digit',month:'2-digit',year:'numeric'})}`;
       const pmsHtml = `
@@ -6326,7 +6326,7 @@ export async function mountTaskflowApp(opts = {}) {
           <div class="drpt-pms-title">PMS (${periodLabel})</div>
         </div>`;
       body.insertAdjacentHTML('beforeend', pmsHtml);
-
+  
       if (allForDay.length) {
         body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:20px">📋 Task Status Summary</div>`);
         const tbl = buildDrptPmsTable(allForDay, prevDate);
@@ -6403,7 +6403,7 @@ export async function mountTaskflowApp(opts = {}) {
     const tbl  = document.createElement('table');
     tbl.className = 'data-table drpt-table drpt-pms-table';
     const prevLabel = prevDate ? fmtDateOnly(prevDate) : '—';
-
+  
     tbl.innerHTML = `<thead><tr>
       <th class="col-sr">Sr.no</th>
       <th>Prev. date</th>
@@ -6413,18 +6413,18 @@ export async function mountTaskflowApp(opts = {}) {
       <th>Delay</th>
       <th>Remarks</th>
     </tr></thead>`;
-
+  
     const tbody = document.createElement('tbody');
     tasks.forEach((t, i) => {
       const tr = document.createElement('tr');
       const isDone = t._section === 'done';
       const daysLate = t._daysLate ?? 0;
-
+  
       let delayHtml;
       if (isDone) delayHtml = `<span class="drpt-done-badge">DONE</span>`;
       else if (daysLate > 0) delayHtml = `<span class="drpt-overdue-badge">${daysLate} Days</span>`;
       else delayHtml = `<span class="drpt-pending-badge">Today</span>`;
-
+  
       tr.innerHTML = `
         <td><span class="sr-number">${i + 1}</span></td>
         <td style="white-space:nowrap;font-size:0.82rem">${escapeHtml(prevLabel)}</td>
@@ -6445,21 +6445,21 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(tbl);
     return wrap;
   }
-
+  
   // Date-range report: one table per calendar day using the same overdue / pending / done-today rules
   async function _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel) {
     try {
       const allTasks = await api('/tasks/all');
       const from = startOfLocalDay(parseLocalDate(fromStr));
       const to   = startOfLocalDay(parseLocalDate(toStr));
-
+  
       body.innerHTML = '';
       body.insertAdjacentHTML('beforeend', `
         <div class="drpt-pms-header">
           <div class="drpt-pms-smile">☺</div>
           <div class="drpt-pms-title">PMS (${rangeLabel})</div>
         </div>`);
-
+  
       let anyRows = false;
       for (let cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
         const day = startOfLocalDay(cursor);
@@ -6477,7 +6477,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (dlBtn) dlBtn.style.display = 'none';
         return;
       }
-
+  
       if (dlBtn) dlBtn.style.display = '';
     } catch (err) {
       body.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(err.message)}</div>`;
@@ -6601,32 +6601,6 @@ export async function mountTaskflowApp(opts = {}) {
     // Up to 2 decimals (33.33, 44.7)
     const rounded = Math.round(n * 100) / 100;
     return String(rounded);
-  }
-
-  function misKpiRow(summary, monthLabel, asOf, taskType = 'all') {
-    const typeNote =
-      taskType === 'normal'
-        ? 'Normal / Delegated tasks only'
-        : taskType === 'recurring'
-          ? 'Recurring tasks only'
-          : 'Delegated + Recurring';
-    return `
-      <div class="mis-kpis">
-        <div class="mis-kpi total"><div class="mis-kpi-label">Total tasks</div><div class="mis-kpi-value">${summary.total || 0}</div><div class="mis-kpi-sub">${monthLabel || ''} · ${typeNote}</div></div>
-        <div class="mis-kpi done"><div class="mis-kpi-label">Done</div><div class="mis-kpi-value">${summary.done || 0}</div><div class="mis-kpi-sub">Completed / verified</div></div>
-        <div class="mis-kpi ontime"><div class="mis-kpi-label">On-time</div><div class="mis-kpi-value">${summary.on_time || 0}</div><div class="mis-kpi-sub">${formatMisPct(summary.on_time_pct || 0)}% of done</div></div>
-        <div class="mis-kpi delayed"><div class="mis-kpi-label">Delayed open</div><div class="mis-kpi-value">${summary.delayed || summary.delayed_not_done || 0}</div><div class="mis-kpi-sub">Past due, not done</div></div>
-        <div class="mis-kpi pending"><div class="mis-kpi-label">Pending</div><div class="mis-kpi-value">${summary.pending || 0}</div><div class="mis-kpi-sub">Still within due</div></div>
-        <div class="mis-kpi na"><div class="mis-kpi-label">N/A</div><div class="mis-kpi-value">${summary.na || 0}</div><div class="mis-kpi-sub">Not applicable</div></div>
-        <div class="mis-kpi completion"><div class="mis-kpi-label">Open %</div><div class="mis-kpi-value">${formatMisPct(summary.completion_pct || 0)}%</div><div class="mis-kpi-sub">0% = all done</div></div>
-      </div>
-      <div class="mis-legend">
-        <span><strong>On-time</strong> = done on/before due</span>
-        <span><strong>Delayed done</strong> = finished after due</span>
-        <span><strong>Delayed</strong> = overdue &amp; still open</span>
-        <span><strong>Open %</strong> = still open ÷ (Total − N/A). <strong>0%</strong> means all completed. Example: 2 of 6 open → 33.33%</span>
-        <span>As of <strong>${escapeHtml(asOf || '—')}</strong></span>
-      </div>`;
   }
 
   function misEmployeeRow(e, isTotal = false, taskType = 'all') {
@@ -6791,8 +6765,7 @@ export async function mountTaskflowApp(opts = {}) {
         }
 
         if (!data.weeks?.length) {
-          body.innerHTML = `${misKpiRow(data.summary || {}, data.month_label, data.as_of, activeType)}
-            <div class="empty-state">No weeks / tasks for this selection</div>`;
+          body.innerHTML = `<div class="empty-state">No weeks / tasks for this selection</div>`;
           return;
         }
 
@@ -6813,7 +6786,6 @@ export async function mountTaskflowApp(opts = {}) {
           </div>`;
 
         body.innerHTML =
-          misKpiRow(data.summary || {}, data.month_label, data.as_of, activeType) +
           `<div class="mis-filter-chip">Showing: <strong>${escapeHtml(typeLabel)}</strong></div>` +
           tabs +
           data.weeks.map((w) => renderMisWeekCard(w, activeType)).join('');
