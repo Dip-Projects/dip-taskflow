@@ -6603,10 +6603,16 @@ export async function mountTaskflowApp(opts = {}) {
     return String(rounded);
   }
 
-  function misKpiRow(summary, monthLabel, asOf) {
+  function misKpiRow(summary, monthLabel, asOf, taskType = 'all') {
+    const typeNote =
+      taskType === 'normal'
+        ? 'Normal / Delegated tasks only'
+        : taskType === 'recurring'
+          ? 'Recurring tasks only'
+          : 'Delegated + Recurring';
     return `
       <div class="mis-kpis">
-        <div class="mis-kpi total"><div class="mis-kpi-label">Total tasks</div><div class="mis-kpi-value">${summary.total || 0}</div><div class="mis-kpi-sub">${monthLabel || ''}</div></div>
+        <div class="mis-kpi total"><div class="mis-kpi-label">Total tasks</div><div class="mis-kpi-value">${summary.total || 0}</div><div class="mis-kpi-sub">${monthLabel || ''} · ${typeNote}</div></div>
         <div class="mis-kpi done"><div class="mis-kpi-label">Done</div><div class="mis-kpi-value">${summary.done || 0}</div><div class="mis-kpi-sub">Completed / verified</div></div>
         <div class="mis-kpi ontime"><div class="mis-kpi-label">On-time</div><div class="mis-kpi-value">${summary.on_time || 0}</div><div class="mis-kpi-sub">${formatMisPct(summary.on_time_pct || 0)}% of done</div></div>
         <div class="mis-kpi delayed"><div class="mis-kpi-label">Delayed open</div><div class="mis-kpi-value">${summary.delayed || summary.delayed_not_done || 0}</div><div class="mis-kpi-sub">Past due, not done</div></div>
@@ -6623,12 +6629,22 @@ export async function mountTaskflowApp(opts = {}) {
       </div>`;
   }
 
-  function misEmployeeRow(e, isTotal = false) {
+  function misEmployeeRow(e, isTotal = false, taskType = 'all') {
+    let splitHtml = '';
+    if (!isTotal) {
+      if (taskType === 'normal') {
+        splitHtml = `<div class="mis-split">Delegated ${e.regular_total || 0}</div>`;
+      } else if (taskType === 'recurring') {
+        splitHtml = `<div class="mis-split">Recurring ${e.recurring_total || 0}</div>`;
+      } else {
+        splitHtml = `<div class="mis-split">Delegated ${e.regular_total || 0} · Recurring ${e.recurring_total || 0}</div>`;
+      }
+    }
     const nameHtml = isTotal
       ? `<strong>Grand Total (${e.employee_count || 0} employees)</strong>`
       : `<div class="mis-emp-name">${escapeHtml(e.name)}</div>
          <div class="mis-emp-meta">${escapeHtml(e.username || '')}${e.department ? ` · ${escapeHtml(e.department)}` : ''}</div>
-         <div class="mis-split">Delegated ${e.regular_total || 0} · Recurring ${e.recurring_total || 0}</div>`;
+         ${splitHtml}`;
     return `
       <tr class="${isTotal ? 'mis-total-row' : ''}">
         <td>${nameHtml}</td>
@@ -6643,7 +6659,7 @@ export async function mountTaskflowApp(opts = {}) {
       </tr>`;
   }
 
-  function renderMisWeekCard(w) {
+  function renderMisWeekCard(w, taskType = 'all') {
     const hint = w.spans_prev_month
       ? ' · includes previous month'
       : w.spans_next_month
@@ -6653,8 +6669,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (!w.employees?.length) {
       rowsHtml = `<tr><td colspan="9" class="empty-state">No tasks due this week</td></tr>`;
     } else {
-      rowsHtml = w.employees.map((e) => misEmployeeRow(e)).join('');
-      rowsHtml += misEmployeeRow({ ...w.totals, employee_count: w.employee_count }, true);
+      rowsHtml = w.employees.map((e) => misEmployeeRow(e, false, taskType)).join('');
+      rowsHtml += misEmployeeRow({ ...w.totals, employee_count: w.employee_count }, true, taskType);
     }
     return `
       <div class="mis-week-card" data-week="${w.week}">
@@ -6712,7 +6728,7 @@ export async function mountTaskflowApp(opts = {}) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `MIS-${data.year}-${String(data.month).padStart(2, '0')}.csv`;
+    a.download = `MIS-${data.year}-${String(data.month).padStart(2, '0')}-${data.filters?.task_type || 'all'}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('CSV downloaded ✅', 'success');
@@ -6724,6 +6740,7 @@ export async function mountTaskflowApp(opts = {}) {
     const weekEl = document.getElementById('misWeek');
     const deptEl = document.getElementById('misDept');
     const sortEl = document.getElementById('misSort');
+    const typeEl = document.getElementById('misTaskType');
     const genBtn = document.getElementById('misGenBtn');
     const csvBtn = document.getElementById('misCsvBtn');
     if (!body || !monthEl) return;
@@ -6737,13 +6754,15 @@ export async function mountTaskflowApp(opts = {}) {
       body.innerHTML = '<div class="empty-state">Building MIS report…</div>';
       try {
         const [y, m] = monthEl.value.split('-').map(Number);
-        const qs = new URLSearchParams({ year: String(y), month: String(m) });
+        const taskType = typeEl?.value || 'all';
+        const qs = new URLSearchParams({ year: String(y), month: String(m), task_type: taskType });
         if (weekEl?.value) qs.set('week', weekEl.value);
         if (deptEl?.value) qs.set('department', deptEl.value);
         if (sortEl?.value) qs.set('sort', sortEl.value);
 
         const data = await api(`/mis-report?${qs}`);
         _misLastData = data;
+        const activeType = data.filters?.task_type || taskType;
 
         // Week options
         if (weekEl) {
@@ -6772,10 +6791,17 @@ export async function mountTaskflowApp(opts = {}) {
         }
 
         if (!data.weeks?.length) {
-          body.innerHTML = `${misKpiRow(data.summary || {}, data.month_label, data.as_of)}
+          body.innerHTML = `${misKpiRow(data.summary || {}, data.month_label, data.as_of, activeType)}
             <div class="empty-state">No weeks / tasks for this selection</div>`;
           return;
         }
+
+        const typeLabel =
+          activeType === 'normal'
+            ? 'Normal / Delegated only'
+            : activeType === 'recurring'
+              ? 'Recurring only'
+              : 'All tasks';
 
         const tabs = `
           <div class="mis-week-tabs" id="misWeekTabs">
@@ -6787,9 +6813,10 @@ export async function mountTaskflowApp(opts = {}) {
           </div>`;
 
         body.innerHTML =
-          misKpiRow(data.summary || {}, data.month_label, data.as_of) +
+          misKpiRow(data.summary || {}, data.month_label, data.as_of, activeType) +
+          `<div class="mis-filter-chip">Showing: <strong>${escapeHtml(typeLabel)}</strong></div>` +
           tabs +
-          data.weeks.map(renderMisWeekCard).join('');
+          data.weeks.map((w) => renderMisWeekCard(w, activeType)).join('');
 
         body.querySelectorAll('#misWeekTabs .mis-week-tab').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -6818,6 +6845,7 @@ export async function mountTaskflowApp(opts = {}) {
       weekEl?.addEventListener('change', run);
       deptEl?.addEventListener('change', run);
       sortEl?.addEventListener('change', run);
+      typeEl?.addEventListener('change', run);
     }
     run();
   }

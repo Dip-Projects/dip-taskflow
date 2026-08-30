@@ -212,7 +212,7 @@ function normDept(d) {
   return String(d || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-// GET /mis-report?year=2026&month=8&week=1&department=MDO%20OFFICE&sort=completion
+// GET /mis-report?year=2026&month=8&week=1&department=MDO%20OFFICE&sort=completion&task_type=all|normal|recurring
 router.get('/', async (req, res) => {
   try {
     const now = new Date();
@@ -221,6 +221,16 @@ router.get('/', async (req, res) => {
     const weekFilter = req.query.week ? Number(req.query.week) : null;
     const deptFilter = (req.query.department || '').trim();
     const sort = (req.query.sort || 'name').toLowerCase();
+    // all = both; normal/regular = delegated only; recurring = recurring instances only
+    const taskTypeRaw = String(req.query.task_type || 'all').toLowerCase().trim();
+    const taskType =
+      taskTypeRaw === 'normal' || taskTypeRaw === 'regular' || taskTypeRaw === 'delegated'
+        ? 'normal'
+        : taskTypeRaw === 'recurring'
+          ? 'recurring'
+          : 'all';
+    const includeNormal = taskType === 'all' || taskType === 'normal';
+    const includeRecurring = taskType === 'all' || taskType === 'recurring';
 
     const allWeeks = weeksForMonth(year, month);
     const weeks = allWeeks.filter((w) => (weekFilter ? w.week === weekFilter : true));
@@ -235,6 +245,12 @@ router.get('/', async (req, res) => {
         as_of: ymd(now),
         departments: [],
         week_options: allWeeks.map((w) => ({ week: w.week, label: w.label })),
+        filters: {
+          department: deptFilter || null,
+          week: weekFilter,
+          sort,
+          task_type: taskType,
+        },
         weeks: [],
         summary: enrichStats(emptyStats()),
       });
@@ -266,30 +282,36 @@ router.get('/', async (req, res) => {
       : employees || [];
     const empIds = new Set(empList.map((e) => e.id));
 
-    // Date-only compare works for both date and timestamptz columns
-    const { data: tasks, error: taskErr } = await supabase
-      .from('tasks')
-      .select(
-        'id, assigned_to, status, target_date, verified_at, sent_for_verification_at, verification_status'
-      )
-      .gte('target_date', rangeFrom)
-      .lte('target_date', `${rangeTo}T23:59:59.999Z`);
-    if (taskErr) throw taskErr;
-
-    const { data: recurring, error: rtErr } = await supabase
-      .from('recurring_tasks')
-      .select('id, assigned_to, frequency, frequency_days, start_date, end_date, is_active')
-      .eq('is_active', true);
-    if (rtErr) throw rtErr;
+    let tasks = [];
+    if (includeNormal) {
+      // Date-only compare works for both date and timestamptz columns
+      const { data, error: taskErr } = await supabase
+        .from('tasks')
+        .select(
+          'id, assigned_to, status, target_date, verified_at, sent_for_verification_at, verification_status'
+        )
+        .gte('target_date', rangeFrom)
+        .lte('target_date', `${rangeTo}T23:59:59.999Z`);
+      if (taskErr) throw taskErr;
+      tasks = data || [];
+    }
 
     const recurringInstances = [];
-    for (const rt of recurring || []) {
-      if (!empIds.has(rt.assigned_to)) continue;
-      const dates = fireDatesInRange(rt, rangeFrom, rangeTo);
-      const insts = await ensureInstances(rt.id, dates);
-      insts.forEach((inst) => {
-        recurringInstances.push({ ...inst, assigned_to: rt.assigned_to });
-      });
+    if (includeRecurring) {
+      const { data: recurring, error: rtErr } = await supabase
+        .from('recurring_tasks')
+        .select('id, assigned_to, frequency, frequency_days, start_date, end_date, is_active')
+        .eq('is_active', true);
+      if (rtErr) throw rtErr;
+
+      for (const rt of recurring || []) {
+        if (!empIds.has(rt.assigned_to)) continue;
+        const dates = fireDatesInRange(rt, rangeFrom, rangeTo);
+        const insts = await ensureInstances(rt.id, dates);
+        insts.forEach((inst) => {
+          recurringInstances.push({ ...inst, assigned_to: rt.assigned_to });
+        });
+      }
     }
 
     const weekPayload = weeks.map((w) => {
@@ -306,21 +328,25 @@ router.get('/', async (req, res) => {
 
       const inWeek = (day) => day >= w.from && day <= w.to;
 
-      for (const t of tasks || []) {
-        if (!empIds.has(t.assigned_to)) continue;
-        const due = t.target_date ? String(t.target_date).slice(0, 10) : null;
-        if (!due || !inWeek(due)) continue;
-        const emp = byEmp[t.assigned_to];
-        if (!emp) continue;
-        addStats(emp, classifyRegular(t, asOf));
+      if (includeNormal) {
+        for (const t of tasks) {
+          if (!empIds.has(t.assigned_to)) continue;
+          const due = t.target_date ? String(t.target_date).slice(0, 10) : null;
+          if (!due || !inWeek(due)) continue;
+          const emp = byEmp[t.assigned_to];
+          if (!emp) continue;
+          addStats(emp, classifyRegular(t, asOf));
+        }
       }
 
-      for (const inst of recurringInstances) {
-        const due = String(inst.due_date).slice(0, 10);
-        if (!inWeek(due)) continue;
-        const emp = byEmp[inst.assigned_to];
-        if (!emp) continue;
-        addStats(emp, classifyRecurring(inst, asOf));
+      if (includeRecurring) {
+        for (const inst of recurringInstances) {
+          const due = String(inst.due_date).slice(0, 10);
+          if (!inWeek(due)) continue;
+          const emp = byEmp[inst.assigned_to];
+          if (!emp) continue;
+          addStats(emp, classifyRecurring(inst, asOf));
+        }
       }
 
       let rows = Object.values(byEmp)
@@ -371,6 +397,7 @@ router.get('/', async (req, res) => {
         department: deptFilter || null,
         week: weekFilter,
         sort,
+        task_type: taskType,
       },
       summary: enrichStats(summary),
       weeks: weekPayload,

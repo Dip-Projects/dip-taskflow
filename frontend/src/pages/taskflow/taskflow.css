@@ -1878,6 +1878,19 @@ body.sidebar-open { overflow: hidden; }
   color: #64748b;
   margin-top: 4px;
 }
+.mis-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 4px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  font-size: 0.78rem;
+  color: #475569;
+}
+.mis-filter-chip strong { color: var(--ink); font-weight: 700; }
 @media (max-width: 768px) {
   .mis-field input,
   .mis-field select { min-width: 0; width: 100%; }

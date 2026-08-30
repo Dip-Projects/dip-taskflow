@@ -1116,7 +1116,7 @@ export default function TaskflowDom() {
           <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">📊 MIS Report</h2>
-              <p className="view-sub">Week-wise performance for delegated + recurring tasks. Week 1 can include previous-month days.</p>
+              <p className="view-sub">Week-wise performance. Filter by Normal (delegated) or Recurring tasks. Week 1 can include previous-month days.</p>
             </div>
             <div className="mis-toolbar">
               <label className="mis-field">
@@ -1133,6 +1133,14 @@ export default function TaskflowDom() {
                 <span>Department</span>
                 <select id="misDept">
                   <option value="">All departments</option>
+                </select>
+              </label>
+              <label className="mis-field">
+                <span>Task type</span>
+                <select id="misTaskType">
+                  <option value="all">All tasks</option>
+                  <option value="normal">Normal / Delegated only</option>
+                  <option value="recurring">Recurring only</option>
                 </select>
               </label>
               <label className="mis-field">
