@@ -453,8 +453,12 @@ export async function mountTaskflowApp(opts = {}) {
   function employeeAssignedDeadline(task) {
     const start = task?.assigned_at || task?.created_at;
     const hours = Number(task?.hours_to_complete);
-    if (!start || !hours || hours <= 0) return null;
-    return addWorkingHours(start, hours, { fromNowIfToday: false });
+    if (!start || Number.isNaN(hours) || hours <= 0) return null;
+    try {
+      return addWorkingHours(start, hours, { fromNowIfToday: false });
+    } catch (_) {
+      return null;
+    }
   }
 
   function employeeWorkDueDate(task) {
@@ -665,10 +669,18 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (!task.accepted_at) {
       const deadline = employeeAssignedDeadline(task);
+      const assignedAt = task.assigned_at || task.created_at;
       if (deadline) {
         return `
           <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
-          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Accept to start timer</div>
+          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Timer starts on Accept</div>
+          ${fmtPlannedDateLine(task)}
+        `;
+      }
+      if (assignedAt) {
+        return `
+          <div class="task-timer-due">Assigned ${fmtDate(assignedAt)}</div>
+          <div class="task-timer-sub">No hours set · Accept to start after hours are added</div>
           ${fmtPlannedDateLine(task)}
         `;
       }
@@ -1490,13 +1502,28 @@ export async function mountTaskflowApp(opts = {}) {
   });
 
   async function actuallyAssignTask(cpLabels) {
+    const hoursVal = document.getElementById('f-hours')?.value;
+    const hoursNum = Number(hoursVal);
+    if (!hoursVal || Number.isNaN(hoursNum) || hoursNum <= 0) {
+      throw new Error('Please enter hours to complete (greater than 0)');
+    }
+    if (!els.fDepartment.value || !els.fEmployee.value || !els.fTaskType.value) {
+      throw new Error('Please fill in all required fields');
+    }
+    if (!document.getElementById('f-description')?.value?.trim()) {
+      throw new Error('Please fill in all required fields');
+    }
+    if (!document.getElementById('f-targetdate')?.value) {
+      throw new Error('Please fill in all required fields');
+    }
+
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
     formData.append('project_id', els.fProject.value);
     formData.append('task_type_id', els.fTaskType.value);
     formData.append('description', document.getElementById('f-description').value);
-    formData.append('hours_to_complete', document.getElementById('f-hours').value);
+    formData.append('hours_to_complete', String(hoursNum));
     formData.append('target_date', document.getElementById('f-targetdate').value);
     formData.append('priority', document.getElementById('f-priority').value);
     formData.append('rescheduling_possible', document.getElementById('f-reschedule').value);
@@ -1514,11 +1541,16 @@ export async function mountTaskflowApp(opts = {}) {
         });
       } catch (_) { /* table missing — task is still assigned */ }
     }
-      showToast('Task assigned ✅', 'success');
+    showToast('Task assigned ✅', 'success');
+    try {
       els.addTaskForm.reset();
-      document.getElementById('f-priority').value = 'Medium';
-      document.getElementById('f-reschedule').value = 'false';
-      updateTaskDeadlinePreview();
+      const priorityEl = document.getElementById('f-priority');
+      const reschedEl = document.getElementById('f-reschedule');
+      const hoursEl = document.getElementById('f-hours');
+      if (priorityEl) priorityEl.value = 'Medium';
+      if (reschedEl) reschedEl.value = 'false';
+      if (hoursEl) hoursEl.value = '8';
+    } catch (_) { /* form reset must never hide assign success */ }
   }
 
   function toggleInlineAdd(rowId) {
