@@ -166,7 +166,7 @@ export default function SiteTeamChat({ user }) {
         .stc-room.on { border-color:#0f766e; background:#f0fdfa; }
         .stc-room em { font-style:normal; font-size:.68rem; color:#0f766e; margin-left:6px; }
         .stc-room b { background:#0f766e; color:#fff; border-radius:999px; padding:0 6px; font-size:.7rem; }
-        .stc-empty { font-size:.8rem; color:#6b645c; }
+        .stc-empty { font-size:.8rem; color:#6b645c; text-align:center; display:flex; align-items:center; justify-content:center; min-height:180px; padding:24px 12px; }
         .stc-main { display:flex; flex-direction:column; border:1px solid #e8e2d8; border-radius:10px; min-height:420px; }
         .stc-head { padding:10px 12px; font-weight:700; border-bottom:1px solid #e8e2d8; }
         .stc-log { flex:1; overflow:auto; padding:10px; display:flex; flex-direction:column; gap:8px; }

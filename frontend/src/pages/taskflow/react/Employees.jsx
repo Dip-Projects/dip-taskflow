@@ -59,16 +59,22 @@ export default function Employees() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((u) => (
-              <tr key={u.id}>
-                <td>{u.full_name || '—'}</td>
-                <td>{u.username || '—'}</td>
-                <td>{u.department || '—'}</td>
-                <td>{u.site_name || (u.site_names || []).join(', ') || '—'}</td>
-                <td>{u.is_head ? 'Yes' : '—'}</td>
-                <td>{u.is_active === false ? 'No' : 'Yes'}</td>
+            {!filtered.length ? (
+              <tr>
+                <td colSpan={6} className="tfr-empty">No employees found.</td>
               </tr>
-            ))}
+            ) : (
+              filtered.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.full_name || '—'}</td>
+                  <td>{u.username || '—'}</td>
+                  <td>{u.department || '—'}</td>
+                  <td>{u.site_name || (u.site_names || []).join(', ') || '—'}</td>
+                  <td>{u.is_head ? 'Yes' : '—'}</td>
+                  <td>{u.is_active === false ? 'No' : 'Yes'}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

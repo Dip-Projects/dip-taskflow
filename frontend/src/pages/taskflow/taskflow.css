@@ -98,13 +98,19 @@ html:has(.tf-shell) body {
   background: var(--bg);
   color: var(--ink);
 }
-#appScreen .empty-state {
-  display: block;
+#appScreen .empty-state:not(td) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  padding: 52px 20px;
+  width: 100%;
+  min-height: calc(100dvh - var(--topbar-h) - var(--surface-bar-h, 0px) - 200px);
+  padding: 40px 20px;
   color: var(--muted);
   font-size: 0.86rem;
-  gap: 0;
+  gap: 8px;
+  box-sizing: border-box;
 }
 #appScreen .filter-row {
   display: flex;
@@ -630,18 +636,22 @@ body.sidebar-open { overflow: hidden; }
 #allTasksTable th:nth-child(9),
 #allTasksTable td:nth-child(9) { width: 15%; }
 
-/* Empty / loading rows: full-width centered (Sr No 4% rule squeezes message to the side) */
+/* Empty / loading rows: fill remaining viewport and sit dead-center */
+#appScreen td.empty-state,
 #allTasksTable td.empty-state,
 #allTasksTable td[colspan],
 #myTasksTable td.empty-state,
 #myTasksTable td[colspan],
 #overdueTasksTable td.empty-state,
 #overdueTasksTable td[colspan],
+.data-table tbody td.empty-state,
 .data-table tbody td.empty-state[colspan] {
+  display: table-cell !important;
   width: 100% !important;
   max-width: none !important;
   text-align: center !important;
-  vertical-align: middle;
+  vertical-align: middle !important;
+  height: calc(100dvh - var(--topbar-h) - var(--surface-bar-h, 0px) - 240px);
   white-space: normal;
   word-break: normal;
   justify-content: center;
@@ -1094,11 +1104,36 @@ body.sidebar-open { overflow: hidden; }
 /* ================================================================
    EMPTY STATE
    ================================================================ */
-.empty-state {
-  text-align: center; padding: 52px 20px;
-  color: var(--muted); font-size: 0.86rem;
+.empty-state:not(td) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  width: 100%;
+  min-height: calc(100dvh - var(--topbar-h, 58px) - var(--surface-bar-h, 0px) - 200px);
+  padding: 40px 20px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  box-sizing: border-box;
 }
 .empty-state .emoji { font-size: 2.4rem; display: block; margin-bottom: 10px; }
+
+/* Nested / small panels: keep compact, still centered */
+#appScreen #overdueDrawerBody .empty-state,
+#appScreen .drawer-body .empty-state,
+#appScreen .drawer-panel .empty-state,
+#appScreen #calDayDetail .empty-state,
+#appScreen .bot-rich .empty-state,
+#appScreen .bot-list .empty-state,
+#appScreen .drpt-table td.empty-state,
+#appScreen .lv-list .empty-state,
+.tf-shell .drawer-body .empty-state,
+.tf-shell .bot-rich .empty-state {
+  min-height: 180px;
+  height: auto;
+  padding: 36px 16px;
+}
 
 /* Employee task work timer (My Tasks) */
 .task-timer-cell,
@@ -1640,7 +1675,15 @@ body.sidebar-open { overflow: hidden; }
 .org-node-info { display: flex; flex-direction: column; line-height: 1.3; text-align: left; }
 .org-node-name { font-weight: 700; font-size: 0.9rem; color: var(--ink); }
 .org-node-meta { font-size: 0.74rem; color: var(--muted); }
-.org-tree-empty { color: var(--muted); padding: 20px 0; text-align: center; }
+.org-tree-empty {
+  color: var(--muted);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100dvh - var(--topbar-h) - var(--surface-bar-h, 0px) - 200px);
+  padding: 40px 20px;
+}
 
 .cell-primary { font-weight: 600; color: var(--ink); line-height: 1.35; }
 .cell-muted { font-size: 0.75rem; color: var(--muted); margin-top: 3px; line-height: 1.3; }
@@ -2089,15 +2132,26 @@ body.sidebar-open { overflow: hidden; }
     justify-content: flex-end;
     width: 100%;
   }
+  #appScreen .table-card--stack .data-table .empty-state,
   .table-card--stack .data-table .empty-state {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
     padding: 24px 12px;
   }
+  #appScreen .table-card--stack .data-table tbody td.empty-state,
+  #appScreen .table-card--stack .data-table tbody td[colspan],
   .table-card--stack .data-table tbody td.empty-state,
   .table-card--stack .data-table tbody td[colspan] {
-    display: block;
-    text-align: center;
+    display: flex !important;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center !important;
+    min-height: calc(100dvh - var(--topbar-h) - var(--surface-bar-h, 0px) - 200px);
+    height: auto;
   }
   .table-card--stack .data-table tbody td.empty-state::before,
   .table-card--stack .data-table tbody td[colspan]::before {

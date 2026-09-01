@@ -113,7 +113,7 @@ const CSS = `
   .mp-tbl .tr-grand-total td{background:#fee2e2;color:#7f1d1d;font-weight:900;text-align:center;font-size:13px;border-top:3px solid #f87171;}
   .mp-tbl .tr-grand-total .td-grand-label{text-align:left;font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#991b1b;}
   .mp-tbl .tr-grand-total .td-grand-total-val{background:#fca5a5;color:#7f1d1d;font-size:15px;}
-  .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 24px;gap:10px;text-align:center;}
+  .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 24px;gap:10px;text-align:center;width:100%;min-height:calc(100dvh - 240px);box-sizing:border-box;}
   .empty-ico{font-size:36px;opacity:.4;}
   .empty-title{font-size:15px;font-weight:700;color:#3d3d3d;}
   .empty-sub{font-size:12.5px;color:#7a7a7a;max-width:320px;line-height:1.6;}

@@ -50,6 +50,8 @@
   min-width: 0;
   padding: 20px 24px;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 .tfr-main h1 {
   margin: 0 0 16px;
@@ -57,7 +59,14 @@
 }
 .tfr-empty,
 .tfr-error {
-  padding: 24px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: calc(100dvh - 140px);
+  padding: 40px 24px;
   border-radius: 12px;
   background: #fff;
   border: 1px solid #e8ddd2;
@@ -66,6 +75,15 @@
   color: #b91c1c;
   border-color: #fecaca;
   background: #fef2f2;
+}
+td.tfr-empty {
+  display: table-cell !important;
+  vertical-align: middle;
+  text-align: center;
+  height: calc(100dvh - 220px);
+  min-height: 0;
+  border: none;
+  background: transparent;
 }
 .tfr-list {
   display: grid;

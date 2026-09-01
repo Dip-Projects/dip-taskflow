@@ -585,7 +585,7 @@ const hasMore = paginated.length < totalReports;
             </div>
           ) : filtered.length === 0 ? (
             /* ── Empty state ── */
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10, padding:"52px 24px", color:"#94a3b8" }}>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:10, padding:"52px 24px", color:"#94a3b8", minHeight:"calc(100dvh - 240px)", width:"100%", textAlign:"center", boxSizing:"border-box" }}>
               <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:0.3 }}>
                 <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
               </svg>

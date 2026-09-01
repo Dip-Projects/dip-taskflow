@@ -512,7 +512,7 @@ border:2px solid transparent;border-radius:12px;color:#6b2d0f;cursor:pointer;fon
 .mreq-rcard-qty{font-size:12.5px;color:var(--ink2);margin-top:2px;font-weight:600;}
 .mreq-rcard-meta{font-size:11.5px;color:var(--ink3);margin-top:8px;line-height:1.6;}
 .mreq-rcard-meta strong{color:var(--ink2);}
-.mreq-empty{display:flex;flex-direction:column;align-items:center;padding:24px 12px;text-align:center;gap:8px;color:var(--ink3);}
+.mreq-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 12px;text-align:center;gap:8px;color:var(--ink3);width:100%;min-height:calc(100dvh - 240px);box-sizing:border-box;}
 .mreq-empty-title{font-size:13px;font-weight:700;color:var(--ink2);}
 .mreq-empty-sub{font-size:12px;color:var(--ink3);}
 .badge{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;}

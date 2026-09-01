@@ -150,7 +150,8 @@ const CSS = `
 
 .mreq-receive-btn{margin-top:10px;width:100%;}
 
-.mreq-empty{display:flex;flex-direction:column;align-items:center;padding:48px 24px;text-align:center;gap:10px;color:var(--ink3);}
+.mreq-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center;gap:10px;color:var(--ink3);width:100%;min-height:calc(100dvh - 240px);box-sizing:border-box;}
+.mreq-empty.mreq-empty-inline{min-height:140px;padding:24px 12px;}
 .mreq-empty svg{opacity:.3;}
 .mreq-empty-title{font-size:13.5px;font-weight:700;color:var(--ink2);}
 .mreq-empty-sub{font-size:12.5px;color:var(--ink3);}
@@ -554,7 +555,7 @@ const handleSiteChange = (newSite) => {
               <SkeletonReqCard />
             </div>
           ) : !history.length ? (
-            <div className="mreq-empty" style={{ padding: "24px 12px" }}>
+            <div className="mreq-empty mreq-empty-inline">
               {Ico.box}
               <div className="mreq-empty-title">No requests yet</div>
               <div className="mreq-empty-sub">Submitted requirements for this site will appear here.</div>
