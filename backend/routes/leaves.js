@@ -196,6 +196,11 @@ async function transferTasksToBuddy(leave) {
   if (!leave?.buddy_id || leave.buddy_status !== 'Accepted') {
     return { transferred: 0 };
   }
+  // Only move tasks after leave is Approved — never on buddy Yes alone,
+  // and never if leave was Rejected / Cancelled.
+  if (String(leave.status || '') !== 'Approved') {
+    return { transferred: 0 };
+  }
   const tasks = await fetchLeaveWindowTasks(leave);
   if (!tasks.length) return { transferred: 0 };
 
@@ -226,6 +231,44 @@ async function transferTasksToBuddy(leave) {
   }
   if (transferred > 0) await setCoverNeeded(leave.id, false);
   return { transferred };
+}
+
+/** If tasks were moved for this leave, put them back on the original assignee. */
+async function revertTasksFromBuddy(leave) {
+  if (!leave?.id) return { reverted: 0 };
+  let rows = [];
+  const withCover = await supabase
+    .from('tasks')
+    .select('id, leave_cover_from, assigned_to')
+    .eq('leave_cover_id', leave.id);
+  if (!withCover.error) {
+    rows = withCover.data || [];
+  } else if (!isBuddySchemaError(withCover.error)) {
+    throw withCover.error;
+  }
+
+  let reverted = 0;
+  for (const t of rows) {
+    const backTo = t.leave_cover_from || leave.user_id;
+    if (!backTo) continue;
+    const patch = {
+      assigned_to: backTo,
+      leave_cover_id: null,
+      leave_cover_from: null,
+    };
+    const { error } = await supabase.from('tasks').update(patch).eq('id', t.id);
+    if (error && isBuddySchemaError(error)) {
+      const { error: e2 } = await supabase
+        .from('tasks')
+        .update({ assigned_to: backTo })
+        .eq('id', t.id);
+      if (!e2) reverted += 1;
+    } else if (!error) {
+      reverted += 1;
+    }
+  }
+  await setCoverNeeded(leave.id, false);
+  return { reverted };
 }
 
 function normDept(d) {
@@ -485,35 +528,43 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     let tasksMoved = 0;
     const acceptDay = todayYmd();
     if (accept) {
-      const transfer = await transferTasksToBuddy({
-        ...existing,
-        buddy_id: req.user.id,
-        buddy_status: 'Accepted',
-      });
-      tasksMoved = transfer.transferred || 0;
-      if (tasksMoved > 0) {
+      // Only transfer if leave is already Approved. If leave is still Pending,
+      // buddy Yes is recorded and tasks move later on admin leave approve.
+      if (String(existing.status || '') === 'Approved') {
+        const transfer = await transferTasksToBuddy({
+          ...existing,
+          buddy_id: req.user.id,
+          buddy_status: 'Accepted',
+          status: 'Approved',
+        });
+        tasksMoved = transfer.transferred || 0;
+        if (tasksMoved > 0) {
+          try {
+            await notifyHeadAndChirag(
+              existing.user_id,
+              `${tasksMoved} task(s) moved to buddy ${req.user.full_name}. Target dates stay as they were.`,
+              existing.from_date,
+              existing.to_date
+            );
+          } catch (waErr) {
+            console.warn('Leave WA (accept) skip:', waErr.message);
+          }
+        }
+      }
+    } else {
+      // Cover needed only after leave is Approved + buddy Declined (not while Pending)
+      if (String(existing.status || '') === 'Approved') {
+        await setCoverNeeded(id, true);
         try {
           await notifyHeadAndChirag(
             existing.user_id,
-            `${tasksMoved} task(s) moved to buddy ${req.user.full_name}. Target dates stay as they were.`,
+            `Buddy ${req.user.full_name} declined cover. Admin: reassign the leave-window tasks or change their target date in TaskFlow.`,
             existing.from_date,
             existing.to_date
           );
         } catch (waErr) {
-          console.warn('Leave WA (accept) skip:', waErr.message);
+          console.warn('Leave WA (decline) skip:', waErr.message);
         }
-      }
-    } else {
-      await setCoverNeeded(id, true);
-      try {
-        await notifyHeadAndChirag(
-          existing.user_id,
-          `Buddy ${req.user.full_name} declined cover. Admin: reassign the leave-window tasks or change their target date in TaskFlow.`,
-          existing.from_date,
-          existing.to_date
-        );
-      } catch (waErr) {
-        console.warn('Leave WA (decline) skip:', waErr.message);
       }
     }
 
@@ -539,8 +590,10 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     res.json({
       ...data,
       tasks_moved: tasksMoved,
-      cover_needed: !accept,
+      cover_needed: !accept && String(existing.status || '') === 'Approved',
       accept_date: accept ? acceptDay : null,
+      transfer_pending_leave_approval:
+        accept && String(existing.status || '') !== 'Approved',
     });
   } catch (err) {
     console.error('Buddy respond error:', err.message);
@@ -799,7 +852,11 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
 
     let transferred = 0;
     if (existing.buddy_status === 'Accepted') {
-      const transfer = await transferTasksToBuddy(existing);
+      const transfer = await transferTasksToBuddy({
+        ...existing,
+        buddy_status: 'Accepted',
+        status: 'Approved',
+      });
       transferred = transfer.transferred;
       if (transferred > 0) {
         const { data: buddy } = await supabase
@@ -840,7 +897,7 @@ router.patch('/:id/reject', requireAdmin, async (req, res) => {
 
     const { data: existing, error: fetchErr } = await supabase
       .from('leaves')
-      .select('id, status')
+      .select('id, status, user_id, buddy_id, buddy_status')
       .eq('id', id)
       .maybeSingle();
     if (fetchErr) throw fetchErr;
@@ -856,6 +913,8 @@ router.patch('/:id/reject', requireAdmin, async (req, res) => {
         decided_by: req.user.id,
         decided_at: new Date().toISOString(),
         decision_note: reason && reason.trim() ? reason.trim() : null,
+        cover_needed: false,
+        cover_resolved_at: new Date().toISOString(),
       })
       .eq('id', id)
       .select(LEAVE_SELECT)
@@ -878,7 +937,17 @@ router.patch('/:id/reject', requireAdmin, async (req, res) => {
       error = null;
     }
     if (error) throw error;
-    res.json(data);
+
+    // Rejected leave: never keep tasks on buddy — revert any earlier transfer
+    let reverted = 0;
+    try {
+      const rev = await revertTasksFromBuddy(existing);
+      reverted = rev.reverted || 0;
+    } catch (revErr) {
+      console.warn('Leave reject revert tasks skip:', revErr.message);
+    }
+
+    res.json({ ...data, tasks_reverted: reverted });
   } catch (err) {
     console.error('Reject leave error:', err.message);
     res.status(500).json({ error: err.message || 'Could not reject leave request' });

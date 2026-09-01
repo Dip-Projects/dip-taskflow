@@ -3992,7 +3992,11 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
         const n = res.tasks_moved || 0;
-        showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
+        if (res.transfer_pending_leave_approval) {
+          showToast('You accepted buddy cover — tasks move only after leave is approved ✅', 'success');
+        } else {
+          showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
+        }
         loadBuddyRequests();
         refreshNavBadges();
       } catch (err) { showToast(err.message, 'error'); }
@@ -4040,7 +4044,7 @@ export async function mountTaskflowApp(opts = {}) {
             </div>
             <div class="ticket-desc"><strong>${escapeHtml(fromName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
             <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
-            <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
+            <div class="ticket-meta">Say Yes to cover their open tasks due in this window. Tasks move to you only after the leave is approved — not if it is rejected.</div>
           `;
           attachBuddyRespondButtons(card.querySelector('.row-actions'), leave);
           wrap.appendChild(card);

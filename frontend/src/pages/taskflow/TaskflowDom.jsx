@@ -1684,7 +1684,7 @@ export default function TaskflowDom() {
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
-            Your open tasks due in this leave window will move to this buddy after they say Yes. Their target dates stay the same — they do not become due on the accept day. Buddy list shows only your department (e.g. MDO OFFICE → MDO only).
+            Your open tasks due in this leave window will move to this buddy only after they say Yes <strong>and</strong> leave is approved. If leave is rejected, tasks stay with you.
           </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>
