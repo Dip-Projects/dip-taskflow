@@ -416,15 +416,46 @@ export async function mountTaskflowApp(opts = {}) {
     return now > due;
   }
 
-  /** An approved reschedule stops the timer until the employee accepts again. */
+  const RESCHEDULE_ACTIONS = ['reschedule_approved', 'rescheduled_by_admin'];
+  const ACCEPT_ACTIONS = ['start_task', 'reaccept_task'];
+
+  function taskEventsOf(task) {
+    return Array.isArray(task?.task_events) ? task.task_events : [];
+  }
+
+  function lastEventAt(task, actions) {
+    let at = null;
+    taskEventsOf(task).forEach((e) => {
+      if (e && actions.includes(e.action) && e.at) {
+        if (!at || new Date(e.at) > new Date(at)) at = e.at;
+      }
+    });
+    return at;
+  }
+
+  /**
+   * An approved reschedule stops the timer until the employee accepts again.
+   * Falls back to the event log where the reaccept_required column is missing.
+   */
   function needsReaccept(task) {
     if (isClosedOrRejectedTask(task)) return false;
-    return !!task?.reaccept_required;
+    if (task?.reaccept_required !== undefined && task?.reaccept_required !== null) {
+      return !!task.reaccept_required;
+    }
+    if (task?.accepted_at) return false;
+    const movedAt = lastEventAt(task, RESCHEDULE_ACTIONS);
+    if (!movedAt) return false;
+    const acceptedAt = lastEventAt(task, ACCEPT_ACTIONS);
+    return !acceptedAt || new Date(acceptedAt) < new Date(movedAt);
   }
 
   /** The first plan date the admin set — kept even after a reschedule. */
   function originalPlanDate(task) {
-    return task?.original_target_date || task?.target_date || null;
+    if (task?.original_target_date) return task.original_target_date;
+    const firstMove = taskEventsOf(task)
+      .filter((e) => e && RESCHEDULE_ACTIONS.includes(e.action) && e.from_target_date)
+      .sort((a, b) => new Date(a.at) - new Date(b.at))[0];
+    return firstMove?.from_target_date || task?.target_date || null;
   }
 
   /** The plan date in force now (after any approved reschedule). */
@@ -435,7 +466,8 @@ export async function mountTaskflowApp(opts = {}) {
   /** True when an approved reschedule moved this task off its original plan. */
   function wasRescheduledTask(task) {
     if (task?.reschedule_approved_target_date) return true;
-    return String(task?.reschedule_status || '') === 'Approved';
+    if (String(task?.reschedule_status || '') === 'Approved') return true;
+    return !!lastEventAt(task, RESCHEDULE_ACTIONS);
   }
 
   /** A plan date with no time means "by close of business" that day. */

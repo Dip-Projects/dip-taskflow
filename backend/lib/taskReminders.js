@@ -23,6 +23,7 @@ const {
   employeeDueDate,
   activePlanDate,
   needsReaccept,
+  acceptNudgeAlreadySent,
   assignedHours,
 } = require('./taskOverdue');
 
@@ -32,7 +33,7 @@ const REMINDER_SELECT = `
   hours_to_complete, original_hours_to_complete,
   target_date, original_target_date, reschedule_approved_target_date,
   reschedule_status, reaccept_required,
-  is_on_hold, hold_remaining_hours, held_at,
+  is_on_hold, hold_remaining_hours, held_at, task_events,
   overdue_since_at, accept_reminder_sent_at,
   assigned_to,
   project:projects ( name ),
@@ -44,7 +45,7 @@ const REMINDER_SELECT_LEGACY = `
   assigned_at, created_at, accepted_at, resumed_at,
   hours_to_complete, original_hours_to_complete,
   target_date, reschedule_status,
-  is_on_hold, hold_remaining_hours, held_at,
+  is_on_hold, hold_remaining_hours, held_at, task_events,
   assigned_to,
   project:projects ( name ),
   assignee:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id )
@@ -192,6 +193,33 @@ async function runDailyOverdueReminders({ now = new Date(), dryRun = false } = {
 }
 
 /**
+ * Records that the nudge went out. Writes both the dedicated column and a
+ * task_events entry, because task_events exists on every deployment while the
+ * column only appears after the plan-separation migration.
+ *
+ * @returns {Promise<boolean>} false when nothing could be recorded, in which
+ *   case the message is skipped rather than risk sending it on every sweep.
+ */
+async function markAcceptNudgeSent(t, now) {
+  const stamp = now.toISOString();
+  const events = (Array.isArray(t.task_events) ? [...t.task_events] : [])
+    .concat({ at: stamp, action: 'accept_nudge_sent' })
+    .slice(-80);
+
+  const withColumn = await supabase
+    .from('tasks')
+    .update({ accept_reminder_sent_at: stamp, task_events: events })
+    .eq('id', t.id);
+  if (!withColumn.error) return true;
+
+  const eventsOnly = await supabase.from('tasks').update({ task_events: events }).eq('id', t.id);
+  if (!eventsOnly.error) return true;
+
+  console.warn('accept nudge: could not record send for task', t.id, eventsOnly.error.message);
+  return false;
+}
+
+/**
  * Accept nudge: a short same-day task still sitting unaccepted after N minutes
  * gets one WhatsApp asking the employee to accept it or request a reschedule.
  */
@@ -206,8 +234,8 @@ async function runAcceptNudges({ now = new Date(), dryRun = false } = {}) {
   const tasks = await loadOpenTasks();
 
   const due = tasks.filter((t) => {
-    if (t.accepted_at && !t.reaccept_required) return false;
-    if (t.accept_reminder_sent_at) return false;
+    if (acceptNudgeAlreadySent(t)) return false;
+    if (t.accepted_at && !needsReaccept(t)) return false;
     if (String(t.status || '') === 'Rejected') return false;
     if (String(t.reschedule_status || '') === 'Pending') return false;
 
@@ -225,6 +253,10 @@ async function runAcceptNudges({ now = new Date(), dryRun = false } = {}) {
     if (!wa) continue;
     const deadline = employeeDueDate(t);
     if (!dryRun) {
+      // Mark first. A duplicate WhatsApp is worse than a missed one, and this
+      // sweep can run concurrently across serverless instances.
+      const marked = await markAcceptNudgeSent(t, now);
+      if (!marked) continue;
       await sendWhatsAppTemplate(wa, 'task_notification_v2', [
         t.assignee?.full_name || 'Team member',
         `PLEASE ACCEPT (${assignedHours(t)}h task, ${waitMin}+ min waiting): ${shortDesc(t)} — accept it now or request a reschedule`,
@@ -232,11 +264,6 @@ async function runAcceptNudges({ now = new Date(), dryRun = false } = {}) {
         deadline ? `Due ${fmtDayLabel(deadline)}` : 'Due today',
         t.priority || 'High',
       ]);
-      await supabase
-        .from('tasks')
-        .update({ accept_reminder_sent_at: now.toISOString() })
-        .eq('id', t.id)
-        .then(() => {}, () => {});
     }
     sent += 1;
   }

@@ -9,7 +9,8 @@ const path = require('path');
 const SRC = path.join(__dirname, '..', 'frontend', 'src', 'pages', 'taskflow', 'mountTaskflowApp.js');
 
 const NAMES = [
-  'parseLocalDate', 'isRejectedTask', 'isClosedOrRejectedTask', 'needsReaccept',
+  'parseLocalDate', 'isRejectedTask', 'isClosedOrRejectedTask',
+  'taskEventsOf', 'lastEventAt', 'needsReaccept',
   'originalPlanDate', 'activePlanDate', 'wasRescheduledTask', 'endOfPlanDay',
   'workTimerAnchor', 'workTimerBudgetHours', 'assignedHoursOf',
   'employeeAssignedDeadline', 'isAssignmentOverdueTask', 'employeeWorkDueDate',
@@ -65,6 +66,10 @@ function extract() {
   const constStart = src.indexOf('\n  const OFFICE_HOURS = {');
   if (constStart >= 0) {
     out += `${src.slice(constStart, endOfBlock(src, src.indexOf('{', constStart + 20)) + 1)};\n`;
+  }
+  for (const arr of ['RESCHEDULE_ACTIONS', 'ACCEPT_ACTIONS']) {
+    const at = src.indexOf(`\n  const ${arr} = [`);
+    if (at >= 0) out += `${src.slice(at, src.indexOf('];', at) + 2)}\n`;
   }
   for (const name of NAMES) {
     const start = src.indexOf(`\n  function ${name}(`);

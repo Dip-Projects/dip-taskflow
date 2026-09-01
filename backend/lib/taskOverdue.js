@@ -88,9 +88,17 @@ function verificationOverdueWorkingHours(t, now = new Date()) {
 
 // ── plan dates (admin side) ──────────────────────────────────────────────────
 
-/** The plan date the admin first set. Falls back to target_date pre-migration. */
+/**
+ * The plan date the admin first set. Uses original_target_date when it exists,
+ * otherwise recovers it from the first reschedule entry in the event log.
+ */
 function originalPlanDate(t) {
-  return toDate(t?.original_target_date) || toDate(t?.target_date);
+  const stored = toDate(t?.original_target_date);
+  if (stored) return stored;
+  const firstMove = eventsOf(t)
+    .filter((e) => e && RESCHEDULE_ACTIONS.includes(e.action) && e.from_target_date)
+    .sort((a, b) => new Date(a.at) - new Date(b.at))[0];
+  return toDate(firstMove?.from_target_date) || toDate(t?.target_date);
 }
 
 /** The plan date in force right now (after any approved reschedule). */
@@ -105,7 +113,8 @@ function activePlanDate(t) {
 /** True when an approved reschedule moved this task off its original plan. */
 function wasRescheduled(t) {
   if (String(t?.reschedule_status || '') === 'Approved') return true;
-  return !!t?.reschedule_approved_target_date;
+  if (t?.reschedule_approved_target_date) return true;
+  return !!lastEventAt(t, RESCHEDULE_ACTIONS);
 }
 
 // ── work timer ───────────────────────────────────────────────────────────────
@@ -166,11 +175,45 @@ function employeeDueDate(t) {
   return employeeWorkDueDate(t) || assignedWorkDeadline(t);
 }
 
-/** True when an approved reschedule is waiting for the employee to accept again. */
+const RESCHEDULE_ACTIONS = ['reschedule_approved', 'rescheduled_by_admin'];
+const ACCEPT_ACTIONS = ['start_task', 'reaccept_task'];
+
+function eventsOf(t) {
+  return Array.isArray(t?.task_events) ? t.task_events : [];
+}
+
+function lastEventAt(t, actions) {
+  let at = null;
+  eventsOf(t).forEach((e) => {
+    if (e && actions.includes(e.action) && e.at) {
+      if (!at || new Date(e.at) > new Date(at)) at = e.at;
+    }
+  });
+  return at;
+}
+
+/**
+ * True when an approved reschedule is waiting for the employee to accept again.
+ *
+ * Prefers the reaccept_required column, and falls back to the event log so the
+ * reschedule flow still behaves correctly before that migration is run.
+ */
 function needsReaccept(t) {
   if (isFinishedTask(t)) return false;
-  if (t?.reaccept_required) return true;
-  return false;
+  if (t?.reaccept_required !== undefined && t?.reaccept_required !== null) {
+    return !!t.reaccept_required;
+  }
+  if (t?.accepted_at) return false;
+  const movedAt = lastEventAt(t, RESCHEDULE_ACTIONS);
+  if (!movedAt) return false;
+  const acceptedAt = lastEventAt(t, ACCEPT_ACTIONS);
+  return !acceptedAt || new Date(acceptedAt) < new Date(movedAt);
+}
+
+/** True once this task has already had its accept nudge sent. */
+function acceptNudgeAlreadySent(t) {
+  if (t?.accept_reminder_sent_at) return true;
+  return eventsOf(t).some((e) => e && e.action === 'accept_nudge_sent');
 }
 
 // ── overdue ──────────────────────────────────────────────────────────────────
@@ -250,6 +293,7 @@ function overdueWorkingHours(t, now = new Date()) {
  */
 function needsAcceptNudge(t, now = new Date()) {
   if (isFinishedTask(t)) return false;
+  if (acceptNudgeAlreadySent(t)) return false;
   if (t?.accepted_at && !needsReaccept(t)) return false;
   if (String(t?.status || '') === 'Rejected') return false;
   if (String(t?.reschedule_status || '') === 'Pending') return false;
@@ -400,6 +444,7 @@ module.exports = {
   endOfPlanDay,
   needsReaccept,
   needsAcceptNudge,
+  acceptNudgeAlreadySent,
   assignedHours,
   assignedWorkDeadline,
   employeeWorkDueDate,
