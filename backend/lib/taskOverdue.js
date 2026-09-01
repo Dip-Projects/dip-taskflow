@@ -3,11 +3,25 @@
  * - Assignment: timer starts at accepted_at + hours_to_complete (office hours)
  *   After hold/resume: anchor = resumed_at, budget = hold_remaining_hours
  * - Pre-accept deadline display: assigned_at + hours_to_complete
- * - Verification: 2h SLA from verification_started_at (Start Verification click)
+ * - Verification: 2 working hours from verification_started_at (Start Verification click)
  */
-const { addWorkingHours } = require('./workingHours');
+const { addWorkingHours, elapsedWorkingHours } = require('./workingHours');
 
-const VERIFICATION_SLA_MS = 2 * 60 * 60 * 1000;
+const VERIFICATION_SLA_HOURS = 2;
+
+function verificationWorkDueDate(t) {
+  if (!t?.verification_started_at) return null;
+  const started = new Date(t.verification_started_at);
+  if (Number.isNaN(started.getTime())) return null;
+  return addWorkingHours(started, VERIFICATION_SLA_HOURS);
+}
+
+function isVerificationOverdue(t, now = new Date()) {
+  if (String(t?.verification_status || '') !== 'Pending Verification') return false;
+  const due = verificationWorkDueDate(t);
+  if (!due) return false;
+  return now > due;
+}
 
 function isFinishedTask(t) {
   const st = String(t?.status || '').trim().toLowerCase();
@@ -56,12 +70,10 @@ function employeeWorkDueDate(t) {
   return addWorkingHours(anchor, hours);
 }
 
-function isVerificationOverdue(t, now = new Date()) {
-  if (String(t?.verification_status || '') !== 'Pending Verification') return false;
-  if (!t?.verification_started_at) return false;
-  const started = new Date(t.verification_started_at);
-  if (Number.isNaN(started.getTime())) return false;
-  return (now - started) >= VERIFICATION_SLA_MS;
+function verificationOverdueWorkingHours(t, now = new Date()) {
+  const due = verificationWorkDueDate(t);
+  if (!due || now <= due) return 0;
+  return Math.max(0, Math.round(elapsedWorkingHours(due, now) * 10) / 10);
 }
 
 function isAssignmentOverdue(t, now = new Date()) {
@@ -110,9 +122,11 @@ function holdResumeSummary(t) {
 }
 
 module.exports = {
-  VERIFICATION_SLA_MS,
+  VERIFICATION_SLA_HOURS,
   isFinishedTask,
   isVerificationOverdue,
+  verificationWorkDueDate,
+  verificationOverdueWorkingHours,
   isAssignmentOverdue,
   isDelegatedOverdue,
   overdueSource,

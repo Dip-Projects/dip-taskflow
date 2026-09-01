@@ -38,7 +38,7 @@ const {
   isAssignmentOverdue,
   overdueSource,
   employeeWorkDueDate,
-  VERIFICATION_SLA_MS,
+  verificationOverdueWorkingHours,
 } = require('./taskOverdue');
 
 /** Prefer new rules; keep legacy name for callers. */
@@ -352,12 +352,11 @@ function formatOverdueBlock(t, { showAssignee = false } = {}) {
       : t.status || 'Open';
 
   if (source === 'verification' && isVerificationOverdue(t, now)) {
-    const started = new Date(t.verification_started_at);
-    const hrsPast = Math.max(0, Math.floor((now - started) / 3600000) - 2);
+    const hrsPast = verificationOverdueWorkingHours(t, now);
     const verifier = t.verifier?.full_name || 'Verifier';
     return (
       `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-      `    Verify overdue: ${hrsPast}h past 2h limit | with ${verifier} | ${state}${who}`
+      `    Verify overdue: ${hrsPast}h past 2 working-hour limit | with ${verifier} | ${state}${who}`
     );
   }
 

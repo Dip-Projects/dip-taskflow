@@ -394,14 +394,26 @@ export async function mountTaskflowApp(opts = {}) {
     return false;
   }
 
-  const VERIFICATION_SLA_MS = 2 * 60 * 60 * 1000;
+  const VERIFICATION_SLA_HOURS = 2;
+
+  function verificationWorkDueDate(task) {
+    if (!task?.verification_started_at) return null;
+    const started = parseLocalDate(task.verification_started_at);
+    if (!started || Number.isNaN(started.getTime())) return null;
+    return addWorkingHours(started, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+  }
+
+  function verificationOverdueWorkingHours(task, now = new Date()) {
+    const due = verificationWorkDueDate(task);
+    if (!due || now <= due) return 0;
+    return Math.max(0, Math.round(elapsedWorkingHoursBetween(due, now) * 10) / 10);
+  }
 
   function isVerificationOverdueTask(t, now = new Date()) {
     if (t?.verification_status !== 'Pending Verification') return false;
-    if (!t?.verification_started_at) return false;
-    const started = parseLocalDate(t.verification_started_at);
-    if (!started || Number.isNaN(started.getTime())) return false;
-    return (now - started) >= VERIFICATION_SLA_MS;
+    const due = verificationWorkDueDate(t);
+    if (!due) return false;
+    return now > due;
   }
 
   function isAssignmentOverdueTask(t, now = new Date()) {
@@ -460,11 +472,11 @@ export async function mountTaskflowApp(opts = {}) {
 
   function fmtOverdueDateCell(task, now = new Date()) {
     if (isVerificationOverdueTask(task, now)) {
-      const started = parseLocalDate(task.verification_started_at);
-      const hrsPast = Math.max(0, Math.floor((now - started) / 3600000) - 2);
+      const due = verificationWorkDueDate(task);
+      const hrsPast = verificationOverdueWorkingHours(task, now);
       return `
-        <div>Started verify: ${fmtDate(task.verification_started_at)}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2h verify limit 🔴` : 'Verify limit crossed 🔴'}</div>
+        <div>Verify due: ${fmtDate(due.toISOString())}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
       `;
     }
     const workDue = employeeWorkDueDate(task);
@@ -1920,7 +1932,7 @@ export async function mountTaskflowApp(opts = {}) {
         ? `<span class="source-badge source-verification">⏳ Verification</span>`
         : `<span class="source-badge source-assignment">📋 Assignment</span>`;
   
-      // Overdue detail (assignment work hours or verification 2h SLA)
+      // Overdue detail (assignment work hours or verification 2 working-hour SLA)
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
       tdDate.innerHTML = fmtOverdueDateCell(task);
@@ -1936,7 +1948,7 @@ export async function mountTaskflowApp(opts = {}) {
       const tdVerifier = document.createElement('td');
       if (task.verifier?.full_name) {
         const verifyNote = isVerificationOverdueTask(task)
-          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2h</div>`
+          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2 working hrs</div>`
           : (task.verification_status === 'Pending Verification' && !task.verification_started_at
             ? `<div style="color:var(--muted);font-size:0.75rem;margin-top:2px">Not started yet</div>`
             : '');

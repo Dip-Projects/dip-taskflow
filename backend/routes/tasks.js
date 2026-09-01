@@ -1545,7 +1545,7 @@ const FMS_STEPS = [
     what: 'Verify, send correction, or request update',
     who: 'Verifier',
     how: 'In TaskFlow',
-    why: 'Close the task or send it back — Done only after Verify click; 2h SLA from Start Verification',
+    why: 'Close the task or send it back — Done only after Verify click; 2 working hours SLA from Start Verification',
     when: '3',
   },
   {
@@ -1626,9 +1626,9 @@ function fmsStep(planned, actual, isApplicable) {
   };
 }
 
-const FMS_VERIFICATION_SLA_MS = 2 * 60 * 60 * 1000;
+const FMS_VERIFICATION_SLA_HOURS = 2;
 
-/** Verification FMS: planned = Start Verification + 2h; actual = Verify/Correction/Updation only. */
+/** Verification FMS: planned = Start Verification + 2 working hours; actual = Verify/Correction/Updation only. */
 function fmsVerifyStep(t) {
   const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
   if (!sentAt) {
@@ -1639,7 +1639,7 @@ function fmsVerifyStep(t) {
   const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
   const verifyActual = decidedAt || null;
   const verifyPlanned = startVerifyAt
-    ? new Date(new Date(startVerifyAt).getTime() + FMS_VERIFICATION_SLA_MS)
+    ? addWorkingHours(startVerifyAt, FMS_VERIFICATION_SLA_HOURS)
     : null;
   const step = fmsStep(
     verifyPlanned ? verifyPlanned.toISOString() : null,
