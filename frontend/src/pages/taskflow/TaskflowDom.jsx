@@ -195,6 +195,7 @@ export default function TaskflowDom() {
                     <th className="col-sr">Sr No</th>
                     <th className="col-details">Task details</th>
                     <th className="col-date">Planned date</th>
+                    <th className="col-hrs">Hrs to complete</th>
                     <th className="col-assigned">Assigned to</th>
                     <th className="col-voice">Voice note</th>
                     <th className="col-attach">Attachment</th>
@@ -1155,46 +1156,71 @@ export default function TaskflowDom() {
           <div id="misReportBody" className="mis-body" style={{marginTop: 16}}></div>
         </section>
 
-        {/* TIME DASHBOARD (admin) */}
+        {/* TIME DASHBOARD — Work & Verification (PDF layout) */}
         <section id="view-time-dashboard" className="view" hidden={true}>
-          <div className="view-heading">
-            <h2 className="view-title">Time dashboard</h2>
-            <p className="view-sub">Planned hours versus assign → accept → submit → verify. Green is on pace, amber is slow, red is late.</p>
+          <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">Work &amp; Verification Dashboard</h2>
+              <p className="view-sub">Same layout as the engineering office PDF — work by employee, matrices, corrections, and time analysis.</p>
+            </div>
+            <div className="td-toolbar mis-toolbar">
+              <label className="mis-field">
+                <span>Range</span>
+                <select id="tdRange">
+                  <option value="month">This month</option>
+                  <option value="last-month">Last month</option>
+                  <option value="week">This week</option>
+                  <option value="day">Today</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <label className="mis-field">
+                <span>Department</span>
+                <select id="tdDept"><option value="">All departments</option></select>
+              </label>
+              <label className="mis-field">
+                <span>Employee</span>
+                <select id="tdPerson"><option value="">All employees</option></select>
+              </label>
+              <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+              <button type="button" id="tdPdfBtn" className="ghost-btn">⬇️ PDF</button>
+              <button type="button" id="tdCsvBtn" className="ghost-btn">⬇️ CSV</button>
+            </div>
           </div>
-          <div className="td-toolbar mis-toolbar">
-            <label className="mis-field">
-              <span>Range</span>
-              <select id="tdRange">
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="last-month">Last month</option>
-                <option value="day">Today</option>
-                <option value="all">All time</option>
-              </select>
-            </label>
-            <label className="mis-field">
-              <span>Department</span>
-              <select id="tdDept"><option value="">All departments</option></select>
-            </label>
-            <label className="mis-field">
-              <span>Employee</span>
-              <select id="tdPerson"><option value="">All employees</option></select>
-            </label>
-            <label className="mis-field">
-              <span>Sort</span>
-              <select id="tdSort">
-                <option value="name">Name</option>
-                <option value="cycle">Slowest cycle</option>
-                <option value="open">Most open</option>
-                <option value="hours">Most planned hours</option>
-                <option value="late">Most late</option>
-              </select>
-            </label>
-            <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
-            <button type="button" id="tdCsvBtn" className="ghost-btn">Export CSV</button>
-          </div>
-          <div id="tdSummary" className="td-summary"></div>
+          <div id="tdSummary" className="td-summary" hidden></div>
           <div id="tdBody"></div>
+        </section>
+
+        {/* EMP DELAY REPORT */}
+        <section id="view-delay-report" className="view" hidden={true}>
+          <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">Task Delay Report</h2>
+              <p className="view-sub">Employee-wise assigned → accept → deadline → submit. Deadline uses office hours (9:30–6:30, lunch 1–2, Mon–Sat). Monday WhatsApp → each emp + their head.</p>
+            </div>
+            <div className="mis-toolbar">
+              <label className="mis-field">
+                <span>Range</span>
+                <select id="drRange">
+                  <option value="month">This month</option>
+                  <option value="last-week">Last week</option>
+                  <option value="week">This week</option>
+                  <option value="last-month">Last month</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <label className="mis-field">
+                <span>Employee</span>
+                <select id="drEmployee">
+                  <option value="">All employees</option>
+                </select>
+              </label>
+              <button type="button" id="drGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+              <button type="button" id="drPdfBtn" className="ghost-btn">⬇️ PDF</button>
+              <button type="button" id="drWaBtn" className="ghost-btn" title="Send last-week reports on WhatsApp now">📲 Send WA now</button>
+            </div>
+          </div>
+          <div id="drBody"></div>
         </section>
 
         {/* FMS STEP TRACKER */}

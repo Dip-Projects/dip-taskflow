@@ -3,7 +3,6 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
-const { workTimerAnchor, workTimerBudgetHours, holdResumeSummary } = require('../lib/taskOverdue');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -74,13 +73,15 @@ function applyDeadlineChange(existing, body, note) {
 // after dropping whichever column Postgres says it doesn't know about, so a
 // missing migration degrades one field instead of breaking the whole action.
 async function updateTaskTolerant(id, updates, select) {
+  await resolveTaskSelect();
+  const sel = select || TASK_SELECT;
   const attempt = { ...updates };
   for (let i = 0; i < 6; i += 1) {
     const { data, error } = await supabase
       .from('tasks')
       .update(attempt)
       .eq('id', id)
-      .select(select)
+      .select(sel)
       .single();
     if (!error) return data;
     const msg = String(error.message || '');
@@ -89,6 +90,11 @@ async function updateTaskTolerant(id, updates, select) {
     if (col && Object.prototype.hasOwnProperty.call(attempt, col)) {
       delete attempt[col];
       continue;
+    }
+    // Select string references a missing column — drop to legacy and retry once.
+    if (/original_hours|first_accepted|column|schema cache/i.test(msg) && sel === TASK_SELECT_FULL) {
+      TASK_SELECT = TASK_SELECT_LEGACY;
+      return updateTaskTolerant(id, attempt, TASK_SELECT_LEGACY);
     }
     throw error;
   }
@@ -114,7 +120,7 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at';
 
 async function loadTaskForStamp(id) {
   let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
@@ -156,11 +162,11 @@ const BUCKET = 'task-files';
 
 // Nested select used everywhere we return a task, so every task always
 // looks the same on the wire (matches what frontend/app.js expects).
-const TASK_SELECT = `
-  id, description, hours_to_complete, target_date, priority,
+const TASK_SELECT_FULL = `
+  id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
   assigned_at, extra_hours, extra_days, correction_extensions,
-  is_on_hold, hold_remaining_hours, held_at, resumed_at,
+  is_on_hold, hold_remaining_hours, held_at, first_accepted_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -175,6 +181,48 @@ const TASK_SELECT = `
   verifier:users!tasks_verifier_id_fkey ( id, full_name ),
   reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
 `;
+
+const TASK_SELECT_LEGACY = `
+  id, description, hours_to_complete, target_date, priority,
+  rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at,
+  accepted_at, rejected_at, sent_for_verification_at, verified_at,
+  verification_status, verification_note, verification_attachment_urls,
+  verification_started_by, verification_started_at,
+  correction_voice_url, updation_note,
+  reschedule_status, reschedule_requested_date, reschedule_reason,
+  reschedule_requested_at, reschedule_decided_at,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name ),
+  reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
+`;
+
+// Resolved once — falls back if original_hours / first_accepted columns not migrated yet.
+let TASK_SELECT = TASK_SELECT_FULL;
+let _taskSelectReady = null;
+async function resolveTaskSelect() {
+  if (_taskSelectReady) return _taskSelectReady;
+  _taskSelectReady = (async () => {
+    const { error } = await supabase
+      .from('tasks')
+      .select('id, original_hours_to_complete, first_accepted_at')
+      .limit(1);
+    if (error && /original_hours|first_accepted|column|schema cache/i.test(error.message || '')) {
+      TASK_SELECT = TASK_SELECT_LEGACY;
+      console.warn('tasks: using legacy TASK_SELECT (run backend/sql/add_original_hours.sql)');
+    } else {
+      TASK_SELECT = TASK_SELECT_FULL;
+    }
+    return TASK_SELECT;
+  })();
+  return _taskSelectReady;
+}
+resolveTaskSelect().catch((e) => console.warn('resolveTaskSelect', e.message));
 
 function parseCheckpointLabels(raw) {
   if (Array.isArray(raw)) {
@@ -290,6 +338,7 @@ router.post(
   ]),
   async (req, res) => {
     try {
+      await resolveTaskSelect();
       const {
         department_id,
         assigned_to,
@@ -325,6 +374,7 @@ if (!isMdoOffice && !project_id) {
         uploadFile(voiceNoteFile, 'voice-notes')
       ]);
 
+      const hrsNum = hours_to_complete ? Number(hours_to_complete) : null;
       const payload = {
           department_id,
           assigned_to,
@@ -332,7 +382,8 @@ if (!isMdoOffice && !project_id) {
           project_id: project_id || null,
           task_type_id,
           description,
-          hours_to_complete: hours_to_complete ? Number(hours_to_complete) : null,
+          hours_to_complete: hrsNum,
+          original_hours_to_complete: hrsNum,
           target_date,
           priority: priority || 'Medium',
           rescheduling_possible: rescheduling_possible === 'true',
@@ -343,6 +394,12 @@ if (!isMdoOffice && !project_id) {
           task_events: [{ at: new Date().toISOString(), action: 'assigned', by: req.user.id }],
       };
       let { data, error } = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+      if (error && /original_hours_to_complete/i.test(error.message || '')) {
+        delete payload.original_hours_to_complete;
+        const retry0 = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retry0.data;
+        error = retry0.error;
+      }
       if (error && /task_events|assigned_at/i.test(error.message || '')) {
         delete payload.task_events;
         if (/assigned_at/i.test(error.message || '')) delete payload.assigned_at;
@@ -420,6 +477,7 @@ if (!isMdoOffice && !project_id) {
 // ----------------------------- all delegated tasks (admin only) -----------------------------
 router.get('/all', requireAdmin, async (req, res) => {
   try {
+    await resolveTaskSelect();
     // Sirf MDO OFFICE ke admin (top-level) ko sab departments ka data dikhta
     // hai. Baaki har department ka admin (jaise Engg. Division ka head)
     // sirf apne hi department ke tasks dekh sakta hai.
@@ -454,6 +512,7 @@ router.get('/all', requireAdmin, async (req, res) => {
 // ----------------------------- my tasks (everyone — only their own) -----------------------------
 router.get('/my', async (req, res) => {
   try {
+    await resolveTaskSelect();
     let query = supabase
       .from('tasks')
       .select(TASK_SELECT)
@@ -490,6 +549,7 @@ router.get('/my', async (req, res) => {
 //     }
 router.get('/verifications', async (req, res) => {
   try {
+    await resolveTaskSelect();
     let query = supabase
       .from('tasks')
       .select(TASK_SELECT)
@@ -604,6 +664,12 @@ router.patch('/:id/accept', async (req, res) => {
     const data = await updateTaskTolerant(id, {
       status: 'In Progress',
       accepted_at: firstStamp(existing, 'accepted_at', at),
+      first_accepted_at: firstStamp(existing, 'first_accepted_at', at),
+      // Lock assigned hours once (if column exists / not already set)
+      original_hours_to_complete:
+        existing.original_hours_to_complete != null
+          ? existing.original_hours_to_complete
+          : existing.hours_to_complete,
       task_events: withTaskEvent(existing, 'start_task', req.user.id),
     }, TASK_SELECT);
     res.json(data);
@@ -645,16 +711,21 @@ router.patch('/:id/hold', async (req, res) => {
     }
 
     const at = nowIso();
-    const anchor = workTimerAnchor(existing) || existing.accepted_at;
-    const budget = workTimerBudgetHours(existing);
-    const elapsed = elapsedWorkingHours(anchor, at);
-    const remaining = Math.max(0, Math.round((budget - elapsed) * 100) / 100);
+    const elapsed = elapsedWorkingHours(existing.accepted_at, at);
+    const remaining = Math.max(0, Math.round((totalHours - elapsed) * 100) / 100);
 
     const data = await updateTaskTolerant(id, {
       is_on_hold: true,
       held_at: at,
       hold_remaining_hours: remaining,
-      task_events: withTaskEvent(existing, 'hold', req.user.id, { remaining_hours: remaining }),
+      original_hours_to_complete:
+        existing.original_hours_to_complete != null
+          ? existing.original_hours_to_complete
+          : existing.hours_to_complete,
+      task_events: withTaskEvent(existing, 'hold', req.user.id, {
+        remaining_hours: remaining,
+        original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+      }),
     }, TASK_SELECT);
     res.json(data);
   } catch (err) {
@@ -680,12 +751,22 @@ router.patch('/:id/resume', async (req, res) => {
 
     const remaining = Number(existing.hold_remaining_hours ?? existing.hours_to_complete) || 0;
     const at = nowIso();
+    // Timer restarts with remaining hours only.
+    // original_hours_to_complete stays as assigned hours for reports.
     const data = await updateTaskTolerant(id, {
       is_on_hold: false,
       held_at: null,
-      resumed_at: at,
-      hold_remaining_hours: remaining,
-      task_events: withTaskEvent(existing, 'resume', req.user.id, { remaining_hours: remaining }),
+      hold_remaining_hours: null,
+      accepted_at: at,
+      hours_to_complete: remaining,
+      original_hours_to_complete:
+        existing.original_hours_to_complete != null
+          ? existing.original_hours_to_complete
+          : existing.hours_to_complete,
+      task_events: withTaskEvent(existing, 'resume', req.user.id, {
+        remaining_hours: remaining,
+        original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+      }),
     }, TASK_SELECT);
     res.json(data);
   } catch (err) {
@@ -1069,15 +1150,14 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const updates = { target_date };
-    // Admin direct reschedule is final — clear any pending emp request so it
-    // does not stay in approve/reject queues or show as a "request" to anyone.
-    if (existing.reschedule_status && existing.reschedule_status !== 'None') {
-      updates.reschedule_status = 'None';
-      updates.reschedule_requested_date = null;
-      updates.reschedule_reason = reason && reason.trim() ? reason.trim() : null;
-      updates.reschedule_requested_at = null;
-      updates.reschedule_decided_by = null;
-      updates.reschedule_decided_at = null;
+    // If an employee's reschedule request was still pending, this direct
+    // admin reschedule supersedes it — clear it out so it can't later be
+    // approved and silently overwrite the date the admin just set here.
+    if (existing.reschedule_status === 'Pending') {
+      updates.reschedule_status = 'Rejected';
+      updates.reschedule_reason = 'Superseded — admin rescheduled this task directly';
+      updates.reschedule_decided_by = req.user.id;
+      updates.reschedule_decided_at = new Date().toISOString();
     }
 
     const { data, error } = await supabase
@@ -1187,19 +1267,25 @@ router.post('/:id/reschedule-request', async (req, res) => {
   }
 });
 
-// List reschedule requests — admin only (pending emp requests to approve/reject).
+// List reschedule requests — admin sees every pending one (to action);
+// everyone else sees only their own (whatever the current status is), read-only.
 router.get('/reschedule-requests', async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.json([]);
-    }
-    const { data, error } = await supabase
+    let query = supabase
       .from('tasks')
       .select(TASK_SELECT)
-      .eq('reschedule_status', 'Pending')
+      .neq('reschedule_status', 'None')
       .order('reschedule_requested_at', { ascending: false });
+
+    if (req.user.role === 'admin') {
+      query = query.eq('reschedule_status', 'Pending');
+    } else {
+      query = query.eq('assigned_to', req.user.id);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
-    res.json(data || []);
+    res.json(data);
   } catch (err) {
     console.error('List reschedule requests error:', err.message);
     res.status(500).json({ error: 'Could not load reschedule requests' });
@@ -1307,6 +1393,11 @@ router.patch('/:id/reassign', requireAdmin, async (req, res) => {
 
 // ----------------------------- admin report -----------------------------
 // GET /tasks/report?range=day|week|month|custom&from=DATE&to=DATE
+const {
+  buildWorkVerificationDashboard,
+  buildSrMap,
+} = require('../lib/workVerificationDashboard');
+
 router.get('/report', requireAdminOrMis, async (req, res) => {
   try {
     const { range, from, to } = req.query;
@@ -1339,15 +1430,14 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
       endDate   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     }
 
-    const { data: tasks, error } = await supabase
+    let taskQuery = supabase
       .from('tasks')
       .select(`
         id, description, status, priority,
         created_at, assigned_at, accepted_at, sent_for_verification_at,
         verification_started_at, verified_at, rejected_at,
         hours_to_complete, target_date, extra_hours, extra_days,
-        verification_status, is_on_hold, hold_remaining_hours, held_at, resumed_at,
-        task_events,
+        verification_status, verification_note, correction_extensions,
         project:projects ( id, name ),
         task_type:task_types ( id, name ),
         department:departments ( id, name ),
@@ -1356,7 +1446,20 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         verifier:users!tasks_verifier_id_fkey ( id, full_name )
       `)
       .order('created_at', { ascending: false })
-      .limit(3000);
+      .limit(5000);
+
+    let { data: tasks, error } = await taskQuery;
+    // Optional columns (may be missing on older DBs)
+    if (!error) {
+      try {
+        const { data: extra } = await supabase
+          .from('tasks')
+          .select('id, first_sent_for_verification_at, task_events')
+          .in('id', (tasks || []).map((t) => t.id).slice(0, 1000));
+        const byId = Object.fromEntries((extra || []).map((t) => [t.id, t]));
+        tasks = (tasks || []).map((t) => ({ ...t, ...byId[t.id] }));
+      } catch (_) { /* ignore */ }
+    }
 
     if (error) throw error;
 
@@ -1384,7 +1487,6 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     // Enrich each task with computed time fields
     const enriched = ranged.map(t => {
       const assigned = t.assigned_at || t.created_at;
-      const hr = holdResumeSummary(t);
       return {
         ...t,
         assigned_at: assigned,
@@ -1395,7 +1497,6 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         total_cycle_hrs: hrsBetween(assigned, t.verified_at || t.rejected_at),
         extra_hours: Number(t.extra_hours || 0),
         extra_days: Number(t.extra_days || 0),
-        hold_resume: hr,
       };
     });
 
@@ -1441,10 +1542,13 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         const valid = arr.filter((h) => h != null);
         return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
       };
-      const finished = allTasks.filter((t) => t.total_cycle_hrs != null);
+      const finished = allTasks.filter((t) => t.accepted_at && (t.sent_for_verification_at || t.verified_at));
       const onTime = finished.filter((t) => {
         const planned = Number(t.hours_to_complete || 0);
-        return planned > 0 ? t.total_cycle_hrs <= planned : t.total_cycle_hrs <= 24;
+        if (!planned || planned <= 0) return true;
+        const end = t.sent_for_verification_at || t.verified_at;
+        const worked = elapsedWorkingHours(t.accepted_at, end);
+        return worked <= planned;
       }).length;
       const late = Math.max(0, finished.length - onTime);
       const deptName = allTasks.find((t) => t.department?.name)?.department?.name || '';
@@ -1499,12 +1603,16 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
       })),
     }));
 
+    const srMap = buildSrMap(tasks || []);
+    const dashboard = buildWorkVerificationDashboard(enriched, { srMap });
+
     res.json({
       range: range || 'month',
       from: startDate.toISOString(),
       to: endDate.toISOString(),
       report,
       verifiers,
+      dashboard,
     });
   } catch (err) {
     console.error('Report error:', err.message);
@@ -1540,26 +1648,8 @@ const FMS_STEPS = [
     what: 'Verify, send correction, or request update',
     who: 'Verifier',
     how: 'In TaskFlow',
-    why: 'Close the task or send it back — Done only after Verify click; 2 working hours SLA from Start Verification',
+    why: 'Close the task or send it back — Done only after Verify click; 2h SLA from Start Verification',
     when: '3',
-  },
-  {
-    key: 'hold',
-    label: 'Hold',
-    what: 'Pause remaining work hours',
-    who: 'Assignee (PERSON)',
-    how: 'In TaskFlow',
-    why: 'Track when work was paused and how many hours were saved',
-    when: '4',
-  },
-  {
-    key: 'resume',
-    label: 'Resume',
-    what: 'Restart countdown with saved hours',
-    who: 'Assignee (PERSON)',
-    how: 'In TaskFlow',
-    why: 'Track when work resumed without overwriting original accept time',
-    when: '5',
   },
 ];
 
@@ -1641,6 +1731,18 @@ function fmsVerifyStep(t) {
     verifyActual,
     true
   );
+  // Prefer working-hours delay when both ends exist
+  if (verifyPlanned && verifyActual) {
+    const late = elapsedWorkingHours(verifyPlanned, verifyActual);
+    const early = elapsedWorkingHours(verifyActual, verifyPlanned);
+    if (new Date(verifyActual) > verifyPlanned) {
+      step.delayHrs = Math.round(late * 10) / 10;
+      step.status = 'Delayed';
+    } else {
+      step.delayHrs = -Math.round(early * 10) / 10;
+      step.status = 'Done';
+    }
+  }
   return {
     ...step,
     actor: t.verifier?.full_name || null,
@@ -1659,7 +1761,6 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       first_sent_for_verification_at, first_verification_started_at,
       hours_to_complete, target_date,
       extra_hours, extra_days, correction_extensions,
-      is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
       project:projects ( id, name ),
       task_type:task_types ( id, name ),
       department:departments ( id, name ),
@@ -1712,11 +1813,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
           accept: fmsStep(assigned, t.accepted_at, true),
           submit: fmsStep(t.target_date, sentAt, true),
           verify: fmsVerifyStep(t),
-          hold: fmsStep(null, t.held_at, !!(t.held_at || t.is_on_hold)),
-          resume: fmsStep(null, t.resumed_at, !!t.resumed_at),
         };
-
-        const hr = holdResumeSummary(t);
 
         return {
           id: t.id,
@@ -1737,7 +1834,6 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
           target_date: t.target_date,
           status: t.status,
           verification_status: t.verification_status,
-          hold_resume: hr,
           steps,
         };
       });

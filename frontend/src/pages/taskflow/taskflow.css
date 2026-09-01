@@ -615,26 +615,28 @@ body.sidebar-open { overflow: hidden; }
 #myTasksTable th:nth-child(8),
 #myTasksTable td:nth-child(8) { width: 15%; }
 
-/* All delegated tasks table: Sr No, Task details, Planned date,
-   Assigned to, Voice note, Attachment, Priority, Status, Actions (9 cols) */
+/* All delegated tasks table: Sr No, Task details, Planned date, Hrs,
+   Assigned to, Voice note, Attachment, Priority, Status, Actions (10 cols) */
 #allTasksTable th:nth-child(1),
 #allTasksTable td:nth-child(1) { width: 4%; }
 #allTasksTable th:nth-child(2),
-#allTasksTable td:nth-child(2) { width: 24%; }
+#allTasksTable td:nth-child(2) { width: 22%; }
 #allTasksTable th:nth-child(3),
-#allTasksTable td:nth-child(3) { width: 11%; }
+#allTasksTable td:nth-child(3) { width: 10%; }
 #allTasksTable th:nth-child(4),
-#allTasksTable td:nth-child(4) { width: 11%; }
+#allTasksTable td:nth-child(4) { width: 7%; text-align: center; }
 #allTasksTable th:nth-child(5),
-#allTasksTable td:nth-child(5) { width: 7%; }
+#allTasksTable td:nth-child(5) { width: 10%; }
 #allTasksTable th:nth-child(6),
-#allTasksTable td:nth-child(6) { width: 7%; }
+#allTasksTable td:nth-child(6) { width: 6%; }
 #allTasksTable th:nth-child(7),
-#allTasksTable td:nth-child(7) { width: 8%; }
+#allTasksTable td:nth-child(7) { width: 6%; }
 #allTasksTable th:nth-child(8),
-#allTasksTable td:nth-child(8) { width: 13%; }
+#allTasksTable td:nth-child(8) { width: 7%; }
 #allTasksTable th:nth-child(9),
-#allTasksTable td:nth-child(9) { width: 15%; }
+#allTasksTable td:nth-child(9) { width: 12%; }
+#allTasksTable th:nth-child(10),
+#allTasksTable td:nth-child(10) { width: 16%; }
 
 /* Empty / loading rows: fill remaining viewport and sit dead-center */
 #appScreen td.empty-state,
@@ -3190,6 +3192,326 @@ body.sidebar-open { overflow: hidden; }
   animation: tf-busy-spin .7s linear infinite;
 }
 @keyframes tf-busy-spin { to { transform: rotate(360deg); } }
+
+/* ── Work & Verification Dashboard (PDF layout) ─────────────────────────── */
+.wvd {
+  --wvd-bg: #F7F4EE;
+  --wvd-ink: #1C1917;
+  --wvd-muted: #78716C;
+  --wvd-accent: #C2410C;
+  --wvd-line: #E7E0D6;
+  --wvd-ok: #166534;
+  --wvd-warn: #B45309;
+  --wvd-bad: #B91C1C;
+  --wvd-info: #1D4ED8;
+  background: var(--wvd-bg);
+  color: var(--wvd-ink);
+  border: 1px solid var(--wvd-line);
+  border-radius: 12px;
+  padding: 28px 26px 36px;
+  font-family: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+.wvd-header { margin-bottom: 18px; }
+.wvd-kicker {
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--wvd-accent);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.wvd-header h1 {
+  margin: 0;
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.wvd-sub {
+  margin: 8px 0 0;
+  color: var(--wvd-muted);
+  font-family: system-ui, sans-serif;
+  font-size: 0.86rem;
+}
+.wvd-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 28px;
+}
+.wvd-stats-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wvd-stat {
+  background: #fff;
+  border: 1px solid var(--wvd-line);
+  border-radius: 8px;
+  padding: 12px 10px;
+  text-align: center;
+}
+.wvd-stat strong {
+  display: block;
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--wvd-ink);
+}
+.wvd-stat span {
+  display: block;
+  margin-top: 6px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: .08em;
+  color: var(--wvd-muted);
+  font-weight: 600;
+}
+.wvd-stat-ok strong { color: var(--wvd-ok); }
+.wvd-stat-warn strong { color: var(--wvd-warn); }
+.wvd-stat-bad { border-color: #FECACA; }
+.wvd-stat-bad strong { color: var(--wvd-bad); }
+.wvd-stat-info strong { color: var(--wvd-info); }
+.wvd-sec { margin: 28px 0 10px; }
+.wvd-sec h2 {
+  margin: 0 0 14px;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.wvd-sec h2 small,
+.wvd-sec h3 em {
+  font-weight: 500;
+  color: var(--wvd-muted);
+  font-style: normal;
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  margin-left: 6px;
+}
+.wvd-sec h3 {
+  margin: 22px 0 8px;
+  font-size: 1.02rem;
+}
+.wvd-help, .wvd-footnote, .wvd-muted, .wvd-footer {
+  font-family: system-ui, sans-serif;
+  color: var(--wvd-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.wvd-help { margin: 0 0 12px; max-width: 920px; }
+.wvd-footnote { margin-top: 10px; font-style: italic; }
+.wvd-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--wvd-line); }
+.wvd-emp-grid, .wvd-ver-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+.wvd-emp-col, .wvd-ver-col {
+  background: #fff;
+  border: 1px solid var(--wvd-line);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 120px;
+}
+.wvd-emp-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-family: system-ui, sans-serif;
+}
+.wvd-emp-head span { font-weight: 700; font-size: 0.78rem; letter-spacing: .02em; }
+.wvd-emp-head em { font-style: normal; color: var(--wvd-muted); font-size: 0.72rem; }
+.wvd-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+.wvd-pill {
+  display: inline-block;
+  font-family: system-ui, sans-serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.wvd-pill-ok { background: #DCFCE7; color: #166534; }
+.wvd-pill-warn { background: #FFEDD5; color: #9A3412; }
+.wvd-pill-bad { background: #FEE2E2; color: #991B1B; }
+.wvd-pill-ack { background: #FEF3C7; color: #92400E; }
+.wvd-pill-muted { background: #F5F5F4; color: #57534E; }
+.wvd-proj-list { font-family: system-ui, sans-serif; font-size: 0.74rem; }
+.wvd-proj-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid #F3EEE6;
+}
+.wvd-proj-row:last-child { border-bottom: 0; }
+.wvd-proj-row strong { color: var(--wvd-ink); }
+.wvd-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--wvd-line);
+  border-radius: 8px;
+  background: #fff;
+  margin-top: 8px;
+}
+.wvd-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+  min-width: 640px;
+}
+.wvd-matrix th, .wvd-matrix td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--wvd-line);
+  text-align: right;
+  white-space: nowrap;
+}
+.wvd-matrix th:first-child, .wvd-matrix td:first-child { text-align: left; }
+.wvd-matrix thead th {
+  background: #1C1917;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: .03em;
+  font-size: 0.68rem;
+}
+.wvd-matrix tbody tr:nth-child(even) td { background: #FBF8F3; }
+.wvd-matrix tfoot td {
+  background: #F5F0E8;
+  font-weight: 700;
+  border-top: 2px solid #D6CBBA;
+}
+.wvd-grand {
+  display: inline-block;
+  background: #FED7AA;
+  color: #9A3412;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+.wvd-detail td { white-space: nowrap; }
+.wvd-corr-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.wvd-corr-count {
+  background: #CCFBF1;
+  color: #115E59;
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.wvd-corr-list { display: grid; gap: 6px; }
+.wvd-corr-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid var(--wvd-line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.8rem;
+}
+.wvd-corr-row em {
+  font-style: normal;
+  color: var(--wvd-bad);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.wvd-corr-note {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #E7E0D6;
+  font-family: system-ui, sans-serif;
+  font-size: 0.72rem;
+  color: var(--wvd-bad);
+}
+.wvd-bars { margin: 8px 0 16px; display: grid; gap: 8px; }
+.wvd-bar-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) 1fr auto;
+  gap: 10px;
+  align-items: center;
+  font-family: system-ui, sans-serif;
+  font-size: 0.74rem;
+}
+.wvd-bar-name { font-weight: 700; font-size: 0.68rem; }
+.wvd-bar-track {
+  height: 10px;
+  background: #EDE7DD;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.wvd-bar-track i {
+  display: block;
+  height: 100%;
+  background: #7C2D12;
+  border-radius: 999px;
+}
+.wvd-bar-val { color: var(--wvd-ink); font-weight: 600; white-space: nowrap; }
+.wvd-bar-val small { color: var(--wvd-muted); font-weight: 500; }
+@media (max-width: 900px) {
+  .wvd-stats, .wvd-stats-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wvd-bar-row { grid-template-columns: 1fr; gap: 4px; }
+  .wvd { padding: 18px 14px 24px; }
+}
+@media print {
+  .wvd { border: none; border-radius: 0; }
+}
+
+/* ── Task Delay Report (emp-wise sheet) ─────────────────────────────────── */
+.dr-report {
+  background: #fff;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  padding: 20px 16px 28px;
+}
+.dr-title {
+  text-align: center;
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #111827;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.dr-sub {
+  text-align: center;
+  margin: 0 0 16px;
+  color: #6B7280;
+  font-size: 0.82rem;
+  font-family: system-ui, sans-serif;
+}
+.dr-table-wrap { overflow: auto; border: 1px solid #D1D5DB; border-radius: 6px; }
+.dr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 0.78rem;
+  min-width: 980px;
+}
+.dr-table th {
+  background: #1F2937;
+  color: #fff;
+  font-weight: 700;
+  padding: 9px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.dr-table td {
+  padding: 8px;
+  border-bottom: 1px solid #E5E7EB;
+  vertical-align: top;
+  color: #111827;
+}
+.dr-table td.dr-hold { font-size: 11px; max-width: 180px; line-height: 1.35; color: #4B5563; }
+.dr-table tr.dr-alt td { background: #F7F3EC; }
+.dr-c { text-align: center !important; }
+.dr-delayed { color: #C2410C; font-weight: 700; }
+.dr-ontime { color: #15803D; font-weight: 700; }
+.dr-na { color: #6B7280; font-weight: 600; }
+@media print {
+  .dr-report { border: none; }
+  .dr-table tr.dr-alt td { background: #F7F3EC !important; }
+}
+
+
 
 
 

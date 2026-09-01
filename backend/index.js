@@ -33,6 +33,7 @@ app.use('/api/tickets',         require('./routes/tickets'));
 app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));
 app.use('/api/mis-report',      require('./routes/mis_report'));
+app.use('/api/delay-report',    require('./routes/delay_report'));
 app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
 app.get('/api/health', (_, res) => {

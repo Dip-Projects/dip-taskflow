@@ -22,3 +22,6 @@ Thumbs.db
 *.log
 .vercel
 .env.local
+
+.vercel
+.env*

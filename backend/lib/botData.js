@@ -38,8 +38,10 @@ const {
   isAssignmentOverdue,
   overdueSource,
   employeeWorkDueDate,
-  verificationOverdueWorkingHours,
+  verificationDueAt,
+  VERIFICATION_SLA_HOURS,
 } = require('./taskOverdue');
+const { elapsedWorkingHours } = require('./workingHours');
 
 /** Prefer new rules; keep legacy name for callers. */
 function isDelegatedOverdueTask(t, now = new Date()) {
@@ -163,13 +165,20 @@ async function taskStatsForUser(userId) {
 }
 
 async function companyTaskSummary() {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select(
-      'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department), verifier:users!tasks_verifier_id_fkey(full_name)'
-    );
-  if (error) throw error;
-  const tasks = data || [];
+  const pageSize = 1000;
+  const tasks = [];
+  const select =
+    'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, accepted_at, is_on_hold, verification_started_at, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department), verifier:users!tasks_verifier_id_fkey(full_name)';
+  for (let from = 0; from < 20000; from += pageSize) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select(select)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    tasks.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
   const now = new Date();
   const open = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
   const overdue = tasks.filter((t) => isDelegatedOverdue(t, now));
@@ -204,6 +213,10 @@ async function companyTaskSummary() {
       .slice()
       .sort((a, b) => String(a.target_date || '').localeCompare(String(b.target_date || ''))),
     pendingVerifyTasks: pendingVerify.slice(0, 80),
+    openTasks: open
+      .slice()
+      .sort((a, b) => String(a.target_date || '').localeCompare(String(b.target_date || '')))
+      .slice(0, 60),
   };
 }
 
@@ -352,20 +365,21 @@ function formatOverdueBlock(t, { showAssignee = false } = {}) {
       : t.status || 'Open';
 
   if (source === 'verification' && isVerificationOverdue(t, now)) {
-    const hrsPast = verificationOverdueWorkingHours(t, now);
+    const due = verificationDueAt(t);
+    const hrsPast = due ? Math.max(0, Math.floor(elapsedWorkingHours(due, now))) : 0;
     const verifier = t.verifier?.full_name || 'Verifier';
     return (
       `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-      `    Verify overdue: ${hrsPast}h past 2 working-hour limit | with ${verifier} | ${state}${who}`
+      `    Verify overdue: ${hrsPast}h past ${VERIFICATION_SLA_HOURS}h office limit | with ${verifier} | ${state}${who}`
     );
   }
 
   const workDue = employeeWorkDueDate(t);
   if (workDue && isAssignmentOverdue(t, now)) {
-    const hrsLate = Math.max(0, Math.floor((now - workDue) / 3600000));
+    const hrsLate = Math.max(0, Math.floor(elapsedWorkingHours(workDue, now)));
     return (
       `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-      `    Work overdue: ${hrsLate}h late (accepted + ${t.hours_to_complete}h) | ${state} | ${t.project?.name || 'No project'}${who}`
+      `    Work overdue: ${hrsLate}h late (accepted + ${t.hours_to_complete}h office) | ${state} | ${t.project?.name || 'No project'}${who}`
     );
   }
 
@@ -849,9 +863,11 @@ async function tasksForPeople(people) {
 async function searchTasks(ql, people) {
   const words = questionWords(ql).filter(
     (w) =>
-      !['task', 'tasks', 'overdue', 'pending', 'leave', 'leaves', 'meeting', 'minutes', 'site', 'clock', 'attendance', 'verify', 'verification', 'recurring', 'ticket', 'company', 'summary'].includes(
-        w
-      )
+      ![
+        'task', 'tasks', 'overdue', 'pending', 'leave', 'leaves', 'meeting', 'minutes', 'site',
+        'clock', 'attendance', 'verify', 'verification', 'recurring', 'ticket', 'company', 'summary',
+        'list', 'lists', 'open', 'all', 'sab', 'dikhao', 'dikha', 'show', 'full', 'poori',
+      ].includes(w)
   );
   if (!words.length && !people.length) return [];
   const { data, error } = await supabase
@@ -890,31 +906,38 @@ function capFacts(text, max = 14000) {
 }
 
 async function answerFromFacts(question, facts, name) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.1,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are DIP Bot. Answer ONLY from Facts. Use this exact shape:\nHEADING IN ALL CAPS\n• item title\n    Label: value\nNo greetings, no advice, no extra sections. If Facts do not have it, say it is not in TaskFlow. Do not invent data. Match the question language.',
-        },
-        {
-          role: 'user',
-          content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nReply with only the answer to that question:`,
-        },
-      ],
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error?.message || 'OpenAI error');
-  return data.choices?.[0]?.message?.content?.trim() || null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are DIP Bot. Answer ONLY from Facts. Use this exact shape:\nHEADING IN ALL CAPS\n• item title\n    Label: value\nNo greetings, no advice, no extra sections. If Facts do not have it, say it is not in TaskFlow. Do not invent data. Match the question language.',
+          },
+          {
+            role: 'user',
+            content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nReply with only the answer to that question:`,
+          },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error?.message || 'OpenAI error');
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function gatherAdminFacts({ ql, people, intents }) {
@@ -975,7 +998,7 @@ function formatAdminFacts(pack, people, intents) {
     );
   }
   if (c) {
-    if (intents.company) {
+    if (intents.company || intents.full || (intents.tasks && !intents.overdue && !intents.verify && !named)) {
       bits.push(
         `TASK COUNTS\nDelegated total ${c.total} | open ${c.open} | overdue ${c.overdue} | pending verification ${c.pendingVerify}`
       );
@@ -996,6 +1019,18 @@ function formatAdminFacts(pack, people, intents) {
         `PENDING VERIFICATION (${c.pendingVerify || 0})\n` +
           (c.pendingVerifyTasks?.length
             ? c.pendingVerifyTasks.slice(0, 30).map(formatTaskBlock).join('\n')
+            : '  (none)')
+      );
+    }
+    // "task list" / "all tasks" / "pending tasks" → actual open rows, not empty
+    if (
+      (intents.full || (intents.tasks && !intents.overdue && !intents.verify && !intents.company && !named)) &&
+      !(pack.hits?.length)
+    ) {
+      bits.push(
+        `OPEN TASKS (${c.open || 0})\n` +
+          (c.openTasks?.length
+            ? c.openTasks.slice(0, 40).map(formatTaskBlock).join('\n')
             : '  (none)')
       );
     }
@@ -1086,9 +1121,12 @@ async function answerQuestion({ question, user, isAdmin }) {
   const wantsRecurring = /recurr|rozana|rojana|daily task|weekly task|checkpoint/i.test(ql);
   const wantsMom = /\bmom\b|minutes|meeting|video call|\bcall\b|baat hui|charcha|discussed|discussion/i.test(ql);
   const wantsTicket = /\bticket\b|complaint|shikayat/i.test(ql);
-  const wantsFull = /\ball tasks\b|sab task|poori list|full list|correction|updation|not started/i.test(ql);
+  const wantsFull =
+    /\ball tasks\b|sab task|poori list|full list|task list|tasks list|list of tasks|pending tasks|open tasks|task\s*list|dikha.*task|task.*dikha|correction|updation|not started/i.test(
+      ql
+    );
   const wantsTasks =
-    /\b(task|tasks|pending|assign|my work|kaam)\b/i.test(ql) ||
+    /\b(task|tasks|pending|assign|my work|kaam|list)\b/i.test(ql) ||
     wantsOverdue ||
     wantsVerify ||
     wantsRecurring ||
@@ -1191,17 +1229,22 @@ async function answerQuestion({ question, user, isAdmin }) {
     skipPolish = true;
     if (isAdmin) {
       adminOnly = true;
-      const c = await companyTaskSummary();
-      const rec = await overdueRecurring();
-      answer =
-        `OVERDUE\n` +
-        `Delegated: ${c.overdue}   Recurring: ${rec.length}\n\n` +
-        `DELEGATED\n` +
-        (c.overdueTasks.length
-          ? c.overdueTasks.map((t) => formatOverdueBlock(t, { showAssignee: true })).join('\n')
-          : '  (none)') +
-        `\n\nRECURRING\n` +
-        formatRecurringOverdue(rec);
+      try {
+        const c = await companyTaskSummary();
+        const rec = await overdueRecurring().catch(() => []);
+        answer =
+          `OVERDUE\n` +
+          `Delegated: ${c.overdue}   Recurring: ${rec.length}\n\n` +
+          `DELEGATED\n` +
+          (c.overdueTasks.length
+            ? c.overdueTasks.map((t) => formatOverdueBlock(t, { showAssignee: true })).join('\n')
+            : '  (none)') +
+          `\n\nRECURRING\n` +
+          formatRecurringOverdue(rec);
+      } catch (e) {
+        console.warn('bot overdue summary:', e.message);
+        answer = 'Could not load overdue list right now. Try again, or ask “overdue of <name>”.';
+      }
     } else {
       const s = await taskStatsForUser(user.id);
       const rec = await overdueRecurring(user.id);
@@ -1216,8 +1259,14 @@ async function answerQuestion({ question, user, isAdmin }) {
     adminOnly = true;
     skipPolish = true;
     useAnswerModel = false;
-    const pack = await gatherAdminFacts({ ql, people, intents });
-    answer = formatAdminFacts(pack, people, intents) || 'No matching TaskFlow rows for that question.';
+    try {
+      const pack = await gatherAdminFacts({ ql, people, intents });
+      answer = formatAdminFacts(pack, people, intents) || 'No matching TaskFlow rows for that question.';
+    } catch (e) {
+      console.warn('bot admin facts:', e.message);
+      answer =
+        'DIP Bot hit an error loading data. Try a narrower question (e.g. “overdue of Charmy”, “company summary”, “open tickets”).';
+    }
   } else if (wantsSite) {
     answer = 'Site attendance, DPR and WPR company view is admin-only. Use the site portal for your own clock-in, DPR and WPR.';
   } else if (wantsLeave) {
@@ -1259,31 +1308,38 @@ async function answerQuestion({ question, user, isAdmin }) {
 }
 
 async function polishWithOpenAI(question, facts, name) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.15,
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are DIP Bot. Rewrite Facts neatly for the asked question only. Same names, dates, times and counts. Keep ALL-CAPS headings and "• " bullets. Do not add extra sections, advice, or greetings. Do not invent data.',
-        },
-        {
-          role: 'user',
-          content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nRewrite only the answer:`,
-        },
-      ],
-    }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error?.message || 'OpenAI error');
-  return data.choices?.[0]?.message?.content?.trim() || null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        temperature: 0.15,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are DIP Bot. Rewrite Facts neatly for the asked question only. Same names, dates, times and counts. Keep ALL-CAPS headings and "• " bullets. Do not add extra sections, advice, or greetings. Do not invent data.',
+          },
+          {
+            role: 'user',
+            content: `Question: ${question}\nAsked by: ${name || ''}\n\nFacts:\n${facts}\n\nRewrite only the answer:`,
+          },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error?.message || 'OpenAI error');
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function listOverdueTasksForWa() {

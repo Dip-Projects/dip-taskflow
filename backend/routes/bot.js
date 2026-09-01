@@ -186,6 +186,9 @@ router.post('/ask', requireAuth, requireAdmin, async (req, res) => {
     if (!question) return res.status(400).json({ error: 'Type a question' });
 
     const result = await answerQuestion({ question, user: req.user, isAdmin: true });
+    if (!result?.answer) {
+      result.answer = 'No answer generated. Try: overdue, company summary, leave, or a person name.';
+    }
 
     try {
       await supabase.from('bot_qa').insert({

@@ -13,6 +13,10 @@
     {
       "path": "/api/bot/cron/overdue-whatsapp",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/delay-report/cron/monday-whatsapp",
+      "schedule": "30 3 * * 1"
     }
   ],
   "headers": [

@@ -396,23 +396,10 @@ export async function mountTaskflowApp(opts = {}) {
 
   const VERIFICATION_SLA_HOURS = 2;
 
-  function verificationWorkDueDate(task) {
-    if (!task?.verification_started_at) return null;
-    const started = parseLocalDate(task.verification_started_at);
-    if (!started || Number.isNaN(started.getTime())) return null;
-    return addWorkingHours(started, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
-  }
-
-  function verificationOverdueWorkingHours(task, now = new Date()) {
-    const due = verificationWorkDueDate(task);
-    if (!due || now <= due) return 0;
-    return Math.max(0, Math.round(elapsedWorkingHoursBetween(due, now) * 10) / 10);
-  }
-
   function isVerificationOverdueTask(t, now = new Date()) {
     if (t?.verification_status !== 'Pending Verification') return false;
-    const due = verificationWorkDueDate(t);
-    if (!due) return false;
+    if (!t?.verification_started_at) return false;
+    const due = addWorkingHours(t.verification_started_at, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
     return now > due;
   }
 
@@ -421,8 +408,9 @@ export async function mountTaskflowApp(opts = {}) {
     if (t?.is_on_hold) return false;
     if (t?.verification_status === 'Pending Verification') return false;
     if (!t?.accepted_at) return false;
-    const due = employeeWorkDueDate(t);
-    if (!due) return false;
+    const hours = Number(t.hours_to_complete);
+    if (!hours || hours <= 0) return false;
+    const due = addWorkingHours(t.accepted_at, hours, { fromNowIfToday: false });
     return now > due;
   }
 
@@ -431,82 +419,20 @@ export async function mountTaskflowApp(opts = {}) {
     return isVerificationOverdueTask(t, now) || isAssignmentOverdueTask(t, now);
   }
 
-  function workTimerAnchor(task) {
-    if (task?.is_on_hold) return task.resumed_at || task.accepted_at || null;
-    if (task?.resumed_at) return task.resumed_at;
-    return task?.accepted_at || null;
-  }
-
-  function workTimerBudgetHours(task) {
-    if (task?.is_on_hold) {
-      const rem = Number(task.hold_remaining_hours);
-      if (rem > 0) return rem;
-      return Number(task.hours_to_complete) || 0;
-    }
-    if (task?.resumed_at && task.hold_remaining_hours != null) {
-      return Number(task.hold_remaining_hours) || 0;
-    }
-    return Number(task.hours_to_complete) || 0;
-  }
-
-  /** Pre-accept deadline: assigned_at + hours (display only; timer starts on Accept). */
-  function employeeAssignedDeadline(task) {
-    const start = task?.assigned_at || task?.created_at;
-    const hours = Number(task?.hours_to_complete);
-    if (!start || Number.isNaN(hours) || hours <= 0) return null;
-    try {
-      return addWorkingHours(start, hours, { fromNowIfToday: false });
-    } catch (_) {
-      return null;
-    }
-  }
-
   function employeeWorkDueDate(task) {
     if (!task?.accepted_at) return null;
-    const anchor = workTimerAnchor(task);
-    const hours = workTimerBudgetHours(task);
-    if (!anchor || !hours || hours <= 0) return null;
-    return addWorkingHours(anchor, hours, { fromNowIfToday: false });
-  }
-
-  /**
-   * Due label for emp UI: after reschedule, calendar date follows target_date
-   * (e.g. Sep 2 → Sep 8) but keeps the work-timer clock time.
-   * Countdown / overdue still use employeeWorkDueDate (hours_to_complete).
-   */
-  function employeeDisplayDueDate(task) {
-    const workDue = employeeWorkDueDate(task);
-    if (!workDue) return null;
-    if (!task?.target_date) return workDue;
-    const target = parseLocalDate(task.target_date);
-    if (!target || Number.isNaN(target.getTime())) return workDue;
-
-    const sameDay =
-      target.getFullYear() === workDue.getFullYear()
-      && target.getMonth() === workDue.getMonth()
-      && target.getDate() === workDue.getDate();
-    if (sameDay) return workDue;
-
-    const display = new Date(target);
-    const dateOnly = typeof task.target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.target_date);
-    if (dateOnly || (target.getHours() === 0 && target.getMinutes() === 0 && target.getSeconds() === 0)) {
-      display.setHours(
-        workDue.getHours(),
-        workDue.getMinutes(),
-        workDue.getSeconds(),
-        workDue.getMilliseconds()
-      );
-    }
-    return display;
+    const hours = Number(task.hours_to_complete);
+    if (!hours || hours <= 0) return null;
+    return addWorkingHours(task.accepted_at, hours, { fromNowIfToday: false });
   }
 
   function fmtOverdueDateCell(task, now = new Date()) {
     if (isVerificationOverdueTask(task, now)) {
-      const due = verificationWorkDueDate(task);
-      const hrsPast = verificationOverdueWorkingHours(task, now);
+      const due = addWorkingHours(task.verification_started_at, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+      const hrsPast = Math.max(0, Math.floor(elapsedWorkingHoursBetween(due, now)));
       return `
-        <div>Verify due: ${fmtDate(due.toISOString())}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
+        <div>Started verify: ${fmtDate(task.verification_started_at)}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2h verify limit (office hrs) 🔴` : 'Verify limit crossed 🔴'}</div>
       `;
     }
     const workDue = employeeWorkDueDate(task);
@@ -676,13 +602,6 @@ export async function mountTaskflowApp(opts = {}) {
     return n % 1 === 0 ? `${n}h` : `${n.toFixed(1)}h`;
   }
 
-  /** Remaining working-time budget until due (excludes nights, lunch, Sunday). */
-  function workingTimeLeftMs(from, due) {
-    if (!due || !from) return 0;
-    const hours = elapsedWorkingHoursBetween(from, due);
-    return Math.max(0, hours * 3600000);
-  }
-
   /** Employee My Tasks: due line + live time-left / hold / overdue (HTML). */
   function fmtEmployeeTimerHtml(task, now = new Date()) {
     if (task.is_on_hold) {
@@ -693,20 +612,6 @@ export async function mountTaskflowApp(opts = {}) {
       `;
     }
     if (!task.accepted_at) {
-      const deadline = employeeAssignedDeadline(task);
-      const assignedAt = task.assigned_at || task.created_at;
-      if (deadline) {
-        return `
-          <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
-          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Timer starts on Accept</div>
-        `;
-      }
-      if (assignedAt) {
-        return `
-          <div class="task-timer-due">Assigned ${fmtDate(assignedAt)}</div>
-          <div class="task-timer-sub">No hours set · Accept to start after hours are added</div>
-        `;
-      }
       return `<div class="task-timer-wait">Accept task to start timer</div>`;
     }
     if (task.verification_status === 'Pending Verification') {
@@ -715,28 +620,25 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
       `;
     }
-    const hours = workTimerBudgetHours(task);
+    const hours = Number(task.hours_to_complete);
     if (!hours || hours <= 0) {
       return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
     }
-    const workDue = employeeWorkDueDate(task);
-    if (!workDue) {
-      return `<div class="task-timer-wait">Accept task to start timer</div>`;
-    }
-    const displayDue = employeeDisplayDueDate(task) || workDue;
+    const due = employeeWorkDueDate(task);
+    if (!due) return `<div class="task-timer-wait">Accept task to start timer</div>`;
 
     if (isAssignmentOverdueTask(task, now)) {
-      const overdueMs = workingTimeLeftMs(workDue, now);
+      const overdueMs = now - due;
       return `
-        <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
+        <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
       `;
     }
 
-    const msLeft = workingTimeLeftMs(now, workDue);
+    const msLeft = due - now;
     const urgent = msLeft < 30 * 60 * 1000;
     return `
-      <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
+      <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
       <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
     `;
   }
@@ -746,16 +648,10 @@ export async function mountTaskflowApp(opts = {}) {
     if (task.is_on_hold) {
       return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
     }
-    if (!task.accepted_at) {
-      const deadline = employeeAssignedDeadline(task);
-      if (deadline) {
-        return `${fmtDate(deadline.toISOString())} · ${task.hours_to_complete}h deadline`;
-      }
-      return 'Accept task to start timer';
-    }
-    const due = employeeWorkDueDate(task);
-    if (!due) return fmtDate(task.accepted_at);
-    return `${fmtDate(due.toISOString())} · ${formatHoursLabel(workTimerBudgetHours(task))}`;
+    if (!task.accepted_at) return 'Accept task to start timer';
+    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
+    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
+    return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
   }
 
   let myTasksTimerCache = [];
@@ -993,7 +889,7 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
-    if (isAdmin && visOk('reschedule-requests') !== false) {
+    if (visOk('reschedule-requests') !== false) {
       appendCollapsibleNav(
         'Reschedule',
         [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
@@ -1011,6 +907,7 @@ export async function mountTaskflowApp(opts = {}) {
       || visOk('daily-report') && (isAdmin || isMis)
       || visOk('mis-report') && (isAdmin || isMis)
       || visOk('time-dashboard') && (isAdmin || isMis)
+      || visOk('delay-report') && (isAdmin || isMis)
       || visOk('fms') && (isAdmin || isMis);
 
     if (showAdminBlock) {
@@ -1026,7 +923,8 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', '🔐 Permissions'));
       if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
       if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
-      if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Time dashboard'));
+      if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
       appendCollapsibleNav(
         isMis && !isAdmin ? 'MIS' : 'Administration',
@@ -1075,7 +973,7 @@ export async function mountTaskflowApp(opts = {}) {
     employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
-    'time-dashboard': 'administration', fms: 'administration',
+    'time-dashboard': 'administration', 'delay-report': 'administration', fms: 'administration',
     'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
@@ -1225,9 +1123,10 @@ export async function mountTaskflowApp(opts = {}) {
           setNavBadge('verifications', verifs.length);
         }
   
-        // Reschedule requests are admin-only (approve/reject). Emp requests
-        // from the task menu and does not get a requests inbox.
-        setNavBadge('reschedule-requests', 0);
+        // Reschedule requests (own — any status change worth a glance, but
+        // badge only counts ones still awaiting a decision)
+        const myResched = await api('/tasks/reschedule-requests').catch(() => []);
+        setNavBadge('reschedule-requests', myResched.filter(t => t.reschedule_status === 'Pending').length);
   
         // My recurring tasks — count of instances still outstanding (today's
         // due instance plus any backlog that hasn't been marked Completed yet)
@@ -1252,15 +1151,7 @@ export async function mountTaskflowApp(opts = {}) {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
         const now = new Date();
-        // Open delegated work: Pending + In Progress + ticket/verify queues
-        // (old filter only counted Pending / Pending Verification → badge stuck at 1)
-        const pendingCount = allTasks.filter((t) => {
-          const st = String(t.status || '');
-          const vs = String(t.verification_status || '');
-          if (st === 'Completed' || st === 'Rejected') return false;
-          if (vs === 'Verified') return false;
-          return true;
-        }).length;
+        const pendingCount = allTasks.filter(t => t.status === 'Pending' || t.verification_status === 'Pending Verification').length;
         const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
   
         const recurringAll = await api('/recurring-tasks/all').catch(() => []);
@@ -1282,9 +1173,9 @@ export async function mountTaskflowApp(opts = {}) {
         const adminVerifs = await api('/tasks/verifications').catch(() => []);
         setNavBadge('verifications', adminVerifs.length);
   
-        // Reschedule requests awaiting admin decision (API already Pending-only)
+        // Reschedule requests awaiting a decision
         const reschedReqs = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', reschedReqs.filter((t) => t.reschedule_status === 'Pending').length);
+        setNavBadge('reschedule-requests', reschedReqs.length);
   
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
@@ -1365,6 +1256,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'daily-report')  loadDailyReport();
     if (viewKey === 'mis-report')    loadMisReport();
     if (viewKey === 'time-dashboard') loadTimeDashboard();
+    if (viewKey === 'delay-report')   loadDelayReport();
     if (viewKey === 'fms')           loadFms();
     if (viewKey === 'ai-bot')        loadAiBot();
     if (viewKey === 'team-chat')     loadTeamChat();
@@ -1510,6 +1402,33 @@ export async function mountTaskflowApp(opts = {}) {
   
   // ─── Add New Task ────────────────────────────────────────────────────────────
   
+  // Live preview of the actual completion deadline while assigning a task —
+  // reuses the same office-hours-aware calculator (9:30 AM–6:30 PM, 1–2 PM
+  // lunch excluded, Sundays skipped) that's already used to show deadlines
+  // everywhere else in the app, so what the admin sees here always matches
+  // what employees/verifiers see later on the task itself.
+  function updateTaskDeadlinePreview() {
+    const previewEl = document.getElementById('f-deadline-preview');
+    if (!previewEl) return;
+    const hoursRaw = document.getElementById('f-hours').value;
+    const dateRaw  = document.getElementById('f-targetdate').value;
+  
+    if (!dateRaw) {
+      previewEl.innerHTML = '';
+      return;
+    }
+    const hours = hoursRaw === '' ? null : Number(hoursRaw);
+    if (hours == null || Number.isNaN(hours) || hours <= 0) {
+      previewEl.innerHTML = `Starts <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong> — add hours to see the calculated completion deadline.`;
+      return;
+    }
+    const due = addWorkingHours(dateRaw, hours);
+    previewEl.innerHTML = `⏱ With <strong>${hours}h</strong> of working time starting <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong>, this task is due by <strong>${escapeHtml(fmtDate(due.toISOString()))}</strong>.`;
+  }
+  document.getElementById('f-hours')?.addEventListener('input', updateTaskDeadlinePreview);
+  document.getElementById('f-targetdate')?.addEventListener('input', updateTaskDeadlinePreview);
+  updateTaskDeadlinePreview();
+  
   els.addTaskForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     hideFormMsg(els.addTaskMsg);
@@ -1521,28 +1440,13 @@ export async function mountTaskflowApp(opts = {}) {
   });
 
   async function actuallyAssignTask(cpLabels) {
-    const hoursVal = document.getElementById('f-hours')?.value;
-    const hoursNum = Number(hoursVal);
-    if (!hoursVal || Number.isNaN(hoursNum) || hoursNum <= 0) {
-      throw new Error('Please enter hours to complete (greater than 0)');
-    }
-    if (!els.fDepartment.value || !els.fEmployee.value || !els.fTaskType.value) {
-      throw new Error('Please fill in all required fields');
-    }
-    if (!document.getElementById('f-description')?.value?.trim()) {
-      throw new Error('Please fill in all required fields');
-    }
-    if (!document.getElementById('f-targetdate')?.value) {
-      throw new Error('Please fill in all required fields');
-    }
-
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
     formData.append('project_id', els.fProject.value);
     formData.append('task_type_id', els.fTaskType.value);
     formData.append('description', document.getElementById('f-description').value);
-    formData.append('hours_to_complete', String(hoursNum));
+    formData.append('hours_to_complete', document.getElementById('f-hours').value);
     formData.append('target_date', document.getElementById('f-targetdate').value);
     formData.append('priority', document.getElementById('f-priority').value);
     formData.append('rescheduling_possible', document.getElementById('f-reschedule').value);
@@ -1560,16 +1464,11 @@ export async function mountTaskflowApp(opts = {}) {
         });
       } catch (_) { /* table missing — task is still assigned */ }
     }
-    showToast('Task assigned ✅', 'success');
-    try {
+      showToast('Task assigned ✅', 'success');
       els.addTaskForm.reset();
-      const priorityEl = document.getElementById('f-priority');
-      const reschedEl = document.getElementById('f-reschedule');
-      const hoursEl = document.getElementById('f-hours');
-      if (priorityEl) priorityEl.value = 'Medium';
-      if (reschedEl) reschedEl.value = 'false';
-      if (hoursEl) hoursEl.value = '8';
-    } catch (_) { /* form reset must never hide assign success */ }
+      document.getElementById('f-priority').value = 'Medium';
+      document.getElementById('f-reschedule').value = 'false';
+      updateTaskDeadlinePreview();
   }
 
   function toggleInlineAdd(rowId) {
@@ -1692,7 +1591,7 @@ export async function mountTaskflowApp(opts = {}) {
   
   async function loadAllTasks() {
     const tbody = els.allTasksList;
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading tasks…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading tasks…</td></tr>`;
     els.allTasksCards.innerHTML = `<div class="empty-state">Loading tasks…</div>`;
     try {
       const query = buildAllTasksQuery();
@@ -1738,9 +1637,21 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // renders the admin "All delegated tasks" as a table (desktop)
+  function assignedHoursLabel(task) {
+    const orig = task.original_hours_to_complete != null && task.original_hours_to_complete !== ''
+      ? Number(task.original_hours_to_complete)
+      : null;
+    const cur = task.hours_to_complete != null && task.hours_to_complete !== ''
+      ? Number(task.hours_to_complete)
+      : null;
+    const display = orig != null && !Number.isNaN(orig) ? orig : cur;
+    if (display == null || Number.isNaN(display)) return '—';
+    return `${display}h`;
+  }
+
   function renderAllTasksTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -1763,6 +1674,12 @@ export async function mountTaskflowApp(opts = {}) {
       tdDate.textContent = task.target_date
         ? fmtDateOnly(task.target_date)
         : '—';
+
+      // Hrs to complete (original assigned when available)
+      const tdHrs = document.createElement('td');
+      tdHrs.style.textAlign = 'center';
+      tdHrs.style.fontWeight = '600';
+      tdHrs.textContent = assignedHoursLabel(task);
   
       // Assigned to
       const tdAssigned = document.createElement('td');
@@ -1818,7 +1735,7 @@ export async function mountTaskflowApp(opts = {}) {
       buildPrimaryStatusButtons(task, { showAssignee: true, allowActions: true }).forEach((btn) => tdActions.appendChild(btn));
       tdActions.appendChild(buildCardMenuElement(task, { showAssignee: true }));
   
-      tr.append(tdSr, tdDetails, tdDate, tdAssigned, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
+      tr.append(tdSr, tdDetails, tdDate, tdHrs, tdAssigned, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -1983,7 +1900,7 @@ export async function mountTaskflowApp(opts = {}) {
         ? `<span class="source-badge source-verification">⏳ Verification</span>`
         : `<span class="source-badge source-assignment">📋 Assignment</span>`;
   
-      // Overdue detail (assignment work hours or verification 2 working-hour SLA)
+      // Overdue detail (assignment work hours or verification 2h SLA)
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
       tdDate.innerHTML = fmtOverdueDateCell(task);
@@ -1999,7 +1916,7 @@ export async function mountTaskflowApp(opts = {}) {
       const tdVerifier = document.createElement('td');
       if (task.verifier?.full_name) {
         const verifyNote = isVerificationOverdueTask(task)
-          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2 working hrs</div>`
+          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2h</div>`
           : (task.verification_status === 'Pending Verification' && !task.verification_started_at
             ? `<div style="color:var(--muted);font-size:0.75rem;margin-top:2px">Not started yet</div>`
             : '');
@@ -2553,20 +2470,11 @@ export async function mountTaskflowApp(opts = {}) {
       items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
     }
 
-    // Emp-only: request reschedule (admin uses direct Reschedule above — no approve step)
-    if (
-      !isAdminManaging
-      && state.user.role !== 'admin'
-      && task.rescheduling_possible
-      && task.status !== 'Completed'
-      && !isPendingVerification
-      && !isOnHold
-      && canManageThisTask
-    ) {
+    if (task.rescheduling_possible && task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
       if (isTicketRaised) {
         items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
-        items.push({ label: '🗓️ Reschedule request pending…', disabled: true });
+        items.push({ label: '🗓️ Reschedule request pending…', onClick: () => switchView('reschedule-requests'), disabled: true });
       } else {
         items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
       }
@@ -3105,30 +3013,22 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Reschedule requests ────────────────────────────────────────────────────
-  // Admin-only inbox: emp requests awaiting Approve / Reject.
-  // Admin direct Reschedule updates the date immediately (no request row).
+  // Admin: every request still awaiting a decision, with Approve/Reject.
+  // Everyone else: only their own requests (any status), read-only.
   async function loadRescheduleRequests() {
     const wrap = document.getElementById('reschedRequestsList');
     const sub = document.getElementById('reschedViewSub');
     const isAdmin = state.user.role === 'admin';
-    if (!isAdmin) {
-      if (sub) sub.textContent = 'Only admins review reschedule requests.';
-      if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
-      const tbody = document.getElementById('reschedRequestsTableBody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
-      return;
-    }
-    if (sub) {
-      sub.textContent = "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is. Admin direct reschedule updates immediately (no approval).";
-    }
-    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    sub.textContent = isAdmin
+      ? "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is."
+      : 'Status of the reschedule requests you\'ve sent.';
+    wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     try {
       const tasks = await api('/tasks/reschedule-requests');
-      const pending = (tasks || []).filter((t) => t.reschedule_status === 'Pending');
-      renderRescheduleRequests(wrap, pending, true);
-      if (tbody) renderRescheduleRequestsTable(tbody, pending, true);
+      renderRescheduleRequests(wrap, tasks, isAdmin);
+      if (tbody) renderRescheduleRequestsTable(tbody, tasks, isAdmin);
     } catch (err) { showToast(err.message, 'error'); }
   }
   
@@ -3992,11 +3892,7 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
         const n = res.tasks_moved || 0;
-        if (res.transfer_pending_leave_approval) {
-          showToast('You accepted buddy cover — tasks move only after leave is approved ✅', 'success');
-        } else {
-          showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
-        }
+        showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
         loadBuddyRequests();
         refreshNavBadges();
       } catch (err) { showToast(err.message, 'error'); }
@@ -4044,7 +3940,7 @@ export async function mountTaskflowApp(opts = {}) {
             </div>
             <div class="ticket-desc"><strong>${escapeHtml(fromName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
             <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
-            <div class="ticket-meta">Say Yes to cover their open tasks due in this window. Tasks move to you only after the leave is approved — not if it is rejected.</div>
+            <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
           `;
           attachBuddyRespondButtons(card.querySelector('.row-actions'), leave);
           wrap.appendChild(card);
@@ -6958,247 +6854,385 @@ export async function mountTaskflowApp(opts = {}) {
     return `${sign}${abs}h`;
   }
 
-  function tdHeat(h, good, warn) {
-    if (h == null || h === '') return '';
-    const n = Number(h);
-    if (Number.isNaN(n)) return '';
-    if (n <= good) return ' td-heat-good';
-    if (n <= warn) return ' td-heat-mid';
-    return ' td-heat-bad';
+  function fmtDays(d) {
+    if (d == null || d === '') return '—';
+    const n = Number(d);
+    if (Number.isNaN(n)) return '—';
+    if (n === 0) return 'same day';
+    if (n === 1) return '1 day';
+    return `${n} days`;
+  }
+
+  function fmtWvdDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const mon = d.toLocaleString('en-GB', { month: 'short' });
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${mon}, ${hh}:${mm}`;
+  }
+
+  function fmtWvdDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const mon = d.toLocaleString('en-GB', { month: 'short' });
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${day} ${mon}`;
   }
 
   let _tdLastData = null;
 
-  function tdPct(done, total) {
-    if (!total) return 0;
-    return Math.round((done / total) * 100);
-  }
-
-  function renderTimeDashboardSummary(emps) {
-    const el = document.getElementById('tdSummary');
-    if (!el) return;
-    if (!emps.length) {
-      el.innerHTML = '';
-      return;
-    }
-    const all = emps.map((e) => e.portfolio || {});
-    const sum = (k) => all.reduce((s, p) => s + Number(p[k] || 0), 0);
-    const avgOf = (k) => {
-      const vals = all.map((p) => p[k]).filter((v) => v != null);
-      return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10 : null;
-    };
-    const total = sum('total');
-    const done = sum('completed');
-    const onTime = sum('onTime');
-    const late = sum('late');
-    const slowest = [...emps]
-      .filter((e) => e.portfolio?.avgCycleHrs != null)
-      .sort((a, b) => b.portfolio.avgCycleHrs - a.portfolio.avgCycleHrs)[0];
-    el.innerHTML = `
-      <div class="td-stat"><span>Tasks in range</span><strong>${total}</strong><small>${emps.length} people</small></div>
-      <div class="td-stat"><span>Completed</span><strong>${done}</strong>
-        <div class="td-bar"><i style="width:${tdPct(done, total)}%"></i></div>
-        <small>${tdPct(done, total)}% closed</small></div>
-      <div class="td-stat"><span>Still open</span><strong>${sum('pending') + sum('inProgress')}</strong><small>pending + in progress</small></div>
-      <div class="td-stat"><span>On time</span><strong>${onTime}</strong><small>${late} late vs planned hours</small></div>
-      <div class="td-stat"><span>Planned hours</span><strong>${fmtHrs(sum('plannedHours'))}</strong><small>+${fmtHrs(sum('extraHours'))} / ${sum('extraDays')}d extra</small></div>
-      <div class="td-stat"><span>Avg accept</span><strong>${fmtHrs(avgOf('avgAcceptHrs'))}</strong><small>assign → accept</small></div>
-      <div class="td-stat"><span>Avg submit</span><strong>${fmtHrs(avgOf('avgSubmitHrs'))}</strong><small>accept → send for verify</small></div>
-      <div class="td-stat"><span>Longest cycle</span><strong>${fmtHrs(slowest?.portfolio?.avgCycleHrs)}</strong><small>${escapeHtml(slowest?.name || '—')}</small></div>`;
-  }
-
   function downloadTimeCsv(data) {
-    if (!data?.report?.length) return showToast('Nothing to export yet', 'error');
-    const head = ['Employee', 'Project', 'Task', 'Assigned', 'Accepted', 'Accept hrs', 'Submit hrs', 'Verify hrs', 'Cycle hrs', 'Extra hrs', 'Extra days', 'Hold at', 'Resume at', 'Orig hrs', 'Remaining hrs'];
+    const dash = data?.dashboard;
+    if (!dash?.completion_time?.rows?.length && !dash?.by_employee?.length) {
+      return showToast('Nothing to export yet', 'error');
+    }
+    const head = ['SR', 'Employee', 'Project', 'Task type', 'Assigned', 'Submitted', 'Hours', 'Verifier', 'Verified', 'Verify days'];
     const lines = [head.join(',')];
-    data.report.forEach((emp) => {
-      (emp.projects || []).forEach((p) => {
-        (p.tasks || []).forEach((t) => {
-          const hr = t.hold_resume || {};
-          lines.push([
-            emp.name, p.name, (t.description || '').replace(/\s+/g, ' '),
-            t.assigned_at || t.created_at || '', t.accepted_at || '',
-            t.time_to_accept_hrs ?? '', t.time_to_submit_hrs ?? '',
-            t.time_to_verify_hrs ?? '', t.total_cycle_hrs ?? '',
-            t.extra_hours || 0, t.extra_days || 0,
-            hr.held_at || '', hr.resumed_at || '',
-            hr.original_hours ?? t.hours_to_complete ?? '', hr.remaining_hours ?? '',
-          ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
-        });
-      });
+    const bySr = {};
+    (dash.completion_time?.rows || []).forEach((r) => { bySr[r.sr] = { ...r }; });
+    (dash.verify_turnaround?.rows || []).forEach((r) => {
+      bySr[r.sr] = { ...(bySr[r.sr] || {}), verifier: r.verifier, verified_at: r.verified_at, days: r.days };
+    });
+    Object.values(bySr).forEach((r) => {
+      lines.push([
+        r.sr ?? '', r.employee || '', r.project || '', r.task_type || '',
+        r.assigned_at || '', r.submitted_at || '', r.hours ?? '',
+        r.verifier || '', r.verified_at || '', r.days ?? '',
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `time-dashboard-${(data.from || '').slice(0, 10)}.csv`;
+    a.download = `work-verification-${(data.from || '').slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
 
-  function filterTdEmps(allEmps) {
+  function printWorkDashboardPdf() {
+    const report = document.getElementById('wvdReport');
+    if (!report) return showToast('Generate the dashboard first', 'error');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups to download PDF', 'error');
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((el) => el.outerHTML)
+      .join('\n');
+    win.document.write(`<!DOCTYPE html><html><head><title>Work & Verification Dashboard</title>
+      ${styles}
+      <style>
+        body { background: #F7F4EE !important; margin: 0; padding: 24px; }
+        .wvd { box-shadow: none !important; border: none !important; }
+        @page { size: A4; margin: 12mm; }
+        @media print {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+      </style>
+    </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+    </body></html>`);
+    win.document.close();
+  }
+
+  function filterDashboardData(dash, allEmps) {
     const personId = document.getElementById('tdPerson')?.value || '';
     const dept = document.getElementById('tdDept')?.value || '';
-    const sort = document.getElementById('tdSort')?.value || 'name';
-    let emps = allEmps.filter((e) => {
-      if (personId && String(e.id) !== String(personId)) return false;
-      if (dept && String(e.department || e.portfolio?.department || '') !== dept) return false;
-      return true;
-    });
-    emps = [...emps].sort((a, b) => {
-      const pa = a.portfolio || {};
-      const pb = b.portfolio || {};
-      if (sort === 'cycle') return (pb.avgCycleHrs || 0) - (pa.avgCycleHrs || 0);
-      if (sort === 'open') return ((pb.pending || 0) + (pb.inProgress || 0)) - ((pa.pending || 0) + (pa.inProgress || 0));
-      if (sort === 'hours') return (pb.plannedHours || 0) - (pa.plannedHours || 0);
-      if (sort === 'late') return (pb.late || 0) - (pa.late || 0);
-      return String(a.name || '').localeCompare(String(b.name || ''));
-    });
-    return emps;
-  }
+    if (!personId && !dept) return dash;
 
-  function renderTdPeopleSheet(emps) {
-    if (!emps.length) return '';
-    const rows = emps.map((e) => {
-      const pf = e.portfolio || {};
-      const open = (pf.pending || 0) + (pf.inProgress || 0);
-      return `<tr>
-        <td class="td-sticky">${escapeHtml(e.name)}</td>
-        <td>${escapeHtml(e.department || pf.department || '—')}</td>
-        <td>${pf.total || 0}</td>
-        <td>${pf.completed || 0}</td>
-        <td>${open}</td>
-        <td>${pf.onTime || 0}</td>
-        <td class="${(pf.late || 0) ? 'td-heat-bad' : ''}">${pf.late || 0}</td>
-        <td>${fmtHrs(pf.plannedHours)}</td>
-        <td>${Number(pf.extraHours || 0) || Number(pf.extraDays || 0) ? `${fmtHrs(pf.extraHours)} / ${pf.extraDays || 0}d` : '—'}</td>
-        <td class="${tdHeat(pf.avgAcceptHrs, 4, 24)}">${fmtHrs(pf.avgAcceptHrs)}</td>
-        <td class="${tdHeat(pf.avgSubmitHrs, 24, 72)}">${fmtHrs(pf.avgSubmitHrs)}</td>
-        <td class="${tdHeat(pf.avgVerifyHrs, 8, 24)}">${fmtHrs(pf.avgVerifyHrs)}</td>
-        <td class="${tdHeat(pf.avgCycleHrs, 24, 72)}">${fmtHrs(pf.avgCycleHrs)}</td>
-      </tr>`;
-    }).join('');
-    return `<div class="td-sheet-wrap"><div class="td-sheet-scroll">
-      <table class="td-sheet">
-        <thead><tr>
-          <th class="td-sticky">Employee</th><th>Dept</th><th>Tasks</th><th>Done</th><th>Open</th>
-          <th>On time</th><th>Late</th><th>Planned</th><th>Extra</th>
-          <th>Avg accept</th><th>Avg submit</th><th>Avg verify</th><th>Avg cycle</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div></div>`;
-  }
-
-  async function loadTimeDashboard(opts = {}) {
-    const body = document.getElementById('tdBody');
-    const rangeEl = document.getElementById('tdRange');
-    if (!body) return;
-    const range = rangeEl?.value || 'month';
-    try {
-      let data = opts.fromCache ? _tdLastData : null;
-      if (!data) {
-        if (!opts.quiet) body.innerHTML = '<div class="empty-state">Loading time data…</div>';
-        data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
-      }
-      _tdLastData = data;
-      const allEmps = data.report || [];
-      fillTdFilters(allEmps);
-      const emps = filterTdEmps(allEmps);
-      const vers = personFilteredVerifiers(data.verifiers || []);
-      renderTimeDashboardSummary(emps);
-      if (!emps.length && !vers.length) {
-        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
-        return;
-      }
-      const empHtml = `<div class="td-grid">${emps.map((emp) => {
-        const pf = emp.portfolio || {};
-        const open = (pf.pending || 0) + (pf.inProgress || 0);
-        const projBlocks = (emp.projects || []).map((p) => {
-          const rows = (p.tasks || []).map((t) => {
-            const planned = Number(t.hours_to_complete || 0);
-            const cycle = t.total_cycle_hrs;
-            const late = cycle != null && planned > 0 && cycle > planned;
-            return `
-            <tr>
-              <td class="td-sticky" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || '').slice(0, 70))}</td>
-              <td>${escapeHtml(t.status || '—')}</td>
-              <td>${planned ? fmtHrs(planned) : '—'}</td>
-              <td>${escapeHtml(fmtDate(t.assigned_at || t.created_at))}</td>
-              <td>${escapeHtml(t.accepted_at ? fmtDate(t.accepted_at) : '—')}</td>
-              <td class="${tdHeat(t.time_to_accept_hrs, 4, 24)}">${fmtHrs(t.time_to_accept_hrs)}</td>
-              <td class="${tdHeat(t.time_to_submit_hrs, planned || 24, (planned || 24) * 1.5)}">${fmtHrs(t.time_to_submit_hrs)}</td>
-              <td class="${tdHeat(t.time_to_start_verify_hrs, 4, 24)}">${fmtHrs(t.time_to_start_verify_hrs)}</td>
-              <td class="${tdHeat(t.time_to_verify_hrs, 8, 24)}">${fmtHrs(t.time_to_verify_hrs)}</td>
-              <td class="${late ? 'td-heat-bad' : tdHeat(cycle, planned || 24, (planned || 24) * 1.25)}">${fmtHrs(cycle)}</td>
-              <td>${Number(t.extra_hours || 0) || Number(t.extra_days || 0)
-                ? `${t.extra_hours || 0}h / ${t.extra_days || 0}d`
-                : '—'}</td>
-              <td>${t.hold_resume?.held_at ? escapeHtml(fmtDate(t.hold_resume.held_at)) : '—'}</td>
-              <td>${t.hold_resume?.resumed_at ? escapeHtml(fmtDate(t.hold_resume.resumed_at)) : '—'}</td>
-              <td>${t.hold_resume?.remaining_hours != null ? fmtHrs(t.hold_resume.remaining_hours) : '—'}</td>
-            </tr>`;
-          }).join('');
-          return `<div class="td-project">
-            <h4>${escapeHtml(p.name)} <span class="td-muted">${p.summary?.total || 0} tasks · avg cycle ${fmtHrs(p.summary?.avgCycleHrs)}</span></h4>
-            <div class="td-sheet-scroll"><table class="td-sheet td-table">
-              <thead><tr>
-                <th class="td-sticky">Task</th><th>Status</th><th>Planned</th><th>Assigned</th><th>Accepted</th>
-                <th>Accept</th><th>Submit</th><th>Start verify</th><th>Verified</th><th>Cycle</th><th>Extra</th>
-                <th>Hold at</th><th>Resume at</th><th>Remaining</th>
-              </tr></thead>
-              <tbody>${rows}</tbody>
-            </table></div>
-          </div>`;
-        }).join('');
-        return `<article class="td-card">
-          <header class="td-card-head">
-            <div>
-              <h3>${escapeHtml(emp.name)}</h3>
-              <span class="td-muted">${escapeHtml(emp.department || pf.department || '')}${emp.department || pf.department ? ' · ' : ''}${pf.total || 0} tasks</span>
-            </div>
-            <span class="td-pill ${open ? 'td-pill-open' : 'td-pill-done'}">${open ? `${open} open` : 'clear'}</span>
-          </header>
-          <div class="td-kpis">
-            <div class="td-kpi"><span>Planned</span><strong>${fmtHrs(pf.plannedHours)}</strong></div>
-            <div class="td-kpi"><span>Extra</span><strong>${fmtHrs(pf.extraHours)} / ${pf.extraDays || 0}d</strong></div>
-            <div class="td-kpi"><span>Done</span><strong>${pf.completed || 0}</strong></div>
-            <div class="td-kpi"><span>On time / late</span><strong>${pf.onTime || 0} / ${pf.late || 0}</strong></div>
-            <div class="td-kpi"><span>Avg accept</span><strong>${fmtHrs(pf.avgAcceptHrs)}</strong></div>
-            <div class="td-kpi"><span>Avg submit</span><strong>${fmtHrs(pf.avgSubmitHrs)}</strong></div>
-            <div class="td-kpi"><span>Avg verify</span><strong>${fmtHrs(pf.avgVerifyHrs)}</strong></div>
-            <div class="td-kpi"><span>Avg cycle</span><strong>${fmtHrs(pf.avgCycleHrs)}</strong></div>
-          </div>
-          ${projBlocks}
-        </article>`;
-      }).join('')}</div>`;
-
-      const verHtml = vers.length
-        ? `<div class="td-emp"><h3>Verification time by person</h3>
-            <div class="td-sheet-scroll"><table class="td-sheet td-table">
-              <thead><tr><th class="td-sticky">Verifier</th><th>Tasks</th><th>Avg verify</th><th>By project</th></tr></thead>
-              <tbody>${vers.map((v) => `<tr>
-                <td class="td-sticky">${escapeHtml(v.name)}</td>
-                <td>${v.total}</td>
-                <td class="${tdHeat(v.avgVerifyHrs, 8, 24)}">${fmtHrs(v.avgVerifyHrs)}</td>
-                <td>${(v.projects || []).map((p) => `${escapeHtml(p.name)} (${p.count}, avg ${fmtHrs(p.avgVerifyHrs)})`).join('<br>')}</td>
-              </tr>`).join('')}</tbody>
-            </table></div></div>`
-        : '';
-
-      body.innerHTML = `<div class="td-range-note">${escapeHtml(data.from?.slice(0,10) || '')} – ${escapeHtml(data.to?.slice(0,10) || '')} · ${emps.length} people</div>
-        <div class="td-section-title">Team overview</div>
-        ${renderTdPeopleSheet(emps)}
-        <div class="td-section-title">By person</div>
-        ${empHtml}${verHtml}`;
-    } catch (err) {
-      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    let allowNames = null;
+    if (personId || dept) {
+      allowNames = new Set(
+        (allEmps || [])
+          .filter((e) => {
+            if (personId && String(e.id) !== String(personId)) return false;
+            if (dept && String(e.department || e.portfolio?.department || '') !== dept) return false;
+            return true;
+          })
+          .map((e) => e.name)
+      );
     }
+    if (!allowNames || !allowNames.size) {
+      return {
+        ...dash,
+        summary: { ...dash.summary, total_tasks: 0, employees: 0, verified: 0, pending_verify: 0, corrections_sent: 0 },
+        by_employee: [],
+        project_employee_matrix: { employees: [], projects: [], employee_totals: {}, grand_total: 0 },
+        correction_log: { by_employee: [], items: [] },
+        completion_time: { matched: 0, avg_hrs: null, fastest_hrs: null, slowest_hrs: null, by_employee: [], rows: [] },
+      };
+    }
+
+    const by_employee = (dash.by_employee || []).filter((e) => allowNames.has(e.name));
+    const employees = by_employee.map((e) => e.name);
+    const pem = dash.project_employee_matrix || { projects: [] };
+    const projects = (pem.projects || [])
+      .map((p) => {
+        const counts = {};
+        let total = 0;
+        employees.forEach((e) => {
+          counts[e] = p.counts?.[e] || 0;
+          total += counts[e];
+        });
+        return { name: p.name, counts, total };
+      })
+      .filter((p) => p.total > 0);
+    const employee_totals = Object.fromEntries(employees.map((e) => [e, by_employee.find((x) => x.name === e)?.total || 0]));
+    const grand_total = by_employee.reduce((s, e) => s + e.total, 0);
+    const correction_log = {
+      by_employee: (dash.correction_log?.by_employee || []).filter((e) => allowNames.has(e.name)),
+      items: (dash.correction_log?.items || []).filter((i) => allowNames.has(i.employee)),
+    };
+    const completion_time = {
+      ...dash.completion_time,
+      rows: (dash.completion_time?.rows || []).filter((r) => allowNames.has(r.employee)),
+      by_employee: (dash.completion_time?.by_employee || []).filter((e) => allowNames.has(e.name)),
+    };
+    completion_time.matched = completion_time.rows.length;
+    const hrs = completion_time.rows.map((r) => r.hours).filter((h) => h != null);
+    completion_time.avg_hrs = hrs.length ? Math.round((hrs.reduce((a, b) => a + b, 0) / hrs.length) * 10) / 10 : null;
+    completion_time.fastest_hrs = hrs.length ? Math.min(...hrs) : null;
+    completion_time.slowest_hrs = hrs.length ? Math.max(...hrs) : null;
+
+    return {
+      ...dash,
+      summary: {
+        ...dash.summary,
+        total_tasks: grand_total,
+        employees: employees.length,
+        verified: by_employee.reduce((s, e) => s + (e.verified || 0), 0),
+        pending_verify: by_employee.reduce((s, e) => s + (e.pending || 0), 0),
+        corrections_sent: correction_log.items.length,
+      },
+      by_employee,
+      project_employee_matrix: { employees, projects, employee_totals, grand_total },
+      correction_log,
+      completion_time,
+    };
   }
 
-  function personFilteredVerifiers(vers) {
-    const personId = document.getElementById('tdPerson')?.value || '';
-    if (!personId) return vers;
-    return vers.filter((v) => String(v.id) === String(personId));
+  function wvdPill(text, kind) {
+    return `<span class="wvd-pill wvd-pill-${kind}">${escapeHtml(text)}</span>`;
+  }
+
+  function wvdMatrix(headers, rows, foot) {
+    return `<div class="wvd-table-wrap"><table class="wvd-matrix">
+      <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody>
+      ${foot || ''}
+    </table></div>`;
+  }
+
+  function renderWorkVerificationDashboard(dash, meta = {}) {
+    const s = dash.summary || {};
+    const srLabel = s.sr_from != null
+      ? `Task SR No. ${s.sr_from}–${s.sr_to} · ${s.total_tasks} tasks · ${s.employees} employees · ${s.verification_submissions || 0} verification submissions`
+      : `${s.total_tasks || 0} tasks · ${s.employees || 0} employees · ${s.verification_submissions || 0} verification submissions`;
+
+    const fromTo = meta.from && meta.to
+      ? `${escapeHtml(String(meta.from).slice(0, 10))} → ${escapeHtml(String(meta.to).slice(0, 10))}`
+      : '';
+
+    // 1 · Work by employee
+    const empCols = (dash.by_employee || []).map((e) => {
+      const pills = [
+        e.verified ? wvdPill(`Verified: ${e.verified}`, 'ok') : '',
+        e.pending ? wvdPill(`Pending Verification: ${e.pending}`, 'warn') : '',
+      ].filter(Boolean).join('');
+      const projects = (e.projects || []).map((p) => `
+        <div class="wvd-proj-row"><span>${escapeHtml(p.name)}</span><strong>${p.count}</strong></div>`).join('');
+      return `<div class="wvd-emp-col">
+        <div class="wvd-emp-head"><span>${escapeHtml((e.name || '').toUpperCase())}</span><em>${e.total} tasks</em></div>
+        <div class="wvd-pills">${pills || wvdPill('No status', 'muted')}</div>
+        <div class="wvd-proj-list">${projects || '<div class="wvd-muted">No projects</div>'}</div>
+      </div>`;
+    }).join('') || '<div class="empty-state">No employees in this range</div>';
+
+    // 2 · Project × Employee
+    const pem = dash.project_employee_matrix || { employees: [], projects: [] };
+    const pemHeads = ['PROJECT', ...(pem.employees || []).map((n) => n.toUpperCase()), 'TOTAL'];
+    const pemRows = (pem.projects || []).map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      ${(pem.employees || []).map((e) => `<td>${p.counts?.[e] ? p.counts[e] : '–'}</td>`).join('')}
+      <td><strong>${p.total || 0}</strong></td>
+    </tr>`).join('');
+    const pemFoot = `<tfoot><tr>
+      <td>Employee Total</td>
+      ${(pem.employees || []).map((e) => `<td>${pem.employee_totals?.[e] || 0}</td>`).join('')}
+      <td><span class="wvd-grand">${pem.grand_total || 0}</span></td>
+    </tr></tfoot>`;
+
+    // 3 · Project × Verifier
+    const pvm = dash.project_verifier_matrix || { verifiers: [], projects: [] };
+    const pvmHeads = ['PROJECT', ...(pvm.verifiers || []).map((n) => n.toUpperCase()), 'TOTAL'];
+    const pvmRows = (pvm.projects || []).map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      ${(pvm.verifiers || []).map((v) => `<td>${p.counts?.[v] ? p.counts[v] : '–'}</td>`).join('')}
+      <td><strong>${p.total || 0}</strong></td>
+    </tr>`).join('');
+    const pvmFoot = `<tfoot><tr>
+      <td>Verifier Total</td>
+      ${(pvm.verifiers || []).map((v) => `<td>${pvm.verifier_totals?.[v] || 0}</td>`).join('')}
+      <td><span class="wvd-grand">${pvm.grand_total || 0}</span></td>
+    </tr></tfoot>`;
+
+    // 3b · Verifier summary
+    const verSum = (dash.verifier_summary || []).map((v) => {
+      const pills = [
+        v.verified ? wvdPill(`Verified: ${v.verified}`, 'ok') : '',
+        v.correction_sent ? wvdPill(`Correction Sent: ${v.correction_sent}`, 'bad') : '',
+        v.correction_ack ? wvdPill(`Correction Acknowledged: ${v.correction_ack}`, 'ack') : '',
+        v.pending ? wvdPill(`Pending Verification: ${v.pending}`, 'warn') : '',
+      ].filter(Boolean).join('');
+      const notes = (v.corrections || []).map((c) => `
+        <div class="wvd-corr-note">
+          <div><strong>${escapeHtml(c.status)} (${escapeHtml(c.employee)}):</strong> ${escapeHtml(c.project)}</div>
+          <div class="wvd-muted">Task SR :- ${c.sr ?? '—'} &nbsp;|&nbsp; ${escapeHtml(c.task_type || '—')}</div>
+          ${c.note ? `<div class="wvd-muted">Note :- ${escapeHtml(c.note)}</div>` : ''}
+        </div>`).join('');
+      return `<div class="wvd-ver-col">
+        <div class="wvd-emp-head"><span>${escapeHtml((v.name || '').toUpperCase())}</span><em>${v.total} verified</em></div>
+        <div class="wvd-pills">${pills}</div>
+        ${notes}
+      </div>`;
+    }).join('') || '<div class="wvd-muted">No verifier activity</div>';
+
+    // 4 · Correction log
+    const corrPills = (dash.correction_log?.by_employee || [])
+      .map((e) => `<span class="wvd-corr-count">${escapeHtml(e.name)}: ${e.count}</span>`)
+      .join('');
+    const corrItems = (dash.correction_log?.items || []).map((i) => `
+      <div class="wvd-corr-row">
+        <span>${escapeHtml(i.employee)} — ${escapeHtml(i.project)} (SR ${i.sr ?? '—'})</span>
+        <em>${escapeHtml(i.status)}</em>
+      </div>`).join('') || '<div class="wvd-muted">No corrections in this range</div>';
+
+    // 5a · Completion time
+    const ct = dash.completion_time || {};
+    const maxAvg = Math.max(1, ...(ct.by_employee || []).map((e) => e.avg_hrs || 0));
+    const bars = (ct.by_employee || []).map((e) => {
+      const w = Math.round(((e.avg_hrs || 0) / maxAvg) * 100);
+      return `<div class="wvd-bar-row">
+        <span class="wvd-bar-name">${escapeHtml((e.name || '').toUpperCase())}</span>
+        <div class="wvd-bar-track"><i style="width:${w}%"></i></div>
+        <span class="wvd-bar-val">${fmtHrs(e.avg_hrs)} <small>(n=${e.n})</small></span>
+      </div>`;
+    }).join('');
+    const ctRows = (ct.rows || []).map((r) => `<tr>
+      <td>${r.sr ?? '—'}</td>
+      <td>${escapeHtml(r.employee)}</td>
+      <td>${escapeHtml(r.project)}</td>
+      <td>${escapeHtml(r.task_type)}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.assigned_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.submitted_at))}</td>
+      <td>${fmtHrs(r.hours)}</td>
+    </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No matched assignment → submission pairs</td></tr>`;
+
+    // 5b · Verify turnaround
+    const vt = dash.verify_turnaround || {};
+    const vtSumRows = (vt.by_verifier || []).map((v) => `<tr>
+      <td>${escapeHtml((v.name || '').toUpperCase())}</td>
+      <td>${v.tasks}</td>
+      <td>${v.same_day}/${v.tasks}</td>
+      <td>${v.avg_days != null ? `${v.avg_days} days` : '—'}</td>
+      <td>${fmtDays(v.slowest_days)}</td>
+    </tr>`).join('');
+    const vtRows = (vt.rows || []).map((r) => `<tr>
+      <td>${r.sr ?? '—'}</td>
+      <td>${escapeHtml(r.employee)}</td>
+      <td>${escapeHtml(r.verifier)}</td>
+      <td>${escapeHtml(r.project)}</td>
+      <td>${escapeHtml(fmtWvdDate(r.accepted_at))}</td>
+      <td>${escapeHtml(fmtWvdDate(r.verified_at))}</td>
+      <td>${fmtDays(r.days)}</td>
+    </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No verification turnaround data</td></tr>`;
+
+    return `<article class="wvd" id="wvdReport">
+      <header class="wvd-header">
+        <div class="wvd-kicker">ENGINEERING OFFICE · TASK REGISTER</div>
+        <h1>Work &amp; Verification Dashboard</h1>
+        <p class="wvd-sub">${escapeHtml(srLabel)}${fromTo ? ` · ${fromTo}` : ''}</p>
+      </header>
+
+      <div class="wvd-stats">
+        <div class="wvd-stat"><strong>${s.total_tasks || 0}</strong><span>TOTAL TASKS</span></div>
+        <div class="wvd-stat"><strong>${s.employees || 0}</strong><span>EMPLOYEES</span></div>
+        <div class="wvd-stat wvd-stat-ok"><strong>${s.verified || 0}</strong><span>VERIFIED</span></div>
+        <div class="wvd-stat wvd-stat-warn"><strong>${s.pending_verify || 0}</strong><span>PENDING VERIFY</span></div>
+        <div class="wvd-stat wvd-stat-bad"><strong>${s.corrections_sent || 0}</strong><span>CORRECTIONS SENT</span></div>
+      </div>
+
+      <section class="wvd-sec">
+        <h2>1 · Work By Employee <small>total + status + project breakdown</small></h2>
+        <div class="wvd-emp-grid">${empCols}</div>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>2 · Project × Employee Matrix <small>how much work each person did per project</small></h2>
+        ${wvdMatrix(pemHeads, pemRows || `<tr><td colspan="${pemHeads.length}" class="empty-state">No data</td></tr>`, pem.employees?.length ? pemFoot : '')}
+      </section>
+
+      <section class="wvd-sec">
+        <h2>3 · Project × Verifier Matrix <small>who verified tasks on which project</small></h2>
+        ${wvdMatrix(pvmHeads, pvmRows || `<tr><td colspan="${Math.max(2, pvmHeads.length)}" class="empty-state">No data</td></tr>`, pvm.verifiers?.length ? pvmFoot : '')}
+      </section>
+
+      <section class="wvd-sec">
+        <h2>3b · Verifier Summary <small>total verifications + status</small></h2>
+        <div class="wvd-ver-grid">${verSum}</div>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>4 · Correction Log <small>who was asked for corrections, how many times</small></h2>
+        <div class="wvd-corr-pills">${corrPills || '<span class="wvd-muted">None</span>'}</div>
+        <div class="wvd-corr-list">${corrItems}</div>
+        <p class="wvd-footnote">* “Correction Acknowledged” and “Correction Sent” statuses are counted as corrections.</p>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>5 · Time Analysis <small>how long employees take to finish work, and how long verification takes</small></h2>
+
+        <h3>5a · Task Completion Time <em>task assigned (time stamp) → submitted for verification</em></h3>
+        <p class="wvd-help">How this is measured: for each task, the time stamp when it was assigned is matched to the submission date when the finished work was sent for verification. Where no matching assignment could be found, the task is left out of this section.</p>
+        <div class="wvd-stats wvd-stats-4">
+          <div class="wvd-stat wvd-stat-bad"><strong>${ct.matched || 0}</strong><span>TASKS MATCHED</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(ct.avg_hrs)}</strong><span>AVERAGE TIME</span></div>
+          <div class="wvd-stat wvd-stat-ok"><strong>${fmtHrs(ct.fastest_hrs)}</strong><span>FASTEST</span></div>
+          <div class="wvd-stat wvd-stat-bad"><strong>${fmtHrs(ct.slowest_hrs)}</strong><span>SLOWEST</span></div>
+        </div>
+        <div class="wvd-bars">${bars}</div>
+        <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
+          <thead><tr>
+            <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK TYPE</th>
+            <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN</th>
+          </tr></thead>
+          <tbody>${ctRows}</tbody>
+        </table></div>
+
+        <h3>5b · Verification Turnaround Time <em>verifier accepted → marked verified</em></h3>
+        <p class="wvd-help">How this is measured: the gap between the date a verifier accepted a task for review and the date it was marked Verified. Shown in whole days.</p>
+        <div class="wvd-stats wvd-stats-4">
+          <div class="wvd-stat wvd-stat-bad"><strong>${vt.measured || 0}</strong><span>TASKS MEASURED</span></div>
+          <div class="wvd-stat wvd-stat-ok"><strong>${vt.same_day || 0}/${vt.measured || 0}</strong><span>VERIFIED SAME DAY</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${vt.avg_days != null ? `${vt.avg_days}d` : '—'}</strong><span>AVERAGE TURNAROUND</span></div>
+          <div class="wvd-stat wvd-stat-bad"><strong>${vt.slowest_days != null ? `${vt.slowest_days}d` : '—'}</strong><span>SLOWEST</span></div>
+        </div>
+        ${vtSumRows ? `<div class="wvd-table-wrap"><table class="wvd-matrix">
+          <thead><tr><th>VERIFIER</th><th>TASKS</th><th>SAME-DAY</th><th>AVG TURNAROUND</th><th>SLOWEST</th></tr></thead>
+          <tbody>${vtSumRows}</tbody>
+        </table></div>` : ''}
+        <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
+          <thead><tr>
+            <th>SR</th><th>SUBMITTED BY</th><th>VERIFIER</th><th>PROJECT</th>
+            <th>VERIFICATION ACCEPTED</th><th>VERIFIED</th><th>DAYS TAKEN</th>
+          </tr></thead>
+          <tbody>${vtRows}</tbody>
+        </table></div>
+      </section>
+
+      <footer class="wvd-footer">Generated from TaskFlow · Work &amp; Verification Dashboard</footer>
+    </article>`;
   }
 
   function fillTdFilters(emps) {
@@ -7220,6 +7254,36 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  async function loadTimeDashboard(opts = {}) {
+    const body = document.getElementById('tdBody');
+    const rangeEl = document.getElementById('tdRange');
+    if (!body) return;
+    const range = rangeEl?.value || 'month';
+    try {
+      let data = opts.fromCache ? _tdLastData : null;
+      if (!data) {
+        if (!opts.quiet) body.innerHTML = '<div class="empty-state">Building Work &amp; Verification Dashboard…</div>';
+        data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+      }
+      _tdLastData = data;
+      const allEmps = data.report || [];
+      fillTdFilters(allEmps);
+      let dash = data.dashboard;
+      if (!dash) {
+        body.innerHTML = '<div class="empty-state">Dashboard data unavailable — refresh after deploy</div>';
+        return;
+      }
+      dash = filterDashboardData(dash, allEmps);
+      if (!(dash.summary?.total_tasks) && !(dash.by_employee || []).length) {
+        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
+        return;
+      }
+      body.innerHTML = renderWorkVerificationDashboard(dash, { from: data.from, to: data.to });
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
   document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
   document.getElementById('tdRange')?.addEventListener('change', () => {
     const deptSel = document.getElementById('tdDept');
@@ -7228,8 +7292,122 @@ export async function mountTaskflowApp(opts = {}) {
   });
   document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
   document.getElementById('tdDept')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
-  document.getElementById('tdSort')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
   document.getElementById('tdCsvBtn')?.addEventListener('click', () => downloadTimeCsv(_tdLastData));
+  document.getElementById('tdPdfBtn')?.addEventListener('click', () => printWorkDashboardPdf());
+
+  // ─── Emp Delay Report (Task Delay Report sheet format) ─────────────────────
+  let _drLast = null;
+  let _drEmpFilled = false;
+
+  function renderDelayReportTable(data) {
+    const rows = data.rows || [];
+    const showEmp = !document.getElementById('drEmployee')?.value;
+    const s = data.summary || {};
+    const headEmp = showEmp ? '<th>Employee</th>' : '';
+    const colSpan = showEmp ? 11 : 10;
+    const body = rows.map((r, i) => {
+      const statusClass =
+        r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
+      const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}">
+        <td class="dr-c">${r.sr ?? '—'}</td>
+        ${empTd}
+        <td>${escapeHtml(r.project)}</td>
+        <td>${escapeHtml(r.assigned_label)}</td>
+        <td>${escapeHtml(r.accepted_label)}</td>
+        <td class="dr-c">${escapeHtml(r.hours_label)}</td>
+        <td class="dr-hold">${escapeHtml(r.hold_resume_label || '—')}</td>
+        <td>${escapeHtml(r.deadline_label)}</td>
+        <td>${escapeHtml(r.submitted_label)}</td>
+        <td class="${statusClass}">${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.delay_label)}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
+
+    return `<div class="dr-report" id="drReport">
+      <h1 class="dr-title">Task Delay Report</h1>
+      <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+        · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+        · <span class="dr-ontime">${s.on_time || 0} on time</span>
+        · ${s.na || 0} N/A</p>
+      <div class="dr-table-wrap">
+        <table class="dr-table">
+          <thead><tr>
+            <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
+            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th><th>Deadline</th>
+            <th>Submitted</th><th>Status</th><th>Delay</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  async function fillDelayEmployees() {
+    const sel = document.getElementById('drEmployee');
+    if (!sel || _drEmpFilled) return;
+    try {
+      const list = await api('/delay-report/employees');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All employees</option>' +
+        (list || []).map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.full_name)}</option>`).join('');
+      if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+      _drEmpFilled = true;
+    } catch (_) { /* ignore */ }
+  }
+
+  async function loadDelayReport() {
+    const body = document.getElementById('drBody');
+    if (!body) return;
+    await fillDelayEmployees();
+    const range = document.getElementById('drRange')?.value || 'month';
+    const emp = document.getElementById('drEmployee')?.value || '';
+    body.innerHTML = '<div class="empty-state">Loading Task Delay Report…</div>';
+    try {
+      const qs = new URLSearchParams({ range });
+      if (emp) qs.set('employee_id', emp);
+      const data = await api(`/delay-report?${qs}`);
+      _drLast = data;
+      body.innerHTML = renderDelayReportTable(data);
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function printDelayReportPdf() {
+    const report = document.getElementById('drReport');
+    if (!report) return showToast('Generate the report first', 'error');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((el) => el.outerHTML).join('\n');
+    win.document.write(`<!DOCTYPE html><html><head><title>Task Delay Report</title>${styles}
+      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
+      @page{size:A4 landscape;margin:10mm}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
+      </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
+      </body></html>`);
+    win.document.close();
+  }
+
+  document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
+  document.getElementById('drRange')?.addEventListener('change', () => loadDelayReport());
+  document.getElementById('drEmployee')?.addEventListener('change', () => loadDelayReport());
+  document.getElementById('drPdfBtn')?.addEventListener('click', () => printDelayReportPdf());
+  document.getElementById('drWaBtn')?.addEventListener('click', async () => {
+    if (!confirm('Send last-week Task Delay Report on WhatsApp to each employee + their head now?')) return;
+    try {
+      showToast('Sending WhatsApp reports…', 'success');
+      const result = await api('/delay-report/send-monday-now', { method: 'POST' });
+      showToast(
+        `WA done · emp ${result.employees_messaged || 0} · heads ${result.heads_messaged || 0}`,
+        'success'
+      );
+    } catch (err) {
+      showToast(err.message || 'WhatsApp send failed', 'error');
+    }
+  });
 
   // ─── FMS step tracker (Planned vs Actual per workflow step) ─────────────────
   let _fmsLastData = null;
@@ -7322,24 +7500,15 @@ export async function mountTaskflowApp(opts = {}) {
       const stepHead = steps.map((s, i) =>
         `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
       const subHead = steps.map(() => '<th class="fms-sub-head">Planned</th><th class="fms-sub-head">Actual</th><th class="fms-sub-head">Status</th><th class="fms-sub-head">Time Delay</th>').join('');
-      const tbody = rows.map((r) => {
-        const hr = r.hold_resume || {};
-        const leadTitle = [
-          `${r.lead_time_hrs || 0}h original`,
-          hr.remaining_hours != null ? `${hr.remaining_hours}h remaining` : '',
-          hr.held_at ? `Hold: ${fmtSheetDateTime(hr.held_at)}` : '',
-          hr.resumed_at ? `Resume: ${fmtSheetDateTime(hr.resumed_at)}` : '',
-        ].filter(Boolean).join(' · ');
-        return `<tr>
+      const tbody = rows.map((r) => `<tr>
         <td class="fms-sticky" title="${escapeHtml(r.description || '')}">${escapeHtml(fmtSheetDateTime(r.timestamp))}</td>
         <td>${escapeHtml(r.job_no)}</td>
         <td>${escapeHtml(r.project)}</td>
         <td title="${escapeHtml(r.description || '')}">${escapeHtml(r.work_type)}</td>
         <td>${escapeHtml(r.person)}</td>
-        <td title="${escapeHtml(leadTitle)}">${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}${hr.is_on_hold ? ' ⏸' : ''}</td>
+        <td>${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
         ${steps.map((s) => fmsCell(r.steps?.[s.key])).join('')}
-      </tr>`;
-      }).join('');
+      </tr>`).join('');
 
       body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
         <table class="fms-table">
@@ -7371,17 +7540,13 @@ export async function mountTaskflowApp(opts = {}) {
   function downloadFmsCsv(data) {
     if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
     const steps = data.steps || [];
-    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME', 'Orig hrs', 'Remaining hrs', 'Hold at', 'Resume at'];
+    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
     steps.forEach((s) => head.push(`${s.label} Planned`, `${s.label} Actual`, `${s.label} Status`, `${s.label} Time Delay`));
     const lines = [head.join(',')];
     data.rows.forEach((r) => {
-      const hr = r.hold_resume || {};
       const cells = [
         r.timestamp || '', r.job_no, r.project, r.work_type,
         r.person, r.lead_time_hrs || 0,
-        hr.original_hours ?? r.lead_time_hrs ?? '',
-        hr.remaining_hours ?? '',
-        hr.held_at || '', hr.resumed_at || '',
       ];
       steps.forEach((s) => {
         const st = r.steps?.[s.key] || {};
@@ -7528,6 +7693,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   async function loadAiBot() {
+    bindBotAskForm();
     const log = document.getElementById('botChatLog');
     if (log && !log.dataset.ready) {
       log.dataset.ready = '1';
@@ -7547,23 +7713,37 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
-  if (!window._botAskBound) {
-    window._botAskBound = true;
-    document.getElementById('botAskForm')?.addEventListener('submit', async (e) => {
+  function bindBotAskForm() {
+    const form = document.getElementById('botAskForm');
+    if (!form) return;
+    // Re-bind when React remounts the DOM (old window._botAskBound left the new form dead).
+    if (form.dataset.botAskBound === '1') return;
+    form.dataset.botAskBound = '1';
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const input = document.getElementById('botAskInput');
       const q = (input?.value || '').trim();
       if (!q) return;
       appendBotBubble('you', q);
       if (input) input.value = '';
+      const askBtn = form.querySelector('button[type="submit"]');
+      if (askBtn) askBtn.disabled = true;
+      appendBotBubble('bot', 'Thinking…');
+      const log = document.getElementById('botChatLog');
+      const thinking = log?.lastElementChild;
       try {
         const res = await api('/bot/ask', { method: 'POST', body: { question: q } });
+        if (thinking) thinking.remove();
         appendBotBubble('bot', res.answer || 'No answer', res.downloads);
       } catch (err) {
+        if (thinking) thinking.remove();
         appendBotBubble('bot', err.message || 'Error');
+      } finally {
+        if (askBtn) askBtn.disabled = false;
       }
     });
   }
+  bindBotAskForm();
 
   // ─── Team chat (WhatsApp-style store + unread + video) ─────────────────────
   let _activeChatRoom = null;
