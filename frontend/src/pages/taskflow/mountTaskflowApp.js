@@ -993,7 +993,7 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
-    if (visOk('reschedule-requests') !== false) {
+    if (isAdmin && visOk('reschedule-requests') !== false) {
       appendCollapsibleNav(
         'Reschedule',
         [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
@@ -1225,10 +1225,9 @@ export async function mountTaskflowApp(opts = {}) {
           setNavBadge('verifications', verifs.length);
         }
   
-        // Reschedule requests (own — any status change worth a glance, but
-        // badge only counts ones still awaiting a decision)
-        const myResched = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', myResched.filter(t => t.reschedule_status === 'Pending').length);
+        // Reschedule requests are admin-only (approve/reject). Emp requests
+        // from the task menu and does not get a requests inbox.
+        setNavBadge('reschedule-requests', 0);
   
         // My recurring tasks — count of instances still outstanding (today's
         // due instance plus any backlog that hasn't been marked Completed yet)
@@ -1253,7 +1252,15 @@ export async function mountTaskflowApp(opts = {}) {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
         const now = new Date();
-        const pendingCount = allTasks.filter(t => t.status === 'Pending' || t.verification_status === 'Pending Verification').length;
+        // Open delegated work: Pending + In Progress + ticket/verify queues
+        // (old filter only counted Pending / Pending Verification → badge stuck at 1)
+        const pendingCount = allTasks.filter((t) => {
+          const st = String(t.status || '');
+          const vs = String(t.verification_status || '');
+          if (st === 'Completed' || st === 'Rejected') return false;
+          if (vs === 'Verified') return false;
+          return true;
+        }).length;
         const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
   
         const recurringAll = await api('/recurring-tasks/all').catch(() => []);
@@ -1275,9 +1282,9 @@ export async function mountTaskflowApp(opts = {}) {
         const adminVerifs = await api('/tasks/verifications').catch(() => []);
         setNavBadge('verifications', adminVerifs.length);
   
-        // Reschedule requests awaiting a decision
+        // Reschedule requests awaiting admin decision (API already Pending-only)
         const reschedReqs = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', reschedReqs.length);
+        setNavBadge('reschedule-requests', reschedReqs.filter((t) => t.reschedule_status === 'Pending').length);
   
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
@@ -2546,11 +2553,20 @@ export async function mountTaskflowApp(opts = {}) {
       items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
     }
 
-    if (task.rescheduling_possible && task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
+    // Emp-only: request reschedule (admin uses direct Reschedule above — no approve step)
+    if (
+      !isAdminManaging
+      && state.user.role !== 'admin'
+      && task.rescheduling_possible
+      && task.status !== 'Completed'
+      && !isPendingVerification
+      && !isOnHold
+      && canManageThisTask
+    ) {
       if (isTicketRaised) {
         items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
-        items.push({ label: '🗓️ Reschedule request pending…', onClick: () => switchView('reschedule-requests'), disabled: true });
+        items.push({ label: '🗓️ Reschedule request pending…', disabled: true });
       } else {
         items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
       }
@@ -3089,22 +3105,30 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Reschedule requests ────────────────────────────────────────────────────
-  // Admin: every request still awaiting a decision, with Approve/Reject.
-  // Everyone else: only their own requests (any status), read-only.
+  // Admin-only inbox: emp requests awaiting Approve / Reject.
+  // Admin direct Reschedule updates the date immediately (no request row).
   async function loadRescheduleRequests() {
     const wrap = document.getElementById('reschedRequestsList');
     const sub = document.getElementById('reschedViewSub');
     const isAdmin = state.user.role === 'admin';
-    sub.textContent = isAdmin
-      ? "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is."
-      : 'Status of the reschedule requests you\'ve sent.';
-    wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    if (!isAdmin) {
+      if (sub) sub.textContent = 'Only admins review reschedule requests.';
+      if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
+      const tbody = document.getElementById('reschedRequestsTableBody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
+      return;
+    }
+    if (sub) {
+      sub.textContent = "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is. Admin direct reschedule updates immediately (no approval).";
+    }
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     try {
       const tasks = await api('/tasks/reschedule-requests');
-      renderRescheduleRequests(wrap, tasks, isAdmin);
-      if (tbody) renderRescheduleRequestsTable(tbody, tasks, isAdmin);
+      const pending = (tasks || []).filter((t) => t.reschedule_status === 'Pending');
+      renderRescheduleRequests(wrap, pending, true);
+      if (tbody) renderRescheduleRequestsTable(tbody, pending, true);
     } catch (err) { showToast(err.message, 'error'); }
   }
   

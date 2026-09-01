@@ -1069,14 +1069,15 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
     const updates = { target_date };
-    // If an employee's reschedule request was still pending, this direct
-    // admin reschedule supersedes it — clear it out so it can't later be
-    // approved and silently overwrite the date the admin just set here.
-    if (existing.reschedule_status === 'Pending') {
-      updates.reschedule_status = 'Rejected';
-      updates.reschedule_reason = 'Superseded — admin rescheduled this task directly';
-      updates.reschedule_decided_by = req.user.id;
-      updates.reschedule_decided_at = new Date().toISOString();
+    // Admin direct reschedule is final — clear any pending emp request so it
+    // does not stay in approve/reject queues or show as a "request" to anyone.
+    if (existing.reschedule_status && existing.reschedule_status !== 'None') {
+      updates.reschedule_status = 'None';
+      updates.reschedule_requested_date = null;
+      updates.reschedule_reason = reason && reason.trim() ? reason.trim() : null;
+      updates.reschedule_requested_at = null;
+      updates.reschedule_decided_by = null;
+      updates.reschedule_decided_at = null;
     }
 
     const { data, error } = await supabase
@@ -1186,25 +1187,19 @@ router.post('/:id/reschedule-request', async (req, res) => {
   }
 });
 
-// List reschedule requests — admin sees every pending one (to action);
-// everyone else sees only their own (whatever the current status is), read-only.
+// List reschedule requests — admin only (pending emp requests to approve/reject).
 router.get('/reschedule-requests', async (req, res) => {
   try {
-    let query = supabase
+    if (req.user.role !== 'admin') {
+      return res.json([]);
+    }
+    const { data, error } = await supabase
       .from('tasks')
       .select(TASK_SELECT)
-      .neq('reschedule_status', 'None')
+      .eq('reschedule_status', 'Pending')
       .order('reschedule_requested_at', { ascending: false });
-
-    if (req.user.role === 'admin') {
-      query = query.eq('reschedule_status', 'Pending');
-    } else {
-      query = query.eq('assigned_to', req.user.id);
-    }
-
-    const { data, error } = await query;
     if (error) throw error;
-    res.json(data);
+    res.json(data || []);
   } catch (err) {
     console.error('List reschedule requests error:', err.message);
     res.status(500).json({ error: 'Could not load reschedule requests' });
