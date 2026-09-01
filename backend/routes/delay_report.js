@@ -47,7 +47,21 @@ const DELAY_TASK_SELECT = `
   id, description, status, hours_to_complete, original_hours_to_complete,
   created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
   verification_status, assigned_to,
-  is_on_hold, hold_remaining_hours, held_at, task_events,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
+  total_hold_seconds, last_hold_seconds, hold_count,
+  target_date, original_target_date, reschedule_approved_target_date,
+  reschedule_status, reschedule_count, reaccept_required,
+  project:projects ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
+`;
+
+// Same minus the plan-separation columns, for databases still on the older schema.
+const DELAY_TASK_SELECT_PRE_PLAN = `
+  id, description, status, hours_to_complete, original_hours_to_complete,
+  created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
+  verification_status, assigned_to,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
+  target_date, reschedule_status,
   project:projects ( id, name ),
   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
 `;
@@ -70,14 +84,21 @@ async function loadTasksForDelayReport({ startDate, endDate, employeeId }) {
   if (employeeId) q = q.eq('assigned_to', employeeId);
 
   let { data, error } = await q;
-  if (error && /column|schema cache|original_hours|task_events|is_on_hold|first_accepted/i.test(error.message || '')) {
-    let q2 = supabase
+
+  // Step down one schema tier at a time so a missing migration costs a few
+  // columns rather than the whole report.
+  const schemaMiss = (e) =>
+    e && /column|schema cache|original_hours|task_events|is_on_hold|first_accepted/i.test(e.message || '');
+
+  for (const fallback of [DELAY_TASK_SELECT_PRE_PLAN, DELAY_TASK_SELECT_FALLBACK]) {
+    if (!schemaMiss(error)) break;
+    let retryQ = supabase
       .from('tasks')
-      .select(DELAY_TASK_SELECT_FALLBACK)
+      .select(fallback)
       .order('created_at', { ascending: true })
       .limit(5000);
-    if (employeeId) q2 = q2.eq('assigned_to', employeeId);
-    const retry = await q2;
+    if (employeeId) retryQ = retryQ.eq('assigned_to', employeeId);
+    const retry = await retryQ;
     data = retry.data;
     error = retry.error;
   }

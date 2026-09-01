@@ -347,7 +347,12 @@ function holdResumeSummary(t, now = new Date()) {
         hold_seconds: null,
       });
     } else if (e.action === 'resume') {
-      const seconds = openHold ? holdSecondsBetween(openHold.at, e.at) : num(e.hold_seconds);
+      // The resume handler measured the pause at the time and recorded it, so
+      // that value wins over re-deriving it from the two event timestamps.
+      const recorded = num(e.hold_seconds);
+      const seconds = recorded != null
+        ? recorded
+        : (openHold ? holdSecondsBetween(openHold.at, e.at) : null);
       timeline.push({
         action: 'resume',
         at: e.at,
