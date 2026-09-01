@@ -416,6 +416,40 @@ export async function mountTaskflowApp(opts = {}) {
     return now > due;
   }
 
+  /** An approved reschedule stops the timer until the employee accepts again. */
+  function needsReaccept(task) {
+    if (isClosedOrRejectedTask(task)) return false;
+    return !!task?.reaccept_required;
+  }
+
+  /** The first plan date the admin set — kept even after a reschedule. */
+  function originalPlanDate(task) {
+    return task?.original_target_date || task?.target_date || null;
+  }
+
+  /** The plan date in force now (after any approved reschedule). */
+  function activePlanDate(task) {
+    return task?.reschedule_approved_target_date || task?.target_date || task?.original_target_date || null;
+  }
+
+  /** True when an approved reschedule moved this task off its original plan. */
+  function wasRescheduledTask(task) {
+    if (task?.reschedule_approved_target_date) return true;
+    return String(task?.reschedule_status || '') === 'Approved';
+  }
+
+  /** A plan date with no time means "by close of business" that day. */
+  function endOfPlanDay(planDateIso) {
+    if (!planDateIso) return null;
+    const d = parseLocalDate(planDateIso);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    const midnightish = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0;
+    if (!midnightish) return d;
+    const end = new Date(d);
+    end.setHours(18, 30, 0, 0);
+    return end;
+  }
+
   function workTimerAnchor(task) {
     if (task?.is_on_hold) return task.resumed_at || task.accepted_at || null;
     if (task?.resumed_at) return task.resumed_at;
@@ -434,11 +468,22 @@ export async function mountTaskflowApp(opts = {}) {
     return Number(task.hours_to_complete) || 0;
   }
 
-  /** Pre-accept deadline: assigned_at + hours (display only; timer starts on Accept). */
+  /** Hours the task was assigned with, before any hold trimmed the live budget. */
+  function assignedHoursOf(task) {
+    const orig = Number(task?.original_hours_to_complete);
+    if (task?.original_hours_to_complete != null && !Number.isNaN(orig)) return orig;
+    const cur = Number(task?.hours_to_complete);
+    return Number.isNaN(cur) ? null : cur;
+  }
+
+  /**
+   * Pre-accept deadline: assigned_at + assigned hours, in office time.
+   * This is what the Due column shows before Accept — never a plan date.
+   */
   function employeeAssignedDeadline(task) {
     const start = task?.assigned_at || task?.created_at;
-    const hours = Number(task?.hours_to_complete);
-    if (!start || Number.isNaN(hours) || hours <= 0) return null;
+    const hours = assignedHoursOf(task);
+    if (!start || hours == null || hours <= 0) return null;
     try {
       return addWorkingHours(start, hours, { fromNowIfToday: false });
     } catch (_) {
@@ -446,10 +491,21 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  /**
+   * Work overdue. Two ways in:
+   *   1. Timer running and the work deadline passed.
+   *   2. A rescheduled task whose new plan date passed without a fresh Accept.
+   */
   function isAssignmentOverdueTask(t, now = new Date()) {
     if (isClosedOrRejectedTask(t)) return false;
     if (t?.is_on_hold) return false;
     if (t?.verification_status === 'Pending Verification') return false;
+
+    if (needsReaccept(t)) {
+      const planEnd = endOfPlanDay(activePlanDate(t));
+      return !!planEnd && now > planEnd;
+    }
+
     if (!t?.accepted_at) return false;
     const due = employeeWorkDueDate(t);
     if (!due) return false;
@@ -461,7 +517,9 @@ export async function mountTaskflowApp(opts = {}) {
     return isVerificationOverdueTask(t, now) || isAssignmentOverdueTask(t, now);
   }
 
+  /** Live work deadline once accepted (and not waiting on a fresh Accept). */
   function employeeWorkDueDate(task) {
+    if (needsReaccept(task)) return null;
     if (!task?.accepted_at) return null;
     const anchor = workTimerAnchor(task);
     const hours = workTimerBudgetHours(task);
@@ -470,33 +528,22 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   /**
-   * Due label for emp UI: after reschedule, calendar date follows target_date
-   * but keeps the work-timer clock time. Countdown uses employeeWorkDueDate.
+   * The one date the employee sees in Due: a real work deadline, never the
+   * admin's plan/target date. Accept moves it from assign-based to accept-based.
    */
-  function employeeDisplayDueDate(task) {
-    const workDue = employeeWorkDueDate(task);
-    if (!workDue) return null;
-    if (!task?.target_date) return workDue;
-    const target = parseLocalDate(task.target_date);
-    if (!target || Number.isNaN(target.getTime())) return workDue;
+  function employeeDueDate(task) {
+    return employeeWorkDueDate(task) || employeeAssignedDeadline(task);
+  }
 
-    const sameDay =
-      target.getFullYear() === workDue.getFullYear()
-      && target.getMonth() === workDue.getMonth()
-      && target.getDate() === workDue.getDate();
-    if (sameDay) return workDue;
-
-    const display = new Date(target);
-    const dateOnly = typeof task.target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.target_date);
-    if (dateOnly || (target.getHours() === 0 && target.getMinutes() === 0 && target.getSeconds() === 0)) {
-      display.setHours(
-        workDue.getHours(),
-        workDue.getMinutes(),
-        workDue.getSeconds(),
-        workDue.getMilliseconds()
-      );
-    }
-    return display;
+  /** Whole calendar days a task has been overdue (0 = went overdue today). */
+  function overdueCalendarDays(task, now = new Date()) {
+    const since = task?.overdue_since_at
+      ? parseLocalDate(task.overdue_since_at)
+      : (needsReaccept(task) ? endOfPlanDay(activePlanDate(task)) : employeeWorkDueDate(task));
+    if (!since || Number.isNaN(since.getTime()) || now <= since) return 0;
+    const a = new Date(since.getFullYear(), since.getMonth(), since.getDate());
+    const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.max(0, Math.round((b - a) / 86400000));
   }
 
   function fmtOverdueDateCell(task, now = new Date()) {
@@ -508,19 +555,27 @@ export async function mountTaskflowApp(opts = {}) {
         <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
       `;
     }
+    // Rescheduled but never accepted again — the plan date is the miss here.
+    if (needsReaccept(task) && isAssignmentOverdueTask(task, now)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      const days = overdueCalendarDays(task, now);
+      return `
+        <div>Rescheduled to: ${planEnd ? fmtDate(planEnd.toISOString()) : '—'}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">Not accepted again${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''} 🔴</div>
+      `;
+    }
     const workDue = employeeWorkDueDate(task);
     if (workDue && isAssignmentOverdueTask(task, now)) {
-      const hrsLate = Math.max(0, Math.floor((now - workDue) / 3600000));
+      const hrsLate = Math.max(0, Math.floor(elapsedWorkingHoursBetween(workDue, now)));
       return `
         <div>Work due: ${fmtDate(workDue.toISOString())}</div>
         <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsLate > 0 ? `${hrsLate}h work overdue 🔴` : 'Work overdue today 🔴'}</div>
       `;
     }
-    const daysOverdue = task.target_date
-      ? Math.floor((now - parseLocalDate(task.target_date)) / 86400000)
-      : 0;
+    const plan = activePlanDate(task);
+    const daysOverdue = plan ? Math.floor((now - parseLocalDate(plan)) / 86400000) : 0;
     return `
-      <div>${task.target_date ? fmtDateOnly(task.target_date) : '—'}</div>
+      <div>${plan ? fmtDateOnly(plan) : '—'}</div>
       <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
     `;
   }
@@ -682,7 +737,11 @@ export async function mountTaskflowApp(opts = {}) {
     return Math.max(0, hours * 3600000);
   }
 
-  /** Employee My Tasks: due line + live time-left / hold / overdue (HTML). */
+  /**
+   * Employee My Tasks Due cell: always a work deadline plus live countdown.
+   * The admin's plan/target date is never shown here — before Accept it is
+   * assign time + hours, after Accept it is accept time + hours.
+   */
   function fmtEmployeeTimerHtml(task, now = new Date()) {
     if (task.is_on_hold) {
       const rem = task.hold_remaining_hours ?? task.hours_to_complete;
@@ -691,13 +750,29 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
       `;
     }
+    // Rescheduled: plan moved, timer reset, waiting for a fresh Accept.
+    if (needsReaccept(task)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      const hrs = formatHoursLabel(assignedHoursOf(task));
+      if (isAssignmentOverdueTask(task, now)) {
+        const days = overdueCalendarDays(task, now);
+        return `
+          <div class="task-timer-due">Rescheduled to ${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'}</div>
+          <div class="task-timer-overdue">🔴 Not accepted${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''}</div>
+        `;
+      }
+      return `
+        <div class="task-timer-due">Rescheduled to ${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'}</div>
+        <div class="task-timer-sub">Accept again to start the ${hrs} timer</div>
+      `;
+    }
     if (!task.accepted_at) {
       const deadline = employeeAssignedDeadline(task);
       const assignedAt = task.assigned_at || task.created_at;
       if (deadline) {
         return `
-          <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
-          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Timer starts on Accept</div>
+          <div class="task-timer-due">Due ${fmtDate(deadline.toISOString())}</div>
+          <div class="task-timer-sub">${formatHoursLabel(assignedHoursOf(task))} from assignment · Timer starts on Accept</div>
         `;
       }
       if (assignedAt) {
@@ -722,12 +797,11 @@ export async function mountTaskflowApp(opts = {}) {
     if (!workDue) {
       return `<div class="task-timer-wait">Accept task to start timer</div>`;
     }
-    const displayDue = employeeDisplayDueDate(task) || workDue;
 
     if (isAssignmentOverdueTask(task, now)) {
       const overdueMs = workingTimeLeftMs(workDue, now);
       return `
-        <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
+        <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
       `;
     }
@@ -735,7 +809,7 @@ export async function mountTaskflowApp(opts = {}) {
     const msLeft = workingTimeLeftMs(now, workDue);
     const urgent = msLeft < 30 * 60 * 1000;
     return `
-      <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
+      <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
       <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
     `;
   }
@@ -745,16 +819,16 @@ export async function mountTaskflowApp(opts = {}) {
     if (task.is_on_hold) {
       return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
     }
-    if (!task.accepted_at) {
-      const deadline = employeeAssignedDeadline(task);
-      if (deadline) {
-        return `${fmtDate(deadline.toISOString())} · ${task.hours_to_complete}h deadline`;
-      }
-      return 'Accept task to start timer';
+    if (needsReaccept(task)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      return `${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'} · accept again to start timer`;
     }
-    const due = employeeWorkDueDate(task);
-    if (!due) return fmtDate(task.accepted_at);
-    return `${fmtDate(due.toISOString())} · ${formatHoursLabel(workTimerBudgetHours(task))}`;
+    const due = employeeDueDate(task);
+    if (!due) return task.accepted_at ? fmtDate(task.accepted_at) : 'Accept task to start timer';
+    const hrsLabel = task.accepted_at
+      ? formatHoursLabel(workTimerBudgetHours(task))
+      : `${formatHoursLabel(assignedHoursOf(task))} deadline`;
+    return `${fmtDate(due.toISOString())} · ${hrsLabel}`;
   }
 
   let myTasksTimerCache = [];
@@ -1348,7 +1422,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'clients')       loadClients();
     if (viewKey === 'masterdata')    loadMasterDataView();
     if (viewKey === 'permissions')   loadPermissions();
-    if (viewKey === 'visibility')    loadVisibility();
+    if (viewKey === 'visibility')    { loadVisibility(); loadReminderSettings(); }
     if (viewKey === 'verifications') loadVerifications();
     if (viewKey === 'reschedule-requests') loadRescheduleRequests();
     if (viewKey === 'tickets')       loadTickets();
@@ -1758,6 +1832,26 @@ export async function mountTaskflowApp(opts = {}) {
     return `${display}h`;
   }
 
+  /**
+   * Admin plan cell. Shows the date in force now; when a reschedule moved it,
+   * the original plan stays underneath so history is never hidden.
+   */
+  function plannedDateCellHtml(task) {
+    const current = activePlanDate(task);
+    if (!current) return '—';
+    const currentLabel = fmtDateOnly(current);
+    const original = originalPlanDate(task);
+    const moved = wasRescheduledTask(task)
+      && original
+      && fmtDateOnly(original) !== currentLabel;
+    if (!moved) return escapeHtml(currentLabel);
+    return `
+      <div>${escapeHtml(currentLabel)}</div>
+      <div style="font-size:0.75rem;color:#888">was ${escapeHtml(fmtDateOnly(original))}</div>
+      ${task.reaccept_required ? `<div style="font-size:0.72rem;color:#c47f00;font-weight:600">awaiting re-accept</div>` : ''}
+    `;
+  }
+
   function renderAllTasksTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
       tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
@@ -1777,12 +1871,10 @@ export async function mountTaskflowApp(opts = {}) {
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: true });
   
-      // Planned date
+      // Planned date — current plan, with the original kept visible after a move
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
-      tdDate.textContent = task.target_date
-        ? fmtDateOnly(task.target_date)
-        : '—';
+      tdDate.innerHTML = plannedDateCellHtml(task);
 
       // Hrs to complete (original assigned when available)
       const tdHrs = document.createElement('td');
@@ -2516,7 +2608,7 @@ export async function mountTaskflowApp(opts = {}) {
   
   function getDeadlineHtml(task, showAssignee, useCreatedDate = false) {
     if (useCreatedDate) return fmtEmployeeTimerHtml(task);
-    return task.target_date ? fmtDateOnly(task.target_date) : '—';
+    return plannedDateCellHtml(task);
   }
   
   function verificationBadgeHtml(task) {
@@ -2687,7 +2779,7 @@ export async function mountTaskflowApp(opts = {}) {
       <p class="task-card-desc">${escapeHtml(task.description)}</p>
       <div class="task-meta task-meta-due">
         <span class="task-meta-due-label">Due</span>
-        <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : (task.target_date ? fmtDateOnly(task.target_date) : '—')}</div>
+        <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : plannedDateCellHtml(task)}</div>
       </div>
       <div class="task-meta task-meta-files">
         ${task.attachment_url ? `<a class="attachment-link" href="${task.attachment_url}" target="_blank" rel="noopener">📎 Attachment</a>` : ''}
@@ -4984,6 +5076,45 @@ export async function mountTaskflowApp(opts = {}) {
       setupTopbarQuick();
     } catch (err) {
       showToast(err.message, 'error');
+    }
+  });
+
+  // ─── Automatic WhatsApp reminder switches (MIS) ───────────────────────────
+  async function loadReminderSettings() {
+    const wrap = document.getElementById('reminderSettings');
+    if (!wrap) return;
+    try {
+      const data = await api('/master/reminder-settings');
+      const s = data.settings || {};
+      const set = (id, prop, value) => {
+        const el = document.getElementById(id);
+        if (el) el[prop] = value;
+      };
+      set('rsDailyOverdue', 'checked', s.daily_overdue_whatsapp !== false);
+      set('rsAcceptNudge', 'checked', s.accept_nudge_whatsapp !== false);
+      set('rsAcceptMinutes', 'value', s.accept_nudge_minutes ?? 20);
+      set('rsAcceptMaxHours', 'value', s.accept_nudge_max_hours ?? 4);
+      set('rsOverdueSince', 'value', String(s.overdue_since_date || '').slice(0, 10));
+    } catch (_) { /* defaults already rendered */ }
+  }
+
+  document.getElementById('reminderSettingsSaveBtn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const settings = {
+      daily_overdue_whatsapp: !!document.getElementById('rsDailyOverdue')?.checked,
+      accept_nudge_whatsapp: !!document.getElementById('rsAcceptNudge')?.checked,
+      accept_nudge_minutes: Number(document.getElementById('rsAcceptMinutes')?.value) || 20,
+      accept_nudge_max_hours: Number(document.getElementById('rsAcceptMaxHours')?.value) || 4,
+      overdue_since_date: document.getElementById('rsOverdueSince')?.value || undefined,
+    };
+    btn.disabled = true;
+    try {
+      await api('/master/reminder-settings', { method: 'PUT', body: { settings } });
+      showToast('Reminder settings saved', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
     }
   });
   
@@ -7430,19 +7561,23 @@ export async function mountTaskflowApp(opts = {}) {
     const showEmp = !document.getElementById('drEmployee')?.value;
     const s = data.summary || {};
     const headEmp = showEmp ? '<th>Employee</th>' : '';
-    const colSpan = showEmp ? 11 : 10;
+    const colSpan = showEmp ? 12 : 11;
     const body = rows.map((r, i) => {
       const statusClass =
         r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
       const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
+      const planNote = r.reschedule_count > 0
+        ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
+        : '';
       return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}">
         <td class="dr-c">${r.sr ?? '—'}</td>
         ${empTd}
-        <td>${escapeHtml(r.project)}</td>
+        <td>${escapeHtml(r.project)}${planNote}</td>
         <td>${escapeHtml(r.assigned_label)}</td>
         <td>${escapeHtml(r.accepted_label)}</td>
         <td class="dr-c">${escapeHtml(r.hours_label)}</td>
         <td class="dr-hold">${escapeHtml(r.hold_resume_label || '—')}</td>
+        <td class="dr-c">${escapeHtml(r.total_hold_label || '—')}</td>
         <td>${escapeHtml(r.deadline_label)}</td>
         <td>${escapeHtml(r.submitted_label)}</td>
         <td class="${statusClass}">${escapeHtml(r.status)}</td>
@@ -7460,7 +7595,8 @@ export async function mountTaskflowApp(opts = {}) {
         <table class="dr-table">
           <thead><tr>
             <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
-            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th><th>Deadline</th>
+            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+            <th>Total Hold</th><th>Due</th>
             <th>Submitted</th><th>Status</th><th>Delay</th>
           </tr></thead>
           <tbody>${body}</tbody>

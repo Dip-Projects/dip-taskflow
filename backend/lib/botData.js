@@ -1342,17 +1342,33 @@ async function polishWithOpenAI(question, facts, name) {
   }
 }
 
+/**
+ * Overdue by the work timer (accept + hours in office time), not by the plan
+ * date, so this matches what the employee sees on their Due column.
+ */
 async function listOverdueTasksForWa() {
-  const nowIso = new Date().toISOString();
-  const { data, error } = await supabase
+  const now = new Date();
+  const columns =
+    'id, description, target_date, priority, status, verification_status, assigned_to, ' +
+    'assigned_at, created_at, accepted_at, resumed_at, hours_to_complete, original_hours_to_complete, ' +
+    'is_on_hold, hold_remaining_hours, held_at, verification_started_at, ' +
+    'project:projects(name), assignee:users!tasks_assigned_to_fkey(id, full_name, whatsapp_number)';
+  const extras = ', original_target_date, reschedule_approved_target_date, reaccept_required, overdue_since_at';
+
+  let { data, error } = await supabase
     .from('tasks')
-    .select(
-      'id, description, target_date, priority, status, verification_status, assigned_to, project:projects(name), assignee:users!tasks_assigned_to_fkey(id, full_name, whatsapp_number)'
-    )
-    .in('status', ['Pending', 'In Progress'])
-    .lt('target_date', nowIso);
+    .select(columns + extras)
+    .in('status', ['Pending', 'In Progress', 'Ticket Raised']);
+  if (error && /column|schema cache/i.test(error.message || '')) {
+    const retry = await supabase
+      .from('tasks')
+      .select(columns)
+      .in('status', ['Pending', 'In Progress', 'Ticket Raised']);
+    data = retry.data;
+    error = retry.error;
+  }
   if (error) throw error;
-  return (data || []).filter((t) => !isFinishedTask(t));
+  return (data || []).filter((t) => !isFinishedTask(t) && isDelegatedOverdue(t, now));
 }
 
 function startOfToday() {

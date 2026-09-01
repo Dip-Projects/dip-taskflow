@@ -9,7 +9,17 @@
 
 const { buildSrMap } = require('./workVerificationDashboard');
 const { addWorkingHours, elapsedWorkingHours } = require('./workingHours');
-const { employeeWorkDueDate, workTimerBudgetHours } = require('./taskOverdue');
+const {
+  employeeWorkDueDate,
+  employeeDueDate,
+  workTimerBudgetHours,
+  holdResumeSummary,
+  holdResumeLabel,
+  needsReaccept,
+  activePlanDate,
+  originalPlanDate,
+  fmtDuration,
+} = require('./taskOverdue');
 
 function fmtDelayStamp(iso) {
   if (!iso) return null;
@@ -54,6 +64,13 @@ function numOrNull(v) {
   return Number.isNaN(n) ? null : n;
 }
 
+/** Plan dates are calendar days — keep them as YYYY-MM-DD, not shifted UTC. */
+function localDayString(d) {
+  if (!d) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Assigned hours for report display (never overwritten by resume remaining). */
 function assignedHours(t) {
   const orig = numOrNull(t.original_hours_to_complete);
@@ -66,28 +83,12 @@ function timerHours(t) {
   return workTimerBudgetHours(t);
 }
 
-function formatHoldResumeLabel(t) {
-  const events = Array.isArray(t.task_events) ? t.task_events : [];
-  const bits = [];
-  events.forEach((e) => {
-    if (!e || (e.action !== 'hold' && e.action !== 'resume')) return;
-    const stamp = fmtDelayStamp(e.at) || '—';
-    const rem = e.remaining_hours != null && e.remaining_hours !== ''
-      ? Number(e.remaining_hours)
-      : null;
-    const remBit = rem != null && !Number.isNaN(rem) ? ` · ${rem}h left` : '';
-    if (e.action === 'hold') bits.push(`Hold ${stamp}${remBit}`);
-    else bits.push(`Resume ${stamp}${remBit}`);
-  });
-  if (t.is_on_hold) {
-    const rem = numOrNull(t.hold_remaining_hours);
-    const remBit = rem != null ? ` · ${rem}h left` : '';
-    const held = fmtDelayStamp(t.held_at);
-    if (!bits.length || bits[bits.length - 1].startsWith('Resume')) {
-      bits.push(held ? `On hold since ${held}${remBit}` : `On hold${remBit}`);
-    }
-  }
-  return bits.length ? bits.join(' → ') : '—';
+/**
+ * Full hold trail for the report: every pause with how long the timer stayed
+ * stopped, every resume with the restart, and the total time lost to holds.
+ */
+function formatHoldResumeLabel(t, now = new Date()) {
+  return holdResumeLabel(t, (iso) => fmtDelayStamp(iso) || '—', now);
 }
 
 /**
@@ -107,34 +108,45 @@ function buildDelayReportRows(tasks, opts = {}) {
       const displayHrs = assignedHours(t);
       const dueHrs = timerHours(t);
 
+      const holds = holdResumeSummary(t, now);
+      const awaitingReaccept = needsReaccept(t);
+
       let deadlineIso = null;
       let deadlineLabel = 'Awaiting acceptance';
       let acceptedLabel = 'Not yet accepted';
       let submittedLabel = 'Not submitted (Pending)';
       let status = 'N/A';
-      let delayLabel = 'Deadline starts after acceptance';
+      let delayLabel = 'Due starts after acceptance';
       let delayMs = null;
 
-      if (acceptedAt) {
+      if (awaitingReaccept) {
+        acceptedLabel = 'Rescheduled — not accepted again';
+        deadlineLabel = 'Waiting for re-accept';
+      } else if (acceptedAt) {
         acceptedLabel = fmtDelayStamp(acceptedAt) || '—';
         const due = employeeWorkDueDate(t);
         if (due) {
           deadlineIso = due.toISOString();
           deadlineLabel = fmtDelayStamp(due) || '—';
-        } else if (dueHrs != null && dueHrs > 0) {
-          deadlineLabel = '—';
         } else {
           deadlineLabel = '—';
         }
+      } else {
+        // Before acceptance the employee still has a promise date on screen.
+        const preDue = employeeDueDate(t);
+        if (preDue) deadlineLabel = `${fmtDelayStamp(preDue)} (if accepted now)`;
       }
 
       if (submittedAt) {
         submittedLabel = fmtDelayStamp(submittedAt) || '—';
       }
 
-      if (!acceptedAt) {
+      if (awaitingReaccept) {
         status = 'N/A';
-        delayLabel = 'Deadline starts after acceptance';
+        delayLabel = 'Rescheduled — accept again to restart the timer';
+      } else if (!acceptedAt) {
+        status = 'N/A';
+        delayLabel = 'Due starts after acceptance';
       } else if (deadlineIso) {
         const compareAt = submittedAt ? new Date(submittedAt) : now;
         const due = new Date(deadlineIso);
@@ -175,8 +187,16 @@ function buildDelayReportRows(tasks, opts = {}) {
         hours_to_complete: displayHrs,
         timer_hours: dueHrs,
         hours_label: displayHrs != null ? `+${displayHrs}h` : '—',
-        hold_resume_label: formatHoldResumeLabel(t),
+        hold_resume_label: formatHoldResumeLabel(t, now),
         is_on_hold: !!t.is_on_hold,
+        hold_count: holds.hold_count,
+        resume_count: holds.resume_count,
+        total_hold_seconds: holds.total_hold_seconds,
+        total_hold_label: holds.total_hold_seconds > 0 ? fmtDuration(holds.total_hold_seconds) : '—',
+        original_target_date: localDayString(originalPlanDate(t)),
+        active_target_date: localDayString(activePlanDate(t)),
+        reschedule_count: numOrNull(t.reschedule_count) || 0,
+        awaiting_reaccept: awaitingReaccept,
         deadline_at: deadlineIso,
         deadline_label: deadlineLabel,
         submitted_at: submittedAt,
@@ -204,6 +224,7 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
       <td>${esc(r.accepted_label)}</td>
       <td style="text-align:center">${esc(r.hours_label)}</td>
       <td style="font-size:11px">${esc(r.hold_resume_label)}</td>
+      <td style="text-align:center">${esc(r.total_hold_label ?? '—')}</td>
       <td>${esc(r.deadline_label)}</td>
       <td>${esc(r.submitted_label)}</td>
       <td style="color:${statusColor};font-weight:700">${esc(r.status)}</td>
@@ -211,7 +232,7 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
     </tr>`;
   }).join('');
 
-  const colCount = showEmployee ? 11 : 10;
+  const colCount = showEmployee ? 12 : 11;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${esc(title)}</title>
 <style>
@@ -228,7 +249,8 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
   <table>
     <thead><tr>
       <th>SR</th>${headExtra}<th>Project</th><th>Timestamp (Assigned)</th>
-      <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th><th>Deadline</th>
+      <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+      <th>Total Hold</th><th>Due</th>
       <th>Submitted</th><th>Status</th><th>Delay</th>
     </tr></thead>
     <tbody>${body || `<tr><td colspan="${colCount}" style="text-align:center;padding:20px;color:#888">No tasks</td></tr>`}</tbody>

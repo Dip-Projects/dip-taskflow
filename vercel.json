@@ -15,6 +15,10 @@
       "schedule": "30 3 * * *"
     },
     {
+      "path": "/api/bot/cron/accept-nudge",
+      "schedule": "*/15 4-13 * * *"
+    },
+    {
       "path": "/api/delay-report/cron/monday-whatsapp",
       "schedule": "30 3 * * 1"
     }

@@ -542,6 +542,32 @@ body.sidebar-open { overflow: hidden; }
 
 .perm-col { text-align: center; }
 
+/* MIS switches for the automated WhatsApp reminders */
+.reminder-settings { padding: 6px 16px 0; display: flex; flex-direction: column; gap: 4px; }
+.reminder-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 4px; border-bottom: 1px solid var(--border, #e5e7eb);
+  cursor: pointer;
+}
+.reminder-row:last-child { border-bottom: none; }
+.reminder-row > input[type="checkbox"] { margin-top: 3px; width: 17px; height: 17px; flex: 0 0 auto; }
+.reminder-row > span { display: flex; flex-direction: column; gap: 3px; }
+.reminder-row strong { font-size: 0.9rem; font-weight: 650; }
+.reminder-row em { font-style: normal; font-size: 0.78rem; color: #6b7280; line-height: 1.45; }
+.reminder-row--inputs {
+  cursor: default; flex-wrap: wrap; gap: 22px;
+}
+.reminder-row--inputs > label {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 0.78rem; color: #6b7280; font-weight: 600;
+}
+.reminder-input { display: inline-flex; align-items: center; gap: 7px; color: #374151; font-weight: 500; }
+.reminder-input input {
+  width: 92px; padding: 7px 9px; font-size: 0.85rem;
+  border: 1px solid var(--border, #e5e7eb); border-radius: 8px; background: #fff;
+}
+.reminder-input input[type="date"] { width: 150px; }
+
 .data-table {
   width: 100%; min-width: 920px; border-collapse: collapse; table-layout: fixed;
   font-size: 0.84rem;
@@ -3500,8 +3526,9 @@ body.sidebar-open { overflow: hidden; }
   vertical-align: top;
   color: #111827;
 }
-.dr-table td.dr-hold { font-size: 11px; max-width: 180px; line-height: 1.35; color: #4B5563; }
+.dr-table td.dr-hold { font-size: 11px; max-width: 220px; line-height: 1.35; color: #4B5563; }
 .dr-table tr.dr-alt td { background: #F7F3EC; }
+.dr-plan-note { font-size: 10px; color: #C47F00; font-weight: 700; margin-top: 2px; }
 .dr-c { text-align: center !important; }
 .dr-delayed { color: #C2410C; font-weight: 700; }
 .dr-ontime { color: #15803D; font-weight: 700; }

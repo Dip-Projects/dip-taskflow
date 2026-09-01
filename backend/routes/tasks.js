@@ -3,7 +3,12 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
-const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
+const {
+  workTimerAnchor,
+  workTimerBudgetHours,
+  assignedWorkDeadline,
+  holdSecondsBetween,
+} = require('../lib/taskOverdue');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -92,7 +97,11 @@ async function updateTaskTolerant(id, updates, select) {
       delete attempt[col];
       continue;
     }
-    // Select string references a missing column — drop to legacy and retry once.
+    // Select string references a missing column — step down one tier and retry.
+    if (/column|schema cache/i.test(msg) && sel === TASK_SELECT_PLAN) {
+      TASK_SELECT = TASK_SELECT_FULL;
+      return updateTaskTolerant(id, attempt, TASK_SELECT_FULL);
+    }
     if (/original_hours|first_accepted|column|schema cache/i.test(msg) && sel === TASK_SELECT_FULL) {
       TASK_SELECT = TASK_SELECT_LEGACY;
       return updateTaskTolerant(id, attempt, TASK_SELECT_LEGACY);
@@ -121,18 +130,29 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, original_target_date, reschedule_status, reschedule_requested_date, reschedule_approved_target_date, reschedule_approved_at, reschedule_count, assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason, accept_reminder_sent_at, is_on_hold, hold_remaining_hours, held_at, resumed_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at';
 
+// Newer plan/timer columns may not be migrated yet — fall back progressively so
+// a missing migration degrades a field instead of breaking the whole action.
 async function loadTaskForStamp(id) {
   let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
   if (error && /column|schema cache/i.test(error.message || '')) {
     const retry = await supabase
       .from('tasks')
-      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status')
+      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at')
       .eq('id', id)
       .maybeSingle();
     data = retry.data;
     error = retry.error;
+  }
+  if (error && /column|schema cache/i.test(error.message || '')) {
+    const retry2 = await supabase
+      .from('tasks')
+      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status')
+      .eq('id', id)
+      .maybeSingle();
+    data = retry2.data;
+    error = retry2.error;
   }
   if (error) throw error;
   return data;
@@ -163,6 +183,32 @@ const BUCKET = 'task-files';
 
 // Nested select used everywhere we return a task, so every task always
 // looks the same on the wire (matches what frontend/app.js expects).
+//
+// Three tiers, newest first. Each tier drops the columns added by the migration
+// above it, so an un-migrated database still serves tasks instead of erroring.
+const TASK_SELECT_PLAN = `
+  id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
+  original_target_date, reschedule_approved_target_date, reschedule_approved_at, reschedule_count,
+  assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason,
+  accept_reminder_sent_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at,
+  rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
+  accepted_at, rejected_at, sent_for_verification_at, verified_at,
+  verification_status, verification_note, verification_attachment_urls,
+  verification_started_by, verification_started_at,
+  correction_voice_url, updation_note,
+  reschedule_status, reschedule_requested_date, reschedule_reason,
+  reschedule_requested_at, reschedule_decided_at,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name ),
+  reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
+`;
+
 const TASK_SELECT_FULL = `
   id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
@@ -203,12 +249,22 @@ const TASK_SELECT_LEGACY = `
   reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
 `;
 
-// Resolved once — falls back if original_hours / first_accepted columns not migrated yet.
-let TASK_SELECT = TASK_SELECT_FULL;
+// Resolved once — picks the richest select the database actually supports.
+let TASK_SELECT = TASK_SELECT_PLAN;
 let _taskSelectReady = null;
 async function resolveTaskSelect() {
   if (_taskSelectReady) return _taskSelectReady;
   _taskSelectReady = (async () => {
+    const plan = await supabase
+      .from('tasks')
+      .select('id, original_target_date, work_due_at, reaccept_required, total_hold_seconds')
+      .limit(1);
+    if (!plan.error) {
+      TASK_SELECT = TASK_SELECT_PLAN;
+      return TASK_SELECT;
+    }
+    console.warn('tasks: plan columns missing (run backend/sql/add_task_plan_separation.sql)');
+
     const { error } = await supabase
       .from('tasks')
       .select('id, original_hours_to_complete, first_accepted_at')
@@ -376,6 +432,14 @@ if (!isMdoOffice && !project_id) {
       ]);
 
       const hrsNum = hours_to_complete ? Number(hours_to_complete) : null;
+      const assignedAtIso = new Date().toISOString();
+      // Pre-accept deadline the employee sees in Due, frozen at assign time so a
+      // later hold/correction can never rewrite what the original promise was.
+      const assignedDeadline = assignedWorkDeadline({
+        assigned_at: assignedAtIso,
+        hours_to_complete: hrsNum,
+        original_hours_to_complete: hrsNum,
+      });
       const payload = {
           department_id,
           assigned_to,
@@ -386,15 +450,27 @@ if (!isMdoOffice && !project_id) {
           hours_to_complete: hrsNum,
           original_hours_to_complete: hrsNum,
           target_date,
+          original_target_date: target_date,
+          assigned_deadline_at: assignedDeadline ? assignedDeadline.toISOString() : null,
           priority: priority || 'Medium',
           rescheduling_possible: rescheduling_possible === 'true',
           attachment_url,
           voice_note_url,
           status: 'Pending',
-          assigned_at: new Date().toISOString(),
-          task_events: [{ at: new Date().toISOString(), action: 'assigned', by: req.user.id }],
+          assigned_at: assignedAtIso,
+          task_events: [{ at: assignedAtIso, action: 'assigned', by: req.user.id }],
       };
       let { data, error } = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+      // Drop plan columns one at a time if that migration has not been run yet.
+      for (let i = 0; i < 4 && error && /column|schema cache/i.test(error.message || ''); i += 1) {
+        const hit = /'([a-z_]+)' column/i.exec(error.message) || /column "?([a-z_]+)"?/i.exec(error.message);
+        const col = hit && hit[1];
+        if (!col || !Object.prototype.hasOwnProperty.call(payload, col)) break;
+        delete payload[col];
+        const retryPlan = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retryPlan.data;
+        error = retryPlan.error;
+      }
       if (error && /original_hours_to_complete/i.test(error.message || '')) {
         delete payload.original_hours_to_complete;
         const retry0 = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
@@ -662,17 +738,43 @@ router.patch('/:id/accept', async (req, res) => {
     }
 
     const at = nowIso();
-    const data = await updateTaskTolerant(id, {
+    // An approved reschedule resets the timer, so that Accept is a fresh start:
+    // the countdown runs from this moment for the full assigned hours again.
+    const isReaccept = !!existing.reaccept_required;
+    const lockedHours =
+      existing.original_hours_to_complete != null
+        ? existing.original_hours_to_complete
+        : existing.hours_to_complete;
+    const budgetHours = isReaccept ? lockedHours : existing.hours_to_complete;
+    const workDue = addWorkingHours(at, Number(budgetHours) || 0);
+
+    const updates = {
       status: 'In Progress',
-      accepted_at: firstStamp(existing, 'accepted_at', at),
+      // first_accepted_at is the audit stamp and is never overwritten;
+      // accepted_at is the anchor of the CURRENT timer cycle.
+      accepted_at: isReaccept ? at : firstStamp(existing, 'accepted_at', at),
       first_accepted_at: firstStamp(existing, 'first_accepted_at', at),
-      // Lock assigned hours once (if column exists / not already set)
-      original_hours_to_complete:
-        existing.original_hours_to_complete != null
-          ? existing.original_hours_to_complete
-          : existing.hours_to_complete,
-      task_events: withTaskEvent(existing, 'start_task', req.user.id),
-    }, TASK_SELECT);
+      original_hours_to_complete: lockedHours,
+      accept_count: (Number(existing.accept_count) || 0) + 1,
+      reaccept_required: false,
+      reaccept_reason: null,
+      task_events: withTaskEvent(existing, isReaccept ? 'reaccept_task' : 'start_task', req.user.id, {
+        hours: Number(budgetHours) || null,
+        work_due_at: Number(budgetHours) > 0 ? workDue.toISOString() : null,
+      }),
+    };
+    if (Number(budgetHours) > 0) {
+      updates.work_due_at = workDue.toISOString();
+      // Fresh cycle — any earlier overdue mark no longer applies.
+      updates.overdue_since_at = null;
+    }
+    if (isReaccept) {
+      updates.hours_to_complete = lockedHours;
+      updates.hold_remaining_hours = null;
+      updates.resumed_at = null;
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
     res.json(data);
   } catch (err) {
     console.error('Accept task error:', err.message);
@@ -721,6 +823,7 @@ router.patch('/:id/hold', async (req, res) => {
       is_on_hold: true,
       held_at: at,
       hold_remaining_hours: remaining,
+      hold_count: (Number(existing.hold_count) || 0) + 1,
       original_hours_to_complete:
         existing.original_hours_to_complete != null
           ? existing.original_hours_to_complete
@@ -728,6 +831,8 @@ router.patch('/:id/hold', async (req, res) => {
       task_events: withTaskEvent(existing, 'hold', req.user.id, {
         remaining_hours: remaining,
         original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+        timer: 'stopped',
+        elapsed_hours: Math.round(elapsed * 100) / 100,
       }),
     }, TASK_SELECT);
     res.json(data);
@@ -754,11 +859,19 @@ router.patch('/:id/resume', async (req, res) => {
 
     const remaining = Number(existing.hold_remaining_hours ?? existing.hours_to_complete) || 0;
     const at = nowIso();
+    // How long the timer actually stayed paused, counted in office hours only.
+    const heldSeconds = holdSecondsBetween(existing.held_at, at);
+    const workDue = addWorkingHours(at, remaining);
+
+    // held_at is deliberately kept: it is the audit stamp of the last pause and
+    // every reader gates on is_on_hold, so nothing displays it as "still held".
     const data = await updateTaskTolerant(id, {
       is_on_hold: false,
-      held_at: null,
       resumed_at: at,
       hold_remaining_hours: remaining,
+      last_hold_seconds: heldSeconds,
+      total_hold_seconds: (Number(existing.total_hold_seconds) || 0) + heldSeconds,
+      work_due_at: remaining > 0 ? workDue.toISOString() : null,
       original_hours_to_complete:
         existing.original_hours_to_complete != null
           ? existing.original_hours_to_complete
@@ -766,6 +879,10 @@ router.patch('/:id/resume', async (req, res) => {
       task_events: withTaskEvent(existing, 'resume', req.user.id, {
         remaining_hours: remaining,
         original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+        timer: 'restarted',
+        held_from: existing.held_at || null,
+        hold_seconds: heldSeconds,
+        work_due_at: remaining > 0 ? workDue.toISOString() : null,
       }),
     }, TASK_SELECT);
     res.json(data);
@@ -842,8 +959,19 @@ router.patch('/:id/status', async (req, res) => {
     } else if (status === 'Pending') {
       updates.status_note = null;
     } else if (status === 'In Progress') {
-      updates.accepted_at = firstStamp(existing, 'accepted_at', at);
-      updates.task_events = withTaskEvent(existing, 'start_task', req.user.id);
+      // Explicitly starting work also satisfies a pending re-accept, so the
+      // timer anchors here rather than at the pre-reschedule accept.
+      const isReaccept = !!existing.reaccept_required;
+      updates.accepted_at = isReaccept ? at : firstStamp(existing, 'accepted_at', at);
+      updates.first_accepted_at = firstStamp(existing, 'first_accepted_at', at);
+      if (isReaccept) {
+        updates.reaccept_required = false;
+        updates.reaccept_reason = null;
+        updates.overdue_since_at = null;
+        const budget = Number(existing.original_hours_to_complete ?? existing.hours_to_complete) || 0;
+        if (budget > 0) updates.work_due_at = addWorkingHours(at, budget).toISOString();
+      }
+      updates.task_events = withTaskEvent(existing, isReaccept ? 'reaccept_task' : 'start_task', req.user.id);
     }
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
@@ -930,6 +1058,11 @@ router.patch(
       }
       if (existing.is_on_hold) {
         return res.status(400).json({ error: 'Resume the task before sending for verification' });
+      }
+      if (existing.reaccept_required) {
+        return res.status(400).json({
+          error: 'This task was rescheduled — accept it again to start the hours before sending for verification',
+        });
       }
 
       const files = req.files || [];
@@ -1144,12 +1277,43 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
 //17t july 
     // const { data: existing, error: fetchErr } = await supabase
     //   .from('tasks').select('id, reschedule_status').eq('id', id).maybeSingle();
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, reschedule_status, target_date').eq('id', id).maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
 
-    const updates = { target_date };
+    const at = nowIso();
+    const lockedHours =
+      existing.original_hours_to_complete != null
+        ? existing.original_hours_to_complete
+        : existing.hours_to_complete;
+
+    const updates = {
+      target_date,
+      // First plan the admin set is kept for the record; only the current plan moves.
+      original_target_date: existing.original_target_date || existing.target_date,
+      reschedule_approved_target_date: target_date,
+      reschedule_approved_at: at,
+      reschedule_count: (Number(existing.reschedule_count) || 0) + 1,
+      // Same rule as an approved request: timer stops, employee accepts again,
+      // and that Accept restarts the full assigned hours.
+      status: 'Pending',
+      reaccept_required: true,
+      reaccept_reason: 'Task rescheduled — accept again to start the hours',
+      accepted_at: null,
+      resumed_at: null,
+      is_on_hold: false,
+      hold_remaining_hours: null,
+      work_due_at: null,
+      overdue_since_at: null,
+      accept_reminder_sent_at: null,
+      hours_to_complete: lockedHours,
+      original_hours_to_complete: lockedHours,
+      task_events: withTaskEvent(existing, 'rescheduled_by_admin', req.user.id, {
+        from_target_date: existing.target_date || null,
+        to_target_date: target_date || null,
+        reason: reason && reason.trim() ? reason.trim() : null,
+        timer: 'reset_pending_accept',
+      }),
+    };
     // If an employee's reschedule request was still pending, this direct
     // admin reschedule supersedes it — clear it out so it can't later be
     // approved and silently overwrite the date the admin just set here.
@@ -1157,21 +1321,10 @@ router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
       updates.reschedule_status = 'Rejected';
       updates.reschedule_reason = 'Superseded — admin rescheduled this task directly';
       updates.reschedule_decided_by = req.user.id;
-      updates.reschedule_decided_at = new Date().toISOString();
+      updates.reschedule_decided_at = at;
     }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
-
-  //   if (error) throw error;
-  //   res.json(data);
-  // } catch (err) {
-  //   console.error('Reschedule error:', err.message); 17th july
-    if (error) throw error;
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
 
     const { data: chirag } = await supabase
       .from('users').select('whatsapp_number').eq('username', 'chirag.s').maybeSingle();
@@ -1292,31 +1445,58 @@ router.get('/reschedule-requests', async (req, res) => {
   }
 });
 
-// Admin: approve — applies the requested date as the new target date
+// Admin: approve — moves the plan to the date the employee asked for and stops
+// the work timer. The employee has to Accept again, and that Accept restarts the
+// full assigned hours from scratch. The original plan date is left untouched.
 router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, reschedule_status, reschedule_requested_date').eq('id', id).maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
     if (existing.reschedule_status !== 'Pending') {
       return res.status(400).json({ error: 'This request has already been decided' });
     }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .update({
-        target_date: existing.reschedule_requested_date,
-        reschedule_status: 'Approved',
-        reschedule_decided_by: req.user.id,
-        reschedule_decided_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select(TASK_SELECT)
-      .single();
+    const at = nowIso();
+    const approvedDate = existing.reschedule_requested_date;
+    const lockedHours =
+      existing.original_hours_to_complete != null
+        ? existing.original_hours_to_complete
+        : existing.hours_to_complete;
 
-    if (error) throw error;
+    const data = await updateTaskTolerant(id, {
+      // Current plan moves; original_target_date keeps what the admin first set.
+      target_date: approvedDate,
+      original_target_date: existing.original_target_date || existing.target_date,
+      reschedule_approved_target_date: approvedDate,
+      reschedule_approved_at: at,
+      reschedule_count: (Number(existing.reschedule_count) || 0) + 1,
+      reschedule_status: 'Approved',
+      reschedule_decided_by: req.user.id,
+      reschedule_decided_at: at,
+      // Timer stops until the employee accepts the new date.
+      status: 'Pending',
+      reaccept_required: true,
+      reaccept_reason: 'Reschedule approved — accept again to start the hours',
+      accepted_at: null,
+      resumed_at: null,
+      is_on_hold: false,
+      hold_remaining_hours: null,
+      work_due_at: null,
+      overdue_since_at: null,
+      accept_reminder_sent_at: null,
+      // Full assigned hours are given back for the new cycle.
+      hours_to_complete: lockedHours,
+      original_hours_to_complete: lockedHours,
+      task_events: withTaskEvent(existing, 'reschedule_approved', req.user.id, {
+        from_target_date: existing.target_date || null,
+        to_target_date: approvedDate || null,
+        original_target_date: existing.original_target_date || existing.target_date || null,
+        hours: lockedHours != null ? Number(lockedHours) : null,
+        timer: 'reset_pending_accept',
+      }),
+    }, TASK_SELECT);
+
     res.json(data);
   } catch (err) {
     console.error('Approve reschedule error:', err.message);

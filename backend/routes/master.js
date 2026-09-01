@@ -2,6 +2,11 @@ const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { MODULES, ROLES, mergeMap, canSee, isMisExecutive } = require('../lib/navVisibility');
+const {
+  getReminderSettings,
+  saveReminderSettings,
+  DEFAULTS: REMINDER_DEFAULTS,
+} = require('../lib/reminderSettings');
 
 const router = express.Router();
 
@@ -345,6 +350,40 @@ router.get('/verifiers', async (req, res) => {
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
+
+// Reminder switches (daily overdue WhatsApp, accept nudge). MIS owns these so
+// a reminder can be turned off without a deploy.
+router.get('/reminder-settings', async (req, res) => {
+  try {
+    res.json({ settings: await getReminderSettings(), defaults: REMINDER_DEFAULTS });
+  } catch (err) {
+    res.json({ settings: REMINDER_DEFAULTS, defaults: REMINDER_DEFAULTS });
+  }
+});
+
+router.put('/reminder-settings', async (req, res) => {
+  try {
+    if (!(await callerIsMis(req))) {
+      return res.status(403).json({ error: 'Only MIS Support / MIS executive can change reminder settings' });
+    }
+    const settings = await saveReminderSettings(req.body?.settings || req.body, req.user.id);
+    res.json({ ok: true, settings });
+  } catch (err) {
+    if (err.settings) return res.status(503).json({ error: err.message, settings: err.settings });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function callerIsMis(req) {
+  if (isMisExecutive(req.user)) return true;
+  if (req.user?.is_mis_executive && req.user?.role !== 'admin') return true;
+  const { data: me } = await supabase
+    .from('users')
+    .select('is_mis_executive, department, designation, role')
+    .eq('id', req.user.id)
+    .maybeSingle();
+  return isMisExecutive(me);
+}
 
 router.get('/nav-visibility', async (req, res) => {
   try {

@@ -695,6 +695,47 @@ export default function TaskflowDom() {
               <button type="button" id="visibilitySaveBtn" className="primary-btn primary-btn-inline">Save visibility</button>
             </div>
           </div>
+
+          {/* Automated reminder switches — MIS decides what goes out on WhatsApp */}
+          <div className="view-heading" style={{marginTop: 28}}>
+            <h2 className="view-title">Automatic WhatsApp reminders</h2>
+            <p className="view-sub">MIS Support only. Overdue is worked out from the employee's own timer (accept time + hours, office hours only) — not from the planned date.</p>
+          </div>
+          <div className="table-card table-card--stack">
+            <div className="reminder-settings" id="reminderSettings">
+              <label className="reminder-row">
+                <input type="checkbox" id="rsDailyOverdue" />
+                <span>
+                  <strong>Daily overdue WhatsApp</strong>
+                  <em>Every morning, each employee gets one message per overdue task saying how many days it has been overdue. Repeats daily until the task is completed.</em>
+                </span>
+              </label>
+              <label className="reminder-row">
+                <input type="checkbox" id="rsAcceptNudge" />
+                <span>
+                  <strong>Accept reminder for short tasks</strong>
+                  <em>If a short same-day task is not accepted within the wait time below, the employee is asked to accept it or request a reschedule.</em>
+                </span>
+              </label>
+              <div className="reminder-row reminder-row--inputs">
+                <label>
+                  Wait before accept reminder
+                  <span className="reminder-input"><input type="number" id="rsAcceptMinutes" min="1" max="600" step="1" /> minutes</span>
+                </label>
+                <label>
+                  Counts as a same-day task up to
+                  <span className="reminder-input"><input type="number" id="rsAcceptMaxHours" min="0.5" max="24" step="0.5" /> hours</span>
+                </label>
+                <label>
+                  Ignore tasks overdue before
+                  <span className="reminder-input"><input type="date" id="rsOverdueSince" /></span>
+                </label>
+              </div>
+            </div>
+            <div style={{padding: '12px 16px'}}>
+              <button type="button" id="reminderSettingsSaveBtn" className="primary-btn primary-btn-inline">Save reminder settings</button>
+            </div>
+          </div>
         </section>
         <section id="view-verifications" className="view" hidden={true}>
           <div className="view-heading">

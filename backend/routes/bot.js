@@ -4,11 +4,16 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const { answerQuestion } = require('../lib/botData');
 const {
-  answerQuestion,
-  listOverdueTasksForWa,
-  startOfToday,
-} = require('../lib/botData');
+  runDailyOverdueReminders,
+  runAcceptNudges,
+  loadOpenTasks,
+  selectOverdue,
+  overduePhrase,
+} = require('../lib/taskReminders');
+const { getReminderSettings } = require('../lib/reminderSettings');
+const { overdueCalendarDays } = require('../lib/taskOverdue');
 const { onboardUserToProjectChats, ensureSiteTeamRoom } = require('../lib/projectChat');
 
 const router = express.Router();
@@ -1106,56 +1111,46 @@ async function notifyVerifierBot(verifierId, taskDesc, projectName) {
 }
 
 // ─── Overdue WhatsApp cron ───────────────────────────────────────────────────
+// Overdue is decided by the work timer (accept + hours in office time), not by
+// the admin's plan date, and the message says how many days it has been late.
+// Repeats every day until the task is completed. MIS can switch it off.
 async function runOverdueWhatsApp() {
-  const day = startOfToday().toISOString().slice(0, 10);
-  const since = process.env.OVERDUE_WA_SINCE || '2026-08-15';
-  const overdue = await listOverdueTasksForWa();
-  let sent = 0;
-  for (const t of overdue) {
-    const dueDay = String(t.target_date || '').slice(0, 10);
-    // Do not blast tasks that were already overdue before this rollout date.
-    if (dueDay && dueDay < since) continue;
-    const wa = t.assignee?.whatsapp_number;
-    if (!wa) continue;
-    const { data: already } = await supabase
-      .from('overdue_wa_log')
-      .select('task_id')
-      .eq('task_id', t.id)
-      .eq('alert_day', day)
-      .maybeSingle();
-    if (already) continue;
+  const result = await runDailyOverdueReminders({ now: new Date() });
+  if (result.skipped) return result;
 
-    await sendWhatsAppTemplate(wa, 'task_notification_v2', [
-      t.assignee?.full_name || 'Team member',
-      `OVERDUE: ${String(t.description || 'Task').slice(0, 180)}`,
-      t.project?.name || '—',
-      String(t.target_date || '').slice(0, 10),
-      t.priority || 'High',
-    ]);
+  // In-app alert alongside the WhatsApp, same one-per-day rule.
+  const day = result.day;
+  const tasks = await loadOpenTasks();
+  const settings = await getReminderSettings();
+  const overdue = selectOverdue(tasks, new Date(), settings);
+  for (const t of overdue) {
+    const days = overdueCalendarDays(t, new Date());
     await pushAlert(
       t.assigned_to,
       'Task overdue',
-      `${String(t.description || 'Task').slice(0, 120)} was due ${String(t.target_date || '').slice(0, 10)}`,
+      `${String(t.description || 'Task').slice(0, 120)} — ${overduePhrase(days)}`,
       'overdue'
-    );
-    await supabase.from('overdue_wa_log').upsert({ task_id: t.id, alert_day: day });
-    sent += 1;
+    ).catch(() => {});
   }
-  return { checked: overdue.length, sent, day };
+  return { ...result, day };
 }
 
 router.post('/cron/overdue-whatsapp', handleOverdueCron);
 router.get('/cron/overdue-whatsapp', handleOverdueCron);
 
+function cronAuthorized(req) {
+  const secret = process.env.CRON_SECRET || '';
+  const hdr = req.headers['authorization'] || '';
+  return (
+    (secret && hdr === `Bearer ${secret}`) ||
+    (secret && req.query.secret === secret) ||
+    (!secret && process.env.VERCEL !== '1')
+  );
+}
+
 async function handleOverdueCron(req, res) {
   try {
-    const secret = process.env.CRON_SECRET || '';
-    const hdr = req.headers['authorization'] || '';
-    const ok =
-      (secret && hdr === `Bearer ${secret}`) ||
-      (secret && req.query.secret === secret) ||
-      (!secret && process.env.VERCEL !== '1');
-    if (!ok) return res.status(401).json({ error: 'Unauthorized cron' });
+    if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
     const result = await runOverdueWhatsApp();
     res.json({ ok: true, ...result });
   } catch (err) {
@@ -1165,6 +1160,25 @@ async function handleOverdueCron(req, res) {
   }
 }
 
+// ─── Accept-nudge cron ───────────────────────────────────────────────────────
+// Short same-day tasks left unaccepted for 20+ minutes get one reminder to
+// accept or ask for a reschedule. Runs every 15 minutes.
+router.post('/cron/accept-nudge', handleAcceptNudgeCron);
+router.get('/cron/accept-nudge', handleAcceptNudgeCron);
+
+async function handleAcceptNudgeCron(req, res) {
+  try {
+    if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
+    const result = await runAcceptNudges({ now: new Date() });
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('Accept nudge cron:', err.message);
+    if (isSchemaMissing(err)) return res.status(503).json({ error: schemaHint() });
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = router;
 module.exports.notifyVerifierBot = notifyVerifierBot;
 module.exports.runOverdueWhatsApp = runOverdueWhatsApp;
+module.exports.runAcceptNudges = runAcceptNudges;
