@@ -3,6 +3,7 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
+const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -120,7 +121,7 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at';
 
 async function loadTaskForStamp(id) {
   let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
@@ -166,7 +167,7 @@ const TASK_SELECT_FULL = `
   id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
   assigned_at, extra_hours, extra_days, correction_extensions,
-  is_on_hold, hold_remaining_hours, held_at, first_accepted_at,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -186,7 +187,7 @@ const TASK_SELECT_LEGACY = `
   id, description, hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
   assigned_at, extra_hours, extra_days, correction_extensions,
-  is_on_hold, hold_remaining_hours, held_at,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -711,8 +712,10 @@ router.patch('/:id/hold', async (req, res) => {
     }
 
     const at = nowIso();
-    const elapsed = elapsedWorkingHours(existing.accepted_at, at);
-    const remaining = Math.max(0, Math.round((totalHours - elapsed) * 100) / 100);
+    const anchor = workTimerAnchor(existing) || existing.accepted_at;
+    const budget = workTimerBudgetHours(existing);
+    const elapsed = elapsedWorkingHours(anchor, at);
+    const remaining = Math.max(0, Math.round((budget - elapsed) * 100) / 100);
 
     const data = await updateTaskTolerant(id, {
       is_on_hold: true,
@@ -751,14 +754,11 @@ router.patch('/:id/resume', async (req, res) => {
 
     const remaining = Number(existing.hold_remaining_hours ?? existing.hours_to_complete) || 0;
     const at = nowIso();
-    // Timer restarts with remaining hours only.
-    // original_hours_to_complete stays as assigned hours for reports.
     const data = await updateTaskTolerant(id, {
       is_on_hold: false,
       held_at: null,
-      hold_remaining_hours: null,
-      accepted_at: at,
-      hours_to_complete: remaining,
+      resumed_at: at,
+      hold_remaining_hours: remaining,
       original_hours_to_complete:
         existing.original_hours_to_complete != null
           ? existing.original_hours_to_complete

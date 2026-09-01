@@ -396,11 +396,54 @@ export async function mountTaskflowApp(opts = {}) {
 
   const VERIFICATION_SLA_HOURS = 2;
 
+  function verificationWorkDueDate(task) {
+    if (!task?.verification_started_at) return null;
+    const started = parseLocalDate(task.verification_started_at);
+    if (!started || Number.isNaN(started.getTime())) return null;
+    return addWorkingHours(started, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+  }
+
+  function verificationOverdueWorkingHours(task, now = new Date()) {
+    const due = verificationWorkDueDate(task);
+    if (!due || now <= due) return 0;
+    return Math.max(0, Math.round(elapsedWorkingHoursBetween(due, now) * 10) / 10);
+  }
+
   function isVerificationOverdueTask(t, now = new Date()) {
     if (t?.verification_status !== 'Pending Verification') return false;
-    if (!t?.verification_started_at) return false;
-    const due = addWorkingHours(t.verification_started_at, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+    const due = verificationWorkDueDate(t);
+    if (!due) return false;
     return now > due;
+  }
+
+  function workTimerAnchor(task) {
+    if (task?.is_on_hold) return task.resumed_at || task.accepted_at || null;
+    if (task?.resumed_at) return task.resumed_at;
+    return task?.accepted_at || null;
+  }
+
+  function workTimerBudgetHours(task) {
+    if (task?.is_on_hold) {
+      const rem = Number(task.hold_remaining_hours);
+      if (rem > 0) return rem;
+      return Number(task.hours_to_complete) || 0;
+    }
+    if (task?.resumed_at && task.hold_remaining_hours != null) {
+      return Number(task.hold_remaining_hours) || 0;
+    }
+    return Number(task.hours_to_complete) || 0;
+  }
+
+  /** Pre-accept deadline: assigned_at + hours (display only; timer starts on Accept). */
+  function employeeAssignedDeadline(task) {
+    const start = task?.assigned_at || task?.created_at;
+    const hours = Number(task?.hours_to_complete);
+    if (!start || Number.isNaN(hours) || hours <= 0) return null;
+    try {
+      return addWorkingHours(start, hours, { fromNowIfToday: false });
+    } catch (_) {
+      return null;
+    }
   }
 
   function isAssignmentOverdueTask(t, now = new Date()) {
@@ -408,9 +451,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (t?.is_on_hold) return false;
     if (t?.verification_status === 'Pending Verification') return false;
     if (!t?.accepted_at) return false;
-    const hours = Number(t.hours_to_complete);
-    if (!hours || hours <= 0) return false;
-    const due = addWorkingHours(t.accepted_at, hours, { fromNowIfToday: false });
+    const due = employeeWorkDueDate(t);
+    if (!due) return false;
     return now > due;
   }
 
@@ -421,18 +463,49 @@ export async function mountTaskflowApp(opts = {}) {
 
   function employeeWorkDueDate(task) {
     if (!task?.accepted_at) return null;
-    const hours = Number(task.hours_to_complete);
-    if (!hours || hours <= 0) return null;
-    return addWorkingHours(task.accepted_at, hours, { fromNowIfToday: false });
+    const anchor = workTimerAnchor(task);
+    const hours = workTimerBudgetHours(task);
+    if (!anchor || !hours || hours <= 0) return null;
+    return addWorkingHours(anchor, hours, { fromNowIfToday: false });
+  }
+
+  /**
+   * Due label for emp UI: after reschedule, calendar date follows target_date
+   * but keeps the work-timer clock time. Countdown uses employeeWorkDueDate.
+   */
+  function employeeDisplayDueDate(task) {
+    const workDue = employeeWorkDueDate(task);
+    if (!workDue) return null;
+    if (!task?.target_date) return workDue;
+    const target = parseLocalDate(task.target_date);
+    if (!target || Number.isNaN(target.getTime())) return workDue;
+
+    const sameDay =
+      target.getFullYear() === workDue.getFullYear()
+      && target.getMonth() === workDue.getMonth()
+      && target.getDate() === workDue.getDate();
+    if (sameDay) return workDue;
+
+    const display = new Date(target);
+    const dateOnly = typeof task.target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.target_date);
+    if (dateOnly || (target.getHours() === 0 && target.getMinutes() === 0 && target.getSeconds() === 0)) {
+      display.setHours(
+        workDue.getHours(),
+        workDue.getMinutes(),
+        workDue.getSeconds(),
+        workDue.getMilliseconds()
+      );
+    }
+    return display;
   }
 
   function fmtOverdueDateCell(task, now = new Date()) {
     if (isVerificationOverdueTask(task, now)) {
-      const due = addWorkingHours(task.verification_started_at, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
-      const hrsPast = Math.max(0, Math.floor(elapsedWorkingHoursBetween(due, now)));
+      const due = verificationWorkDueDate(task);
+      const hrsPast = verificationOverdueWorkingHours(task, now);
       return `
-        <div>Started verify: ${fmtDate(task.verification_started_at)}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2h verify limit (office hrs) 🔴` : 'Verify limit crossed 🔴'}</div>
+        <div>Verify due: ${fmtDate(due.toISOString())}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
       `;
     }
     const workDue = employeeWorkDueDate(task);
@@ -602,6 +675,13 @@ export async function mountTaskflowApp(opts = {}) {
     return n % 1 === 0 ? `${n}h` : `${n.toFixed(1)}h`;
   }
 
+  /** Remaining working-time budget until due (excludes nights, lunch, Sunday). */
+  function workingTimeLeftMs(from, due) {
+    if (!due || !from) return 0;
+    const hours = elapsedWorkingHoursBetween(from, due);
+    return Math.max(0, hours * 3600000);
+  }
+
   /** Employee My Tasks: due line + live time-left / hold / overdue (HTML). */
   function fmtEmployeeTimerHtml(task, now = new Date()) {
     if (task.is_on_hold) {
@@ -612,6 +692,20 @@ export async function mountTaskflowApp(opts = {}) {
       `;
     }
     if (!task.accepted_at) {
+      const deadline = employeeAssignedDeadline(task);
+      const assignedAt = task.assigned_at || task.created_at;
+      if (deadline) {
+        return `
+          <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
+          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Timer starts on Accept</div>
+        `;
+      }
+      if (assignedAt) {
+        return `
+          <div class="task-timer-due">Assigned ${fmtDate(assignedAt)}</div>
+          <div class="task-timer-sub">No hours set · Accept to start after hours are added</div>
+        `;
+      }
       return `<div class="task-timer-wait">Accept task to start timer</div>`;
     }
     if (task.verification_status === 'Pending Verification') {
@@ -620,25 +714,28 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
       `;
     }
-    const hours = Number(task.hours_to_complete);
+    const hours = workTimerBudgetHours(task);
     if (!hours || hours <= 0) {
       return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
     }
-    const due = employeeWorkDueDate(task);
-    if (!due) return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    const workDue = employeeWorkDueDate(task);
+    if (!workDue) {
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    }
+    const displayDue = employeeDisplayDueDate(task) || workDue;
 
     if (isAssignmentOverdueTask(task, now)) {
-      const overdueMs = now - due;
+      const overdueMs = workingTimeLeftMs(workDue, now);
       return `
-        <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+        <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
       `;
     }
 
-    const msLeft = due - now;
+    const msLeft = workingTimeLeftMs(now, workDue);
     const urgent = msLeft < 30 * 60 * 1000;
     return `
-      <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+      <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
       <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
     `;
   }
@@ -648,10 +745,16 @@ export async function mountTaskflowApp(opts = {}) {
     if (task.is_on_hold) {
       return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
     }
-    if (!task.accepted_at) return 'Accept task to start timer';
-    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
-    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
-    return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
+    if (!task.accepted_at) {
+      const deadline = employeeAssignedDeadline(task);
+      if (deadline) {
+        return `${fmtDate(deadline.toISOString())} · ${task.hours_to_complete}h deadline`;
+      }
+      return 'Accept task to start timer';
+    }
+    const due = employeeWorkDueDate(task);
+    if (!due) return fmtDate(task.accepted_at);
+    return `${fmtDate(due.toISOString())} · ${formatHoursLabel(workTimerBudgetHours(task))}`;
   }
 
   let myTasksTimerCache = [];
@@ -889,7 +992,7 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
-    if (visOk('reschedule-requests') !== false) {
+    if (isAdmin && visOk('reschedule-requests') !== false) {
       appendCollapsibleNav(
         'Reschedule',
         [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
@@ -1123,10 +1226,9 @@ export async function mountTaskflowApp(opts = {}) {
           setNavBadge('verifications', verifs.length);
         }
   
-        // Reschedule requests (own — any status change worth a glance, but
-        // badge only counts ones still awaiting a decision)
-        const myResched = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', myResched.filter(t => t.reschedule_status === 'Pending').length);
+        // Reschedule requests are admin-only (approve/reject). Emp requests
+        // from the task menu and does not get a requests inbox.
+        setNavBadge('reschedule-requests', 0);
   
         // My recurring tasks — count of instances still outstanding (today's
         // due instance plus any backlog that hasn't been marked Completed yet)
@@ -1151,7 +1253,14 @@ export async function mountTaskflowApp(opts = {}) {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
         const now = new Date();
-        const pendingCount = allTasks.filter(t => t.status === 'Pending' || t.verification_status === 'Pending Verification').length;
+        // Open delegated work: Pending + In Progress + ticket/verify queues
+        const pendingCount = allTasks.filter((t) => {
+          const st = String(t.status || '');
+          const vs = String(t.verification_status || '');
+          if (st === 'Completed' || st === 'Rejected') return false;
+          if (vs === 'Verified') return false;
+          return true;
+        }).length;
         const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
   
         const recurringAll = await api('/recurring-tasks/all').catch(() => []);
@@ -1173,9 +1282,9 @@ export async function mountTaskflowApp(opts = {}) {
         const adminVerifs = await api('/tasks/verifications').catch(() => []);
         setNavBadge('verifications', adminVerifs.length);
   
-        // Reschedule requests awaiting a decision
+        // Reschedule requests awaiting admin decision (API already Pending-only)
         const reschedReqs = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', reschedReqs.length);
+        setNavBadge('reschedule-requests', reschedReqs.filter((t) => t.reschedule_status === 'Pending').length);
   
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
@@ -2470,11 +2579,20 @@ export async function mountTaskflowApp(opts = {}) {
       items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
     }
 
-    if (task.rescheduling_possible && task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
+    // Emp-only: request reschedule (admin uses direct Reschedule above — no approve step)
+    if (
+      !isAdminManaging
+      && state.user.role !== 'admin'
+      && task.rescheduling_possible
+      && task.status !== 'Completed'
+      && !isPendingVerification
+      && !isOnHold
+      && canManageThisTask
+    ) {
       if (isTicketRaised) {
         items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
-        items.push({ label: '🗓️ Reschedule request pending…', onClick: () => switchView('reschedule-requests'), disabled: true });
+        items.push({ label: '🗓️ Reschedule request pending…', disabled: true });
       } else {
         items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
       }
@@ -3013,22 +3131,30 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Reschedule requests ────────────────────────────────────────────────────
-  // Admin: every request still awaiting a decision, with Approve/Reject.
-  // Everyone else: only their own requests (any status), read-only.
+  // Admin-only inbox: emp requests awaiting Approve / Reject.
+  // Admin direct Reschedule updates the date immediately (no request row).
   async function loadRescheduleRequests() {
     const wrap = document.getElementById('reschedRequestsList');
     const sub = document.getElementById('reschedViewSub');
     const isAdmin = state.user.role === 'admin';
-    sub.textContent = isAdmin
-      ? "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is."
-      : 'Status of the reschedule requests you\'ve sent.';
-    wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    if (!isAdmin) {
+      if (sub) sub.textContent = 'Only admins review reschedule requests.';
+      if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
+      const tbody = document.getElementById('reschedRequestsTableBody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
+      return;
+    }
+    if (sub) {
+      sub.textContent = "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is. Admin direct reschedule updates immediately (no approval).";
+    }
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     try {
       const tasks = await api('/tasks/reschedule-requests');
-      renderRescheduleRequests(wrap, tasks, isAdmin);
-      if (tbody) renderRescheduleRequestsTable(tbody, tasks, isAdmin);
+      const pending = (tasks || []).filter((t) => t.reschedule_status === 'Pending');
+      renderRescheduleRequests(wrap, pending, true);
+      if (tbody) renderRescheduleRequestsTable(tbody, pending, true);
     } catch (err) { showToast(err.message, 'error'); }
   }
   

@@ -9,6 +9,7 @@
 
 const { buildSrMap } = require('./workVerificationDashboard');
 const { addWorkingHours, elapsedWorkingHours } = require('./workingHours');
+const { employeeWorkDueDate, workTimerBudgetHours } = require('./taskOverdue');
 
 function fmtDelayStamp(iso) {
   if (!iso) return null;
@@ -62,7 +63,7 @@ function assignedHours(t) {
 
 /** Hours used for live deadline after accept / resume. */
 function timerHours(t) {
-  return numOrNull(t.hours_to_complete);
+  return workTimerBudgetHours(t);
 }
 
 function formatHoldResumeLabel(t) {
@@ -116,10 +117,12 @@ function buildDelayReportRows(tasks, opts = {}) {
 
       if (acceptedAt) {
         acceptedLabel = fmtDelayStamp(acceptedAt) || '—';
-        if (dueHrs != null && dueHrs > 0) {
-          const due = addWorkingHours(acceptedAt, dueHrs);
+        const due = employeeWorkDueDate(t);
+        if (due) {
           deadlineIso = due.toISOString();
           deadlineLabel = fmtDelayStamp(due) || '—';
+        } else if (dueHrs != null && dueHrs > 0) {
+          deadlineLabel = '—';
         } else {
           deadlineLabel = '—';
         }
