@@ -469,9 +469,35 @@ export async function mountTaskflowApp(opts = {}) {
     return addWorkingHours(anchor, hours, { fromNowIfToday: false });
   }
 
-  function fmtPlannedDateLine(task) {
-    if (!task?.target_date) return '';
-    return `<div class="task-timer-sub">Planned: ${escapeHtml(fmtDateOnly(task.target_date))}</div>`;
+  /**
+   * Due label for emp UI: after reschedule, calendar date follows target_date
+   * (e.g. Sep 2 → Sep 8) but keeps the work-timer clock time.
+   * Countdown / overdue still use employeeWorkDueDate (hours_to_complete).
+   */
+  function employeeDisplayDueDate(task) {
+    const workDue = employeeWorkDueDate(task);
+    if (!workDue) return null;
+    if (!task?.target_date) return workDue;
+    const target = parseLocalDate(task.target_date);
+    if (!target || Number.isNaN(target.getTime())) return workDue;
+
+    const sameDay =
+      target.getFullYear() === workDue.getFullYear()
+      && target.getMonth() === workDue.getMonth()
+      && target.getDate() === workDue.getDate();
+    if (sameDay) return workDue;
+
+    const display = new Date(target);
+    const dateOnly = typeof task.target_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.target_date);
+    if (dateOnly || (target.getHours() === 0 && target.getMinutes() === 0 && target.getSeconds() === 0)) {
+      display.setHours(
+        workDue.getHours(),
+        workDue.getMinutes(),
+        workDue.getSeconds(),
+        workDue.getMilliseconds()
+      );
+    }
+    return display;
   }
 
   function fmtOverdueDateCell(task, now = new Date()) {
@@ -664,7 +690,6 @@ export async function mountTaskflowApp(opts = {}) {
       return `
         <div class="task-timer-hold">⏸ Timer paused</div>
         <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
-        ${fmtPlannedDateLine(task)}
       `;
     }
     if (!task.accepted_at) {
@@ -674,58 +699,45 @@ export async function mountTaskflowApp(opts = {}) {
         return `
           <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
           <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Timer starts on Accept</div>
-          ${fmtPlannedDateLine(task)}
         `;
       }
       if (assignedAt) {
         return `
           <div class="task-timer-due">Assigned ${fmtDate(assignedAt)}</div>
           <div class="task-timer-sub">No hours set · Accept to start after hours are added</div>
-          ${fmtPlannedDateLine(task)}
         `;
       }
-      return `
-        <div class="task-timer-wait">Accept task to start timer</div>
-        ${fmtPlannedDateLine(task)}
-      `;
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
     }
     if (task.verification_status === 'Pending Verification') {
       return `
         <div class="task-timer-due">Sent for verification</div>
         <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
-        ${fmtPlannedDateLine(task)}
       `;
     }
     const hours = workTimerBudgetHours(task);
     if (!hours || hours <= 0) {
-      return `
-        <div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>
-        ${fmtPlannedDateLine(task)}
-      `;
+      return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
     }
-    const due = employeeWorkDueDate(task);
-    if (!due) {
-      return `
-        <div class="task-timer-wait">Accept task to start timer</div>
-        ${fmtPlannedDateLine(task)}
-      `;
+    const workDue = employeeWorkDueDate(task);
+    if (!workDue) {
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
     }
+    const displayDue = employeeDisplayDueDate(task) || workDue;
 
     if (isAssignmentOverdueTask(task, now)) {
-      const overdueMs = workingTimeLeftMs(due, now);
+      const overdueMs = workingTimeLeftMs(workDue, now);
       return `
-        <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+        <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
-        ${fmtPlannedDateLine(task)}
       `;
     }
 
-    const msLeft = workingTimeLeftMs(now, due);
+    const msLeft = workingTimeLeftMs(now, workDue);
     const urgent = msLeft < 30 * 60 * 1000;
     return `
-      <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
+      <div class="task-timer-due">Due ${fmtDate(displayDue.toISOString())}</div>
       <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
-      ${fmtPlannedDateLine(task)}
     `;
   }
 
