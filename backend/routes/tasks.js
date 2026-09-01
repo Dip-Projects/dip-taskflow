@@ -3,6 +3,7 @@ const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
+const { workTimerAnchor, workTimerBudgetHours, holdResumeSummary } = require('../lib/taskOverdue');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
@@ -113,7 +114,7 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at';
 
 async function loadTaskForStamp(id) {
   let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
@@ -159,7 +160,7 @@ const TASK_SELECT = `
   id, description, hours_to_complete, target_date, priority,
   rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
   assigned_at, extra_hours, extra_days, correction_extensions,
-  is_on_hold, hold_remaining_hours, held_at,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
@@ -644,8 +645,10 @@ router.patch('/:id/hold', async (req, res) => {
     }
 
     const at = nowIso();
-    const elapsed = elapsedWorkingHours(existing.accepted_at, at);
-    const remaining = Math.max(0, Math.round((totalHours - elapsed) * 100) / 100);
+    const anchor = workTimerAnchor(existing) || existing.accepted_at;
+    const budget = workTimerBudgetHours(existing);
+    const elapsed = elapsedWorkingHours(anchor, at);
+    const remaining = Math.max(0, Math.round((budget - elapsed) * 100) / 100);
 
     const data = await updateTaskTolerant(id, {
       is_on_hold: true,
@@ -680,9 +683,8 @@ router.patch('/:id/resume', async (req, res) => {
     const data = await updateTaskTolerant(id, {
       is_on_hold: false,
       held_at: null,
-      hold_remaining_hours: null,
-      accepted_at: at,
-      hours_to_complete: remaining,
+      resumed_at: at,
+      hold_remaining_hours: remaining,
       task_events: withTaskEvent(existing, 'resume', req.user.id, { remaining_hours: remaining }),
     }, TASK_SELECT);
     res.json(data);
@@ -1349,7 +1351,8 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         created_at, assigned_at, accepted_at, sent_for_verification_at,
         verification_started_at, verified_at, rejected_at,
         hours_to_complete, target_date, extra_hours, extra_days,
-        verification_status,
+        verification_status, is_on_hold, hold_remaining_hours, held_at, resumed_at,
+        task_events,
         project:projects ( id, name ),
         task_type:task_types ( id, name ),
         department:departments ( id, name ),
@@ -1386,6 +1389,7 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     // Enrich each task with computed time fields
     const enriched = ranged.map(t => {
       const assigned = t.assigned_at || t.created_at;
+      const hr = holdResumeSummary(t);
       return {
         ...t,
         assigned_at: assigned,
@@ -1396,6 +1400,7 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         total_cycle_hrs: hrsBetween(assigned, t.verified_at || t.rejected_at),
         extra_hours: Number(t.extra_hours || 0),
         extra_days: Number(t.extra_days || 0),
+        hold_resume: hr,
       };
     });
 
@@ -1543,6 +1548,24 @@ const FMS_STEPS = [
     why: 'Close the task or send it back — Done only after Verify click; 2h SLA from Start Verification',
     when: '3',
   },
+  {
+    key: 'hold',
+    label: 'Hold',
+    what: 'Pause remaining work hours',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Track when work was paused and how many hours were saved',
+    when: '4',
+  },
+  {
+    key: 'resume',
+    label: 'Resume',
+    what: 'Restart countdown with saved hours',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Track when work resumed without overwriting original accept time',
+    when: '5',
+  },
 ];
 
 function fmsRangeDates(range, from, to) {
@@ -1641,6 +1664,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       first_sent_for_verification_at, first_verification_started_at,
       hours_to_complete, target_date,
       extra_hours, extra_days, correction_extensions,
+      is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
       project:projects ( id, name ),
       task_type:task_types ( id, name ),
       department:departments ( id, name ),
@@ -1693,7 +1717,11 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
           accept: fmsStep(assigned, t.accepted_at, true),
           submit: fmsStep(t.target_date, sentAt, true),
           verify: fmsVerifyStep(t),
+          hold: fmsStep(null, t.held_at, !!(t.held_at || t.is_on_hold)),
+          resume: fmsStep(null, t.resumed_at, !!t.resumed_at),
         };
+
+        const hr = holdResumeSummary(t);
 
         return {
           id: t.id,
@@ -1714,6 +1742,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
           target_date: t.target_date,
           status: t.status,
           verification_status: t.verification_status,
+          hold_resume: hr,
           steps,
         };
       });

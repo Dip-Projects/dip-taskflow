@@ -409,9 +409,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (t?.is_on_hold) return false;
     if (t?.verification_status === 'Pending Verification') return false;
     if (!t?.accepted_at) return false;
-    const hours = Number(t.hours_to_complete);
-    if (!hours || hours <= 0) return false;
-    const due = addWorkingHours(t.accepted_at, hours, { fromNowIfToday: false });
+    const due = employeeWorkDueDate(t);
+    if (!due) return false;
     return now > due;
   }
 
@@ -420,11 +419,43 @@ export async function mountTaskflowApp(opts = {}) {
     return isVerificationOverdueTask(t, now) || isAssignmentOverdueTask(t, now);
   }
 
+  function workTimerAnchor(task) {
+    if (task?.is_on_hold) return task.resumed_at || task.accepted_at || null;
+    if (task?.resumed_at) return task.resumed_at;
+    return task?.accepted_at || null;
+  }
+
+  function workTimerBudgetHours(task) {
+    if (task?.is_on_hold) {
+      const rem = Number(task.hold_remaining_hours);
+      if (rem > 0) return rem;
+      return Number(task.hours_to_complete) || 0;
+    }
+    if (task?.resumed_at && task.hold_remaining_hours != null) {
+      return Number(task.hold_remaining_hours) || 0;
+    }
+    return Number(task.hours_to_complete) || 0;
+  }
+
+  /** Pre-accept deadline: assigned_at + hours (display only; timer starts on Accept). */
+  function employeeAssignedDeadline(task) {
+    const start = task?.assigned_at || task?.created_at;
+    const hours = Number(task?.hours_to_complete);
+    if (!start || !hours || hours <= 0) return null;
+    return addWorkingHours(start, hours, { fromNowIfToday: false });
+  }
+
   function employeeWorkDueDate(task) {
     if (!task?.accepted_at) return null;
-    const hours = Number(task.hours_to_complete);
-    if (!hours || hours <= 0) return null;
-    return addWorkingHours(task.accepted_at, hours, { fromNowIfToday: false });
+    const anchor = workTimerAnchor(task);
+    const hours = workTimerBudgetHours(task);
+    if (!anchor || !hours || hours <= 0) return null;
+    return addWorkingHours(anchor, hours, { fromNowIfToday: false });
+  }
+
+  function fmtPlannedDateLine(task) {
+    if (!task?.target_date) return '';
+    return `<div class="task-timer-sub">Planned: ${escapeHtml(fmtDateOnly(task.target_date))}</div>`;
   }
 
   function fmtOverdueDateCell(task, now = new Date()) {
@@ -617,29 +648,51 @@ export async function mountTaskflowApp(opts = {}) {
       return `
         <div class="task-timer-hold">⏸ Timer paused</div>
         <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
+        ${fmtPlannedDateLine(task)}
       `;
     }
     if (!task.accepted_at) {
-      return `<div class="task-timer-wait">Accept task to start timer</div>`;
+      const deadline = employeeAssignedDeadline(task);
+      if (deadline) {
+        return `
+          <div class="task-timer-due">Deadline ${fmtDate(deadline.toISOString())}</div>
+          <div class="task-timer-sub">${formatHoursLabel(task.hours_to_complete)} from assignment · Accept to start timer</div>
+          ${fmtPlannedDateLine(task)}
+        `;
+      }
+      return `
+        <div class="task-timer-wait">Accept task to start timer</div>
+        ${fmtPlannedDateLine(task)}
+      `;
     }
     if (task.verification_status === 'Pending Verification') {
       return `
         <div class="task-timer-due">Sent for verification</div>
         <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
+        ${fmtPlannedDateLine(task)}
       `;
     }
-    const hours = Number(task.hours_to_complete);
+    const hours = workTimerBudgetHours(task);
     if (!hours || hours <= 0) {
-      return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
+      return `
+        <div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>
+        ${fmtPlannedDateLine(task)}
+      `;
     }
     const due = employeeWorkDueDate(task);
-    if (!due) return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    if (!due) {
+      return `
+        <div class="task-timer-wait">Accept task to start timer</div>
+        ${fmtPlannedDateLine(task)}
+      `;
+    }
 
     if (isAssignmentOverdueTask(task, now)) {
       const overdueMs = workingTimeLeftMs(due, now);
       return `
         <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
+        ${fmtPlannedDateLine(task)}
       `;
     }
 
@@ -648,6 +701,7 @@ export async function mountTaskflowApp(opts = {}) {
     return `
       <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
       <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
+      ${fmtPlannedDateLine(task)}
     `;
   }
 
@@ -656,10 +710,16 @@ export async function mountTaskflowApp(opts = {}) {
     if (task.is_on_hold) {
       return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
     }
-    if (!task.accepted_at) return 'Accept task to start timer';
-    if (task.hours_to_complete == null) return fmtDate(task.accepted_at);
-    const due = addWorkingHours(task.accepted_at, task.hours_to_complete, { fromNowIfToday: false });
-    return `${fmtDate(due.toISOString())} · ${task.hours_to_complete}h`;
+    if (!task.accepted_at) {
+      const deadline = employeeAssignedDeadline(task);
+      if (deadline) {
+        return `${fmtDate(deadline.toISOString())} · ${task.hours_to_complete}h deadline`;
+      }
+      return 'Accept task to start timer';
+    }
+    const due = employeeWorkDueDate(task);
+    if (!due) return fmtDate(task.accepted_at);
+    return `${fmtDate(due.toISOString())} · ${formatHoursLabel(workTimerBudgetHours(task))}`;
   }
 
   let myTasksTimerCache = [];
@@ -6865,17 +6925,20 @@ export async function mountTaskflowApp(opts = {}) {
 
   function downloadTimeCsv(data) {
     if (!data?.report?.length) return showToast('Nothing to export yet', 'error');
-    const head = ['Employee', 'Project', 'Task', 'Assigned', 'Accepted', 'Accept hrs', 'Submit hrs', 'Verify hrs', 'Cycle hrs', 'Extra hrs', 'Extra days'];
+    const head = ['Employee', 'Project', 'Task', 'Assigned', 'Accepted', 'Accept hrs', 'Submit hrs', 'Verify hrs', 'Cycle hrs', 'Extra hrs', 'Extra days', 'Hold at', 'Resume at', 'Orig hrs', 'Remaining hrs'];
     const lines = [head.join(',')];
     data.report.forEach((emp) => {
       (emp.projects || []).forEach((p) => {
         (p.tasks || []).forEach((t) => {
+          const hr = t.hold_resume || {};
           lines.push([
             emp.name, p.name, (t.description || '').replace(/\s+/g, ' '),
             t.assigned_at || t.created_at || '', t.accepted_at || '',
             t.time_to_accept_hrs ?? '', t.time_to_submit_hrs ?? '',
             t.time_to_verify_hrs ?? '', t.total_cycle_hrs ?? '',
             t.extra_hours || 0, t.extra_days || 0,
+            hr.held_at || '', hr.resumed_at || '',
+            hr.original_hours ?? t.hours_to_complete ?? '', hr.remaining_hours ?? '',
           ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
         });
       });
@@ -6986,6 +7049,9 @@ export async function mountTaskflowApp(opts = {}) {
               <td>${Number(t.extra_hours || 0) || Number(t.extra_days || 0)
                 ? `${t.extra_hours || 0}h / ${t.extra_days || 0}d`
                 : '—'}</td>
+              <td>${t.hold_resume?.held_at ? escapeHtml(fmtDate(t.hold_resume.held_at)) : '—'}</td>
+              <td>${t.hold_resume?.resumed_at ? escapeHtml(fmtDate(t.hold_resume.resumed_at)) : '—'}</td>
+              <td>${t.hold_resume?.remaining_hours != null ? fmtHrs(t.hold_resume.remaining_hours) : '—'}</td>
             </tr>`;
           }).join('');
           return `<div class="td-project">
@@ -6994,6 +7060,7 @@ export async function mountTaskflowApp(opts = {}) {
               <thead><tr>
                 <th class="td-sticky">Task</th><th>Status</th><th>Planned</th><th>Assigned</th><th>Accepted</th>
                 <th>Accept</th><th>Submit</th><th>Start verify</th><th>Verified</th><th>Cycle</th><th>Extra</th>
+                <th>Hold at</th><th>Resume at</th><th>Remaining</th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table></div>
@@ -7171,15 +7238,24 @@ export async function mountTaskflowApp(opts = {}) {
       const stepHead = steps.map((s, i) =>
         `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
       const subHead = steps.map(() => '<th class="fms-sub-head">Planned</th><th class="fms-sub-head">Actual</th><th class="fms-sub-head">Status</th><th class="fms-sub-head">Time Delay</th>').join('');
-      const tbody = rows.map((r) => `<tr>
+      const tbody = rows.map((r) => {
+        const hr = r.hold_resume || {};
+        const leadTitle = [
+          `${r.lead_time_hrs || 0}h original`,
+          hr.remaining_hours != null ? `${hr.remaining_hours}h remaining` : '',
+          hr.held_at ? `Hold: ${fmtSheetDateTime(hr.held_at)}` : '',
+          hr.resumed_at ? `Resume: ${fmtSheetDateTime(hr.resumed_at)}` : '',
+        ].filter(Boolean).join(' · ');
+        return `<tr>
         <td class="fms-sticky" title="${escapeHtml(r.description || '')}">${escapeHtml(fmtSheetDateTime(r.timestamp))}</td>
         <td>${escapeHtml(r.job_no)}</td>
         <td>${escapeHtml(r.project)}</td>
         <td title="${escapeHtml(r.description || '')}">${escapeHtml(r.work_type)}</td>
         <td>${escapeHtml(r.person)}</td>
-        <td>${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
+        <td title="${escapeHtml(leadTitle)}">${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}${hr.is_on_hold ? ' ⏸' : ''}</td>
         ${steps.map((s) => fmsCell(r.steps?.[s.key])).join('')}
-      </tr>`).join('');
+      </tr>`;
+      }).join('');
 
       body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
         <table class="fms-table">
@@ -7211,13 +7287,17 @@ export async function mountTaskflowApp(opts = {}) {
   function downloadFmsCsv(data) {
     if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
     const steps = data.steps || [];
-    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
+    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME', 'Orig hrs', 'Remaining hrs', 'Hold at', 'Resume at'];
     steps.forEach((s) => head.push(`${s.label} Planned`, `${s.label} Actual`, `${s.label} Status`, `${s.label} Time Delay`));
     const lines = [head.join(',')];
     data.rows.forEach((r) => {
+      const hr = r.hold_resume || {};
       const cells = [
         r.timestamp || '', r.job_no, r.project, r.work_type,
         r.person, r.lead_time_hrs || 0,
+        hr.original_hours ?? r.lead_time_hrs ?? '',
+        hr.remaining_hours ?? '',
+        hr.held_at || '', hr.resumed_at || '',
       ];
       steps.forEach((s) => {
         const st = r.steps?.[s.key] || {};
