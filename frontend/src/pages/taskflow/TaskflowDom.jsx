@@ -111,9 +111,6 @@ export default function TaskflowDom() {
                 <input id="f-targetdate" type="date" required />
               </div>
             </div>
-            <div className="field" id="f-deadline-preview-wrap" style={{marginTop: '-6px'}}>
-              <div id="f-deadline-preview" className="form-hint">Enter hours to complete to see the employee's calculated deadline (office hours: 9:30 AM–6:30 PM, 1–2 PM lunch excluded).</div>
-            </div>
             <div className="field-grid">
               <div className="field">
                 <label htmlFor="f-priority">Priority</label>

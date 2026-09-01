@@ -603,6 +603,13 @@ export async function mountTaskflowApp(opts = {}) {
     return n % 1 === 0 ? `${n}h` : `${n.toFixed(1)}h`;
   }
 
+  /** Remaining working-time budget until due (excludes nights, lunch, Sunday). */
+  function workingTimeLeftMs(from, due) {
+    if (!due || !from) return 0;
+    const hours = elapsedWorkingHoursBetween(from, due);
+    return Math.max(0, hours * 3600000);
+  }
+
   /** Employee My Tasks: due line + live time-left / hold / overdue (HTML). */
   function fmtEmployeeTimerHtml(task, now = new Date()) {
     if (task.is_on_hold) {
@@ -629,14 +636,14 @@ export async function mountTaskflowApp(opts = {}) {
     if (!due) return `<div class="task-timer-wait">Accept task to start timer</div>`;
 
     if (isAssignmentOverdueTask(task, now)) {
-      const overdueMs = now - due;
+      const overdueMs = workingTimeLeftMs(due, now);
       return `
         <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
         <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
       `;
     }
 
-    const msLeft = due - now;
+    const msLeft = workingTimeLeftMs(now, due);
     const urgent = msLeft < 30 * 60 * 1000;
     return `
       <div class="task-timer-due">Due ${fmtDate(due.toISOString())}</div>
@@ -1399,33 +1406,6 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Add New Task ────────────────────────────────────────────────────────────
-  
-  // Live preview of the actual completion deadline while assigning a task —
-  // reuses the same office-hours-aware calculator (9:30 AM–6:30 PM, 1–2 PM
-  // lunch excluded, Sundays skipped) that's already used to show deadlines
-  // everywhere else in the app, so what the admin sees here always matches
-  // what employees/verifiers see later on the task itself.
-  function updateTaskDeadlinePreview() {
-    const previewEl = document.getElementById('f-deadline-preview');
-    if (!previewEl) return;
-    const hoursRaw = document.getElementById('f-hours').value;
-    const dateRaw  = document.getElementById('f-targetdate').value;
-  
-    if (!dateRaw) {
-      previewEl.innerHTML = '';
-      return;
-    }
-    const hours = hoursRaw === '' ? null : Number(hoursRaw);
-    if (hours == null || Number.isNaN(hours) || hours <= 0) {
-      previewEl.innerHTML = `Starts <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong> — add hours to see the calculated completion deadline.`;
-      return;
-    }
-    const due = addWorkingHours(dateRaw, hours);
-    previewEl.innerHTML = `⏱ With <strong>${hours}h</strong> of working time starting <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong>, this task is due by <strong>${escapeHtml(fmtDate(due.toISOString()))}</strong>.`;
-  }
-  document.getElementById('f-hours')?.addEventListener('input', updateTaskDeadlinePreview);
-  document.getElementById('f-targetdate')?.addEventListener('input', updateTaskDeadlinePreview);
-  updateTaskDeadlinePreview();
   
   els.addTaskForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
