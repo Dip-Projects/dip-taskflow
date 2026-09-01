@@ -21,6 +21,11 @@ app.get('/config.js', (_req, res) => {
   res.send(`window.__TF_CONFIG__=${JSON.stringify(payload)};`);
 });
 
+// The accept nudge needs ~15-minute granularity, but the Vercel plan only
+// allows one cron a day. Piggyback a throttled sweep on normal API traffic so
+// it fires during office hours; the daily cron stays as the backstop.
+app.use(require('./middleware/reminderSweep'));
+
 app.use('/api/auth',            require('./routes/auth'));
 app.use('/api/tasks',           require('./routes/tasks'));
 app.use('/api/master',          require('./routes/master'));
