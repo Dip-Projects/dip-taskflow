@@ -802,10 +802,7 @@ export async function mountTaskflowApp(opts = {}) {
       const deadline = employeeAssignedDeadline(task);
       const assignedAt = task.assigned_at || task.created_at;
       if (deadline) {
-        return `
-          <div class="task-timer-due">Due ${fmtDate(deadline.toISOString())}</div>
-          <div class="task-timer-sub">${formatHoursLabel(assignedHoursOf(task))} from assignment · Timer starts on Accept</div>
-        `;
+        return `<div class="task-timer-due">Due ${fmtDate(deadline.toISOString())}</div>`;
       }
       if (assignedAt) {
         return `
