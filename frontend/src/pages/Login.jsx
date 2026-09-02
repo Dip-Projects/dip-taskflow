@@ -47,7 +47,7 @@ export default function Login() {
           <div className="lp-panel-tagline">Civil Project Management Consultants</div>
           <div className="lp-panel-divider" />
           <div className="lp-panel-quote">
-            &ldquo;Quality + Quantity to be delivered on time.&rdquo;
+            &ldquo;Quality + Quantity to be delivered on time every time .&rdquo;
           </div>
         </div>
       </div>
@@ -62,7 +62,7 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="lp-heading">DIP Projects Platform</div>
+          <div className="lp-heading">DIP Projects </div>
           <div className="lp-subheading">
             Sign in to access project intelligence, reporting, and collaboration tools.
           </div>
