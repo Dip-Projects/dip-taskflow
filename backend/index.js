@@ -1,3 +1,9 @@
+// Every date calculation in this codebase — office hours, "today", week
+// ranges, recurring schedules — reads the local clock and assumes it is IST.
+// Vercel runs its functions in UTC, so pin the zone before anything builds a
+// Date. India has no DST, so a fixed zone is safe year round.
+process.env.TZ = 'Asia/Kolkata';
+
 require('dotenv').config();
 const path    = require('path');
 const express = require('express');

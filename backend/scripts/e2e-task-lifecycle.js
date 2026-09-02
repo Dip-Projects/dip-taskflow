@@ -66,11 +66,14 @@ async function call(method, path, token, body) {
 const hhmm = (iso) => (iso ? new Date(iso).toTimeString().slice(0, 5) : '—');
 const ymd = (v) => (v ? String(v).slice(0, 10) : '—');
 
-/** Local calendar day — toISOString would shift a local-midnight date back one. */
+/**
+ * The IST calendar day an instant falls on. Plan dates are stored at IST
+ * midnight, so reading them with the local getters (or toISOString) reports the
+ * previous day whenever this script runs outside IST.
+ */
 function localDay(d) {
   if (!d) return '—';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 let taskId = null;

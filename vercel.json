@@ -3,6 +3,14 @@
   "installCommand": "cd backend && npm install && cd ../frontend && npm install",
   "buildCommand": "cd frontend && npm run build && node scripts/copy-to-vercel-public.mjs && test -f public/index.html && ls public | head",
   "outputDirectory": "public",
+  "env": {
+    "TZ": "Asia/Kolkata"
+  },
+  "build": {
+    "env": {
+      "TZ": "Asia/Kolkata"
+    }
+  },
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
