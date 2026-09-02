@@ -6,6 +6,7 @@ process.env.TZ = 'Asia/Kolkata';
 
 require('dotenv').config();
 const path    = require('path');
+const { addWorkingHours } = require('./lib/workingHours');
 const express = require('express');
 const cors    = require('cors');
 const app     = express();
@@ -58,6 +59,17 @@ app.get('/api/health', (_, res) => {
     whatsappEnv: {
       META_PHONE_NUMBER_ID: phoneId,
       META_ACCESS_TOKEN: accessToken,
+    },
+    // Vercel reserves TZ, so it can only be set from code and the platform
+    // does not promise that sticks. Every deadline depends on the clock
+    // reading as IST, so surface it here instead of assuming.
+    clock: {
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+      localHour: new Date().getHours(),
+      istHour: Number(new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false })),
+      // Independent of the process clock — must hold even if TZ is ignored.
+      officeHoursSample: addWorkingHours('2026-09-02T11:33:20+05:30', 2)
+        .toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false }),
     },
   });
 });
