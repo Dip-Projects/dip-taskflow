@@ -1818,7 +1818,8 @@ export default function TaskflowDom() {
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
-            Your open tasks due in this leave window will move to this buddy only after they say Yes <strong>and</strong> leave is approved. If leave is rejected, tasks stay with you.
+            After you submit, you can choose per task: assign to this buddy now, keep on hold, or request a reschedule.
+            If you skip that step, open tasks due in the leave window still move to the buddy only after they say Yes <strong>and</strong> leave is approved.
           </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>
@@ -1827,6 +1828,27 @@ export default function TaskflowDom() {
           <button type="submit" className="primary-btn primary-btn-inline">Submit request</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  {/* After leave apply — plan open tasks (office employees only) */}
+  <div id="leaveTaskActionsModal" className="modal-backdrop" hidden={true}>
+    <div className="modal modal-wide">
+      <div className="modal-header">
+        <h3>Plan your tasks while on leave</h3>
+        <button className="modal-close" id="closeLeaveTaskActionsModal" type="button">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p id="leaveTaskActionsIntro" className="cell-muted" style={{marginTop: 0}}>
+          Choose what should happen to each open task. Site engineers are not included in this flow.
+        </p>
+        <div id="leaveTaskActionsList" className="leave-task-actions-list"></div>
+        <p id="leaveTaskActionsMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="skipLeaveTaskActions">Skip for now</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="submitLeaveTaskActions">Save choices</button>
+        </div>
+      </div>
     </div>
   </div>
 

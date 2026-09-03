@@ -2,6 +2,8 @@ const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const { elapsedWorkingHours } = require('../lib/workingHours');
+const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -168,16 +170,30 @@ function taskDay(iso) {
 async function fetchLeaveWindowTasks(leave) {
   const fromDay = String(leave.from_date).slice(0, 10);
   const toDay = String(leave.to_date).slice(0, 10);
-  const { data: tasks, error } = await supabase
-    .from('tasks')
-    .select('id, description, assigned_to, target_date, status, priority')
-    .eq('assigned_to', leave.user_id)
-    .in('status', ['Pending', 'In Progress']);
-  if (error) {
-    if (isBuddySchemaError(error)) return [];
-    throw error;
+  let tasks = [];
+  {
+    const withCover = await supabase
+      .from('tasks')
+      .select('id, description, assigned_to, target_date, status, priority, leave_cover_id')
+      .eq('assigned_to', leave.user_id)
+      .in('status', ['Pending', 'In Progress']);
+    if (withCover.error && isBuddySchemaError(withCover.error)) {
+      const retry = await supabase
+        .from('tasks')
+        .select('id, description, assigned_to, target_date, status, priority')
+        .eq('assigned_to', leave.user_id)
+        .in('status', ['Pending', 'In Progress']);
+      if (retry.error) throw retry.error;
+      tasks = retry.data || [];
+    } else if (withCover.error) {
+      throw withCover.error;
+    } else {
+      tasks = withCover.data || [];
+    }
   }
   return (tasks || []).filter((t) => {
+    // Already handled at leave apply (buddy / hold / reschedule) — don't auto-move again
+    if (t.leave_cover_id) return false;
     const day = taskDay(t.target_date);
     return day && day >= fromDay && day <= toDay;
   });
@@ -443,6 +459,262 @@ if (error) throw error;
   } catch (err) {
     console.error('Apply leave error:', err.message);
     res.status(500).json({ error: err.message || 'Could not submit leave request' });
+  }
+});
+
+// ----------------------------- open tasks for leave planning popup -----------------------------
+router.get('/:id/open-tasks', async (req, res) => {
+  try {
+    const { data: leave, error } = await supabase
+      .from('leaves')
+      .select('id, user_id, from_date, to_date, buddy_id, status')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!leave) return res.status(404).json({ error: 'Leave request not found' });
+    if (String(leave.user_id) !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Not your leave request' });
+    }
+
+    const fromDay = String(leave.from_date).slice(0, 10);
+    const toDay = String(leave.to_date).slice(0, 10);
+    const { data: tasks, error: tErr } = await supabase
+      .from('tasks')
+      .select(
+        'id, description, status, priority, target_date, hours_to_complete, accepted_at, is_on_hold, rescheduling_possible, reschedule_status, verification_status, project:projects(id, name)'
+      )
+      .eq('assigned_to', leave.user_id)
+      .in('status', ['Pending', 'In Progress', 'Ticket Raised'])
+      .order('target_date', { ascending: true });
+    if (tErr) throw tErr;
+
+    const rows = (tasks || []).map((t) => {
+      const day = taskDay(t.target_date);
+      const inWindow = !!(day && day >= fromDay && day <= toDay);
+      return { ...t, in_leave_window: inWindow };
+    });
+    // Prefer window tasks first, then other open work
+    rows.sort((a, b) => Number(b.in_leave_window) - Number(a.in_leave_window));
+    res.json({ leave, tasks: rows });
+  } catch (err) {
+    console.error('Leave open-tasks error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not load tasks' });
+  }
+});
+
+// ----------------------------- plan task actions right after leave apply -----------------------------
+router.post('/:id/task-actions', async (req, res) => {
+  try {
+    const { data: leave, error } = await supabase
+      .from('leaves')
+      .select('id, user_id, from_date, to_date, buddy_id, buddy_status, status')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (!leave) return res.status(404).json({ error: 'Leave request not found' });
+    if (String(leave.user_id) !== String(req.user.id)) {
+      return res.status(403).json({ error: 'Only the applicant can plan leave task actions' });
+    }
+    if (String(leave.status) !== 'Pending' && String(leave.status) !== 'Approved') {
+      return res.status(400).json({ error: 'Leave is no longer open for task planning' });
+    }
+
+    const actions = Array.isArray(req.body?.actions) ? req.body.actions : [];
+    if (!actions.length) {
+      return res.json({ ok: true, results: [] });
+    }
+
+    const results = [];
+    for (const raw of actions) {
+      const taskId = raw?.task_id;
+      const action = String(raw?.action || '').toLowerCase();
+      if (!taskId || !['buddy', 'hold', 'reschedule'].includes(action)) {
+        results.push({ task_id: taskId || null, action, ok: false, error: 'Invalid action' });
+        continue;
+      }
+      try {
+        const { data: task, error: tErr } = await supabase
+          .from('tasks')
+          .select(
+            'id, assigned_to, status, description, target_date, accepted_at, hours_to_complete, original_hours_to_complete, is_on_hold, hold_remaining_hours, held_at, hold_count, verification_status, reschedule_status, rescheduling_possible, task_events, leave_cover_id'
+          )
+          .eq('id', taskId)
+          .maybeSingle();
+        if (tErr) throw tErr;
+        if (!task) {
+          results.push({ task_id: taskId, action, ok: false, error: 'Task not found' });
+          continue;
+        }
+        if (String(task.assigned_to) !== String(req.user.id)) {
+          results.push({ task_id: taskId, action, ok: false, error: 'Not your task' });
+          continue;
+        }
+        if (task.status === 'Completed' || String(task.status).toLowerCase() === 'rejected') {
+          results.push({ task_id: taskId, action, ok: false, error: 'Task already closed' });
+          continue;
+        }
+
+        if (action === 'buddy') {
+          if (!leave.buddy_id) {
+            results.push({ task_id: taskId, action, ok: false, error: 'No buddy on this leave' });
+            continue;
+          }
+          const patch = {
+            assigned_to: leave.buddy_id,
+            leave_cover_id: leave.id,
+            leave_cover_from: leave.user_id,
+            is_on_hold: false,
+            hold_remaining_hours: null,
+            held_at: null,
+          };
+          let { error: upErr } = await supabase.from('tasks').update(patch).eq('id', taskId);
+          if (upErr && isBuddySchemaError(upErr)) {
+            const retry = await supabase
+              .from('tasks')
+              .update({ assigned_to: leave.buddy_id })
+              .eq('id', taskId);
+            upErr = retry.error;
+          }
+          if (upErr) throw upErr;
+          results.push({ task_id: taskId, action, ok: true });
+          continue;
+        }
+
+        if (action === 'hold') {
+          if (task.verification_status === 'Pending Verification') {
+            results.push({ task_id: taskId, action, ok: false, error: 'Cannot hold while verifying' });
+            continue;
+          }
+          const at = new Date().toISOString();
+          const markCover = {
+            leave_cover_id: leave.id,
+            leave_cover_from: leave.user_id,
+          };
+          if (task.status === 'In Progress' && task.accepted_at && !task.is_on_hold) {
+            const totalHours = Number(task.hours_to_complete);
+            let remaining = totalHours > 0 ? totalHours : 0;
+            try {
+              const anchor = workTimerAnchor(task) || task.accepted_at;
+              const budget = workTimerBudgetHours(task);
+              const elapsed = elapsedWorkingHours(anchor, at);
+              remaining = Math.max(0, Math.round((budget - elapsed) * 100) / 100);
+            } catch (_) {
+              /* keep remaining as hours_to_complete */
+            }
+            const events = Array.isArray(task.task_events) ? [...task.task_events] : [];
+            events.push({
+              at,
+              action: 'hold',
+              by: req.user.id,
+              remaining_hours: remaining,
+              timer: 'stopped',
+              reason: 'leave',
+              leave_id: leave.id,
+            });
+            const holdPatch = {
+              ...markCover,
+              is_on_hold: true,
+              held_at: at,
+              hold_remaining_hours: remaining,
+              hold_count: (Number(task.hold_count) || 0) + 1,
+              original_hours_to_complete:
+                task.original_hours_to_complete != null
+                  ? task.original_hours_to_complete
+                  : task.hours_to_complete,
+              task_events: events.slice(-80),
+            };
+            let { error: upErr } = await supabase.from('tasks').update(holdPatch).eq('id', taskId);
+            if (upErr) {
+              // Fallback without optional columns
+              const { error: up2 } = await supabase
+                .from('tasks')
+                .update({
+                  is_on_hold: true,
+                  held_at: at,
+                  hold_remaining_hours: remaining,
+                  ...markCover,
+                })
+                .eq('id', taskId);
+              if (up2 && isBuddySchemaError(up2)) {
+                const { error: up3 } = await supabase
+                  .from('tasks')
+                  .update({ is_on_hold: true, held_at: at, hold_remaining_hours: remaining })
+                  .eq('id', taskId);
+                if (up3) throw up3;
+              } else if (up2) throw up2;
+            }
+            results.push({ task_id: taskId, action, ok: true });
+            continue;
+          }
+          // Pending / already held: keep with employee, mark handled so buddy auto-transfer skips
+          let { error: upErr } = await supabase.from('tasks').update(markCover).eq('id', taskId);
+          if (upErr && isBuddySchemaError(upErr)) {
+            results.push({
+              task_id: taskId,
+              action,
+              ok: true,
+              note: 'Kept with you (cover columns not available)',
+            });
+          } else if (upErr) throw upErr;
+          else results.push({ task_id: taskId, action, ok: true });
+          continue;
+        }
+
+        if (action === 'reschedule') {
+          const requested_date = String(raw?.requested_date || '').slice(0, 10);
+          if (!requested_date) {
+            results.push({ task_id: taskId, action, ok: false, error: 'Pick a new date' });
+            continue;
+          }
+          if (!task.rescheduling_possible) {
+            results.push({ task_id: taskId, action, ok: false, error: 'Reschedule not allowed on this task' });
+            continue;
+          }
+          if (task.status === 'Ticket Raised') {
+            results.push({ task_id: taskId, action, ok: false, error: 'Ticket raised — cannot reschedule' });
+            continue;
+          }
+          if (task.verification_status === 'Pending Verification') {
+            results.push({ task_id: taskId, action, ok: false, error: 'Pending verification' });
+            continue;
+          }
+          if (task.reschedule_status === 'Pending') {
+            results.push({ task_id: taskId, action, ok: false, error: 'Reschedule already pending' });
+            continue;
+          }
+          const reason =
+            (raw?.reason && String(raw.reason).trim()) ||
+            `Leave ${String(leave.from_date).slice(0, 10)} → ${String(leave.to_date).slice(0, 10)}`;
+          const patch = {
+            reschedule_status: 'Pending',
+            reschedule_requested_date: requested_date,
+            reschedule_reason: reason,
+            reschedule_requested_at: new Date().toISOString(),
+            reschedule_decided_by: null,
+            reschedule_decided_at: null,
+            leave_cover_id: leave.id,
+            leave_cover_from: leave.user_id,
+          };
+          let { error: upErr } = await supabase.from('tasks').update(patch).eq('id', taskId);
+          if (upErr && isBuddySchemaError(upErr)) {
+            delete patch.leave_cover_id;
+            delete patch.leave_cover_from;
+            const retry = await supabase.from('tasks').update(patch).eq('id', taskId);
+            upErr = retry.error;
+          }
+          if (upErr) throw upErr;
+          results.push({ task_id: taskId, action, ok: true });
+        }
+      } catch (inner) {
+        results.push({ task_id: taskId, action, ok: false, error: inner.message || 'Failed' });
+      }
+    }
+
+    const okCount = results.filter((r) => r.ok).length;
+    res.json({ ok: true, applied: okCount, results });
+  } catch (err) {
+    console.error('Leave task-actions error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not apply task actions' });
   }
 });
 

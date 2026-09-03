@@ -143,6 +143,13 @@ function collectEls() {
     leaveBuddy: document.getElementById('leave-buddy'),
     closeLeaveModal: document.getElementById('closeLeaveModal'),
     cancelLeaveModal: document.getElementById('cancelLeaveModal'),
+    leaveTaskActionsModal: document.getElementById('leaveTaskActionsModal'),
+    leaveTaskActionsList: document.getElementById('leaveTaskActionsList'),
+    leaveTaskActionsIntro: document.getElementById('leaveTaskActionsIntro'),
+    leaveTaskActionsMsg: document.getElementById('leaveTaskActionsMsg'),
+    closeLeaveTaskActionsModal: document.getElementById('closeLeaveTaskActionsModal'),
+    skipLeaveTaskActions: document.getElementById('skipLeaveTaskActions'),
+    submitLeaveTaskActions: document.getElementById('submitLeaveTaskActions'),
     leaveApprovalsList: document.getElementById('leaveApprovalsList'),
     leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
     buddyRequestsList: document.getElementById('buddyRequestsList'),
@@ -4145,6 +4152,170 @@ export async function mountTaskflowApp(opts = {}) {
     return `${name} (${st})`;
   }
 
+  function isOfficeLeaveEmployee() {
+    const dept = String(state.user?.department || '').trim().toLowerCase();
+    return dept !== 'site engineer';
+  }
+
+  let _leaveTaskPlanLeaveId = null;
+  let _leaveTaskPlanBuddyName = '';
+
+  function closeLeaveTaskActionsModal() {
+    if (els.leaveTaskActionsModal) els.leaveTaskActionsModal.hidden = true;
+    _leaveTaskPlanLeaveId = null;
+    if (els.leaveTaskActionsList) els.leaveTaskActionsList.innerHTML = '';
+    if (els.leaveTaskActionsMsg) els.leaveTaskActionsMsg.hidden = true;
+  }
+
+  async function openLeaveTaskActionsModal(leave) {
+    if (!leave?.id || !isOfficeLeaveEmployee()) return false;
+    _leaveTaskPlanLeaveId = leave.id;
+    _leaveTaskPlanBuddyName = leave.buddy?.full_name || 'your buddy';
+    if (els.leaveTaskActionsMsg) els.leaveTaskActionsMsg.hidden = true;
+    if (els.leaveTaskActionsList) {
+      els.leaveTaskActionsList.innerHTML = '<div class="empty-state">Loading your tasks…</div>';
+    }
+    if (els.leaveTaskActionsModal) els.leaveTaskActionsModal.hidden = false;
+    try {
+      const data = await api(`/leaves/${leave.id}/open-tasks`);
+      const tasks = data?.tasks || [];
+      if (!tasks.length) {
+        closeLeaveTaskActionsModal();
+        return false;
+      }
+      if (els.leaveTaskActionsIntro) {
+        els.leaveTaskActionsIntro.textContent =
+          `Leave ${String(leave.from_date).slice(0, 10)} → ${String(leave.to_date).slice(0, 10)}. ` +
+          `For each task pick: assign to ${_leaveTaskPlanBuddyName}, keep on hold, or request a reschedule.`;
+      }
+      renderLeaveTaskActionsList(tasks, leave);
+      return true;
+    } catch (err) {
+      closeLeaveTaskActionsModal();
+      showToast(err.message || 'Could not load tasks for leave planning', 'error');
+      return false;
+    }
+  }
+
+  function renderLeaveTaskActionsList(tasks, leave) {
+    const list = els.leaveTaskActionsList;
+    if (!list) return;
+    list.innerHTML = '';
+    const defaultResched = (() => {
+      try {
+        const d = new Date(String(leave.to_date).slice(0, 10) + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      } catch (_) {
+        return String(leave.to_date).slice(0, 10);
+      }
+    })();
+
+    tasks.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'leave-task-action-row';
+      row.dataset.taskId = t.id;
+      const canResched = !!t.rescheduling_possible && t.reschedule_status !== 'Pending'
+        && t.status !== 'Ticket Raised' && t.verification_status !== 'Pending Verification';
+      const proj = t.project?.name ? ` · ${t.project.name}` : '';
+      const windowTag = t.in_leave_window
+        ? '<span class="pill pill-Pending" style="font-size:10px;margin-left:6px">In leave window</span>'
+        : '';
+      row.innerHTML = `
+        <div class="leave-task-action-head">
+          <strong>${escapeHtml(t.description || 'Task')}</strong>${windowTag}
+          <div class="cell-muted" style="font-size:0.78rem;margin-top:2px">
+            ${escapeHtml(t.status)}${escapeHtml(proj)}
+            · due ${escapeHtml(fmtDateOnly(t.target_date) || '—')}
+            · ${escapeHtml(t.priority || '')}
+          </div>
+        </div>
+        <div class="leave-task-action-opts">
+          <label class="leave-task-opt">
+            <input type="radio" name="leave-act-${t.id}" value="buddy" checked />
+            Assign to buddy (${escapeHtml(_leaveTaskPlanBuddyName)})
+          </label>
+          <label class="leave-task-opt">
+            <input type="radio" name="leave-act-${t.id}" value="hold" />
+            Keep on hold with me
+          </label>
+          <label class="leave-task-opt${canResched ? '' : ' is-disabled'}">
+            <input type="radio" name="leave-act-${t.id}" value="reschedule" ${canResched ? '' : 'disabled'} />
+            Reschedule request
+          </label>
+          <div class="leave-task-resched-wrap" hidden>
+            <label class="filter-label">New target date</label>
+            <input type="date" class="leave-task-resched-date" value="${defaultResched}" ${canResched ? '' : 'disabled'} />
+          </div>
+        </div>
+      `;
+      const radios = row.querySelectorAll(`input[name="leave-act-${t.id}"]`);
+      const wrap = row.querySelector('.leave-task-resched-wrap');
+      radios.forEach((r) => {
+        r.addEventListener('change', () => {
+          if (wrap) wrap.hidden = row.querySelector(`input[name="leave-act-${t.id}"]:checked`)?.value !== 'reschedule';
+        });
+      });
+      list.appendChild(row);
+    });
+  }
+
+  async function submitLeaveTaskActions() {
+    if (!_leaveTaskPlanLeaveId) return;
+    const msg = els.leaveTaskActionsMsg;
+    if (msg) msg.hidden = true;
+    const rows = [...(els.leaveTaskActionsList?.querySelectorAll('.leave-task-action-row') || [])];
+    const actions = [];
+    for (const row of rows) {
+      const taskId = row.dataset.taskId;
+      const choice = row.querySelector(`input[name="leave-act-${taskId}"]:checked`)?.value;
+      if (!choice) continue;
+      if (choice === 'reschedule') {
+        const requested_date = row.querySelector('.leave-task-resched-date')?.value;
+        if (!requested_date) {
+          if (msg) {
+            msg.textContent = 'Pick a new date for every reschedule choice';
+            msg.hidden = false;
+          }
+          return;
+        }
+        actions.push({ task_id: taskId, action: 'reschedule', requested_date });
+      } else {
+        actions.push({ task_id: taskId, action: choice });
+      }
+    }
+    if (!actions.length) {
+      closeLeaveTaskActionsModal();
+      return;
+    }
+    try {
+      if (els.submitLeaveTaskActions) els.submitLeaveTaskActions.disabled = true;
+      const res = await api(`/leaves/${_leaveTaskPlanLeaveId}/task-actions`, {
+        method: 'POST',
+        body: { actions },
+      });
+      const failed = (res.results || []).filter((r) => !r.ok);
+      if (failed.length) {
+        showToast(
+          `Saved ${res.applied || 0} task plan(s); ${failed.length} failed (e.g. reschedule not allowed)`,
+          'error'
+        );
+      } else {
+        showToast(`Task plans saved for leave (${res.applied || actions.length}) ✅`, 'success');
+      }
+      closeLeaveTaskActionsModal();
+      if (state.activeView === 'my') loadMyTasks();
+      refreshNavBadges();
+    } catch (err) {
+      if (msg) {
+        msg.textContent = err.message || 'Could not save task plans';
+        msg.hidden = false;
+      } else showToast(err.message, 'error');
+    } finally {
+      if (els.submitLeaveTaskActions) els.submitLeaveTaskActions.disabled = false;
+    }
+  }
+
   function openLeaveModal() {
     els.leaveFormMsg.hidden = true;
     els.leaveForm.reset();
@@ -4154,6 +4325,12 @@ export async function mountTaskflowApp(opts = {}) {
   els.openApplyLeave?.addEventListener('click', openLeaveModal);
   els.closeLeaveModal?.addEventListener('click', () => { els.leaveModal.hidden = true; });
   els.cancelLeaveModal?.addEventListener('click', () => { els.leaveModal.hidden = true; });
+  els.closeLeaveTaskActionsModal?.addEventListener('click', closeLeaveTaskActionsModal);
+  els.skipLeaveTaskActions?.addEventListener('click', () => {
+    closeLeaveTaskActionsModal();
+    showToast('Leave submitted — you can still cover tasks later via buddy approval', 'success');
+  });
+  els.submitLeaveTaskActions?.addEventListener('click', submitLeaveTaskActions);
   els.leaveForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.leaveFormMsg.hidden = true;
     const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
@@ -4163,7 +4340,7 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
     try {
-      await api('/leaves', {
+      const created = await api('/leaves', {
         method: 'POST',
         body: {
           from_date: els.leaveFrom.value,
@@ -4173,11 +4350,20 @@ export async function mountTaskflowApp(opts = {}) {
           buddy_id: buddyId,
         }
       });
-      showToast('Leave request submitted — waiting for buddy Yes/No ✅', 'success');
       els.leaveModal.hidden = true;
       if (state.activeView === 'applyleave') loadMyLeaves();
       if (state.activeView === 'buddyrequests') loadBuddyRequests();
       refreshNavBadges();
+
+      let openedPlan = false;
+      if (isOfficeLeaveEmployee()) {
+        openedPlan = await openLeaveTaskActionsModal(created);
+      }
+      if (!openedPlan) {
+        showToast('Leave request submitted — waiting for buddy Yes/No ✅', 'success');
+      } else {
+        showToast('Leave submitted — choose what to do with your open tasks', 'success');
+      }
     } catch (err) { els.leaveFormMsg.textContent = err.message; els.leaveFormMsg.hidden = false; }
   });
 
