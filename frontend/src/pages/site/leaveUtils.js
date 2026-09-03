@@ -210,17 +210,19 @@ export async function getSiteProjectStaff(supabase, site) {
 }
 
 /**
- * Engineer / Jr / Incharge leave → Co-ordinator + Head of that site (from projects).
+ * Engineer / Jr / Incharge leave → Co-ordinator AND Head must both approve.
  * Co-ordinator leave → Head only.
  * Head leave → auto-approved.
  */
 export async function resolveApprovalChain(supabase, site, _applicantRole, applicantUsername) {
   if (!site) {
-    return { levelApprover: null, headApprover: null, autoApproved: false };
+    return { levelApprover: null, headApprover: null, autoApproved: false, requiresLevel: true };
   }
   const staff = await getSiteProjectStaff(supabase, site);
   const applicantIsHead =
     staff.head?.username === applicantUsername || staff.teamLeader?.username === applicantUsername;
+  const applicantIsCoord = staff.coordinator?.username === applicantUsername;
+
   const head =
     staff.head && staff.head.username !== applicantUsername
       ? asApprover(staff.head, "Head")
@@ -228,19 +230,18 @@ export async function resolveApprovalChain(supabase, site, _applicantRole, appli
         ? asApprover(staff.teamLeader, "Head")
         : null;
 
-  if (applicantIsHead && !head) {
-    return { levelApprover: null, headApprover: null, autoApproved: true };
+  if (applicantIsHead) {
+    return { levelApprover: null, headApprover: null, autoApproved: true, requiresLevel: false };
   }
 
-  const applicantIsCoord = staff.coordinator?.username === applicantUsername;
+  const samePerson = staff.coordinator && head && staff.coordinator.username === head.username;
+  const requiresLevel = !applicantIsCoord && !samePerson;
   let levelApprover = null;
-  if (!applicantIsCoord && staff.coordinator && staff.coordinator.username !== applicantUsername) {
-    if (!head || staff.coordinator.username !== head.username) {
-      levelApprover = asApprover(staff.coordinator, "Co-ordinator");
-    }
+  if (requiresLevel && staff.coordinator) {
+    levelApprover = asApprover(staff.coordinator, "Co-ordinator");
   }
 
-  return { levelApprover, headApprover: head, autoApproved: false };
+  return { levelApprover, headApprover: head, autoApproved: false, requiresLevel };
 }
 
 /** Sites this user manages via projects.team_leader_id / coordinator_id / site_incharge_id. */
@@ -275,13 +276,19 @@ export async function fetchManagedSites(supabase, user) {
   return { siteNames, headSites, coordSites };
 }
 
-export function leaveActionSlot(leave, user, managed) {
+export function leaveRolesForUser(leave, user, managed) {
   const uname = user?.user_name;
-  if (!uname) return null;
-  if (leave.head_approver_user_name === uname) return "head";
-  if (leave.level_approver_user_name === uname) return "level";
-  const key = String(leave.site_name || "").trim().toLowerCase();
-  if (managed?.headSites?.has(key)) return "head";
-  if (managed?.coordSites?.has(key)) return "level";
+  const key = String(leave?.site_name || "").trim().toLowerCase();
+  if (!uname) return { asHead: false, asLevel: false };
+  return {
+    asHead: leave.head_approver_user_name === uname || !!managed?.headSites?.has(key),
+    asLevel: leave.level_approver_user_name === uname || !!managed?.coordSites?.has(key),
+  };
+}
+
+export function leaveActionSlot(leave, user, managed) {
+  const { asHead, asLevel } = leaveRolesForUser(leave, user, managed);
+  if (asHead) return "head";
+  if (asLevel) return "level";
   return null;
 }

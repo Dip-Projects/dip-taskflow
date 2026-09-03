@@ -20,6 +20,7 @@ import {
   resolveApprovalChain,
   fetchManagedSites,
   leaveActionSlot,
+  leaveRolesForUser,
 } from "./leaveUtils.js";
 import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
@@ -1043,13 +1044,11 @@ function LeaveApprovals({ user }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const slotOf = (l) => leaveActionSlot(l, user, managed);
-  const isMyHeadSlot = (l) => slotOf(l) === "head";
+  const rolesOf = (l) => leaveRolesForUser(l, user, managed);
+  const isMyHeadSlot = (l) => rolesOf(l).asHead;
   const needsMyAction = (l) => {
-    const slot = slotOf(l);
-    if (slot === "head") return l.head_approved === null;
-    if (slot === "level") return l.level_approved === null;
-    return false;
+    const { asHead, asLevel } = rolesOf(l);
+    return (asLevel && l.level_approved === null) || (asHead && l.head_approved === null);
   };
 
   const pending = leaves.filter(needsMyAction);
@@ -1057,18 +1056,27 @@ function LeaveApprovals({ user }) {
 
   const approve = async (leave) => {
     setActioningId(leave.id);
-    const isHead = isMyHeadSlot(leave);
-    let newLevel = isHead ? leave.level_approved : true;
-    const newHead = isHead ? true : leave.head_approved;
-    if (isHead && newLevel === null && !leave.level_approver_user_name) newLevel = true;
-    const payload = isHead
-      ? { head_approved: true, level_approved: newLevel, status: deriveLeaveStatus(newLevel, true) }
-      : { level_approved: true, status: deriveLeaveStatus(true, newHead) };
+    const { asHead, asLevel } = rolesOf(leave);
+    const newLevel = asLevel && leave.level_approved === null ? true : leave.level_approved;
+    const newHead = asHead && leave.head_approved === null ? true : leave.head_approved;
+    const payload = {
+      ...(asLevel && leave.level_approved === null ? { level_approved: true } : {}),
+      ...(asHead && leave.head_approved === null ? { head_approved: true } : {}),
+      status: deriveLeaveStatus(newLevel, newHead),
+    };
 
     const { error } = await supabase.from("site_leaves").update(payload).eq("id", leave.id);
     setActioningId(null);
     if (error) { showToast("err", "Failed: " + error.message); return; }
-    showToast("ok", "Leave approved.");
+    const waiting =
+      deriveLeaveStatus(newLevel, newHead) === "pending"
+        ? asHead && newLevel !== true
+          ? " Waiting for Co-ordinator."
+          : asLevel && newHead !== true
+            ? " Waiting for Head."
+            : ""
+        : "";
+    showToast("ok", "Your approval was recorded." + waiting);
     load();
   };
 
@@ -1149,14 +1157,14 @@ function LeaveApprovals({ user }) {
                 </div>
 
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {l.level_approver_user_name && (
+                  {(l.level_approver_user_name || l.level_approved === null) && (
                       <span className={`badge ${l.level_approved===true?"badge-green":l.level_approved===false?"badge-red":"badge-amber"}`} style={{fontSize:10}}>
-                        {l.level_approver_role || "Level"} ({l.level_approver_name || l.level_approver_user_name}): {l.level_approved===true?"✓ Approved":l.level_approved===false?"✗ Rejected":"Pending"}
+                        {l.level_approver_role || "Co-ordinator"}{l.level_approver_name || l.level_approver_user_name ? ` (${l.level_approver_name || l.level_approver_user_name})` : ""}: {l.level_approved===true?"✓ Approved":l.level_approved===false?"✗ Rejected":"Pending"}
                       </span>
                     )}
-                    {l.head_approver_user_name && (
+                    {(l.head_approver_user_name || l.head_approved === null) && (
                       <span className={`badge ${l.head_approved===true?"badge-green":l.head_approved===false?"badge-red":"badge-amber"}`} style={{fontSize:10}}>
-                        {l.head_approver_role || "Head"} ({l.head_approver_name || l.head_approver_user_name}): {l.head_approved===true?"✓ Approved":l.head_approved===false?"✗ Rejected":"Pending"}
+                        Head{l.head_approver_name || l.head_approver_user_name ? ` (${l.head_approver_name || l.head_approver_user_name})` : ""}: {l.head_approved===true?"✓ Approved":l.head_approved===false?"✗ Rejected":"Pending"}
                       </span>
                     )}
                 </div>
@@ -1331,8 +1339,8 @@ const submit = async () => {
       chain ||
       (await resolveApprovalChain(supabase, site, applicantRole, user.user_name));
 
-    const initialLevel = c.levelApprover ? null : true;
-    const initialHead = c.autoApproved ? true : c.headApprover ? null : true;
+    const initialLevel = c.autoApproved || c.requiresLevel === false ? true : null;
+    const initialHead = c.autoApproved ? true : null;
 
   if (!(await tableExists('site_leaves'))) {
     setBusy(false);
@@ -1413,12 +1421,12 @@ const submit = async () => {
               )}
               {!chain?.levelApprover &&
                 !chain?.headApprover &&
-                "the Head of this site for approval."}
-              {chain?.levelApprover && chain?.headApprover
+                (chain?.requiresLevel
+                  ? "the Co-ordinator and Head of this site."
+                  : "the Head of this site.")}
+              {chain?.requiresLevel
                 ? " Both must approve before leave is granted."
-                : chain?.headApprover
-                  ? " Only the Head needs to approve."
-                  : ""}
+                : " Only the Head needs to approve."}
             </>
           )}
         </span>
@@ -1790,10 +1798,8 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
       merged.push(row);
     });
     const count = merged.filter((l) => {
-      const slot = leaveActionSlot(l, u, sites);
-      if (slot === "head") return l.head_approved === null;
-      if (slot === "level") return l.level_approved === null;
-      return false;
+      const { asHead, asLevel } = leaveRolesForUser(l, u, sites);
+      return (asLevel && l.level_approved === null) || (asHead && l.head_approved === null);
     }).length;
     setApprovalsPendingCount(count);
   }, []);
