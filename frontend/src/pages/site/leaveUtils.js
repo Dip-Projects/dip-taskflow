@@ -156,145 +156,132 @@ export async function computeMonthlyLeaveBalance(supabase, user, targetMonth) {
   };
 }
 
-function belongsToSite(row, site) {
-  const want = String(site || "").trim().toLowerCase();
-  if (!want) return false;
-  if (String(row.site_name || "").trim().toLowerCase() === want) return true;
-  const names = Array.isArray(row.site_names) ? row.site_names : [];
-  return names.some((n) => String(n || "").trim().toLowerCase() === want);
+function sameId(a, b) {
+  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
 }
 
-function asPerson(row, rank) {
-  if (!row?.username) return null;
+function asApprover(person, roleLabel) {
+  if (!person?.username) return null;
   return {
-    username: row.username,
-    name: row.name || row.full_name || row.username,
-    role: ROLE_DISPLAY[ROLE_LEVELS[rank]] || ROLE_LEVELS[rank] || row.role || "",
-    rank,
+    username: person.username,
+    name: person.name || person.full_name || person.username,
+    role: roleLabel,
   };
 }
 
-async function fetchUserById(supabase, id) {
+async function fetchPersonById(supabase, id) {
   if (!id) return null;
   const { data } = await supabase
     .from("site_user_details")
     .select(SITE_USER_COLS)
     .eq("id", id)
     .maybeSingle();
-  return data || null;
-}
-
-async function fetchUsersOnSite(supabase, site) {
-  const [{ data: byPrimary }, { data: byList }] = await Promise.all([
-    supabase.from("site_user_details").select(SITE_USER_COLS).eq("status", "Active").ilike("site_name", site),
-    supabase.from("site_user_details").select(SITE_USER_COLS).eq("status", "Active").contains("site_names", [site]),
-  ]);
-  const merged = [];
-  const seen = new Set();
-  [...(byPrimary || []), ...(byList || [])].forEach((row) => {
-    if (!row?.username || seen.has(row.username)) return;
-    if (!belongsToSite(row, site)) return;
-    seen.add(row.username);
-    merged.push(row);
-  });
-  return merged;
-}
-
-/**
- * People on this site, grouped by ladder rank.
- * Site Head / Co-ordinator / Incharge come from `projects` assignments first
- * (Manage Sites), then anyone else assigned to the site via site_name / site_names.
- */
-export async function loadSiteRoster(supabase, site) {
-  const byRank = { 0: [], 1: [], 2: [], 3: [], 4: [] };
-  const seen = new Set();
-
-  const add = (row, forcedRank) => {
-    if (!row?.username || seen.has(row.username)) return;
-    if (String(row.status || "Active").toLowerCase() === "inactive") return;
-    const rank = forcedRank != null ? forcedRank : siteRoleRank(row.role);
-    if (rank == null || rank < 0) return;
-    seen.add(row.username);
-    const person = asPerson(row, rank);
-    if (person) byRank[rank].push(person);
-  };
-
-  const { data: project } = await supabase
-    .from("projects")
-    .select("team_leader_id, coordinator_id, site_incharge_id")
-    .ilike("name", site)
+  if (data?.username) {
+    return { id: data.id, username: data.username, name: data.name, role: data.role };
+  }
+  const { data: u } = await supabase
+    .from("users")
+    .select("id, username, full_name, designation")
+    .eq("id", id)
     .maybeSingle();
+  if (!u?.username) return null;
+  return { id: u.id, username: u.username, name: u.full_name, role: u.designation };
+}
 
-  if (project) {
-    const [leader, coord, incharge] = await Promise.all([
-      fetchUserById(supabase, project.team_leader_id),
-      fetchUserById(supabase, project.coordinator_id),
-      fetchUserById(supabase, project.site_incharge_id),
-    ]);
-    if (leader) add(leader, 4);
-    if (coord) add(coord, 3);
-    if (incharge && incharge.username !== leader?.username) {
-      add(incharge, leader ? 2 : 4);
-    }
-  }
-
-  const onSite = await fetchUsersOnSite(supabase, site);
-  onSite.forEach((row) => add(row, null));
-
-  const { data: assigned } = await supabase
-    .from("user_site_assignments")
-    .select("user_name")
-    .ilike("site_name", site);
-  const extraNames = [...new Set((assigned || []).map((a) => a.user_name).filter(Boolean))].filter(
-    (n) => !seen.has(n)
-  );
-  if (extraNames.length) {
-    const { data: extraUsers } = await supabase
-      .from("site_user_details")
-      .select(SITE_USER_COLS)
-      .in("username", extraNames)
-      .eq("status", "Active");
-    (extraUsers || []).forEach((row) => add(row, null));
-  }
-
-  return byRank;
+/** projects.site_incharge_id = Head, coordinator_id = Co-ordinator, team_leader_id = fallback Head. */
+export async function getSiteProjectStaff(supabase, site) {
+  const want = String(site || "").trim().toLowerCase();
+  if (!want) return { head: null, coordinator: null, teamLeader: null };
+  const { data: rows } = await supabase
+    .from("projects")
+    .select("id, name, team_leader_id, coordinator_id, site_incharge_id");
+  const project = (rows || []).find((p) => String(p.name || "").trim().toLowerCase() === want) || null;
+  if (!project) return { head: null, coordinator: null, teamLeader: null };
+  const [teamLeader, coordinator, incharge] = await Promise.all([
+    fetchPersonById(supabase, project.team_leader_id),
+    fetchPersonById(supabase, project.coordinator_id),
+    fetchPersonById(supabase, project.site_incharge_id),
+  ]);
+  return {
+    head: incharge || teamLeader,
+    coordinator,
+    teamLeader,
+  };
 }
 
 /**
- * For a given site: Head always approves. The next filled role above the
- * applicant on that same site is the level approver.
- * Engineer at Belcon (Head + Coordinator, no Incharge) → Coordinator + Head.
- * Coordinator → Head only.
+ * Engineer / Jr / Incharge leave → Co-ordinator + Head of that site (from projects).
+ * Co-ordinator leave → Head only.
+ * Head leave → auto-approved.
  */
-export async function resolveApprovalChain(supabase, site, applicantRole, applicantUsername) {
+export async function resolveApprovalChain(supabase, site, _applicantRole, applicantUsername) {
   if (!site) {
     return { levelApprover: null, headApprover: null, autoApproved: false };
   }
+  const staff = await getSiteProjectStaff(supabase, site);
+  const applicantIsHead =
+    staff.head?.username === applicantUsername || staff.teamLeader?.username === applicantUsername;
+  const head =
+    staff.head && staff.head.username !== applicantUsername
+      ? asApprover(staff.head, "Head")
+      : staff.teamLeader && staff.teamLeader.username !== applicantUsername
+        ? asApprover(staff.teamLeader, "Head")
+        : null;
 
-  const roster = await loadSiteRoster(supabase, site);
-  const applicantRank = siteRoleRank(applicantRole);
-  const idx = applicantRank < 0 ? 1 : applicantRank;
-
-  const heads = (roster[4] || []).filter((p) => p.username !== applicantUsername);
-  const headApprover = heads[0] || null;
-  const applicantIsSiteHead = (roster[4] || []).some((p) => p.username === applicantUsername);
-
-  if (applicantIsSiteHead && !headApprover) {
+  if (applicantIsHead && !head) {
     return { levelApprover: null, headApprover: null, autoApproved: true };
   }
 
+  const applicantIsCoord = staff.coordinator?.username === applicantUsername;
   let levelApprover = null;
-  for (let r = idx + 1; r <= 3; r++) {
-    const cand = (roster[r] || []).find((p) => p.username !== applicantUsername);
-    if (cand) {
-      levelApprover = cand;
-      break;
+  if (!applicantIsCoord && staff.coordinator && staff.coordinator.username !== applicantUsername) {
+    if (!head || staff.coordinator.username !== head.username) {
+      levelApprover = asApprover(staff.coordinator, "Co-ordinator");
     }
   }
 
-  if (levelApprover && headApprover && levelApprover.username === headApprover.username) {
-    levelApprover = null;
-  }
+  return { levelApprover, headApprover: head, autoApproved: false };
+}
 
-  return { levelApprover, headApprover, autoApproved: false };
+/** Sites this user manages via projects.team_leader_id / coordinator_id / site_incharge_id. */
+export async function fetchManagedSites(supabase, user) {
+  const empty = { siteNames: [], headSites: new Set(), coordSites: new Set() };
+  if (!user) return empty;
+  let uid = user.id;
+  if (!uid && user.user_name) {
+    const { data } = await supabase
+      .from("site_user_details")
+      .select("id")
+      .eq("username", user.user_name)
+      .maybeSingle();
+    uid = data?.id;
+  }
+  if (!uid) return empty;
+  const { data: rows } = await supabase
+    .from("projects")
+    .select("name, team_leader_id, coordinator_id, site_incharge_id")
+    .or(`team_leader_id.eq.${uid},coordinator_id.eq.${uid},site_incharge_id.eq.${uid}`);
+  const siteNames = [];
+  const headSites = new Set();
+  const coordSites = new Set();
+  (rows || []).forEach((p) => {
+    const name = String(p.name || "").trim();
+    if (!name) return;
+    siteNames.push(name);
+    const key = name.toLowerCase();
+    if (sameId(p.site_incharge_id, uid) || sameId(p.team_leader_id, uid)) headSites.add(key);
+    if (sameId(p.coordinator_id, uid)) coordSites.add(key);
+  });
+  return { siteNames, headSites, coordSites };
+}
+
+export function leaveActionSlot(leave, user, managed) {
+  const uname = user?.user_name;
+  if (!uname) return null;
+  if (leave.head_approver_user_name === uname) return "head";
+  if (leave.level_approver_user_name === uname) return "level";
+  const key = String(leave.site_name || "").trim().toLowerCase();
+  if (managed?.headSites?.has(key)) return "head";
+  if (managed?.coordSites?.has(key)) return "level";
+  return null;
 }

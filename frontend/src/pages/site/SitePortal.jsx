@@ -18,6 +18,8 @@ import {
   isMonthlyLeaveRole,
   canApproveSiteLeave,
   resolveApprovalChain,
+  fetchManagedSites,
+  leaveActionSlot,
 } from "./leaveUtils.js";
 import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
@@ -484,16 +486,9 @@ function buildNav(user, visMap) {
   const showSiteLeave = showLeaveApprovalsMenu(user, visMap);
 
   if (isOfficeSiteViewer(user)) {
-    const items = [];
-    if (showSiteLeave) {
-      items.push({
-        section: "leave",
-        label: "Leave",
-        children: [
-          { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
-        ],
-      });
-    }
+    const items = [
+      { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
+    ];
     if (visAllows(visMap, "site-report", user)) {
       items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
     }
@@ -1004,11 +999,12 @@ function MyLeave({ user, onApply }) {
 }
 function LeaveApprovals({ user }) {
   const [leaves, setLeaves] = useState([]);
+  const [managed, setManaged] = useState({ siteNames: [], headSites: new Set(), coordSites: new Set() });
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState(null);
   const [toast, setToast] = useState(null);
   const [tab, setTab] = useState("pending");
-  const [rejectTarget, setRejectTarget] = useState(null); // { leave, isHead }
+  const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
 
   const showToast = (type, msg) => { setToast({ type, msg }); setTimeout(() => setToast(null), 4000); };
@@ -1016,44 +1012,66 @@ function LeaveApprovals({ user }) {
   const load = useCallback(async () => {
     if (!user?.user_name) return;
     setLoading(true);
-    const { data, error } = await fromMaybe('site_leaves', (q) =>
+    const sites = await fetchManagedSites(supabase, user);
+    setManaged(sites);
+
+    const named = await fromMaybe("site_leaves", (q) =>
       q
-        .select('*')
+        .select("*")
         .or(`level_approver_user_name.eq.${user.user_name},head_approver_user_name.eq.${user.user_name}`)
-        .order('created_at', { ascending: false })
+        .order("created_at", { ascending: false })
     );
-    if (!error) setLeaves(data || []);
+
+    let bySite = { data: [] };
+    if (sites.siteNames.length) {
+      bySite = await fromMaybe("site_leaves", (q) =>
+        q.select("*").in("site_name", sites.siteNames).order("created_at", { ascending: false })
+      );
+    }
+
+    const merged = [];
+    const seen = new Set();
+    [...(bySite.data || []), ...(named.data || [])].forEach((row) => {
+      if (!row?.id || seen.has(row.id)) return;
+      seen.add(row.id);
+      merged.push(row);
+    });
+    merged.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    setLeaves(merged);
     setLoading(false);
-  }, [user?.user_name]);
+  }, [user?.user_name, user?.id]);
 
   useEffect(() => { load(); }, [load]);
 
-  const isMyLevelSlot = (l) => l.level_approver_user_name === user.user_name;
-  const isMyHeadSlot  = (l) => l.head_approver_user_name  === user.user_name;
-  const needsMyAction = (l) =>
-    (isMyLevelSlot(l) && l.level_approved === null) || (isMyHeadSlot(l) && l.head_approved === null);
+  const slotOf = (l) => leaveActionSlot(l, user, managed);
+  const isMyHeadSlot = (l) => slotOf(l) === "head";
+  const needsMyAction = (l) => {
+    const slot = slotOf(l);
+    if (slot === "head") return l.head_approved === null;
+    if (slot === "level") return l.level_approved === null;
+    return false;
+  };
 
   const pending = leaves.filter(needsMyAction);
   const list = tab === "pending" ? pending : leaves;
 
-  // Approve: no reason needed
   const approve = async (leave) => {
     setActioningId(leave.id);
     const isHead = isMyHeadSlot(leave);
-    const field = isHead ? "head_approved" : "level_approved";
-    const newLevel = isHead ? leave.level_approved : true;
-    const newHead  = isHead ? true : leave.head_approved;
+    let newLevel = isHead ? leave.level_approved : true;
+    const newHead = isHead ? true : leave.head_approved;
+    if (isHead && newLevel === null && !leave.level_approver_user_name) newLevel = true;
+    const payload = isHead
+      ? { head_approved: true, level_approved: newLevel, status: deriveLeaveStatus(newLevel, true) }
+      : { level_approved: true, status: deriveLeaveStatus(true, newHead) };
 
-    const { error } = await supabase.from("site_leaves")
-      .update({ [field]: true, status: deriveLeaveStatus(newLevel, newHead) })
-      .eq("id", leave.id);
+    const { error } = await supabase.from("site_leaves").update(payload).eq("id", leave.id);
     setActioningId(null);
     if (error) { showToast("err", "Failed: " + error.message); return; }
     showToast("ok", "Leave approved.");
     load();
   };
 
-  // Reject: opens modal to collect reason first
   const openReject = (leave) => {
     setRejectTarget({ leave, isHead: isMyHeadSlot(leave) });
     setRejectReason("");
@@ -1064,15 +1082,15 @@ function LeaveApprovals({ user }) {
     const { leave, isHead } = rejectTarget;
     setActioningId(leave.id);
 
-    const field = isHead ? "head_approved" : "level_approved";
     const newLevel = isHead ? leave.level_approved : false;
-    const newHead  = isHead ? false : leave.head_approved;
+    const newHead = isHead ? false : leave.head_approved;
     const slot = isHead ? "head" : "level";
     const merged = mergeRejectionReason(leave.rejection_reason, slot, user.name, rejectReason.trim());
+    const payload = isHead
+      ? { head_approved: false, status: deriveLeaveStatus(newLevel, false), rejection_reason: merged }
+      : { level_approved: false, status: deriveLeaveStatus(false, newHead), rejection_reason: merged };
 
-    const { error } = await supabase.from("site_leaves")
-      .update({ [field]: false, status: deriveLeaveStatus(newLevel, newHead), rejection_reason: merged })
-      .eq("id", leave.id);
+    const { error } = await supabase.from("site_leaves").update(payload).eq("id", leave.id);
 
     setActioningId(null);
     setRejectTarget(null);
@@ -1088,7 +1106,7 @@ function LeaveApprovals({ user }) {
       <div className="info-banner" style={{ marginBottom: 18, display: "flex", alignItems: "flex-start", gap: 8 }}>
         <span style={{ flexShrink: 0, marginTop: 2 }}>{Ico.info}</span>
         <span>
-          Approve or reject leave for your site. Leave is granted only after every required approver on that site has approved.
+          Approve or reject leave from your site team. Engineer leave needs the Co-ordinator and Head of that site. Co-ordinator leave needs the Head only.
         </span>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -1104,7 +1122,7 @@ function LeaveApprovals({ user }) {
         <div className="empty-state">
           <div className="empty-ico">{Ico.leave}</div>
           <div className="empty-title">{tab==="pending" ? "Nothing pending your approval" : "No leave requests"}</div>
-          <div className="empty-sub">{tab==="pending" ? "You're all caught up." : "Requests routed to you will show up here."}</div>
+          <div className="empty-sub">{tab==="pending" ? "You're all caught up." : "Leaves applied by site staff for your sites will show up here."}</div>
         </div>
       ) : (
         <div className="lv-list">
@@ -1744,25 +1762,39 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   }, []);
   const checkApprovalsPending = useCallback(async (u) => {
     if (!u?.user_name) return;
-    const { data, error } = await fromMaybe('site_leaves', (q) =>
+    const sites = await fetchManagedSites(supabase, u);
+    const named = await fromMaybe("site_leaves", (q) =>
       q
         .select(
-          'id, level_approver_user_name, level_approved, head_approver_user_name, head_approved',
+          "id, site_name, level_approver_user_name, level_approved, head_approver_user_name, head_approved",
         )
         .or(
           `level_approver_user_name.eq.${u.user_name},head_approver_user_name.eq.${u.user_name}`,
         )
     );
-    if (error || !data) {
-      setApprovalsPendingCount(0);
-      return;
+    let bySite = { data: [] };
+    if (sites.siteNames.length) {
+      bySite = await fromMaybe("site_leaves", (q) =>
+        q
+          .select(
+            "id, site_name, level_approver_user_name, level_approved, head_approver_user_name, head_approved",
+          )
+          .in("site_name", sites.siteNames)
+      );
     }
-    const count = data.filter(
-      (l) =>
-        (l.level_approver_user_name === u.user_name &&
-          l.level_approved === null) ||
-        (l.head_approver_user_name === u.user_name && l.head_approved === null),
-    ).length;
+    const merged = [];
+    const seen = new Set();
+    [...(bySite.data || []), ...(named.data || [])].forEach((row) => {
+      if (!row?.id || seen.has(row.id)) return;
+      seen.add(row.id);
+      merged.push(row);
+    });
+    const count = merged.filter((l) => {
+      const slot = leaveActionSlot(l, u, sites);
+      if (slot === "head") return l.head_approved === null;
+      if (slot === "level") return l.level_approved === null;
+      return false;
+    }).length;
     setApprovalsPendingCount(count);
   }, []);
 
@@ -2049,6 +2081,7 @@ useEffect(() => {
 
   const navUser = {
     ...user,
+    id: user.id || authUser?.id,
     _isApprover: isApprover,
     is_head: !!(user.is_head || authUser?.is_head),
     role: authUser?.role || user.role,
@@ -2076,7 +2109,7 @@ useEffect(() => {
       case "apply-leave":
         return <ApplyLeave user={user} />;
       case "leave-approvals":
-        return <LeaveApprovals user={user} />;
+        return <LeaveApprovals user={{ ...user, id: user.id || authUser?.id }} />;
       case "daily-report":
         return <DPR user={user} />;
       // case "weekly-planning":  return <WeeklyReport user={user}/>;
@@ -2887,6 +2920,7 @@ useEffect(() => {
                       onEnter={() => setHoveredNavKey(n.key)}
                       onLeave={() => setHoveredNavKey(null)}
                       onClick={() => nav(n.key)}
+                      badge={n.key === "leave-approvals" ? approvalsPendingCount : undefined}
                     />
                   );
                 return (
