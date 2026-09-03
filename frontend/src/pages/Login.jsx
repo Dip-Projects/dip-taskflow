@@ -47,7 +47,7 @@ export default function Login() {
           <div className="lp-panel-tagline">Civil Project Management Consultants</div>
           <div className="lp-panel-divider" />
           <div className="lp-panel-quote">
-            &ldquo;Quality + Quantity to be delivered on time every time .&rdquo;
+            &ldquo;Quality + Quantity to be Delivered on Time Every Time .&rdquo;
           </div>
         </div>
       </div>
