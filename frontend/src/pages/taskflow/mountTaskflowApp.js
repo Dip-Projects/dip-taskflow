@@ -53,6 +53,11 @@ function collectEls() {
     myTasksTableBody: document.getElementById('myTasksTableBody'),
     employeesTableBody: document.getElementById('employeesTableBody'),
     employeesCards: document.getElementById('employeesCards'),
+    empFilterQ: document.getElementById('emp-filter-q'),
+    empFilterDepartment: document.getElementById('emp-filter-department'),
+    empFilterStatus: document.getElementById('emp-filter-status'),
+    clearEmpFilters: document.getElementById('clearEmpFilters'),
+    empFilterCount: document.getElementById('empFilterCount'),
     openAddEmployee: document.getElementById('openAddEmployee'),
     employeeModal: document.getElementById('employeeModal'),
     employeeForm: document.getElementById('employeeForm'),
@@ -196,6 +201,11 @@ function collectEls() {
     closeReassignModal: document.getElementById('closeReassignModal'),
     cancelReassignModal: document.getElementById('cancelReassignModal'),
     sitesTableBody: document.getElementById('sitesTableBody'),
+    siteFilterQ: document.getElementById('site-filter-q'),
+    siteFilterType: document.getElementById('site-filter-type'),
+    siteFilterStatus: document.getElementById('site-filter-status'),
+    clearSiteFilters: document.getElementById('clearSiteFilters'),
+    siteFilterCount: document.getElementById('siteFilterCount'),
     openAddSite: document.getElementById('openAddSite'),
     siteModal: document.getElementById('siteModal'),
     siteForm: document.getElementById('siteForm'),
@@ -210,6 +220,11 @@ function collectEls() {
     siteFormSubmit: document.getElementById('siteFormSubmit'),
     siteEditId: document.getElementById('site-edit-id'),
     clientsTableBody: document.getElementById('clientsTableBody'),
+    clientFilterQ: document.getElementById('client-filter-q'),
+    clientFilterSite: document.getElementById('client-filter-site'),
+    clientFilterStatus: document.getElementById('client-filter-status'),
+    clearClientFilters: document.getElementById('clearClientFilters'),
+    clientFilterCount: document.getElementById('clientFilterCount'),
     openAddClient: document.getElementById('openAddClient'),
     clientModal: document.getElementById('clientModal'),
     clientForm: document.getElementById('clientForm'),
@@ -4576,21 +4591,83 @@ export async function mountTaskflowApp(opts = {}) {
     return role === 'client' || dept === 'client' || des === 'client';
   }
 
+  let employeesCache = [];
+  let sitesCache = [];
+  let clientsCache = [];
+
   async function loadEmployees() {
     els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
     els.employeesCards.innerHTML = `<div class="empty-state">Loading employees…</div>`;
     try {
       const all = await api('/employees');
       // Clients belong only in Manage clients — never here
-      const employees = (all || []).filter((e) => !isClientUserRow(e));
-      renderEmployeesTable(employees);
-      renderEmployeesCards(employees);
+      employeesCache = (all || []).filter((e) => !isClientUserRow(e));
+      fillEmpDepartmentFilter(employeesCache);
+      applyEmployeesFilter();
     } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function fillEmpDepartmentFilter(employees) {
+    const sel = els.empFilterDepartment;
+    if (!sel) return;
+    const prev = sel.value;
+    const depts = [...new Set((employees || []).map((e) => e.department).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">All departments</option>';
+    depts.forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    });
+    if (prev && depts.includes(prev)) sel.value = prev;
+  }
+
+  function getFilteredEmployees() {
+    const q = (els.empFilterQ?.value || '').trim().toLowerCase();
+    const dept = els.empFilterDepartment?.value || '';
+    const status = els.empFilterStatus?.value || '';
+    return employeesCache.filter((emp) => {
+      if (dept && String(emp.department || '') !== dept) return false;
+      if (status === 'active' && !emp.is_active) return false;
+      if (status === 'inactive' && emp.is_active) return false;
+      if (q) {
+        const hay = [
+          emp.full_name, emp.username, emp.department, emp.designation,
+          emp.role, emp.reporting_head?.full_name
+        ].map((x) => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applyEmployeesFilter() {
+    const filtered = getFilteredEmployees();
+    renderEmployeesTable(filtered);
+    renderEmployeesCards(filtered);
+    if (els.empFilterCount) {
+      const active = !!(els.empFilterQ?.value?.trim() || els.empFilterDepartment?.value || els.empFilterStatus?.value);
+      if (active) {
+        els.empFilterCount.hidden = false;
+        els.empFilterCount.textContent = `Showing ${filtered.length} of ${employeesCache.length} employees`;
+      } else {
+        els.empFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearEmployeesFilter() {
+    if (els.empFilterQ) els.empFilterQ.value = '';
+    if (els.empFilterDepartment) els.empFilterDepartment.value = '';
+    if (els.empFilterStatus) els.empFilterStatus.value = '';
+    applyEmployeesFilter();
   }
   
   function renderEmployeesTable(employees) {
     if (!employees.length) {
-      els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">No employees yet</td></tr>`;
+      const emptyMsg = employeesCache.length ? 'No matching employees' : 'No employees yet';
+      els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyMsg}</td></tr>`;
       return;
     }
     els.employeesTableBody.innerHTML = '';
@@ -4639,7 +4716,8 @@ export async function mountTaskflowApp(opts = {}) {
   // renders the "Manage employees" view as cards (shown on mobile)
   function renderEmployeesCards(employees) {
     if (!employees.length) {
-      els.employeesCards.innerHTML = `<div class="empty-state"><span class="emoji">👥</span>No employees yet</div>`;
+      const emptyMsg = employeesCache.length ? 'No matching employees' : 'No employees yet';
+      els.employeesCards.innerHTML = `<div class="empty-state"><span class="emoji">👥</span>${emptyMsg}</div>`;
       return;
     }
     els.employeesCards.innerHTML = '';
@@ -4695,6 +4773,11 @@ export async function mountTaskflowApp(opts = {}) {
       els.employeesCards.appendChild(card);
     });
   }
+
+  els.empFilterQ?.addEventListener('input', applyEmployeesFilter);
+  els.empFilterDepartment?.addEventListener('change', applyEmployeesFilter);
+  els.empFilterStatus?.addEventListener('change', applyEmployeesFilter);
+  els.clearEmpFilters?.addEventListener('click', clearEmployeesFilter);
   
   async function toggleEmployeeStatus(emp) {
     try {
@@ -5351,15 +5434,88 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadSites() {
     els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
     try {
-      const sites = await api('/sites');
-      mergeSiteProjectTypesFromSites(sites);
-      renderSitesTable(sites);
+      sitesCache = await api('/sites') || [];
+      mergeSiteProjectTypesFromSites(sitesCache);
+      fillSiteFilterOptions(sitesCache);
+      applySitesFilter();
     }
     catch (err) { showToast(err.message, 'error'); }
   }
+
+  function fillSiteFilterOptions(sites) {
+    const typeSel = els.siteFilterType;
+    const statusSel = els.siteFilterStatus;
+    if (typeSel) {
+      const prev = typeSel.value;
+      const types = [...new Set((sites || []).map((s) => s.project_type).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      typeSel.innerHTML = '<option value="">All types</option>';
+      types.forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        typeSel.appendChild(opt);
+      });
+      if (prev && types.includes(prev)) typeSel.value = prev;
+    }
+    if (statusSel) {
+      const prev = statusSel.value;
+      const statuses = [...new Set((sites || []).map((s) => s.status).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      statusSel.innerHTML = '<option value="">All statuses</option>';
+      statuses.forEach((st) => {
+        const opt = document.createElement('option');
+        opt.value = st;
+        opt.textContent = st;
+        statusSel.appendChild(opt);
+      });
+      if (prev && statuses.includes(prev)) statusSel.value = prev;
+    }
+  }
+
+  function getFilteredSites() {
+    const q = (els.siteFilterQ?.value || '').trim().toLowerCase();
+    const type = els.siteFilterType?.value || '';
+    const status = els.siteFilterStatus?.value || '';
+    return sitesCache.filter((site) => {
+      if (type && String(site.project_type || '') !== type) return false;
+      if (status && String(site.status || '') !== status) return false;
+      if (q) {
+        const hay = [
+          site.name, site.client_name, site.location, site.project_type,
+          site.status, site.team_leader?.full_name
+        ].map((x) => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applySitesFilter() {
+    const filtered = getFilteredSites();
+    renderSitesTable(filtered);
+    if (els.siteFilterCount) {
+      const active = !!(els.siteFilterQ?.value?.trim() || els.siteFilterType?.value || els.siteFilterStatus?.value);
+      if (active) {
+        els.siteFilterCount.hidden = false;
+        els.siteFilterCount.textContent = `Showing ${filtered.length} of ${sitesCache.length} sites`;
+      } else {
+        els.siteFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearSitesFilter() {
+    if (els.siteFilterQ) els.siteFilterQ.value = '';
+    if (els.siteFilterType) els.siteFilterType.value = '';
+    if (els.siteFilterStatus) els.siteFilterStatus.value = '';
+    applySitesFilter();
+  }
+
   function renderSitesTable(sites) {
     if (!sites.length) {
-      els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No sites yet</td></tr>`;
+      const emptyMsg = sitesCache.length ? 'No matching sites' : 'No sites yet';
+      els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">${emptyMsg}</td></tr>`;
       return;
     }
     els.sitesTableBody.innerHTML = '';
@@ -5387,6 +5543,11 @@ export async function mountTaskflowApp(opts = {}) {
       els.sitesTableBody.appendChild(tr);
     });
   }
+  els.siteFilterQ?.addEventListener('input', applySitesFilter);
+  els.siteFilterType?.addEventListener('change', applySitesFilter);
+  els.siteFilterStatus?.addEventListener('change', applySitesFilter);
+  els.clearSiteFilters?.addEventListener('click', clearSitesFilter);
+
   async function deleteSite(site) {
     if (!confirm(`Delete site "${site.name}"? This cannot be undone.`)) return;
     try {
@@ -5507,17 +5668,76 @@ export async function mountTaskflowApp(opts = {}) {
     if (!els.clientsTableBody) return;
     els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading clients…</td></tr>`;
     try {
-      const clients = await api('/clients');
-      renderClientsTable(clients);
+      clientsCache = await api('/clients') || [];
+      fillClientFilterOptions(clientsCache);
+      applyClientsFilter();
     } catch (err) {
       showToast(err.message, 'error');
       els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
     }
   }
 
+  function fillClientFilterOptions(clients) {
+    const sel = els.clientFilterSite;
+    if (!sel) return;
+    const prev = sel.value;
+    const sites = [...new Set((clients || []).map((c) => c.site_name).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">All projects</option>';
+    sites.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      sel.appendChild(opt);
+    });
+    if (prev && sites.includes(prev)) sel.value = prev;
+  }
+
+  function getFilteredClients() {
+    const q = (els.clientFilterQ?.value || '').trim().toLowerCase();
+    const site = els.clientFilterSite?.value || '';
+    const status = els.clientFilterStatus?.value || '';
+    return clientsCache.filter((c) => {
+      if (site && String(c.site_name || '') !== site) return false;
+      if (status === 'active' && c.is_active === false) return false;
+      if (status === 'inactive' && c.is_active !== false) return false;
+      if (q) {
+        const sc = c.site_contacts || {};
+        const hay = [
+          c.full_name, c.username, c.site_name,
+          sc.head_name, sc.incharge_name, sc.pc_name
+        ].map((x) => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applyClientsFilter() {
+    const filtered = getFilteredClients();
+    renderClientsTable(filtered);
+    if (els.clientFilterCount) {
+      const active = !!(els.clientFilterQ?.value?.trim() || els.clientFilterSite?.value || els.clientFilterStatus?.value);
+      if (active) {
+        els.clientFilterCount.hidden = false;
+        els.clientFilterCount.textContent = `Showing ${filtered.length} of ${clientsCache.length} clients`;
+      } else {
+        els.clientFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearClientsFilter() {
+    if (els.clientFilterQ) els.clientFilterQ.value = '';
+    if (els.clientFilterSite) els.clientFilterSite.value = '';
+    if (els.clientFilterStatus) els.clientFilterStatus.value = '';
+    applyClientsFilter();
+  }
+
   function renderClientsTable(clients) {
     if (!clients.length) {
-      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No clients yet</td></tr>`;
+      const emptyMsg = clientsCache.length ? 'No matching clients' : 'No clients yet';
+      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${emptyMsg}</td></tr>`;
       return;
     }
     els.clientsTableBody.innerHTML = '';
@@ -5556,6 +5776,11 @@ export async function mountTaskflowApp(opts = {}) {
       els.clientsTableBody.appendChild(tr);
     });
   }
+
+  els.clientFilterQ?.addEventListener('input', applyClientsFilter);
+  els.clientFilterSite?.addEventListener('change', applyClientsFilter);
+  els.clientFilterStatus?.addEventListener('change', applyClientsFilter);
+  els.clearClientFilters?.addEventListener('click', clearClientsFilter);
 
   async function toggleClientStatus(client) {
     const next = client.is_active === false;

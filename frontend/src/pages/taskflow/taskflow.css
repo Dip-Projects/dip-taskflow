@@ -462,14 +462,23 @@ body.sidebar-open { overflow: hidden; }
   letter-spacing: .05em; color: var(--muted);
 }
 .filter-field select,
-.filter-field input[type="date"] {
+.filter-field input[type="date"],
+.filter-field input[type="search"],
+.filter-field input[type="text"] {
   padding: 8px 11px; border: 1.5px solid var(--border);
   border-radius: var(--r-sm); background: var(--surface-2);
   color: var(--ink); font-size: 0.83rem; cursor: pointer;
   transition: border-color .15s; outline: none; min-width: 140px;
 }
+.filter-field input[type="search"],
+.filter-field input[type="text"] {
+  cursor: text;
+  min-width: 200px;
+}
 .filter-field select:focus,
-.filter-field input[type="date"]:focus { border-color: var(--primary); }
+.filter-field input[type="date"]:focus,
+.filter-field input[type="search"]:focus,
+.filter-field input[type="text"]:focus { border-color: var(--primary); }
 
 .range-count {
   font-size: 0.78rem; color: var(--muted); margin-top: 10px;
@@ -2018,7 +2027,9 @@ body.sidebar-open { overflow: hidden; }
   .filter-row { gap: 10px; }
   .filter-field { flex: 1 1 100%; min-width: 0; }
   .filter-field select,
-  .filter-field input[type="date"] {
+  .filter-field input[type="date"],
+  .filter-field input[type="search"],
+  .filter-field input[type="text"] {
     width: 100%;
     min-width: 0;
     font-size: 16px; /* no iOS zoom */

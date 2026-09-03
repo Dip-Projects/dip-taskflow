@@ -382,6 +382,29 @@ export default function TaskflowDom() {
             <button id="openAddEmployee" className="primary-btn primary-btn-inline">+ Add employee</button>
           </div>
 
+          <div className="filter-panel" style={{marginTop: 16}}>
+            <div className="filter-row">
+              <div className="filter-field" style={{flex: '1 1 200px'}}>
+                <label className="filter-label" htmlFor="emp-filter-q">Search</label>
+                <input type="search" id="emp-filter-q" placeholder="Name, username, designation…" autoComplete="off" />
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="emp-filter-department">Department</label>
+                <select id="emp-filter-department"><option value="">All departments</option></select>
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="emp-filter-status">Status</label>
+                <select id="emp-filter-status">
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <button type="button" id="clearEmpFilters" className="clear-btn">✕ Clear</button>
+            </div>
+            <p id="empFilterCount" className="range-count" hidden={true}></p>
+          </div>
+
           <div className="table-card view-desktop-only" style={{marginTop: 20}}>
             <div className="table-scroll">
               <table className="data-table">
@@ -552,6 +575,26 @@ export default function TaskflowDom() {
             </div>
             <button id="openAddSite" className="primary-btn primary-btn-inline">+ Add site</button>
           </div>
+
+          <div className="filter-panel" style={{marginTop: 16}}>
+            <div className="filter-row">
+              <div className="filter-field" style={{flex: '1 1 200px'}}>
+                <label className="filter-label" htmlFor="site-filter-q">Search</label>
+                <input type="search" id="site-filter-q" placeholder="Site, client, location, team leader…" autoComplete="off" />
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="site-filter-type">Type</label>
+                <select id="site-filter-type"><option value="">All types</option></select>
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="site-filter-status">Status</label>
+                <select id="site-filter-status"><option value="">All statuses</option></select>
+              </div>
+              <button type="button" id="clearSiteFilters" className="clear-btn">✕ Clear</button>
+            </div>
+            <p id="siteFilterCount" className="range-count" hidden={true}></p>
+          </div>
+
           <div className="table-card table-card--stack" style={{marginTop: 20}}>
             <div className="table-scroll">
               <table className="data-table" id="sitesTable">
@@ -576,6 +619,30 @@ export default function TaskflowDom() {
             </div>
             <button id="openAddClient" className="primary-btn primary-btn-inline">+ Add client</button>
           </div>
+
+          <div className="filter-panel" style={{marginTop: 16}}>
+            <div className="filter-row">
+              <div className="filter-field" style={{flex: '1 1 200px'}}>
+                <label className="filter-label" htmlFor="client-filter-q">Search</label>
+                <input type="search" id="client-filter-q" placeholder="Client, username, project / site…" autoComplete="off" />
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="client-filter-site">Project / Site</label>
+                <select id="client-filter-site"><option value="">All projects</option></select>
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="client-filter-status">Status</label>
+                <select id="client-filter-status">
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <button type="button" id="clearClientFilters" className="clear-btn">✕ Clear</button>
+            </div>
+            <p id="clientFilterCount" className="range-count" hidden={true}></p>
+          </div>
+
           <div className="table-card table-card--stack" style={{marginTop: 20}}>
             <div className="table-scroll">
               <table className="data-table" id="clientsTable">
