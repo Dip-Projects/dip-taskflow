@@ -2511,6 +2511,29 @@ body.sidebar-open { overflow: hidden; }
   flex-direction: column;
   gap: 8px;
 }
+.chat-meeting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.chat-mom-card {
+  background: rgba(15, 118, 110, 0.06);
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.chat-mom-head {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #0f766e;
+}
+.chat-mom-body {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+}
 .chat-meeting-card a,
 .chat-meeting-join {
   display: inline-flex;

@@ -85,6 +85,59 @@ function isMomParticipant(existing, user) {
   return attendees.includes(String(user.id));
 }
 
+/** Post / update MoM in the linked team chat so members see minutes in the thread. */
+async function upsertMomChatMessage({ roomId, senderId, mom, label }) {
+  if (!roomId || !mom) return null;
+  const title = String(mom.title || 'Minutes of Meeting').trim();
+  const raw = String(mom.mom_body || '').trim();
+  const preview = raw.length > 2800 ? `${raw.slice(0, 2800)}\n\n…(open Meetings for full MoM)` : raw;
+  const statusBit = mom.status === 'final' ? 'Final' : 'Draft';
+  const body = preview
+    ? `📝 MoM (${statusBit})${label ? ` · ${label}` : ''}\n${title}\n\n${preview}`
+    : `📝 MoM (${statusBit})${label ? ` · ${label}` : ''}\n${title}\n\n(Open Meetings to write minutes after the call.)`;
+
+  const meetingUrl = mom.meeting_url || null;
+  let existingId = null;
+  if (meetingUrl) {
+    const { data: existing } = await supabase
+      .from('chat_messages')
+      .select('id')
+      .eq('room_id', roomId)
+      .eq('msg_type', 'mom')
+      .eq('meeting_url', meetingUrl)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingId = existing?.id || null;
+  }
+
+  if (existingId) {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .update({ body, meeting_url: meetingUrl })
+      .eq('id', existingId)
+      .select('id, body, is_bot, created_at, sender_id, msg_type, meeting_url')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .insert({
+      room_id: roomId,
+      sender_id: senderId,
+      body,
+      is_bot: false,
+      msg_type: 'mom',
+      meeting_url: meetingUrl,
+    })
+    .select('id, body, is_bot, created_at, sender_id, msg_type, meeting_url')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function appendMeetingTranscript(existing, line) {
   const next = `${existing.live_transcript || ''}${existing.live_transcript ? '\n' : ''}${line}`.slice(-80000);
   const mom_body = replaceCallDiscussion(existing.mom_body, next);
@@ -617,6 +670,20 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
       console.warn('MoM create:', e.message);
     }
 
+    let momChatMessage = null;
+    if (mom) {
+      try {
+        momChatMessage = await upsertMomChatMessage({
+          roomId,
+          senderId: req.user.id,
+          mom,
+          label: 'created',
+        });
+      } catch (e) {
+        console.warn('MoM chat post:', e.message);
+      }
+    }
+
     const meetTitle = `Meeting started · ${room?.title || 'Team chat'}`;
     const meetBody = `Video meeting started by ${req.user.full_name}. Open Team chat → Join video. Keep TaskFlow open so spoken words go into MoM.`;
     for (const uid of attendeeIds) {
@@ -628,7 +695,13 @@ router.post('/chats/:id/meeting', requireAuth, async (req, res) => {
       });
     }
 
-    res.status(201).json({ message: data, meeting_url, mom });
+    res.status(201).json({
+      message: data,
+      meeting_url,
+      mom,
+      mom_chat_message: momChatMessage,
+      mom_warning: mom ? null : 'MoM draft was not created — run backend/sql/RUN_DIP_BOT_CHAT.sql (or add_meeting_moms.sql) in Supabase.',
+    });
   } catch (err) {
     if (isSchemaMissing(err)) return res.status(503).json({ error: schemaHint() });
     res.status(500).json({ error: err.message });
@@ -733,7 +806,23 @@ router.patch('/meetings/:id', requireAuth, async (req, res) => {
       )
       .single();
     if (error) throw error;
-    res.json(data);
+
+    // Keep Team Chat in sync whenever MoM is saved or marked final
+    let chat_message = null;
+    if (data?.chat_room_id && (mom_body !== undefined || status !== undefined)) {
+      try {
+        chat_message = await upsertMomChatMessage({
+          roomId: data.chat_room_id,
+          senderId: req.user.id,
+          mom: data,
+          label: data.status === 'final' ? 'marked final' : 'updated',
+        });
+      } catch (e) {
+        console.warn('MoM chat sync:', e.message);
+      }
+    }
+
+    res.json({ ...data, chat_message });
   } catch (err) {
     if (isSchemaMissing(err)) return res.status(503).json({ error: 'Run backend/sql/add_meeting_moms.sql' });
     res.status(500).json({ error: err.message });
