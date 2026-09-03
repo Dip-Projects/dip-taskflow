@@ -877,6 +877,40 @@ export async function mountTaskflowApp(opts = {}) {
 
   let myTasksTimerCache = [];
 
+  /** Accepted / in-progress work that can justify Hold (switching between tasks). */
+  function isActiveAcceptedWorkTask(task) {
+    if (!task?.accepted_at) return false;
+    if (isRejectedTask(task) || task.status === 'Completed') return false;
+    if (task.status === 'Pending') return false;
+    if (task.verification_status === 'Pending Verification') return false;
+    return task.status === 'In Progress' || task.status === 'Ticket Raised' || !!task.is_on_hold;
+  }
+
+  function countMyActiveAcceptedTasks(extraTask) {
+    const uid = String(state.user?.id || '');
+    const byId = new Map();
+    (myTasksTimerCache || []).forEach((t) => {
+      const assignee = String(t.assigned_to_user?.id || t.assigned_to || '');
+      if (uid && assignee && assignee !== uid) return;
+      if (isActiveAcceptedWorkTask(t)) byId.set(String(t.id), t);
+    });
+    if (extraTask && isActiveAcceptedWorkTask(extraTask)) {
+      const assignee = String(extraTask.assigned_to_user?.id || extraTask.assigned_to || '');
+      if (!uid || !assignee || assignee === uid) byId.set(String(extraTask.id), extraTask);
+    }
+    return byId.size;
+  }
+
+  /** Hold only when 2+ accepted tasks. Resume always if already on hold (avoid stuck). */
+  function canShowHoldForTask(task) {
+    return countMyActiveAcceptedTasks(task) >= 2;
+  }
+
+  function canShowResumeForTask(task) {
+    if (!task?.is_on_hold) return false;
+    return true;
+  }
+
   function refreshEmployeeTimerDisplays() {
     const now = new Date();
     document.querySelectorAll('[data-task-timer-id]').forEach((el) => {
@@ -2700,7 +2734,7 @@ export async function mountTaskflowApp(opts = {}) {
           updateStatus(task.id, 'Rejected', reason);
         }});
       }
-    } else if (isOnHold && isActuallyMine) {
+    } else if (isOnHold && isActuallyMine && canShowResumeForTask(task)) {
       items.push({ label: '▶️ Resume task', onClick: () => resumeTask(task.id) });
     } else if (
       !isOnHold
@@ -2711,6 +2745,7 @@ export async function mountTaskflowApp(opts = {}) {
       && !isPendingVerification
       && !isTicketRaised
       && !isReschedulePending
+      && canShowHoldForTask(task)
     ) {
       items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
     }
@@ -2756,6 +2791,7 @@ export async function mountTaskflowApp(opts = {}) {
       && task.status !== 'Completed' && !isPendingVerification && !isAdminManaging;
     const buttons = [];
     if (!canAct) return buttons;
+    // Always allow Resume when on hold so a lone held task never gets stuck
     if (isOnHold && isOwnTask) {
       buttons.push(makeActionBtn('action-start', '▶ Resume', () => resumeTask(task.id)));
       return buttons;

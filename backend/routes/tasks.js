@@ -813,6 +813,26 @@ router.patch('/:id/hold', async (req, res) => {
       return res.status(400).json({ error: 'This task has no work hours to pause' });
     }
 
+    // Hold only when the assignee has 2+ accepted active tasks (switch between them)
+    const assigneeId = existing.assigned_to;
+    const { data: siblingRows, error: sibErr } = await supabase
+      .from('tasks')
+      .select('id, status, accepted_at, verification_status, is_on_hold')
+      .eq('assigned_to', assigneeId)
+      .neq('status', 'Completed')
+      .neq('status', 'Rejected');
+    if (sibErr) throw sibErr;
+    const activeAccepted = (siblingRows || []).filter((t) => {
+      if (!t.accepted_at) return false;
+      if (t.verification_status === 'Pending Verification') return false;
+      return t.status === 'In Progress' || t.status === 'Ticket Raised' || !!t.is_on_hold;
+    });
+    if (activeAccepted.length < 2) {
+      return res.status(400).json({
+        error: 'Hold is only available when you have 2 or more accepted tasks in progress',
+      });
+    }
+
     const at = nowIso();
     const anchor = workTimerAnchor(existing) || existing.accepted_at;
     const budget = workTimerBudgetHours(existing);
