@@ -132,7 +132,7 @@ export function isOnSiteStaff(user) {
   const blob = [user.role, user.designation, user.department, user.site_role]
     .map((s) => String(s || '').toLowerCase())
     .join(' ');
-  return /site engineer|site incharge|site coordinator/.test(blob);
+  return /jr\.?\s*site engineer|junior site engineer|site engineer|site incharge|site coordinator|co-?ordinator/.test(blob);
 }
 
 /** Office head on Site view: only their team's submitted reports. */
@@ -150,6 +150,8 @@ export function isSiteHead(user) {
   if (user.is_head) return true;
   const role = String(user.role || '').toLowerCase().trim();
   if (role === 'admin' || role === 'head') return true;
+  const des = String(user.designation || user.site_role || '').toLowerCase().trim();
+  if (des === 'head' || des === 'project head' || des === 'site head') return true;
   const blob = [
     user.role,
     user.designation,
@@ -169,7 +171,13 @@ export function canToggleSite(user) {
   if (user.can_switch_office_site || user.is_head || user.can_access_site) return true;
   if (isSiteEngineer(user)) return false;
   const desig = (user.designation || '').toLowerCase().trim();
-  return desig === 'project head' || desig === 'site incharge';
+  return (
+    desig === 'project head' ||
+    desig === 'site incharge' ||
+    desig === 'site head' ||
+    desig === 'head' ||
+    /co-?ordinator/.test(desig)
+  );
 }
 
 /** Office ↔ MDO: Process Controller by role, or Permissions toggle. */

@@ -13,10 +13,25 @@ import SiteTeamChat from "./SiteTeamChat.jsx";
 import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
 import "./SitePortal.css";
-import { computeMonthlyLeaveBalance, isMonthlyLeaveRole } from "./leaveUtils.js";
+import {
+  computeMonthlyLeaveBalance,
+  isMonthlyLeaveRole,
+  canApproveSiteLeave,
+  resolveApprovalChain,
+} from "./leaveUtils.js";
 import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { api, syncSiteUser, isSiteHead, isOfficeSiteViewer } from '../../lib/api';
+
+export { ROLE_LEVELS, resolveApprovalChain } from "./leaveUtils.js";
+
+const OFFICE_SITE_TABS = new Set([
+  "profile",
+  "report-submissions",
+  "site-report",
+  "my-reports",
+  "leave-approvals",
+]);
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
 
@@ -456,10 +471,29 @@ function reportMatchesTeam(rawName, teamNames) {
   return false;
 }
 
+function showLeaveApprovalsMenu(user, visMap) {
+  const canAct =
+    isSiteHead(user) || canApproveSiteLeave(user) || !!user?._isApprover;
+  if (!canAct) return false;
+  if (!visMap || !visMap["site-leave-approvals"]) return true;
+  return visAllows(visMap, "site-leave-approvals", user) || canAct;
+}
+
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
 function buildNav(user, visMap) {
+  const showSiteLeave = showLeaveApprovalsMenu(user, visMap);
+
   if (isOfficeSiteViewer(user)) {
     const items = [];
+    if (showSiteLeave) {
+      items.push({
+        section: "leave",
+        label: "Leave",
+        children: [
+          { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
+        ],
+      });
+    }
     if (visAllows(visMap, "site-report", user)) {
       items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
     }
@@ -476,7 +510,6 @@ function buildNav(user, visMap) {
   ];
   const head = isSiteHead(user);
   const showTeam = visAllows(visMap, "site-team-submissions", user) && head;
-  const showSiteLeave = visAllows(visMap, "site-leave-approvals", user) && (head || user?._isApprover);
 
   if (showSiteLeave) {
     leaveChildren.push({
@@ -1052,6 +1085,12 @@ function LeaveApprovals({ user }) {
 
   return (
     <div>
+      <div className="info-banner" style={{ marginBottom: 18, display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <span style={{ flexShrink: 0, marginTop: 2 }}>{Ico.info}</span>
+        <span>
+          Approve or reject leave for your site. Leave is granted only after every required approver on that site has approved.
+        </span>
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
         <button className={`badge ${tab==="pending"?"badge-amber":"badge-gray"}`} style={{cursor:"pointer",border:"none"}} onClick={()=>setTab("pending")}>
           Pending my action ({pending.length})
@@ -1183,28 +1222,34 @@ function ApplyLeave({ user }) {
   const [chain, setChain] = useState(null);
   const [chainLoading, setChainLoading] = useState(true);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-const [monthlyBalance, setMonthlyBalance] = useState(null);
-const [balanceLoading, setBalanceLoading] = useState(true);
-const [balanceRefresh, setBalanceRefresh] = useState(0);
-const monthlyScheme = isMonthlyLeaveRole(user);
+  const [monthlyBalance, setMonthlyBalance] = useState(null);
+  const [balanceLoading, setBalanceLoading] = useState(true);
+  const [balanceRefresh, setBalanceRefresh] = useState(0);
+  const [selectedSite, setSelectedSite] = useState("");
+  const monthlyScheme = isMonthlyLeaveRole(user);
+  const applicantRole = user.role || user.designation || "";
 
-useEffect(() => {
-  if (!monthlyScheme) { setBalanceLoading(false); return; }
-  setBalanceLoading(true);
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  computeMonthlyLeaveBalance(supabase, user, thisMonth)
-    .then(setMonthlyBalance)
-    .finally(() => setBalanceLoading(false));
-}, [user.user_name, monthlyScheme, balanceRefresh]);
-  // all sites this user belongs to (for display only)
   const sites =
     Array.isArray(user.site_names) && user.site_names.length
       ? user.site_names
       : user.site_name
         ? [user.site_name]
         : [];
+  const site = selectedSite || sites[0] || "";
+  const sitesKey = sites.join("|");
 
-  const site = sites[0] || ""; // still used for approver chain + submission, unchanged
+  useEffect(() => {
+    if (!monthlyScheme) { setBalanceLoading(false); return; }
+    setBalanceLoading(true);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    computeMonthlyLeaveBalance(supabase, user, thisMonth)
+      .then(setMonthlyBalance)
+      .finally(() => setBalanceLoading(false));
+  }, [user.user_name, monthlyScheme, balanceRefresh]);
+
+  useEffect(() => {
+    setSelectedSite((prev) => (prev && sites.includes(prev) ? prev : sites[0] || ""));
+  }, [sitesKey]);
 
   const showToast = (msg, ms = 4500) => {
     setToast(msg);
@@ -1212,15 +1257,15 @@ useEffect(() => {
   };
 
   useEffect(() => {
-    if (!site || !user.role) {
+    if (!site || !applicantRole) {
       setChainLoading(false);
       return;
     }
     setChainLoading(true);
-    resolveApprovalChain(supabase, site, user.role, user.user_name)
+    resolveApprovalChain(supabase, site, applicantRole, user.user_name)
       .then(setChain)
       .finally(() => setChainLoading(false));
-  }, [site, user.role, user.user_name]); 
+  }, [site, applicantRole, user.user_name]); 
   const days =
     form.from_date &&
     form.to_date &&
@@ -1266,7 +1311,7 @@ const submit = async () => {
 
     const c =
       chain ||
-      (await resolveApprovalChain(supabase, site, user.role, user.user_name));
+      (await resolveApprovalChain(supabase, site, applicantRole, user.user_name));
 
     const initialLevel = c.levelApprover ? null : true;
     const initialHead = c.autoApproved ? true : c.headApprover ? null : true;
@@ -1330,15 +1375,16 @@ const submit = async () => {
         <span style={{ flexShrink: 0, marginTop: 2 }}>{Ico.info}</span>
         <span style={{ flex: 1, minWidth: 0 }}>
           {chainLoading ? (
-            "Finding your approvers…"
+            "Finding your approvers for this site…"
           ) : chain?.autoApproved ? (
-            "You are the top of the approval chain for this site — your leave will be auto-approved."
+            "You are the Head of this site — your leave will be auto-approved."
           ) : (
             <>
-              Your leave will be routed to{" "}
+              Leave for <strong>{site || "this site"}</strong> will be routed to{" "}
               {chain?.levelApprover && (
                 <strong>
                   {chain.levelApprover.name || chain.levelApprover.username}
+                  {chain.levelApprover.role ? ` (${chain.levelApprover.role})` : ""}
                 </strong>
               )}
               {chain?.levelApprover && chain?.headApprover && " and "}
@@ -1349,7 +1395,12 @@ const submit = async () => {
               )}
               {!chain?.levelApprover &&
                 !chain?.headApprover &&
-                "your project head for approval."}{" "}
+                "the Head of this site for approval."}
+              {chain?.levelApprover && chain?.headApprover
+                ? " Both must approve before leave is granted."
+                : chain?.headApprover
+                  ? " Only the Head needs to approve."
+                  : ""}
             </>
           )}
         </span>
@@ -1363,13 +1414,38 @@ const submit = async () => {
       <div
         style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}
       >
-        <div
-          style={{ background: "var(--paper)", border: "1px solid var(--line2)", borderRadius: 9, padding: "8px 14px", fontSize: 12.5,}}>
-          <span style={{ color: "var(--ink3)", fontWeight: 600 }}>
-            Site{sites.length > 1 ? "s" : ""}:{"  "}
-          </span>
-          <strong>{sites.length ? sites.join(", ") : "Not Assigned"}</strong>
-        </div>
+        {sites.length > 1 ? (
+          <div style={{ background: "var(--paper)", border: "1px solid var(--line2)", borderRadius: 9, padding: "6px 12px", fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "var(--ink3)", fontWeight: 600 }}>Site:</span>
+            <select
+              className="finput"
+              value={site}
+              onChange={(e) => {
+                setSelectedSite(e.target.value);
+                setInvalidFields((f) => f.filter((x) => x !== "Site"));
+              }}
+              style={{
+                width: "auto",
+                minWidth: 180,
+                padding: "4px 8px",
+                fontWeight: 700,
+                borderColor: invalidFields.includes("Site") ? "var(--red)" : undefined,
+              }}
+            >
+              {sites.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div
+            style={{ background: "var(--paper)", border: "1px solid var(--line2)", borderRadius: 9, padding: "8px 14px", fontSize: 12.5,}}>
+            <span style={{ color: "var(--ink3)", fontWeight: 600 }}>
+              Site:{"  "}
+            </span>
+            <strong>{sites.length ? sites[0] : "Not Assigned"}</strong>
+          </div>
+        )}
         {monthlyScheme && (
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
@@ -1558,67 +1634,6 @@ function WeeklyReport() {
     </div>
   );
 }
-export const ROLE_LEVELS = [
-  "Site Engineer",
-  "Site Incharge",
-  "Site Coordinator",
-  "Project Head",
-];
-const normRole = (s) => (s || "").trim().toLowerCase();
-
-async function findUserForRole(supabase, site, role) {
-  const { data } = await supabase
-    .from("site_user_details")
-    .select("username, name, role")
-    .ilike("role", role)
-    .eq("status", "Active")
-    .or(`site_name.eq.${site},site_names.cs.{${site}}`)
-    .limit(1)
-    .maybeSingle();
-  return data || null;
-}
-
-export async function resolveApprovalChain(
-  supabase,
-  site,
-  applicantRole,
-  applicantUsername,
-) {
-  if (!site) {
-    // No site assigned — fall back to admin-direct approval (no chain)
-    return { levelApprover: null, headApprover: null, autoApproved: false };
-  }
-  const idx = ROLE_LEVELS.findIndex(
-    (r) => normRole(r) === normRole(applicantRole),
-  );
-  const headRole = ROLE_LEVELS[ROLE_LEVELS.length - 1];
-
-  if (idx === -1)
-    return { levelApprover: null, headApprover: null, autoApproved: false };
-  if (idx === ROLE_LEVELS.length - 1)
-    return { levelApprover: null, headApprover: null, autoApproved: true };
-
-  let levelApprover = null;
-  for (let i = idx + 1; i < ROLE_LEVELS.length - 1; i++) {
-    const candidate = await findUserForRole(supabase, site, ROLE_LEVELS[i]);
-    if (candidate && candidate.username !== applicantUsername) {
-      levelApprover = candidate;
-      break;
-    }
-  }
-
-  const headApprover = await findUserForRole(supabase, site, headRole);
-
-  if (
-    levelApprover &&
-    headApprover &&
-    levelApprover.username === headApprover.username
-  ) {
-    levelApprover = null;
-  }
-
-  return { levelApprover, headApprover, autoApproved: false };
-}
 export function deriveLeaveStatus(levelApproved, headApproved) {
   if (levelApproved === false || headApproved === false) return "rejected";
   if (levelApproved === true && headApproved === true) return "approved";
@@ -1696,6 +1711,24 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   const canSwitchToAdmin = canAccessPortal(user, "admin");
   const checkIsApprover = useCallback(async (u) => {
     if (!u?.user_name) return;
+    if (isSiteHead(u) || canApproveSiteLeave(u)) {
+      setIsApprover(true);
+      return;
+    }
+    const uid = u.id;
+    if (uid) {
+      const { data: assigned } = await supabase
+        .from("projects")
+        .select("id")
+        .or(
+          `team_leader_id.eq.${uid},coordinator_id.eq.${uid},site_incharge_id.eq.${uid}`,
+        )
+        .limit(1);
+      if (assigned?.length) {
+        setIsApprover(true);
+        return;
+      }
+    }
     const { count, error } = await fromMaybe('site_leaves', (q) =>
       q
         .select('id', { count: 'exact', head: true })
@@ -1949,9 +1982,7 @@ useEffect(() => {
     };
     if (!isOfficeSiteViewer(viewer)) return;
     setActiveTab((tab) =>
-      tab === "profile" || tab === "report-submissions" || tab === "site-report" || tab === "my-reports"
-        ? tab
-        : "report-submissions",
+      OFFICE_SITE_TABS.has(tab) ? tab : "report-submissions",
     );
   }, [user, authUser]);
 
@@ -1970,13 +2001,7 @@ useEffect(() => {
       ...authUser,
       is_head: !!(user?.is_head || authUser?.is_head),
     };
-    if (
-      isOfficeSiteViewer(viewer) &&
-      key !== "report-submissions" &&
-      key !== "site-report" &&
-      key !== "my-reports" &&
-      key !== "profile"
-    ) {
+    if (isOfficeSiteViewer(viewer) && !OFFICE_SITE_TABS.has(key)) {
       setActiveTab("report-submissions");
       if (window.innerWidth <= 999) setSidebarOpen(false);
       return;
@@ -2036,11 +2061,7 @@ useEffect(() => {
 
   const renderContent = () => {
     const tab =
-      isOfficeSiteViewer(navUser) &&
-      activeTab !== "profile" &&
-      activeTab !== "site-report" &&
-      activeTab !== "my-reports" &&
-      activeTab !== "report-submissions"
+      isOfficeSiteViewer(navUser) && !OFFICE_SITE_TABS.has(activeTab)
         ? "report-submissions"
         : activeTab;
     switch (tab) {
@@ -2893,7 +2914,13 @@ useEffect(() => {
                             onEnter={() => setHoveredNavKey(c.key)}
                             onLeave={() => setHoveredNavKey(null)}
                             onClick={() => nav(c.key)}
-                            badge={c.key === "my-leave" ? leaveBadgeCount : undefined}
+                            badge={
+                              c.key === "my-leave"
+                                ? leaveBadgeCount
+                                : c.key === "leave-approvals"
+                                  ? approvalsPendingCount
+                                  : undefined
+                            }
                           />
                         ))}
                     </div>

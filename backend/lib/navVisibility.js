@@ -74,7 +74,7 @@ function defaultRow(key) {
     calendar: { admin: false, mis: true, employee: true, site: false, site_head: false },
     corrections: { admin: false, mis: true, employee: true, site: false, site_head: false },
     'site-team-submissions': { admin: false, mis: false, employee: false, site: false, site_head: true },
-    'site-leave-approvals': { admin: false, mis: false, employee: false, site: false, site_head: true },
+    'site-leave-approvals': { admin: false, mis: false, employee: false, site: true, site_head: true },
   };
   return map[key] || allTrue;
 }
@@ -120,11 +120,15 @@ function viewerRole(user) {
   const head =
     !!user.is_head ||
     role === 'head' ||
+    desig === 'head' ||
     /site incharge|project head|site head/.test(blob);
-  if (dept === 'site engineer' || /site engineer/.test(blob)) {
+  if (
+    dept === 'site engineer' ||
+    /site engineer|jr\.?\s*site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+  ) {
     return head ? 'site_head' : 'site';
   }
-  if (head && /incharge|project head/.test(blob)) return 'site_head';
+  if (head && /incharge|project head|\bhead\b/.test(blob)) return 'site_head';
   return 'employee';
 }
 
