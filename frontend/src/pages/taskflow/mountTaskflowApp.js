@@ -8278,6 +8278,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   function previewText(msg) {
     if (!msg) return 'No messages yet';
+    if (msg.msg_type === 'mom') return '📝 MoM';
     if (msg.msg_type === 'meeting' || msg.meeting_url) return '📹 Video meeting';
     return String(msg.body || '').replace(/\s+/g, ' ').slice(0, 48);
   }
@@ -8289,16 +8290,49 @@ export async function mountTaskflowApp(opts = {}) {
     const who = m.is_bot ? 'Bot' : m.sender?.full_name || (mine ? 'You' : 'User');
     const meetUrl = m.meeting_url || (String(m.body || '').match(/https:\/\/meet\.jit\.si\/[^\s]+/) || [])[0];
     let bodyHtml;
-    if (m.msg_type === 'meeting' || meetUrl) {
+    if (m.msg_type === 'mom') {
+      const lines = String(m.body || 'Minutes of Meeting').split('\n');
+      const head = lines.slice(0, 2).join('\n');
+      const rest = lines.slice(2).join('\n').trim();
+      bodyHtml = `<div class="chat-meeting-card chat-mom-card">
+        <div class="chat-mom-head">${escapeHtml(head).replace(/\n/g, '<br>')}</div>
+        ${rest ? `<div class="bot-bubble-body chat-mom-body">${escapeHtml(rest).replace(/\n/g, '<br>')}</div>` : ''}
+        <button type="button" class="primary-btn primary-btn-inline js-open-mom" data-meet-url="${escapeHtml(meetUrl || '')}" data-mom-title="${escapeHtml(lines[1] || lines[0] || '')}">Open MoM</button>
+      </div>`;
+    } else if (m.msg_type === 'meeting' || meetUrl) {
       bodyHtml = `<div class="chat-meeting-card">
         <div>${escapeHtml((m.body || 'Video meeting').split('\n')[0])}</div>
-        <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video</button>
+        <div class="chat-meeting-actions">
+          <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video</button>
+          <button type="button" class="action-btn action-start js-open-mom" data-meet-url="${escapeHtml(meetUrl || '')}">View MoM</button>
+        </div>
       </div>`;
     } else {
       bodyHtml = `<div class="bot-bubble-body">${escapeHtml(m.body).replace(/\n/g, '<br>')}</div>`;
     }
     div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div>${bodyHtml}<div class="chat-msg-meta">${escapeHtml(formatChatTime(m.created_at))}</div>`;
     return div;
+  }
+
+  async function openMomFromChat(meetUrl, titleHint) {
+    try {
+      const rows = await api('/bot/meetings');
+      let hit = null;
+      if (meetUrl) hit = (rows || []).find((m) => String(m.meeting_url || '') === String(meetUrl));
+      if (!hit && titleHint) {
+        const t = String(titleHint).trim().toLowerCase();
+        hit = (rows || []).find((m) => String(m.title || '').trim().toLowerCase() === t);
+      }
+      if (!hit) {
+        showToast('MoM not found yet — start video from Team chat first', 'error');
+        return;
+      }
+      switchView('meetings');
+      await loadMeetings();
+      openMomEditor(hit);
+    } catch (err) {
+      showToast(err.message || 'Could not open MoM', 'error');
+    }
   }
 
   let _jitsiWin = null;
@@ -8494,6 +8528,11 @@ export async function mountTaskflowApp(opts = {}) {
       if (n) n.hidden = true;
     });
     document.getElementById('chatMsgLog')?.addEventListener('click', async (e) => {
+      const momBtn = e.target.closest?.('.js-open-mom');
+      if (momBtn) {
+        await openMomFromChat(momBtn.dataset.meetUrl || '', momBtn.dataset.momTitle || '');
+        return;
+      }
       const btn = e.target.closest?.('.js-join-meet');
       if (!btn) return;
       const url = btn.dataset.meetUrl;
@@ -8744,7 +8783,8 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/bot/chats/${_activeChatRoom}/meeting`, { method: 'POST', body: {} });
         const url = res.meeting_url;
-        fireSystemNotify('Meeting started', 'Jitsi opens in a new window. Keep this TaskFlow tab open so spoken words go into MoM. WhatsApp sent to members.');
+        if (res.mom_warning) showToast(res.mom_warning, 'error');
+        else fireSystemNotify('Meeting started', 'Jitsi opens in a new window. Keep this TaskFlow tab open so spoken words go into MoM. WhatsApp sent to members.');
         await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle, kind: 'project' });
         if (url) await openInAppMeeting(url, res.mom?.id || null);
       } catch (err) {
@@ -8864,8 +8904,13 @@ export async function mountTaskflowApp(opts = {}) {
             mom_body: document.getElementById('momBody')?.value,
           },
         });
-        showToast('MoM saved', 'success');
+        showToast('MoM saved — also posted to Team chat', 'success');
         loadMeetings();
+        if (_activeChatRoom) {
+          try {
+            await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
+          } catch (_) {}
+        }
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -8892,8 +8937,13 @@ export async function mountTaskflowApp(opts = {}) {
             status: 'final',
           },
         });
-        showToast('MoM marked final', 'success');
+        showToast('MoM marked final — posted to Team chat', 'success');
         loadMeetings();
+        if (_activeChatRoom) {
+          try {
+            await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
+          } catch (_) {}
+        }
       } catch (err) {
         showToast(err.message, 'error');
       }

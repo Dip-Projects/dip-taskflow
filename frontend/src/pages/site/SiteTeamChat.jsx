@@ -133,12 +133,31 @@ export default function SiteTeamChat({ user }) {
         <section className="stc-main">
           <div className="stc-head">{active?.title || 'Select a team or project group'}</div>
           <div className="stc-log">
-            {(msgs || []).map((m) => (
-              <div key={m.id} className={`stc-msg${m.sender_id === user?.id ? ' mine' : ''}${m.is_bot ? ' bot' : ''}`}>
-                <small>{m.sender?.full_name || (m.is_bot ? 'System' : 'Member')}</small>
-                <div>{m.body}</div>
-              </div>
-            ))}
+            {(msgs || []).map((m) => {
+              const meetUrl = m.meeting_url || (String(m.body || '').match(/https:\/\/meet\.jit\.si\/[^\s]+/) || [])[0];
+              const isMom = m.msg_type === 'mom';
+              const isMeet = m.msg_type === 'meeting' || (!!meetUrl && !isMom);
+              return (
+                <div key={m.id} className={`stc-msg${m.sender_id === user?.id ? ' mine' : ''}${m.is_bot ? ' bot' : ''}${isMom ? ' mom' : ''}`}>
+                  <small>{m.sender?.full_name || (m.is_bot ? 'System' : 'Member')}</small>
+                  {isMom ? (
+                    <>
+                      <div className="stc-mom-label">📝 Minutes of Meeting</div>
+                      <div className="stc-mom-body">{m.body}</div>
+                    </>
+                  ) : isMeet ? (
+                    <>
+                      <div>{(m.body || 'Video meeting').split('\n')[0]}</div>
+                      {meetUrl ? (
+                        <a className="stc-join" href={meetUrl} target="_blank" rel="noreferrer">Join video</a>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div>{m.body}</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <form className="stc-send" onSubmit={send}>
             <input
@@ -173,6 +192,10 @@ export default function SiteTeamChat({ user }) {
         .stc-msg { background:#f5f2ee; padding:8px 10px; border-radius:10px; max-width:80%; }
         .stc-msg.mine { align-self:flex-end; background:#ccfbf1; }
         .stc-msg.bot { background:#fff7ed; }
+        .stc-msg.mom { background:#f0fdfa; border:1px solid #99f6e4; max-width:92%; }
+        .stc-mom-label { font-weight:700; color:#0f766e; font-size:.8rem; margin-bottom:4px; }
+        .stc-mom-body { white-space:pre-wrap; font-size:.82rem; max-height:220px; overflow:auto; }
+        .stc-join { display:inline-block; margin-top:6px; padding:6px 10px; border-radius:8px; background:#0f766e; color:#fff; text-decoration:none; font-weight:700; font-size:.78rem; }
         .stc-msg small { display:block; font-size:.68rem; color:#6b645c; margin-bottom:2px; }
         .stc-send { display:flex; gap:8px; padding:10px; border-top:1px solid #e8e2d8; }
         .stc-send input { flex:1; padding:8px 10px; border-radius:8px; border:1px solid #d4ccc0; }
