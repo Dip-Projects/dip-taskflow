@@ -76,9 +76,59 @@ export function canApproveSiteLeave(user) {
   return rank >= 1;
 }
 
+/** Rejected if either slot is false. Approved only when BOTH slots are true. */
+export function deriveLeaveStatus(levelApproved, headApproved) {
+  if (levelApproved === false || headApproved === false) return "rejected";
+  if (levelApproved === true && headApproved === true) return "approved";
+  return "pending";
+}
+
 function isLeaveApproved(l) {
-  if (l.level_approved === false || l.head_approved === false) return false;
-  return l.level_approved === true && l.head_approved === true;
+  return deriveLeaveStatus(l.level_approved, l.head_approved) === "approved";
+}
+
+function collectUserSites(u) {
+  const out = [];
+  if (u?.site_name) out.push(u.site_name);
+  const extra = u?.site_names;
+  if (Array.isArray(extra)) extra.forEach((s) => out.push(s));
+  else if (typeof extra === "string" && extra.trim()) {
+    try {
+      const parsed = JSON.parse(extra);
+      if (Array.isArray(parsed)) parsed.forEach((s) => out.push(s));
+      else out.push(extra);
+    } catch {
+      extra.split(",").forEach((s) => out.push(s));
+    }
+  }
+  return out.map((s) => String(s || "").trim().toLowerCase()).filter(Boolean);
+}
+
+function userOnSite(u, site) {
+  const want = String(site || "").trim().toLowerCase();
+  return !!want && collectUserSites(u).includes(want);
+}
+
+function roleLabelForRank(rank, fallback) {
+  if (rank === 2) return "Incharge";
+  if (rank === 3) return "Co-ordinator";
+  if (rank === 1) return "Engineer";
+  return fallback || "Co-ordinator";
+}
+
+/** Next filled ladder role on this site who is not the applicant or Head. */
+async function findNextLevelOnSite(supabase, site, applicantUsername, applicantRank, headUsername) {
+  const { data: rows } = await supabase.from("site_user_details").select(SITE_USER_COLS);
+  const candidates = (rows || [])
+    .filter((u) => u?.username && u.username !== applicantUsername && u.username !== headUsername)
+    .filter((u) => userOnSite(u, site))
+    .filter((u) => String(u.status || "").toLowerCase() !== "inactive")
+    .map((u) => ({ ...u, rank: siteRoleRank(u.role) }))
+    .filter((u) => u.rank > applicantRank && u.rank < 4);
+  candidates.sort(
+    (a, b) => a.rank - b.rank || String(a.name || "").localeCompare(String(b.name || "")),
+  );
+  return candidates[0] || null;
 }
 
 function splitLeaveDaysByMonth(fromDate, toDate) {
@@ -210,18 +260,25 @@ export async function getSiteProjectStaff(supabase, site) {
 }
 
 /**
- * Engineer / Jr / Incharge leave → Co-ordinator AND Head must both approve.
+ * Engineer / Jr / Incharge leave → upper-level role AND Head must both approve.
  * Co-ordinator leave → Head only.
  * Head leave → auto-approved.
+ * Coordinator and Head being the same project contact does not skip the level slot;
+ * we look for another filled upper-level person on the site first.
  */
-export async function resolveApprovalChain(supabase, site, _applicantRole, applicantUsername) {
+export async function resolveApprovalChain(supabase, site, applicantRole, applicantUsername) {
   if (!site) {
     return { levelApprover: null, headApprover: null, autoApproved: false, requiresLevel: true };
   }
   const staff = await getSiteProjectStaff(supabase, site);
+  const applicantRank = siteRoleRank(applicantRole);
+  const effectiveRank = applicantRank >= 0 ? applicantRank : 1;
   const applicantIsHead =
-    staff.head?.username === applicantUsername || staff.teamLeader?.username === applicantUsername;
-  const applicantIsCoord = staff.coordinator?.username === applicantUsername;
+    staff.head?.username === applicantUsername ||
+    staff.teamLeader?.username === applicantUsername ||
+    effectiveRank >= 4;
+  const applicantIsCoord =
+    staff.coordinator?.username === applicantUsername || effectiveRank === 3;
 
   const head =
     staff.head && staff.head.username !== applicantUsername
@@ -234,14 +291,33 @@ export async function resolveApprovalChain(supabase, site, _applicantRole, appli
     return { levelApprover: null, headApprover: null, autoApproved: true, requiresLevel: false };
   }
 
-  const samePerson = staff.coordinator && head && staff.coordinator.username === head.username;
-  const requiresLevel = !applicantIsCoord && !samePerson;
-  let levelApprover = null;
-  if (requiresLevel && staff.coordinator) {
-    levelApprover = asApprover(staff.coordinator, "Co-ordinator");
+  if (applicantIsCoord) {
+    return { levelApprover: null, headApprover: head, autoApproved: false, requiresLevel: false };
   }
 
-  return { levelApprover, headApprover: head, autoApproved: false, requiresLevel };
+  const headUsername = head?.username || null;
+  const coordDistinct =
+    staff.coordinator &&
+    staff.coordinator.username !== applicantUsername &&
+    staff.coordinator.username !== headUsername
+      ? asApprover(staff.coordinator, "Co-ordinator")
+      : null;
+
+  let levelApprover = coordDistinct;
+  if (!levelApprover) {
+    const next = await findNextLevelOnSite(
+      supabase,
+      site,
+      applicantUsername,
+      effectiveRank,
+      headUsername,
+    );
+    if (next) {
+      levelApprover = asApprover(next, roleLabelForRank(next.rank, next.role));
+    }
+  }
+
+  return { levelApprover, headApprover: head, autoApproved: false, requiresLevel: true };
 }
 
 /** Sites this user manages via projects.team_leader_id / coordinator_id / site_incharge_id. */
@@ -280,15 +356,17 @@ export function leaveRolesForUser(leave, user, managed) {
   const uname = user?.user_name;
   const key = String(leave?.site_name || "").trim().toLowerCase();
   if (!uname) return { asHead: false, asLevel: false };
+  const namedLevel = leave.level_approver_user_name;
   return {
     asHead: leave.head_approver_user_name === uname || !!managed?.headSites?.has(key),
-    asLevel: leave.level_approver_user_name === uname || !!managed?.coordSites?.has(key),
+    asLevel: namedLevel === uname || (!namedLevel && !!managed?.coordSites?.has(key)),
   };
 }
 
+/** One pending slot per action. Level is filled first when the user holds both roles. */
 export function leaveActionSlot(leave, user, managed) {
   const { asHead, asLevel } = leaveRolesForUser(leave, user, managed);
-  if (asHead) return "head";
-  if (asLevel) return "level";
+  if (asLevel && leave.level_approved === null) return "level";
+  if (asHead && leave.head_approved === null) return "head";
   return null;
 }

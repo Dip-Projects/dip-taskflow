@@ -20,13 +20,13 @@ import {
   resolveApprovalChain,
   fetchManagedSites,
   leaveActionSlot,
-  leaveRolesForUser,
+  deriveLeaveStatus,
 } from "./leaveUtils.js";
 import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { api, syncSiteUser, isSiteHead, isOfficeSiteViewer } from '../../lib/api';
 
-export { ROLE_LEVELS, resolveApprovalChain } from "./leaveUtils.js";
+export { ROLE_LEVELS, resolveApprovalChain, deriveLeaveStatus } from "./leaveUtils.js";
 
 const OFFICE_SITE_TABS = new Set([
   "profile",
@@ -631,11 +631,7 @@ function MyLeave({ user, onApply }) {
   }, [user.user_name]);
 
   function computeLeaveStatus(leave) {
-    if (leave.level_approved === false || leave.head_approved === false)
-      return "rejected";
-    if (leave.level_approved === true && leave.head_approved === true)
-      return "approved";
-    return "pending";
+    return deriveLeaveStatus(leave.level_approved, leave.head_approved);
   }
 
   const canCancel = (l) => {
@@ -1044,24 +1040,23 @@ function LeaveApprovals({ user }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const rolesOf = (l) => leaveRolesForUser(l, user, managed);
-  const isMyHeadSlot = (l) => rolesOf(l).asHead;
-  const needsMyAction = (l) => {
-    const { asHead, asLevel } = rolesOf(l);
-    return (asLevel && l.level_approved === null) || (asHead && l.head_approved === null);
-  };
+  const needsMyAction = (l) => !!leaveActionSlot(l, user, managed);
 
   const pending = leaves.filter(needsMyAction);
   const list = tab === "pending" ? pending : leaves;
 
   const approve = async (leave) => {
     setActioningId(leave.id);
-    const { asHead, asLevel } = rolesOf(leave);
-    const newLevel = asLevel && leave.level_approved === null ? true : leave.level_approved;
-    const newHead = asHead && leave.head_approved === null ? true : leave.head_approved;
+    const slot = leaveActionSlot(leave, user, managed);
+    if (!slot) {
+      setActioningId(null);
+      return;
+    }
+    const newLevel = slot === "level" ? true : leave.level_approved;
+    const newHead = slot === "head" ? true : leave.head_approved;
     const payload = {
-      ...(asLevel && leave.level_approved === null ? { level_approved: true } : {}),
-      ...(asHead && leave.head_approved === null ? { head_approved: true } : {}),
+      ...(slot === "level" ? { level_approved: true } : {}),
+      ...(slot === "head" ? { head_approved: true } : {}),
       status: deriveLeaveStatus(newLevel, newHead),
     };
 
@@ -1070,9 +1065,9 @@ function LeaveApprovals({ user }) {
     if (error) { showToast("err", "Failed: " + error.message); return; }
     const waiting =
       deriveLeaveStatus(newLevel, newHead) === "pending"
-        ? asHead && newLevel !== true
-          ? " Waiting for Co-ordinator."
-          : asLevel && newHead !== true
+        ? newLevel !== true
+          ? " Waiting for the other approver (Co-ordinator / upper level)."
+          : newHead !== true
             ? " Waiting for Head."
             : ""
         : "";
@@ -1081,7 +1076,7 @@ function LeaveApprovals({ user }) {
   };
 
   const openReject = (leave) => {
-    setRejectTarget({ leave, isHead: isMyHeadSlot(leave) });
+    setRejectTarget({ leave, isHead: leaveActionSlot(leave, user, managed) === "head" });
     setRejectReason("");
   };
 
@@ -1114,7 +1109,7 @@ function LeaveApprovals({ user }) {
       <div className="info-banner" style={{ marginBottom: 18, display: "flex", alignItems: "flex-start", gap: 8 }}>
         <span style={{ flexShrink: 0, marginTop: 2 }}>{Ico.info}</span>
         <span>
-          Approve or reject leave from your site team. Engineer leave needs the Co-ordinator and Head of that site. Co-ordinator leave needs the Head only.
+          Approve or reject leave from your site team. Engineer leave needs both the upper-level role and the Head — one approval is not enough. If either rejects, the leave is rejected. Co-ordinator leave needs the Head only.
         </span>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -1339,7 +1334,7 @@ const submit = async () => {
       chain ||
       (await resolveApprovalChain(supabase, site, applicantRole, user.user_name));
 
-    const initialLevel = c.autoApproved || c.requiresLevel === false ? true : null;
+    const initialLevel = c.autoApproved ? true : c.requiresLevel ? null : true;
     const initialHead = c.autoApproved ? true : null;
 
   if (!(await tableExists('site_leaves'))) {
@@ -1425,7 +1420,7 @@ const submit = async () => {
                   ? "the Co-ordinator and Head of this site."
                   : "the Head of this site.")}
               {chain?.requiresLevel
-                ? " Both must approve before leave is granted."
+                ? " Both must approve before leave is granted. If either rejects, the request is rejected."
                 : " Only the Head needs to approve."}
             </>
           )}
@@ -1660,12 +1655,6 @@ function WeeklyReport() {
     </div>
   );
 }
-export function deriveLeaveStatus(levelApproved, headApproved) {
-  if (levelApproved === false || headApproved === false) return "rejected";
-  if (levelApproved === true && headApproved === true) return "approved";
-  return "pending";
-}
-
 // Merge a new rejection entry into the existing rejection_reason array (max 2: one per slot)
 export function mergeRejectionReason(existing, slot, by, reason) {
   const arr = Array.isArray(existing) ? existing.filter(r => r.slot !== slot) : [];
@@ -1797,22 +1786,13 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
       seen.add(row.id);
       merged.push(row);
     });
-    const count = merged.filter((l) => {
-      const { asHead, asLevel } = leaveRolesForUser(l, u, sites);
-      return (asLevel && l.level_approved === null) || (asHead && l.head_approved === null);
-    }).length;
+    const count = merged.filter((l) => !!leaveActionSlot(l, u, sites)).length;
     setApprovalsPendingCount(count);
   }, []);
 
   const matUnseen = useMaterialUnseenCount(user);
   // Same status-normalization logic used inside MyLeave, kept in sync
-  const leaveStatusKey = (l) => {
-    if (l.level_approved === false || l.head_approved === false)
-      return "rejected";
-    if (l.level_approved === true && l.head_approved === true)
-      return "approved";
-    return "pending";
-  };
+  const leaveStatusKey = (l) => deriveLeaveStatus(l.level_approved, l.head_approved);
 
 const getSeenLeaveStatuses = async (u) => {
   if (!u?.user_name) return {};
