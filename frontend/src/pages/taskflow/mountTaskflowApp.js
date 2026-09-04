@@ -385,6 +385,152 @@ export async function mountTaskflowApp(opts = {}) {
       select.appendChild(opt);
     }
   }
+
+  function parseEmployeeSites(emp) {
+    const out = [];
+    const add = (s) => {
+      const v = String(s || '').trim();
+      if (v && !out.includes(v)) out.push(v);
+    };
+    if (Array.isArray(emp?.site_names)) emp.site_names.forEach(add);
+    else if (typeof emp?.site_names === 'string' && emp.site_names.trim()) {
+      try {
+        const parsed = JSON.parse(emp.site_names);
+        if (Array.isArray(parsed)) parsed.forEach(add);
+        else add(emp.site_names);
+      } catch { add(emp.site_names); }
+    }
+    add(emp?.site_name);
+    return out;
+  }
+
+  function getSelectedSites(root) {
+    if (!root) return [];
+    if (root._selectedSites instanceof Set) return [...root._selectedSites];
+    return [...root.querySelectorAll('.ms-list input[type="checkbox"]:checked')]
+      .map((cb) => cb.value)
+      .filter(Boolean);
+  }
+
+  function closeSiteMultiSelects(except) {
+    document.querySelectorAll('.multi-select.open').forEach((el) => {
+      if (except && el === except) return;
+      el.classList.remove('open');
+      const p = el.querySelector('.ms-panel');
+      if (p) p.hidden = true;
+      el.querySelector('.ms-toggle')?.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function fillSiteMultiSelect(root, projects, selected = []) {
+    if (!root) return;
+    const placeholder = root.dataset.placeholder || 'Select one or more sites';
+    const selectedSet = new Set((selected || []).map((s) => String(s).trim()).filter(Boolean));
+    root._selectedSites = selectedSet;
+    const names = [];
+    (projects || []).forEach((p) => {
+      const n = String(p?.name || '').trim();
+      if (n && !names.includes(n)) names.push(n);
+    });
+    selectedSet.forEach((s) => { if (!names.includes(s)) names.push(s); });
+
+    root.innerHTML = `
+      <button type="button" class="ms-toggle" id="${root.id}-toggle" aria-expanded="false" aria-haspopup="listbox">
+        <span class="ms-toggle-label is-placeholder"></span>
+        <span class="ms-caret">▾</span>
+      </button>
+      <div class="ms-panel" hidden>
+        <input type="search" class="ms-search" placeholder="Search sites…" autocomplete="off" />
+        <div class="ms-list" role="listbox"></div>
+      </div>
+      <div class="ms-chips"></div>
+    `;
+    const toggle = root.querySelector('.ms-toggle');
+    const label = root.querySelector('.ms-toggle-label');
+    const panel = root.querySelector('.ms-panel');
+    const search = root.querySelector('.ms-search');
+    const list = root.querySelector('.ms-list');
+    const chips = root.querySelector('.ms-chips');
+
+    function syncUi() {
+      const picked = names.filter((n) => selectedSet.has(n));
+      if (!picked.length) {
+        label.textContent = placeholder;
+        label.classList.add('is-placeholder');
+      } else if (picked.length === 1) {
+        label.textContent = picked[0];
+        label.classList.remove('is-placeholder');
+      } else {
+        label.textContent = `${picked.length} sites selected`;
+        label.classList.remove('is-placeholder');
+      }
+      chips.innerHTML = picked.map((n) =>
+        `<span class="ms-chip"><span title="${escapeHtml(n)}">${escapeHtml(n)}</span><button type="button" data-remove="${escapeHtml(n)}" aria-label="Remove">×</button></span>`
+      ).join('');
+      chips.querySelectorAll('button[data-remove]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedSet.delete(btn.dataset.remove);
+          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            if (cb.value === btn.dataset.remove) cb.checked = false;
+          });
+          syncUi();
+        });
+      });
+    }
+
+    function renderList(filter = '') {
+      const q = filter.trim().toLowerCase();
+      const shown = names.filter((n) => !q || n.toLowerCase().includes(q));
+      if (!shown.length) {
+        list.innerHTML = `<div class="ms-empty">${names.length ? 'No matching sites' : 'No projects yet'}</div>`;
+        return;
+      }
+      list.innerHTML = shown.map((n) => `
+        <label class="ms-option">
+          <input type="checkbox" value="${escapeHtml(n)}" ${selectedSet.has(n) ? 'checked' : ''}>
+          <span>${escapeHtml(n)}</span>
+        </label>
+      `).join('');
+      list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) selectedSet.add(cb.value);
+          else selectedSet.delete(cb.value);
+          syncUi();
+        });
+      });
+    }
+
+    function setOpen(open) {
+      if (open) closeSiteMultiSelects(root);
+      root.classList.toggle('open', open);
+      panel.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        search.value = '';
+        renderList('');
+        setTimeout(() => search.focus(), 0);
+      }
+    }
+
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      setOpen(panel.hidden);
+    });
+    search.addEventListener('input', () => renderList(search.value));
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
+    });
+
+    renderList('');
+    syncUi();
+  }
+
+  document.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.multi-select')) return;
+    closeSiteMultiSelects();
+  });
   
   // JS parses a bare "YYYY-MM-DD" string (no time, no offset) as UTC midnight
   // per the ISO-8601 spec — but a full timestamp like "...T10:15:00" (no
@@ -4856,7 +5002,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (q) {
         const hay = [
           emp.full_name, emp.username, emp.department, emp.designation,
-          emp.role, emp.reporting_head?.full_name
+          emp.role, emp.reporting_head?.full_name, emp.site_name, ...(parseEmployeeSites(emp))
         ].map((x) => String(x || '').toLowerCase()).join(' ');
         if (!hay.includes(q)) return false;
       }
@@ -5028,22 +5174,19 @@ export async function mountTaskflowApp(opts = {}) {
   
   els.openAddEmployee?.addEventListener('click', () => {
     els.employeeForm.reset(); els.employeeFormMsg.hidden = true;
-    // Fill project/site dropdown from master projects
-    fillSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], {
-      placeholder: '— None —', labelKey: 'name', valueKey: 'name'
-    });
+    fillSiteMultiSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], []);
     els.employeeModal.hidden = false;
   });
-  els.closeEmployeeModal?.addEventListener('click', () => { els.employeeModal.hidden = true; });
-  els.cancelEmployeeModal?.addEventListener('click', () => { els.employeeModal.hidden = true; });
+  els.closeEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.employeeModal.hidden = true; });
+  els.cancelEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.employeeModal.hidden = true; });
   els.employeeForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.employeeFormMsg.hidden = true;
-    const siteName = (document.getElementById('emp-site')?.value || '').trim();
+    const sites = getSelectedSites(els.empSite || document.getElementById('emp-site'));
     const role = document.getElementById('emp-role').value;
     let department = document.getElementById('emp-department').value.trim();
     if (role === 'client' && !department) department = 'Client';
-    if (role === 'client' && !siteName) {
-      els.employeeFormMsg.textContent = 'Please select the project for this client';
+    if (role === 'client' && !sites.length) {
+      els.employeeFormMsg.textContent = 'Please select at least one project for this client';
       els.employeeFormMsg.hidden = false;
       return;
     }
@@ -5054,8 +5197,8 @@ export async function mountTaskflowApp(opts = {}) {
       role,
       is_head: role === 'head',
       reporting_head_id: els.empReportingHead.value || null,
-      site_name: siteName || null,
-      site_names: siteName ? [siteName] : null,
+      site_name: sites[0] || null,
+      site_names: sites.length ? sites : null,
       whatsapp_number: (document.getElementById('emp-whatsapp')?.value || '').trim() || null
     };
     try {
@@ -5083,11 +5226,11 @@ export async function mountTaskflowApp(opts = {}) {
     const headOptions = (state.master.employees || []).filter((e) => e.id !== emp.id);
     fillSelect(els.editEmpReportingHead, headOptions, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
     els.editEmpReportingHead.value = emp.reporting_head_id || '';
-    fillSelect(els.editEmpSite || document.getElementById('edit-emp-site'), state.master.projects || [], {
-      placeholder: '— None —', labelKey: 'name', valueKey: 'name'
-    });
-    const editSiteEl = els.editEmpSite || document.getElementById('edit-emp-site');
-    if (editSiteEl) editSiteEl.value = emp.site_name || '';
+    fillSiteMultiSelect(
+      els.editEmpSite || document.getElementById('edit-emp-site'),
+      state.master.projects || [],
+      parseEmployeeSites(emp)
+    );
     const waEl = document.getElementById('edit-emp-whatsapp');
     if (waEl) waEl.value = emp.whatsapp_number || '';
     setEditStatusToggle(emp.is_active !== false);
@@ -5103,8 +5246,8 @@ export async function mountTaskflowApp(opts = {}) {
   els.editEmpStatusToggle?.addEventListener('click', () => {
     setEditStatusToggle(els.editEmpStatusToggle.dataset.active !== 'true');
   });
-  els.closeEditEmployeeModal?.addEventListener('click', () => { els.editEmployeeModal.hidden = true; });
-  els.cancelEditEmployeeModal?.addEventListener('click', () => { els.editEmployeeModal.hidden = true; });
+  els.closeEditEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.editEmployeeModal.hidden = true; });
+  els.cancelEditEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.editEmployeeModal.hidden = true; });
   els.toggleEditPassword?.addEventListener('click', () => {
     const isPw = els.editEmpPassword.type === 'password';
     els.editEmpPassword.type = isPw ? 'text' : 'password';
@@ -5130,14 +5273,14 @@ export async function mountTaskflowApp(opts = {}) {
       reporting_head_id: els.editEmpReportingHead.value || null, // optional — blank clears it
       is_active:   els.editEmpStatusToggle.dataset.active === 'true'
     };
-    const siteName = (els.editEmpSite || document.getElementById('edit-emp-site'))?.value?.trim() || '';
-    if (role === 'client' && !siteName) {
-      els.editEmployeeFormMsg.textContent = 'Please select the project for this client';
+    const sites = getSelectedSites(els.editEmpSite || document.getElementById('edit-emp-site'));
+    if (role === 'client' && !sites.length) {
+      els.editEmployeeFormMsg.textContent = 'Please select at least one project for this client';
       els.editEmployeeFormMsg.hidden = false;
       return;
     }
-    body.site_name = siteName || null;
-    body.site_names = siteName ? [siteName] : null;
+    body.site_name = sites[0] || null;
+    body.site_names = sites.length ? sites : null;
     body.whatsapp_number = (document.getElementById('edit-emp-whatsapp')?.value || '').trim() || null;
     if (newPassword) body.new_password = newPassword;
     try {
@@ -5554,7 +5697,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
     const blob = empRoleBlob(emp);
     if (/site engineer|site incharge|site coordinator|site execution|team leader|\bsite\b/.test(blob)) return true;
-    if (emp?.site_name || (Array.isArray(emp?.site_names) && emp.site_names.length)) return true;
+    if (emp?.site_name || parseEmployeeSites(emp).length) return true;
     return false;
   }
 

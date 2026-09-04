@@ -927,6 +927,61 @@ body.sidebar-open { overflow: hidden; }
 }
 .field input[type="file"] { padding: 8px 12px; cursor: pointer; }
 
+.multi-select { position: relative; }
+.multi-select .ms-toggle {
+  width: 100%; padding: 10px 13px;
+  border: 1.5px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2); color: var(--ink);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  text-align: left; cursor: pointer; font: inherit;
+}
+.multi-select .ms-toggle:focus {
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(220,105,0,.1); outline: none;
+}
+.multi-select.open .ms-toggle { border-color: var(--primary); }
+.multi-select .ms-toggle-label {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.92rem;
+}
+.multi-select .ms-toggle-label.is-placeholder { color: var(--muted); }
+.multi-select .ms-caret { color: var(--muted); font-size: 0.75rem; flex-shrink: 0; }
+.multi-select .ms-panel {
+  position: relative; z-index: 30;
+  margin-top: 4px;
+  background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--r-sm);
+  box-shadow: 0 10px 28px rgba(0,0,0,.12); max-height: 260px;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.multi-select .ms-search {
+  width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  padding: 9px 12px; background: var(--surface-2); color: var(--ink); outline: none;
+  font: inherit; font-size: 0.88rem;
+}
+.multi-select .ms-list { overflow: auto; max-height: 200px; padding: 6px 0; }
+.multi-select .ms-option {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 12px; cursor: pointer; font-size: 0.88rem; color: var(--ink);
+}
+.multi-select .ms-option:hover { background: var(--primary-lt); }
+.multi-select .ms-option input { width: auto; margin-top: 2px; accent-color: var(--primary); flex-shrink: 0; }
+.multi-select .ms-empty { padding: 12px; font-size: 0.82rem; color: var(--muted); }
+.multi-select .ms-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.multi-select .ms-chips:empty { display: none; }
+.multi-select .ms-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--primary-lt); color: var(--ink); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 8px 3px 10px; font-size: 0.75rem; font-weight: 600;
+  max-width: 100%;
+}
+.multi-select .ms-chip span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
+}
+.multi-select .ms-chip button {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 0.95rem; line-height: 1; padding: 0 2px;
+}
+.multi-select .ms-chip button:hover { color: var(--rose); }
+
 .req      { color: var(--rose); font-size: 0.9em; }
 .optional { color: var(--muted-lt); font-weight: 400; font-size: 0.85em; }
 
@@ -2091,7 +2146,9 @@ body.sidebar-open { overflow: hidden; }
   }
   .field input,
   .field select,
-  .field textarea {
+  .field textarea,
+  .multi-select .ms-toggle,
+  .multi-select .ms-search {
     font-size: 16px;
   }
 

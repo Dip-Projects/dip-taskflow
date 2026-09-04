@@ -10,6 +10,26 @@ router.use(requireAdmin); // every route here is admin-only
 
 // ----------------------------- helpers -----------------------------
 
+function normalizeSiteNames(site_names, site_name) {
+  const out = [];
+  const add = (s) => {
+    const v = String(s || '').trim();
+    if (v && !out.includes(v)) out.push(v);
+  };
+  if (Array.isArray(site_names)) site_names.forEach(add);
+  else if (typeof site_names === 'string' && site_names.trim()) {
+    try {
+      const parsed = JSON.parse(site_names);
+      if (Array.isArray(parsed)) parsed.forEach(add);
+      else add(site_names);
+    } catch {
+      add(site_names);
+    }
+  }
+  add(site_name);
+  return out;
+}
+
 // Turns "Jignesh Thakorbhai Lad" -> "jignesh.l" (firstname.lastinitial),
 // then appends a number if that username is already taken.
 function slugifyName(full_name) {
@@ -117,6 +137,8 @@ router.post('/', async (req, res) => {
       role === 'client' && !(department || '').trim()
         ? 'Client'
         : department;
+    const siteList = normalizeSiteNames(site_names, site_name);
+    const primarySite = siteList[0] || null;
 
     let insertRole = role;
     let { data, error } = await supabase
@@ -125,8 +147,8 @@ router.post('/', async (req, res) => {
         username, password_hash, full_name, department: departmentFinal, designation, role: insertRole, is_active: true,
         reporting_head_id: reporting_head_id || null,
         is_head: headFlag,
-        site_name: site_name || null,
-        site_names: site_names || null,
+        site_name: primarySite,
+        site_names: siteList.length ? siteList : null,
         whatsapp_number: whatsapp_number ? String(whatsapp_number).trim() : null
       })
       .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
@@ -141,8 +163,8 @@ router.post('/', async (req, res) => {
           role: insertRole, is_active: true,
           reporting_head_id: reporting_head_id || null,
           is_head: false,
-          site_name: site_name || null,
-          site_names: site_names || null,
+          site_name: primarySite,
+          site_names: siteList.length ? siteList : null,
           whatsapp_number: whatsapp_number ? String(whatsapp_number).trim() : null
         })
         .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
@@ -201,8 +223,11 @@ router.patch('/:id', async (req, res) => {
       }
     }
     if (is_head !== undefined) updates.is_head = !!is_head;
-    if (site_name !== undefined) updates.site_name = site_name;
-    if (site_names !== undefined) updates.site_names = site_names;
+    if (site_name !== undefined || site_names !== undefined) {
+      const siteList = normalizeSiteNames(site_names, site_name);
+      updates.site_name = siteList[0] || null;
+      updates.site_names = siteList.length ? siteList : null;
+    }
     if (is_active !== undefined) updates.is_active = is_active;
     if (can_verify !== undefined) updates.can_verify = can_verify;
     if (is_mis_executive !== undefined) updates.is_mis_executive = is_mis_executive;

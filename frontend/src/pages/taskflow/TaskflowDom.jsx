@@ -1409,11 +1409,9 @@ export default function TaskflowDom() {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="emp-site">Project / Site <span className="optional">(for Site Engineer)</span></label>
-          <select id="emp-site">
-            <option value="">— None —</option>
-          </select>
-          <p className="form-note" style={{marginTop: 6}}>Required for Site Engineers and Clients. Client login only shows this project’s reports and materials.</p>
+          <label htmlFor="emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+          <div id="emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+          <p className="form-note" style={{marginTop: 6}}>You can assign multiple projects. Required for Site Engineers and Clients. Client login only shows these projects’ reports and materials.</p>
         </div>
         <div className="field">
           <label htmlFor="emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
@@ -1466,10 +1464,9 @@ export default function TaskflowDom() {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="edit-emp-site">Project / Site <span className="optional">(for Site Engineer)</span></label>
-          <select id="edit-emp-site">
-            <option value="">— None —</option>
-          </select>
+          <label htmlFor="edit-emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+          <div id="edit-emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+          <p className="form-note" style={{marginTop: 6}}>Select every site this person should access. Click again to add or remove sites.</p>
         </div>
         <div className="field">
           <label htmlFor="edit-emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>

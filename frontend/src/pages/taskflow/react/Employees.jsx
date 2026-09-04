@@ -29,7 +29,8 @@ export default function Employees() {
       (u.full_name || '').toLowerCase().includes(s) ||
       (u.username || '').toLowerCase().includes(s) ||
       (u.department || '').toLowerCase().includes(s) ||
-      (u.site_name || '').toLowerCase().includes(s)
+      (u.site_name || '').toLowerCase().includes(s) ||
+      (Array.isArray(u.site_names) ? u.site_names.join(' ') : String(u.site_names || '')).toLowerCase().includes(s)
     );
   });
 
