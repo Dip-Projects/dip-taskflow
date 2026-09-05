@@ -1766,7 +1766,7 @@ body.sidebar-open { overflow: hidden; }
 .org-tree-container {
   position: relative;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: var(--sh-xs); padding: 40px 16px;
+  box-shadow: var(--sh-xs); padding: 20px 10px;
   overflow: auto;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
@@ -1776,45 +1776,51 @@ body.sidebar-open { overflow: hidden; }
   pointer-events: none; overflow: visible;
 }
 .org-tree-svg .org-line {
-  stroke: var(--primary); stroke-width: 2; stroke-linecap: round;
+  stroke: var(--primary); stroke-width: 1.5; stroke-linecap: round;
 }
 .org-tree {
   position: relative; z-index: 1;
-  display: flex; align-items: flex-start; justify-content: center; gap: 56px;
+  display: flex; align-items: flex-start; justify-content: center; gap: 18px;
   width: max-content;
   min-width: 100%;
   box-sizing: border-box;
-  padding: 8px 56px 16px;
+  padding: 4px 18px 10px;
 }
 .org-branch {
   display: flex; flex-direction: column; align-items: center;
   flex: 0 0 auto;
 }
 .org-branch-children {
-  display: flex; align-items: flex-start; justify-content: center; gap: 28px;
-  margin-top: 40px;
+  display: flex; align-items: flex-start; justify-content: center; gap: 10px;
+  margin-top: 22px;
   width: max-content;
   flex: 0 0 auto;
 }
 
 .org-node {
   position: relative; z-index: 1;
-  display: inline-flex; align-items: center; gap: 10px;
+  display: inline-flex; align-items: center; gap: 7px;
   flex-shrink: 0;
+  max-width: 148px;
   background: var(--surface-2); border: 1.5px solid var(--border);
-  border-radius: var(--r-md); padding: 9px 16px; box-shadow: var(--sh-xs);
-  white-space: nowrap;
+  border-radius: 8px; padding: 5px 8px; box-shadow: var(--sh-xs);
 }
 .org-node-root { background: var(--primary-lt); border-color: var(--primary-mid); }
 .org-node-avatar {
-  width: 34px; height: 34px; border-radius: 50%; background: var(--primary);
+  width: 24px; height: 24px; border-radius: 50%; background: var(--primary);
   color: #fff; display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 0.85rem; flex-shrink: 0;
+  font-weight: 700; font-size: 0.68rem; flex-shrink: 0;
 }
 .org-node-root .org-node-avatar { background: var(--primary-dk); }
-.org-node-info { display: flex; flex-direction: column; line-height: 1.3; text-align: left; }
-.org-node-name { font-weight: 700; font-size: 0.9rem; color: var(--ink); }
-.org-node-meta { font-size: 0.74rem; color: var(--muted); }
+.org-node-info { display: flex; flex-direction: column; line-height: 1.25; text-align: left; min-width: 0; }
+.org-node-name {
+  font-weight: 700; font-size: 0.74rem; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 108px;
+}
+.org-node-meta {
+  font-size: 0.64rem; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 108px;
+}
 .org-tree-empty {
   color: var(--muted);
   text-align: center;

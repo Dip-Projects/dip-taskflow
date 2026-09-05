@@ -5331,6 +5331,8 @@ export async function mountTaskflowApp(opts = {}) {
   
     const nodeEl = document.createElement('div');
     nodeEl.className = `org-node${isRoot ? ' org-node-root' : ''}`;
+    const meta = node.designation || node.role || '';
+    nodeEl.title = meta ? `${node.full_name} — ${meta}` : (node.full_name || '');
     nodeEl.innerHTML = `
       <div class="org-node-avatar">${escapeHtml(orgInitials(node.full_name))}</div>
       <div class="org-node-info">
