@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Navbar from "../../components/Navbar";
 import { supabase, fromMaybe } from "../../lib/supabase";
 import { api } from "../../lib/api";
@@ -185,6 +185,13 @@ function lateMinutesFromClockIn(ts) {
 function pendText(value) {
   const s = String(value ?? "").trim();
   return s || "Pend";
+}
+function employeeOptionKey(person) {
+  return normKey(person?.username) || normKey(person?.name);
+}
+function employeeMatches(person, key) {
+  if (!key || key === "all") return true;
+  return normKey(person?.username) === key || normKey(person?.name) === key;
 }
 function locationCell(label, url) {
   const text = pendText(label);
@@ -641,7 +648,7 @@ function engineerReportMark(onLeave, done) {
   return done ? "Done" : "Pend";
 }
 
-async function fetchEngineerExcelReport(sites, from, to) {
+async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
   if (!from || !to) return [];
   const dates = dateRange(from, to);
   if (!dates.length) return [];
@@ -703,7 +710,10 @@ async function fetchEngineerExcelReport(sites, from, to) {
     if (type === "evening") bucket.evening = true;
   });
 
-  const list = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
+  let list = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
+  if (employeeKey && employeeKey !== "all") {
+    list = list.filter((eng) => employeeMatches(eng, employeeKey));
+  }
   const sheets = list.map((eng) => {
     const rows = dates.map((date) => {
       const att = attByUserDate.get(`${normKey(eng.username)}__${date}`)
@@ -1140,7 +1150,7 @@ function downloadDprPdf(rows, dates, from, to) {
 // DATE RANGE FILTER (shared control)
 // ═══════════════════════════════════════════════════════════════════════════
 
-function RangeFilter({ from, to, setFrom, setTo, onGenerate, busy }) {
+function RangeFilter({ from, to, setFrom, setTo, onGenerate, busy, extra }) {
   return (
     <div className="grid2" style={{ marginBottom: 20 }}>
       <div className="fgroup">
@@ -1164,6 +1174,7 @@ function RangeFilter({ from, to, setFrom, setTo, onGenerate, busy }) {
           onChange={(e) => setTo(e.target.value)}
         />
       </div>
+      {extra}
       <div className="col2 act-row" style={{ marginTop: 0 }}>
         <button className="btn btn-pri" disabled={!from || !to || busy} onClick={onGenerate}>
           {busy ? "Generating…" : "Generate Report"}
@@ -1347,12 +1358,43 @@ function EngineerExcelReport({ sites }) {
   const [sheets, setSheets] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [employeeKey, setEmployeeKey] = useState("all");
+  const [employees, setEmployees] = useState([]);
+  const sitesKey = (sites || []).join("|");
+
+  useEffect(() => {
+    let live = true;
+    resolveAllSiteEngineers(sites)
+      .then((list) => {
+        if (!live) return;
+        setEmployees(list || []);
+      })
+      .catch(() => {
+        if (live) setEmployees([]);
+      });
+    return () => { live = false; };
+  }, [sitesKey]);
+
+  const employeeOptions = useMemo(() => {
+    const byKey = new Map();
+    (employees || []).forEach((e) => {
+      const key = employeeOptionKey(e);
+      if (key) byKey.set(key, e);
+    });
+    (sheets || []).forEach((s) => {
+      const key = employeeOptionKey(s);
+      if (key && !byKey.has(key)) byKey.set(key, { username: s.username, name: s.name });
+    });
+    return [...byKey.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [employees, sheets]);
+
+  const visibleSheets = !sheets ? null : sheets.filter((s) => employeeMatches(s, employeeKey));
 
   const generate = async () => {
     setBusy(true);
     setErr("");
     try {
-      const data = await fetchEngineerExcelReport(sites, from, to);
+      const data = await fetchEngineerExcelReport(sites, from, to, employeeKey);
       setSheets(data);
     } catch (e) {
       setErr(e.message || "Failed to build engineer Excel report.");
@@ -1364,32 +1406,63 @@ function EngineerExcelReport({ sites }) {
 
   return (
     <div>
-      <RangeFilter from={from} to={to} setFrom={setFrom} setTo={setTo} onGenerate={generate} busy={busy} />
+      <RangeFilter
+        from={from}
+        to={to}
+        setFrom={setFrom}
+        setTo={setTo}
+        onGenerate={generate}
+        busy={busy}
+        extra={(
+          <div className="fgroup col2">
+            <label className="flabel">Employee <span className="req">*</span></label>
+            <select
+              className="finput"
+              value={employeeKey}
+              onChange={(e) => setEmployeeKey(e.target.value)}
+            >
+              <option value="all">All Employees</option>
+              {employeeOptions.map((e) => {
+                const key = employeeOptionKey(e);
+                return (
+                  <option key={key} value={key}>{e.name}</option>
+                );
+              })}
+            </select>
+          </div>
+        )}
+      />
       {err && <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>{err}</div>}
 
-      {sheets && (
+      {visibleSheets && (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontSize: 13, color: "var(--ink2)" }}>
-              {sheets.length} engineer{sheets.length !== 1 ? "s" : ""} · {fmtDDMMYYYY(from)} to {fmtDDMMYYYY(to)} · one Excel sheet per engineer
+              {employeeKey === "all"
+                ? `${visibleSheets.length} employee${visibleSheets.length !== 1 ? "s" : ""} · ${fmtDDMMYYYY(from)} to ${fmtDDMMYYYY(to)} · one Excel sheet per employee`
+                : `${visibleSheets[0]?.name || "Selected employee"} · ${fmtDDMMYYYY(from)} to ${fmtDDMMYYYY(to)}`}
             </div>
             <button
               className="btn btn-out"
-              onClick={() => downloadEngineerExcel(sheets, from, to)}
-              disabled={!sheets.length}
+              onClick={() => downloadEngineerExcel(visibleSheets, from, to)}
+              disabled={!visibleSheets.length}
             >
               {Ico.dl} Download Excel
             </button>
           </div>
 
-          {sheets.length === 0 ? (
+          {visibleSheets.length === 0 ? (
             <div className="empty-state">
-              <div className="empty-title">No site engineers found</div>
-              <div className="empty-sub">No site engineers are assigned for the selected sites.</div>
+              <div className="empty-title">{employeeKey === "all" ? "No site engineers found" : "No report for this employee"}</div>
+              <div className="empty-sub">
+                {employeeKey === "all"
+                  ? "No site engineers are assigned for the selected sites."
+                  : "Generate the report again after selecting this employee."}
+              </div>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-              {sheets.map((s) => (
+              {visibleSheets.map((s) => (
                 <div key={s.username || s.name} style={{ overflowX: "auto" }}>
                   <div style={{
                     textAlign: "center",
