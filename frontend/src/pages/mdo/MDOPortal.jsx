@@ -507,6 +507,55 @@ async function resolveAllSiteEngineers(sites) {
   return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function isApprovedLeaveRow(leave) {
+  const st = String(leave?.status || "").toLowerCase();
+  if (st === "rejected") return false;
+  if (st === "approved") return true;
+  if (leave?.level_approved === false || leave?.head_approved === false) return false;
+  if (leave?.admin_approved === true) return true;
+  return isLeaveFullyApproved(leave);
+}
+
+async function fetchApprovedLeaveDays(from, to) {
+  const onLeave = new Set();
+  const addLeaves = (rows) => {
+    (rows || []).forEach((l) => {
+      if (!isApprovedLeaveRow(l) || !l.from_date || !l.to_date) return;
+      const start = l.from_date > from ? l.from_date : from;
+      const end = l.to_date < to ? l.to_date : to;
+      dateRange(start, end).forEach((d) => {
+        if (l.user_name) onLeave.add(`${normKey(l.user_name)}__${d}`);
+        if (l.name) onLeave.add(`${normKey(l.name)}__${d}`);
+      });
+    });
+  };
+  const { data: siteLeaves } = await fromMaybe("site_leaves", (q) =>
+    q.select("user_name, name, from_date, to_date, status, level_approved, head_approved")
+      .lte("from_date", to)
+      .gte("to_date", from)
+  );
+  addLeaves(siteLeaves);
+  const { data: officeLeaves } = await fromMaybe("leaves", (q) =>
+    q.select("user_name, name, from_date, to_date, status, admin_approved, proxy_approved, proxy_user_name, level_approved, head_approved, level_approver_user_name, head_approver_user_name")
+      .lte("from_date", to)
+      .gte("to_date", from)
+  );
+  addLeaves(officeLeaves);
+  return onLeave;
+}
+
+function engineerDayStatus({ onLeave, clockIn, clockOut, lateMins, att }) {
+  if (onLeave) return "On Leave";
+  if (!clockIn || !clockOut) return "Pend";
+  if (lateMins > 0 || isLateAttendance(att)) return "Late";
+  return "On Time";
+}
+
+function engineerReportMark(onLeave, done) {
+  if (onLeave) return "On Leave";
+  return done ? "Done" : "Pend";
+}
+
 async function fetchEngineerExcelReport(sites, from, to) {
   if (!from || !to) return [];
   const dates = dateRange(from, to);
@@ -515,6 +564,7 @@ async function fetchEngineerExcelReport(sites, from, to) {
   const engineers = await resolveAllSiteEngineers(sites);
   const byUser = new Map(engineers.map((e) => [normKey(e.username), e]));
   const byName = new Map(engineers.map((e) => [normKey(e.name), e]));
+  const leaveDays = await fetchApprovedLeaveDays(from, to);
 
   let attendance;
   try {
@@ -577,20 +627,21 @@ async function fetchEngineerExcelReport(sites, from, to) {
         || dprByNameDate.get(`${normKey(eng.username)}__${date}`)
         || { morning: false, evening: false };
       const clockIn = att?.clock_in || "";
+      const clockOut = att?.clock_out || "";
       const lateMins = lateMinutesFromClockIn(clockIn);
-      let status = "";
-      if (clockIn) status = lateMins > 0 || isLateAttendance(att) ? "Late" : "On Time";
+      const onLeave = leaveDays.has(`${normKey(eng.username)}__${date}`)
+        || leaveDays.has(`${normKey(eng.name)}__${date}`);
       return {
         date,
         name: eng.name,
         clockIn,
         clockInLocation: att?.clock_in_location || "",
-        clockOut: att?.clock_out || "",
+        clockOut,
         clockOutLocation: att?.clock_out_location || "",
-        status,
-        lateMinutes: clockIn ? lateMins : 0,
-        morning: dpr.morning ? "Done" : "Pend",
-        evening: dpr.evening ? "Done" : "Pend",
+        status: engineerDayStatus({ onLeave, clockIn, clockOut, lateMins, att }),
+        lateMinutes: clockIn && !onLeave ? lateMins : 0,
+        morning: engineerReportMark(onLeave, dpr.morning),
+        evening: engineerReportMark(onLeave, dpr.evening),
       };
     });
     return { name: eng.name, username: eng.username, rows };
@@ -629,9 +680,8 @@ function downloadEngineerExcel(sheets, from, to) {
   (sheets || []).forEach((sheet) => {
     const ws = {};
     const name = String(sheet.name || "ENGINEER").toUpperCase();
-    ws.A1 = { v: name, t: "s", s: titleStyle };
-    for (let c = 1; c <= 9; c++) {
-      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: "", t: "s", s: titleStyle };
+    for (let c = 0; c <= 9; c++) {
+      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: c === 3 ? name : "", t: "s", s: titleStyle };
     }
     headers.forEach((h, c) => {
       ws[XLSX.utils.encode_cell({ r: 1, c })] = { v: h, t: "s", s: headStyle };
@@ -651,15 +701,31 @@ function downloadEngineerExcel(sheets, from, to) {
         row.evening,
       ];
       vals.forEach((v, c) => {
+        const st = bodyStyle(c === 1 ? "left" : "center");
+        if (c === 6) {
+          if (v === "Late") st.font = { ...st.font, bold: true, color: { rgb: "FFB45309" } };
+          else if (v === "Pend") st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
+          else if (v === "On Leave") st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
+          else if (v === "On Time") st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
+        }
+        if ((c === 8 || c === 9) && v === "Pend") {
+          st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
+        }
+        if ((c === 8 || c === 9) && v === "Done") {
+          st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
+        }
+        if ((c === 8 || c === 9) && v === "On Leave") {
+          st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
+        }
         ws[XLSX.utils.encode_cell({ r, c })] = {
           v,
           t: typeof v === "number" ? "n" : "s",
-          s: bodyStyle(c === 1 ? "left" : "center"),
+          s: st,
         };
       });
     });
     const lastRow = 1 + (sheet.rows?.length || 0);
-    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
+    ws["!merges"] = [{ s: { r: 0, c: 3 }, e: { r: 0, c: 6 } }];
     ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(lastRow, 1), c: 9 } });
     ws["!cols"] = [
       { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 22 },
@@ -674,7 +740,7 @@ function downloadEngineerExcel(sheets, from, to) {
     const ws = XLSX.utils.aoa_to_sheet([["No site engineers found"]]);
     XLSX.utils.book_append_sheet(wb, ws, "Report");
   }
-  XLSX.writeFile(wb, `Site_Engineer_Report_${from}_to_${to}.xlsx`);
+  XLSX.writeFile(wb, `SITE_ATT_REPORT_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
 }
 
 async function resolveEngineers(sites) {
@@ -1227,34 +1293,72 @@ function EngineerExcelReport({ sites }) {
               <div className="empty-sub">No site engineers are assigned for the selected sites.</div>
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: "2px solid var(--line)" }}>
-                    <th style={{ textAlign: "left", padding: "8px 10px" }}>Engineer</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Days</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Late</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Morning Done</th>
-                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Evening Done</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sheets.map((s) => {
-                    const late = s.rows.filter((r) => r.status === "Late").length;
-                    const morning = s.rows.filter((r) => r.morning === "Done").length;
-                    const evening = s.rows.filter((r) => r.evening === "Done").length;
-                    return (
-                      <tr key={s.username || s.name} style={{ borderBottom: "1px solid var(--line)" }}>
-                        <td style={{ padding: "8px 10px", fontWeight: 600 }}>{s.name}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{s.rows.length}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", color: late ? "var(--amber2, #d97706)" : "inherit" }}>{late}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{morning}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{evening}</td>
+            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+              {sheets.map((s) => (
+                <div key={s.username || s.name} style={{ overflowX: "auto" }}>
+                  <div style={{
+                    textAlign: "center",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    letterSpacing: ".04em",
+                    padding: "10px 8px",
+                    background: "#bdd7ee",
+                    color: "#1a3a5c",
+                    border: "1px solid #9eb3cc",
+                  }}>
+                    {String(s.name || "").toUpperCase()}
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead>
+                      <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                        <th style={{ padding: "8px 8px" }}>Date</th>
+                        <th style={{ padding: "8px 8px", textAlign: "left" }}>Employee Name</th>
+                        <th style={{ padding: "8px 8px" }}>Check In Time</th>
+                        <th style={{ padding: "8px 8px" }}>Check In Location</th>
+                        <th style={{ padding: "8px 8px" }}>Check Out Time</th>
+                        <th style={{ padding: "8px 8px" }}>Check Out Location</th>
+                        <th style={{ padding: "8px 8px" }}>Status</th>
+                        <th style={{ padding: "8px 8px" }}>Late Minutes</th>
+                        <th style={{ padding: "8px 8px" }}>Morning Report</th>
+                        <th style={{ padding: "8px 8px" }}>Evening DPR</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {s.rows.map((r) => (
+                        <tr key={`${s.username}-${r.date}`} style={{ borderBottom: "1px solid var(--line)" }}>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtDMonYY(r.date)}</td>
+                          <td style={{ padding: "7px 8px" }}>{r.name}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtTimeIST24(r.clockIn) || "—"}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.clockInLocation || "—"}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtTimeIST24(r.clockOut) || "—"}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.clockOutLocation || "—"}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            fontWeight: 700,
+                            color: r.status === "Late" || r.status === "Pend" ? "var(--amber2, #d97706)"
+                              : r.status === "On Leave" ? "#7c3aed"
+                              : r.status === "On Time" ? "var(--green)" : "inherit",
+                          }}>{r.status}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.lateMinutes}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            fontWeight: 700,
+                            color: r.morning === "Done" ? "var(--green)" : r.morning === "On Leave" ? "#7c3aed" : "var(--amber2, #d97706)",
+                          }}>{r.morning}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            fontWeight: 700,
+                            color: r.evening === "Done" ? "var(--green)" : r.evening === "On Leave" ? "#7c3aed" : "var(--amber2, #d97706)",
+                          }}>{r.evening}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
             </div>
           )}
         </>
