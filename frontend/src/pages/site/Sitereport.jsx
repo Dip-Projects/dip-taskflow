@@ -97,27 +97,32 @@ function isMissingColumnError(error, column) {
   );
 }
 
+function isMissingColumnMsg(message) {
+  return /column .+ does not exist/i.test(String(message || ""));
+}
+
 async function querySvrDraft(site_name, reporter) {
   const attempts = [
     { col: "reporter", order: "saved_at" },
-    { col: "submitted_by", order: "updated_at" },
     { col: "reporter", order: null },
+    { col: "submitted_by", order: "updated_at" },
     { col: "submitted_by", order: null },
   ];
-  let lastError = "";
+  let lastFatal = "";
+  let queryWorked = false;
   for (const attempt of attempts) {
     let q = supabase.from("svr_drafts").select("*").eq("site_name", site_name).eq(attempt.col, reporter).limit(1);
     if (attempt.order) q = q.order(attempt.order, { ascending: false });
     const { data, error } = await q;
     if (error) {
-      lastError = error.message;
+      if (isMissingColumnMsg(error.message)) continue;
+      lastFatal = error.message;
       continue;
     }
+    queryWorked = true;
     if (data?.[0]) return { ok: true, draft: data[0] };
   }
-  if (lastError && /does not exist|schema cache|could not find the table/i.test(lastError)) {
-    return { ok: false, error: lastError, draft: null };
-  }
+  if (!queryWorked && lastFatal) return { ok: false, error: lastFatal, draft: null };
   return { ok: true, draft: null };
 }
 
@@ -162,8 +167,8 @@ async function saveSvrDraft(payload) {
   if (!found.ok && found.error) return found;
 
   const result = await writeSvrDraftRow(found.draft?.id, [
-    { site_name: site, reporter, submitted_by: reporter, payload: clean, saved_at: now, updated_at: now },
     { site_name: site, reporter, payload: clean, saved_at: now },
+    { site_name: site, reporter, payload: clean },
     { site_name: site, submitted_by: reporter, payload: clean, updated_at: now },
     { site_name: site, submitted_by: reporter, payload: clean },
   ]);
