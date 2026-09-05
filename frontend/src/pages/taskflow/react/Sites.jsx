@@ -113,7 +113,7 @@ export default function Sites() {
             <input type="date" value={form.expected_end_date} onChange={(e) => set('expected_end_date', e.target.value)} />
           </label>
           <label>
-            Team leader
+            Team incharge
             <select required value={form.team_leader_id} onChange={(e) => set('team_leader_id', e.target.value)}>
               <option value="">Select…</option>
               {people.map((p) => (
@@ -131,7 +131,7 @@ export default function Sites() {
             </select>
           </label>
           <label>
-            Site incharge
+            Head name
             <select required value={form.site_incharge_id} onChange={(e) => set('site_incharge_id', e.target.value)}>
               <option value="">Select…</option>
               {people.map((p) => (

@@ -1804,9 +1804,9 @@ export async function mountTaskflowApp(opts = {}) {
       syncFilterEmployeeDropdown();
       syncOverdueEmployeeDropdown();
       syncRecurringEmployeeDropdown();
-      fillSelect(els.siteTeamleader, siteTeamLeaderOptions(employees), { placeholder: 'Select team leader', labelKey: 'full_name' });
+      fillSelect(els.siteTeamleader, siteTeamLeaderOptions(employees), { placeholder: 'Select team incharge', labelKey: 'full_name' });
       fillSelect(els.siteCoordinator, siteCoordinatorOptions(employees), { placeholder: 'Select coordinator', labelKey: 'full_name' });
-      fillSelect(els.siteIncharge, siteInchargeOptions(employees), { placeholder: 'Select site incharge (Head)', labelKey: 'full_name' });
+      fillSelect(els.siteIncharge, siteInchargeOptions(employees), { placeholder: 'Select head name', labelKey: 'full_name' });
       fillSitePcDropdown(employees);
       // Reporting Head — optional field on the employee form. Add form shows everyone;
       // Edit form additionally excludes the employee being edited (can't report to self).
@@ -5747,13 +5747,13 @@ export async function mountTaskflowApp(opts = {}) {
   function fillSitePeopleDropdowns(employees, keep = {}) {
     const emps = employees || state.master.employees || [];
     fillSelect(els.siteTeamleader, siteTeamLeaderOptions(emps, keep.team_leader_id), {
-      placeholder: 'Select team leader', labelKey: 'full_name',
+      placeholder: 'Select team incharge', labelKey: 'full_name',
     });
     fillSelect(els.siteCoordinator, siteCoordinatorOptions(emps, keep.coordinator_id), {
       placeholder: 'Select coordinator', labelKey: 'full_name',
     });
     fillSelect(els.siteIncharge, siteInchargeOptions(emps, keep.site_incharge_id), {
-      placeholder: 'Select site incharge (Head)', labelKey: 'full_name',
+      placeholder: 'Select head name', labelKey: 'full_name',
     });
     fillSitePcDropdown(emps, keep.pc_id);
     if (keep.team_leader_id && els.siteTeamleader) els.siteTeamleader.value = keep.team_leader_id;

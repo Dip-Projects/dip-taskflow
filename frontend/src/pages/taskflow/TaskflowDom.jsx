@@ -1569,8 +1569,8 @@ export default function TaskflowDom() {
         </div>
         <div className="field-grid">
           <div className="field">
-            <label htmlFor="site-teamleader">Team leader <span className="req">*</span></label>
-            <select id="site-teamleader" required><option value="">Select team leader</option></select>
+            <label htmlFor="site-teamleader">Team incharge <span className="req">*</span></label>
+            <select id="site-teamleader" required><option value="">Select team incharge</option></select>
           </div>
           <div className="field">
             <label htmlFor="site-coordinator">Co-ordinator <span className="req">*</span></label>
@@ -1579,8 +1579,8 @@ export default function TaskflowDom() {
         </div>
         <div className="field-grid">
           <div className="field">
-            <label htmlFor="site-incharge">Site incharge (Head) <span className="req">*</span></label>
-            <select id="site-incharge" required><option value="">Select head</option></select>
+            <label htmlFor="site-incharge">Head name <span className="req">*</span></label>
+            <select id="site-incharge" required><option value="">Select head name</option></select>
           </div>
           <div className="field">
             <label htmlFor="site-pc">PC <span className="req">*</span></label>
