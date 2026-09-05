@@ -80,44 +80,125 @@ async function uploadSvrPdfToSupabase(blob, fileName, site, date) {
   });
 }
 
+function cleanSvrDraftPayload(payload) {
+  const photos = (payload?.photos || []).map((p) => ({
+    dataUrl: p?.dataUrl || "",
+    caption: p?.caption || "",
+  }));
+  return JSON.parse(JSON.stringify({ ...payload, photos }));
+}
+
+function isMissingColumnError(error, column) {
+  const msg = String(error?.message || "").toLowerCase();
+  return msg.includes(String(column).toLowerCase()) && (
+    msg.includes("column") ||
+    msg.includes("schema cache") ||
+    msg.includes("could not find")
+  );
+}
+
+async function querySvrDraft(site_name, reporter) {
+  const attempts = [
+    { col: "reporter", order: "saved_at" },
+    { col: "submitted_by", order: "updated_at" },
+    { col: "reporter", order: null },
+    { col: "submitted_by", order: null },
+  ];
+  let lastError = "";
+  for (const attempt of attempts) {
+    let q = supabase.from("svr_drafts").select("*").eq("site_name", site_name).eq(attempt.col, reporter).limit(1);
+    if (attempt.order) q = q.order(attempt.order, { ascending: false });
+    const { data, error } = await q;
+    if (error) {
+      lastError = error.message;
+      continue;
+    }
+    if (data?.[0]) return { ok: true, draft: data[0] };
+  }
+  if (lastError && /does not exist|schema cache|could not find the table/i.test(lastError)) {
+    return { ok: false, error: lastError, draft: null };
+  }
+  return { ok: true, draft: null };
+}
+
+async function writeSvrDraftRow(existingId, rows) {
+  let lastError = "";
+  for (const row of rows) {
+    const req = existingId
+      ? supabase.from("svr_drafts").update(row).eq("id", existingId)
+      : supabase.from("svr_drafts").insert(row);
+    const { error } = await req;
+    if (!error) return { ok: true };
+    lastError = error.message;
+    if (/payload|too large|bytes|json/i.test(lastError) && row.payload?.photos?.length) {
+      const slim = { ...row, payload: { ...row.payload, photos: [] } };
+      const retry = existingId
+        ? supabase.from("svr_drafts").update(slim).eq("id", existingId)
+        : supabase.from("svr_drafts").insert(slim);
+      const { error: slimErr } = await retry;
+      if (!slimErr) return { ok: true, warning: "Draft saved without photos (files were too large)." };
+      lastError = slimErr.message;
+    }
+  }
+  return { ok: false, error: lastError || "Failed to save draft." };
+}
+
 async function saveSvrDraft(payload) {
-  const { error } = await supabase
-    .from("svr_drafts")
-    .upsert(
-      {
-        site_name: payload.site_name,
-        reporter:  payload.reporter_name,
-        payload:   JSON.parse(JSON.stringify(payload)),
-        saved_at:  new Date().toISOString(),
-      },
-      { onConflict: "site_name,reporter", ignoreDuplicates: false }
-    );
-  if (error) { console.error("saveSvrDraft error:", error); return { ok: false, error: error.message }; }
-  return { ok: true };
+  const site = String(payload?.site_name || "").trim();
+  const reporter = String(payload?.reporter_name || "").trim();
+  if (!site || !reporter) {
+    return { ok: false, error: "Site name and reporter name are required." };
+  }
+
+  let clean;
+  try {
+    clean = cleanSvrDraftPayload(payload);
+  } catch (e) {
+    return { ok: false, error: e.message || "Could not prepare draft data." };
+  }
+
+  const now = new Date().toISOString();
+  const found = await querySvrDraft(site, reporter);
+  if (!found.ok && found.error) return found;
+
+  const result = await writeSvrDraftRow(found.draft?.id, [
+    { site_name: site, reporter, submitted_by: reporter, payload: clean, saved_at: now, updated_at: now },
+    { site_name: site, reporter, payload: clean, saved_at: now },
+    { site_name: site, submitted_by: reporter, payload: clean, updated_at: now },
+    { site_name: site, submitted_by: reporter, payload: clean },
+  ]);
+  if (!result.ok) console.error("saveSvrDraft error:", result.error);
+  return result;
 }
 
 async function loadSvrDraft(site_name, reporter) {
   if (!site_name || !reporter) return { ok: true, draft: null };
-  const { data, error } = await supabase
-    .from("svr_drafts")
-    .select("*")
-    .eq("site_name", site_name)
-    .eq("reporter", reporter)
-    .order("saved_at", { ascending: false })
-    .limit(1);
-  if (error) return { ok: false, error: error.message, draft: null };
-  return { ok: true, draft: (data && data[0]) || null };
+  return querySvrDraft(site_name, reporter);
 }
 
 async function deleteSvrDraft(site_name, reporter) {
   if (!site_name || !reporter) return { ok: true };
-  const { error } = await supabase
-    .from("svr_drafts")
-    .delete()
-    .eq("site_name", site_name)
-    .eq("reporter", reporter);
-  if (error) return { ok: false, error: error.message };
-  return { ok: true };
+  const found = await querySvrDraft(site_name, reporter);
+  if (!found.ok) return found;
+  if (found.draft?.id) {
+    const { error } = await supabase.from("svr_drafts").delete().eq("id", found.draft.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
+  const attempts = [
+    supabase.from("svr_drafts").delete().eq("site_name", site_name).eq("reporter", reporter),
+    supabase.from("svr_drafts").delete().eq("site_name", site_name).eq("submitted_by", reporter),
+  ];
+  let lastError = "";
+  for (const req of attempts) {
+    const { error } = await req;
+    if (!error) return { ok: true };
+    lastError = error.message;
+    if (isMissingColumnError({ message: lastError }, "reporter") || isMissingColumnError({ message: lastError }, "submitted_by")) {
+      continue;
+    }
+  }
+  return lastError ? { ok: false, error: lastError } : { ok: true };
 }
 
 // ─── Fetch all unique site names from user_details ────────────────────────────
@@ -306,7 +387,7 @@ export default function SiteReport({ user }) {
     visit_date: new Date().toISOString().split("T")[0],
     visit_time: "",
     site_name: "",
-    reporter_name: user?.name || "",
+    reporter_name: user?.name || user?.full_name || "",
     designation: "",
     designation_other: "",
     progress_of_work: "",
@@ -431,7 +512,7 @@ const [submitStage, setSubmitStage] = useState(""); // "saving" | "pdf" | "uploa
     const res = await saveSvrDraft({ ...form, photos, visitType, visitors });
     setSavingDraft(false);
     if (res.ok) {
-      showToast("success", "✅ Draft saved successfully!");
+      showToast("success", res.warning || "✅ Draft saved successfully!");
       const loaded = await loadSvrDraft(site, rep);
       if (loaded.ok) { setDraftInfo(loaded.draft); setDraftCheckStatus(loaded.draft ? "found" : "none"); }
     } else {
@@ -440,10 +521,10 @@ const [submitStage, setSubmitStage] = useState(""); // "saving" | "pdf" | "uploa
   };
 
   const handleOpenDraft = () => {
-        const d = draftInfo.payload || {};
-    setVisitType(d.visitType || "single");
-setVisitors(d.visitors?.length ? d.visitors : [{ name: "", designation: "" }]);
     if (!draftInfo) { showToast("error", "No draft available."); return; }
+    const d = draftInfo.payload || {};
+    setVisitType(d.visitType || "single");
+    setVisitors(d.visitors?.length ? d.visitors : [{ name: "", designation: "" }]);
 
     const restoredSite = d.site_name || "";
 
