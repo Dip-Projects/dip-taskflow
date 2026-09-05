@@ -208,12 +208,35 @@ function locationCell(label, url) {
     </a>
   );
 }
+function looksLikeLoginId(value) {
+  const s = String(value || "").trim();
+  if (!s) return true;
+  if (s.includes("@")) return true;
+  if (!/\s/.test(s) && (s.includes(".") || s.includes("_") || s === s.toLowerCase())) return true;
+  return false;
+}
 function parseLatLng(raw) {
-  const m = String(raw || "").trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+  if (text.startsWith("{")) {
+    try {
+      const obj = JSON.parse(text);
+      const lat = Number(obj.lat ?? obj.latitude);
+      const lng = Number(obj.lng ?? obj.lon ?? obj.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        return { lat, lng };
+      }
+    } catch {
+      /* ignore invalid json */
+    }
+  }
+  const m = text.match(/(-?\d+(?:\.\d+)?)\s*[,/;\s]\s*(-?\d+(?:\.\d+)?)/);
   if (!m) return null;
   const lat = Number(m[1]);
   const lng = Number(m[2]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   return { lat, lng };
 }
 function mapsUrlFromCoords(lat, lng) {
@@ -599,6 +622,42 @@ async function resolveAllSiteEngineers(sites) {
   return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+async function resolveNameByUsername() {
+  const names = new Map();
+  const add = (username, name) => {
+    const key = normKey(username);
+    const display = String(name || "").trim();
+    if (!key || !display) return;
+    const prev = names.get(key);
+    names.set(key, prev ? preferDisplayName(prev, display) : display);
+  };
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("username, full_name")
+  );
+  (users || []).forEach((u) => add(u.username, u.full_name));
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+    q.select("user_name, full_name")
+  );
+  (assigns || []).forEach((a) => add(a.user_name, a.full_name));
+  const { data: details } = await fromMaybe("user_details", (q) =>
+    q.select("username, name")
+  );
+  (details || []).forEach((u) => add(u.username, u.name));
+  return names;
+}
+
+function applyOfficialName(person, nameByUser) {
+  if (!person) return person;
+  const official = nameByUser.get(normKey(person.username)) || nameByUser.get(normKey(person.name));
+  if (!official) return person;
+  if (looksLikeLoginId(person.name) || normKey(person.name) === normKey(person.username)) {
+    person.name = official;
+  } else {
+    person.name = preferDisplayName(person.name, official);
+  }
+  return person;
+}
+
 function isApprovedLeaveRow(leave) {
   const st = String(leave?.status || "").toLowerCase();
   if (st === "rejected") return false;
@@ -653,10 +712,18 @@ async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
   const dates = dateRange(from, to);
   if (!dates.length) return [];
 
-  const engineers = await resolveAllSiteEngineers(sites);
-  const byUser = new Map(engineers.map((e) => [normKey(e.username), e]));
-  const byName = new Map(engineers.map((e) => [normKey(e.name), e]));
-  const leaveDays = await fetchApprovedLeaveDays(from, to);
+  const [engineers, nameByUser, leaveDays] = await Promise.all([
+    resolveAllSiteEngineers(sites),
+    resolveNameByUsername(),
+    fetchApprovedLeaveDays(from, to),
+  ]);
+  const byUser = new Map();
+  const byName = new Map();
+  engineers.forEach((e) => {
+    applyOfficialName(e, nameByUser);
+    byUser.set(normKey(e.username), e);
+    byName.set(normKey(e.name), e);
+  });
 
   let attendance;
   try {
@@ -681,18 +748,27 @@ async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
 
   attendance.forEach((r) => {
     const key = normKey(r.user_name);
-    if (!key || byUser.has(key)) return;
-    const name = r.user_name;
-    const eng = { username: r.user_name, name };
+    if (!key) return;
+    if (byUser.has(key)) {
+      applyOfficialName(byUser.get(key), nameByUser);
+      return;
+    }
+    const name = nameByUser.get(key) || r.user_name;
+    const eng = applyOfficialName({ username: r.user_name, name }, nameByUser);
     byUser.set(key, eng);
-    byName.set(normKey(name), eng);
+    byName.set(normKey(eng.name), eng);
   });
   dprs.forEach((r) => {
     const name = String(r.engineer || "").trim();
     if (!name || byName.has(normKey(name))) return;
-    const eng = { username: name, name };
-    byName.set(normKey(name), eng);
-    byUser.set(normKey(name), eng);
+    const key = normKey(name);
+    if (byUser.has(key)) {
+      applyOfficialName(byUser.get(key), nameByUser);
+      return;
+    }
+    const eng = applyOfficialName({ username: name, name }, nameByUser);
+    byName.set(normKey(eng.name), eng);
+    byUser.set(normKey(eng.username), eng);
   });
 
   const attByUserDate = new Map();
@@ -1364,10 +1440,10 @@ function EngineerExcelReport({ sites }) {
 
   useEffect(() => {
     let live = true;
-    resolveAllSiteEngineers(sites)
-      .then((list) => {
+    Promise.all([resolveAllSiteEngineers(sites), resolveNameByUsername()])
+      .then(([list, names]) => {
         if (!live) return;
-        setEmployees(list || []);
+        setEmployees((list || []).map((e) => applyOfficialName({ ...e }, names)));
       })
       .catch(() => {
         if (live) setEmployees([]);
