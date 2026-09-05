@@ -26,6 +26,37 @@ function addSiteName(set, value) {
   if (s) set.add(s);
 }
 
+function normKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+/** Prefer mixed/title case over ALL CAPS so "Proposed Cafe" wins over "PROPOSED CAFE". */
+function preferDisplayName(a, b) {
+  const x = String(a || "").trim();
+  const y = String(b || "").trim();
+  if (!x) return y;
+  if (!y) return x;
+  const xAll = x === x.toUpperCase() && /[A-Z]/.test(x);
+  const yAll = y === y.toUpperCase() && /[A-Z]/.test(y);
+  if (xAll && !yAll) return y;
+  if (yAll && !xAll) return x;
+  const xU = (x.match(/[A-Z]/g) || []).length;
+  const yU = (y.match(/[A-Z]/g) || []).length;
+  if (xU !== yU) return xU > yU ? x : y;
+  return x.length >= y.length ? x : y;
+}
+
+function uniqueNamesCaseInsensitive(names) {
+  const map = new Map();
+  (names || []).forEach((n) => {
+    const trimmed = String(n || "").trim();
+    if (!trimmed) return;
+    const k = normKey(trimmed);
+    map.set(k, map.has(k) ? preferDisplayName(map.get(k), trimmed) : trimmed);
+  });
+  return [...map.values()];
+}
+
 function sitesOfRow(row) {
   const out = [];
   if (row?.site_name) out.push(String(row.site_name).trim());
@@ -69,7 +100,7 @@ async function collectAllSiteNames() {
   const { data: dprs } = await fromMaybe("dpr_reports", (q) => q.select("site"));
   (dprs || []).forEach((r) => addSiteName(set, r.site));
 
-  return [...set].sort((a, b) => a.localeCompare(b));
+  return uniqueNamesCaseInsensitive([...set]).sort((a, b) => a.localeCompare(b));
 }
 
 async function resolvePeopleForSites(sites) {
@@ -396,75 +427,105 @@ async function resolveEngineers(sites) {
 
   const map = {};
   sites.forEach((site) => {
-    const siteLc = String(site).toLowerCase();
+    const siteLc = normKey(site);
     const names = rows
       .filter((u) => {
-        const onSite = (u.site_names || []).some((s) => String(s).toLowerCase() === siteLc);
+        const onSite = (u.site_names || []).some((s) => normKey(s) === siteLc);
         if (!onSite) return false;
         const role = String(u.role || "");
         return ENGINEER_ROLES.some((r) => role.toLowerCase().includes(r.toLowerCase())) || /engineer|incharge|coordinator/i.test(role);
       })
       .map((u) => u.name)
       .filter(Boolean);
-    const unique = [...new Set(names)];
-    map[site] = unique.length ? unique.join(", ") : "—";
+    map[siteLc] = uniqueNamesCaseInsensitive(names).sort((a, b) => a.localeCompare(b));
   });
 
   return map;
 }
 
-// DPR sheet: one row per site (deduped), DONE/PEND for each day in range.
+// DPR sheet: one row per site (case-insensitive), or one row per engineer when a site has several.
 async function fetchDprSheet(sites, from, to) {
-  let uniqueSites = [...new Set((sites || []).filter(Boolean))];
   if (!from || !to) return { rows: [], dates: [] };
-  if (!uniqueSites.length) {
-    uniqueSites = await collectAllSiteNames();
-  }
+
+  let rawSites = (sites || []).filter(Boolean);
+  if (!rawSites.length) rawSites = await collectAllSiteNames();
+
+  const uniqueSites = uniqueNamesCaseInsensitive(rawSites).sort((a, b) => a.localeCompare(b));
   if (!uniqueSites.length) return { rows: [], dates: [] };
 
+  const knownKeys = new Set(uniqueSites.map(normKey));
   const dates = dateRange(from, to);
 
-  const { data, error } = await supabase
-    .from("dpr_reports")
-    .select("site, engineer, report_type, date")
-    .in("site", uniqueSites)
-    .gte("date", from)
-    .lte("date", to)
-    .neq("report_type", "morning");
+  // Fetch the date range (not only exact site strings) so "Proposed Cafe" and
+  // "PROPOSED CAFE" submissions fold into the same site.
+  const data = [];
+  const pageSize = 1000;
+  for (let page = 0; page < 20; page++) {
+    const { data: chunk, error } = await supabase
+      .from("dpr_reports")
+      .select("site, engineer, report_type, date")
+      .gte("date", from)
+      .lte("date", to)
+      .neq("report_type", "morning")
+      .range(page * pageSize, page * pageSize + pageSize - 1);
+    if (error) throw error;
+    data.push(...(chunk || []));
+    if (!chunk || chunk.length < pageSize) break;
+  }
 
-  if (error) throw error;
-
-  const submitted = new Set();
-  const submittedEngineersBySite = new Map(); // site -> Set(engineer names)
-
+  // siteKey -> engineerKey -> { display, dates }
+  const submittedBySite = new Map();
   (data || []).forEach((r) => {
-    submitted.add(`${r.site}__${r.date}`);
-    if (r.engineer && r.engineer.trim()) {
-      if (!submittedEngineersBySite.has(r.site)) {
-        submittedEngineersBySite.set(r.site, new Set());
-      }
-      submittedEngineersBySite.get(r.site).add(r.engineer.trim());
+    const sk = normKey(r.site);
+    if (!knownKeys.has(sk)) return;
+    const eng = String(r.engineer || "").trim();
+    const ek = normKey(eng) || "__none__";
+    if (!submittedBySite.has(sk)) submittedBySite.set(sk, new Map());
+    const engMap = submittedBySite.get(sk);
+    if (!engMap.has(ek)) {
+      engMap.set(ek, { display: eng || "—", dates: new Set() });
+    } else if (eng) {
+      engMap.get(ek).display = preferDisplayName(engMap.get(ek).display, eng);
     }
+    if (r.date) engMap.get(ek).dates.add(r.date);
   });
 
-  // Only sites with NO submissions at all in range need the user_details fallback
-  const sitesNeedingFallback = uniqueSites.filter((s) => !submittedEngineersBySite.has(s));
-  const fallbackEngineers = sitesNeedingFallback.length
-    ? await resolveEngineers(sitesNeedingFallback)
-    : {};
+  const assignedBySite = await resolveEngineers(uniqueSites);
 
-  const rows = uniqueSites.map((site, i) => {
-    const submittedNames = submittedEngineersBySite.get(site);
-    const engineer = submittedNames
-      ? [...submittedNames].join(", ")
-      : fallbackEngineers[site] || "—";
+  const rows = [];
+  uniqueSites.forEach((site) => {
+    const sk = normKey(site);
+    const submittedEngs = submittedBySite.get(sk);
+    const assigned = assignedBySite[sk] || [];
+    const fromReports = [...(submittedEngs?.values() || [])]
+      .map((e) => e.display)
+      .filter((d) => d && d !== "—");
+    const engineers = uniqueNamesCaseInsensitive([...assigned, ...fromReports])
+      .sort((a, b) => a.localeCompare(b));
+    const list = engineers.length ? engineers : ["—"];
+    const isMulti = list.length > 1;
 
-    return {
-      srNo: i + 1,
-      site,
-      engineer,
-      days: dates.map((d) => (submitted.has(`${site}__${d}`) ? "DONE" : "PEND")),
-    };
+    list.forEach((eng) => {
+      const ek = normKey(eng);
+      const ownDates = ek && submittedEngs ? submittedEngs.get(ek)?.dates : null;
+      const anySiteDates = new Set();
+      if (eng === "—") {
+        submittedEngs?.forEach((v) => v.dates.forEach((d) => anySiteDates.add(d)));
+      }
+
+      rows.push({
+        site: isMulti ? `${site}-${eng}` : site,
+        engineer: eng,
+        days: dates.map((d) => {
+          if (eng === "—") return anySiteDates.has(d) ? "DONE" : "PEND";
+          return ownDates?.has(d) ? "DONE" : "PEND";
+        }),
+      });
+    });
+  });
+
+  rows.forEach((r, i) => {
+    r.srNo = i + 1;
   });
 
   return { rows, dates };
@@ -1053,7 +1114,7 @@ function DprSheetReport({ sites }) {
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ fontSize: 13, color: "var(--ink2)" }}>
-              {result.rows.length} site{result.rows.length !== 1 ? "s" : ""} · Period: {fmtDMonYYYY(from)} to {fmtDMonYYYY(to)}
+              {result.rows.length} row{result.rows.length !== 1 ? "s" : ""} · Period: {fmtDMonYYYY(from)} to {fmtDMonYYYY(to)}
             </div>
             <button
               className="btn btn-out"
@@ -1089,7 +1150,7 @@ function DprSheetReport({ sites }) {
                 </thead>
                 <tbody>
                   {result.rows.map((r) => (
-                    <tr key={r.site} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <tr key={`${r.srNo}-${r.site}-${r.engineer}`} style={{ borderBottom: "1px solid var(--line)" }}>
                       <td style={{ padding: "8px 6px", textAlign: "center" }}>{r.srNo}</td>
                       <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.site}</td>
                       <td style={{ padding: "8px 10px" }}>{r.engineer}</td>
@@ -1796,12 +1857,12 @@ const handleDrawingSubmit = async () => {
         data = {
           ...(data || {}),
           site_name: data?.site_name || assigned[0],
-          site_names: [...new Set([...sitesOfRow(data), ...assigned])],
+          site_names: uniqueNamesCaseInsensitive([...sitesOfRow(data), ...assigned]),
         };
       }
     }
 
-    const ownSites = sitesOfRow(data || shaped);
+    const ownSites = uniqueNamesCaseInsensitive(sitesOfRow(data || shaped));
     const all = await collectAllSiteNames();
     const site_names = ownSites.length ? ownSites : all;
     const updated = {
@@ -1845,12 +1906,13 @@ useEffect(() => {
     );
   }
 
-  const ownSites =
+  const ownSites = uniqueNamesCaseInsensitive(
     Array.isArray(user.site_names) && user.site_names.length
       ? user.site_names
       : user.site_name
         ? [user.site_name]
-        : [];
+        : []
+  );
   const sites = ownSites.length ? ownSites : allSites;
 
   const activeItem = NAV.find((n) => n.key === activeTab);
