@@ -182,6 +182,91 @@ function lateMinutesFromClockIn(ts) {
   const mins = Number(parts[0]) * 60 + Number(parts[1]);
   return Math.max(0, mins - 9 * 60);
 }
+function pendText(value) {
+  const s = String(value ?? "").trim();
+  return s || "Pend";
+}
+function locationCell(label, url) {
+  const text = pendText(label);
+  if (text === "Pend" || !url) {
+    return (
+      <span style={{ fontWeight: text === "Pend" ? 700 : undefined, color: text === "Pend" ? "var(--amber2, #d97706)" : undefined }}>
+        {text}
+      </span>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#0563c1", fontWeight: 600, textDecoration: "underline" }}>
+      {text}
+    </a>
+  );
+}
+function parseLatLng(raw) {
+  const m = String(raw || "").trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+function mapsUrlFromCoords(lat, lng) {
+  return `https://www.google.com/maps?q=${lat},${lng}`;
+}
+function placeLabelFromGeo(data) {
+  if (!data) return "";
+  const area = data.locality || data.localityInfo?.informative?.[0]?.name || "";
+  const city = data.city || "";
+  const parts = [area, city].map((p) => String(p || "").trim()).filter(Boolean);
+  return [...new Set(parts)].join(", ");
+}
+async function reverseGeocodeLatLng(lat, lng) {
+  const res = await fetch(
+    `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+  );
+  if (!res.ok) throw new Error("geocode failed");
+  return res.json();
+}
+async function resolveLocationInfo(raw, cache) {
+  const text = String(raw || "").trim();
+  if (!text) return { label: "Pend", url: "" };
+  const coords = parseLatLng(text);
+  if (!coords) return { label: text, url: "" };
+  const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
+  if (cache.has(key)) return cache.get(key);
+  const promise = (async () => {
+    const url = mapsUrlFromCoords(coords.lat, coords.lng);
+    try {
+      const geo = await reverseGeocodeLatLng(coords.lat, coords.lng);
+      return { label: placeLabelFromGeo(geo) || "View on Maps", url };
+    } catch {
+      return { label: "View on Maps", url };
+    }
+  })();
+  cache.set(key, promise);
+  return promise;
+}
+async function attachResolvedLocations(sheets) {
+  const cache = new Map();
+  const pending = [];
+  (sheets || []).forEach((sheet) => {
+    (sheet.rows || []).forEach((row) => {
+      pending.push(
+        resolveLocationInfo(row.clockInLocation, cache).then((info) => {
+          row.clockInLocation = info.label;
+          row.clockInMaps = info.url;
+        })
+      );
+      pending.push(
+        resolveLocationInfo(row.clockOutLocation, cache).then((info) => {
+          row.clockOutLocation = info.label;
+          row.clockOutMaps = info.url;
+        })
+      );
+    });
+  });
+  await Promise.all(pending);
+  return sheets;
+}
 function excelSheetName(name, used) {
   let base = String(name || "Engineer").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim();
   if (!base) base = "Engineer";
@@ -619,7 +704,7 @@ async function fetchEngineerExcelReport(sites, from, to) {
   });
 
   const list = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
-  return list.map((eng) => {
+  const sheets = list.map((eng) => {
     const rows = dates.map((date) => {
       const att = attByUserDate.get(`${normKey(eng.username)}__${date}`)
         || attByUserDate.get(`${normKey(eng.name)}__${date}`);
@@ -646,6 +731,7 @@ async function fetchEngineerExcelReport(sites, from, to) {
     });
     return { name: eng.name, username: eng.username, rows };
   });
+  return attachResolvedLocations(sheets);
 }
 
 function downloadEngineerExcel(sheets, from, to) {
@@ -681,7 +767,7 @@ function downloadEngineerExcel(sheets, from, to) {
     const ws = {};
     const name = String(sheet.name || "ENGINEER").toUpperCase();
     for (let c = 0; c <= 9; c++) {
-      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: c === 3 ? name : "", t: "s", s: titleStyle };
+      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: c === 0 ? name : "", t: "s", s: titleStyle };
     }
     headers.forEach((h, c) => {
       ws[XLSX.utils.encode_cell({ r: 1, c })] = { v: h, t: "s", s: headStyle };
@@ -691,10 +777,10 @@ function downloadEngineerExcel(sheets, from, to) {
       const vals = [
         fmtDMonYY(row.date),
         row.name,
-        fmtTimeIST24(row.clockIn),
-        row.clockInLocation,
-        fmtTimeIST24(row.clockOut),
-        row.clockOutLocation,
+        pendText(fmtTimeIST24(row.clockIn)),
+        pendText(row.clockInLocation),
+        pendText(fmtTimeIST24(row.clockOut)),
+        pendText(row.clockOutLocation),
         row.status,
         row.lateMinutes || 0,
         row.morning,
@@ -702,11 +788,15 @@ function downloadEngineerExcel(sheets, from, to) {
       ];
       vals.forEach((v, c) => {
         const st = bodyStyle(c === 1 ? "left" : "center");
+        const mapsUrl = c === 3 ? row.clockInMaps : c === 5 ? row.clockOutMaps : "";
         if (c === 6) {
           if (v === "Late") st.font = { ...st.font, bold: true, color: { rgb: "FFB45309" } };
           else if (v === "Pend") st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
           else if (v === "On Leave") st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
           else if (v === "On Time") st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
+        }
+        if ((c === 2 || c === 3 || c === 4 || c === 5) && v === "Pend") {
+          st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
         }
         if ((c === 8 || c === 9) && v === "Pend") {
           st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
@@ -717,19 +807,24 @@ function downloadEngineerExcel(sheets, from, to) {
         if ((c === 8 || c === 9) && v === "On Leave") {
           st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
         }
-        ws[XLSX.utils.encode_cell({ r, c })] = {
+        if (mapsUrl && v !== "Pend") {
+          st.font = { ...st.font, color: { rgb: "FF0563C1" }, underline: true };
+        }
+        const cell = {
           v,
           t: typeof v === "number" ? "n" : "s",
           s: st,
         };
+        if (mapsUrl && v !== "Pend") cell.l = { Target: mapsUrl };
+        ws[XLSX.utils.encode_cell({ r, c })] = cell;
       });
     });
     const lastRow = 1 + (sheet.rows?.length || 0);
-    ws["!merges"] = [{ s: { r: 0, c: 3 }, e: { r: 0, c: 6 } }];
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
     ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(lastRow, 1), c: 9 } });
     ws["!cols"] = [
-      { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 22 },
-      { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 14 },
+      { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 32 },
+      { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 14 },
       { wch: 16 }, { wch: 14 },
     ];
     ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
@@ -1328,10 +1423,10 @@ function EngineerExcelReport({ sites }) {
                         <tr key={`${s.username}-${r.date}`} style={{ borderBottom: "1px solid var(--line)" }}>
                           <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtDMonYY(r.date)}</td>
                           <td style={{ padding: "7px 8px" }}>{r.name}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtTimeIST24(r.clockIn) || "—"}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.clockInLocation || "—"}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtTimeIST24(r.clockOut) || "—"}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.clockOutLocation || "—"}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: pendText(fmtTimeIST24(r.clockIn)) === "Pend" ? 700 : undefined, color: pendText(fmtTimeIST24(r.clockIn)) === "Pend" ? "var(--amber2, #d97706)" : undefined }}>{pendText(fmtTimeIST24(r.clockIn))}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{locationCell(r.clockInLocation, r.clockInMaps)}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: pendText(fmtTimeIST24(r.clockOut)) === "Pend" ? 700 : undefined, color: pendText(fmtTimeIST24(r.clockOut)) === "Pend" ? "var(--amber2, #d97706)" : undefined }}>{pendText(fmtTimeIST24(r.clockOut))}</td>
+                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{locationCell(r.clockOutLocation, r.clockOutMaps)}</td>
                           <td style={{
                             padding: "7px 8px",
                             textAlign: "center",
