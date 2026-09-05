@@ -1545,7 +1545,7 @@ function DprSheetReport({ sites }) {
 const NAV = [
   { key: "attendance", label: "Attendance Report", icon: Ico.attendance },
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
-  { key: "engineer-excel", label: "Engineer Excel Report", icon: Ico.excel },
+  { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
