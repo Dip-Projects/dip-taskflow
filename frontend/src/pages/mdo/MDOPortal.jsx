@@ -503,7 +503,6 @@ async function fetchDprSheet(sites, from, to) {
     const engineers = uniqueNamesCaseInsensitive([...assigned, ...fromReports])
       .sort((a, b) => a.localeCompare(b));
     const list = engineers.length ? engineers : ["—"];
-    const isMulti = list.length > 1;
 
     list.forEach((eng) => {
       const ek = normKey(eng);
@@ -514,7 +513,7 @@ async function fetchDprSheet(sites, from, to) {
       }
 
       rows.push({
-        site: isMulti ? `${site}-${eng}` : site,
+        site,
         engineer: eng,
         days: dates.map((d) => {
           if (eng === "—") return anySiteDates.has(d) ? "DONE" : "PEND";
@@ -652,15 +651,15 @@ function downloadDprPdf(rows, dates, from, to) {
   autoTable(doc, {
     startY,
     theme: "grid",
-    head: [["SR NO", "SITE NAME", "ENGINEER NAME", ...dayHead]],
-    body: rows.map((r) => [r.srNo, r.site.toUpperCase(), r.engineer, ...r.days]),
+    head: [["SR NO", "ENGINEER NAME", "SITE NAME", ...dayHead]],
+    body: rows.map((r) => [r.srNo, r.engineer, r.site.toUpperCase(), ...r.days]),
     styles: { fontSize: useIcons ? 7 : 8, halign: "center", cellPadding: useIcons ? 1.5 : 3, lineColor: [0, 0, 0], lineWidth: 0.1 },
     headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: "bold", lineColor: [0, 0, 0], lineWidth: 0.1 },
     bodyStyles: { fillColor: [255, 255, 255] },
     columnStyles: {
       0: { cellWidth: useIcons ? 8 : "auto" },
-      1: { halign: "center", fontStyle: "bold", cellWidth: useIcons ? 32 : "auto" },
-      2: { halign: "center", cellWidth: useIcons ? 30 : "auto" },
+      1: { halign: "center", cellWidth: useIcons ? 30 : "auto" },
+      2: { halign: "center", fontStyle: "bold", cellWidth: useIcons ? 32 : "auto" },
     },
 
     // Suppress the default DONE/PEND text draw for day columns when
@@ -1136,8 +1135,8 @@ function DprSheetReport({ sites }) {
                 <thead>
                   <tr style={{ borderBottom: "2px solid var(--line)" }}>
                     <th style={{ padding: "8px 6px" }}>SR NO</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px" }}>SITE NAME</th>
                     <th style={{ textAlign: "left", padding: "8px 10px" }}>ENGINEER NAME</th>
+                    <th style={{ textAlign: "left", padding: "8px 10px" }}>SITE NAME</th>
                     {result.dates.map((d) => {
                       const dt = new Date(d + "T00:00:00");
                       return (
@@ -1152,8 +1151,8 @@ function DprSheetReport({ sites }) {
                   {result.rows.map((r) => (
                     <tr key={`${r.srNo}-${r.site}-${r.engineer}`} style={{ borderBottom: "1px solid var(--line)" }}>
                       <td style={{ padding: "8px 6px", textAlign: "center" }}>{r.srNo}</td>
-                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.site}</td>
                       <td style={{ padding: "8px 10px" }}>{r.engineer}</td>
+                      <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.site}</td>
                       {r.days.map((status, i) => (
                         <td
                           key={i}
