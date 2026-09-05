@@ -5325,12 +5325,13 @@ export async function mountTaskflowApp(opts = {}) {
   function orgInitials(name) {
     return (name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
   }
-  function renderOrgNode(node, isRoot = false) {
+  function renderOrgNode(node, depth = 0) {
     const branch = document.createElement('div');
     branch.className = 'org-branch';
   
     const nodeEl = document.createElement('div');
-    nodeEl.className = `org-node${isRoot ? ' org-node-root' : ''}`;
+    const level = Math.min(depth, 3);
+    nodeEl.className = `org-node org-node-d${level}${depth === 0 ? ' org-node-root' : ''}`;
     const meta = node.designation || node.role || '';
     nodeEl.title = meta ? `${node.full_name} — ${meta}` : (node.full_name || '');
     nodeEl.innerHTML = `
@@ -5344,10 +5345,13 @@ export async function mountTaskflowApp(opts = {}) {
   
     if (node.children && node.children.length) {
       const childrenWrap = document.createElement('div');
-      childrenWrap.className = 'org-branch-children';
+      const stackLeaves = node.children.every((child) => !child.children?.length);
+      childrenWrap.className = stackLeaves
+        ? 'org-branch-children org-branch-children-stack'
+        : 'org-branch-children';
       node.children
         .sort((a, b) => a.full_name.localeCompare(b.full_name))
-        .forEach((child) => childrenWrap.appendChild(renderOrgNode(child, false)));
+        .forEach((child) => childrenWrap.appendChild(renderOrgNode(child, depth + 1)));
       branch.appendChild(childrenWrap);
     }
     return branch;
@@ -5364,7 +5368,7 @@ export async function mountTaskflowApp(opts = {}) {
     treeEl.className = 'org-tree';
     roots
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
-      .forEach((root) => treeEl.appendChild(renderOrgNode(root, true)));
+      .forEach((root) => treeEl.appendChild(renderOrgNode(root, 0)));
     els.hierarchyTreeContainer.appendChild(treeEl);
   
     requestAnimationFrame(() => {
@@ -5396,6 +5400,14 @@ export async function mountTaskflowApp(opts = {}) {
     svg.setAttribute('width', els.hierarchyTreeContainer.scrollWidth);
     svg.setAttribute('height', els.hierarchyTreeContainer.scrollHeight);
   
+    const addLine = (d) => {
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('class', 'org-line');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+    };
+
     treeEl.querySelectorAll('.org-branch').forEach((branch) => {
       const parentNode = branch.querySelector(':scope > .org-node');
       const childrenWrap = branch.querySelector(':scope > .org-branch-children');
@@ -5406,19 +5418,30 @@ export async function mountTaskflowApp(opts = {}) {
       const py = pRect.bottom - containerRect.top + scrollY;
       const childrenTop = childrenWrap.getBoundingClientRect().top - containerRect.top + scrollY;
       const midY = py + (childrenTop - py) / 2;
-  
-      Array.from(childrenWrap.children).forEach((childBranch) => {
-        const childNode = childBranch.querySelector(':scope > .org-node');
-        if (!childNode) return;
+      const kids = Array.from(childrenWrap.children)
+        .map((childBranch) => childBranch.querySelector(':scope > .org-node'))
+        .filter(Boolean);
+
+      if (childrenWrap.classList.contains('org-branch-children-stack') && kids.length) {
+        const first = kids[0].getBoundingClientRect();
+        const last = kids[kids.length - 1].getBoundingClientRect();
+        const spineX = first.left - containerRect.left + scrollX - 10;
+        const lastCy = last.top + last.height / 2 - containerRect.top + scrollY;
+        addLine(`M ${px} ${py} V ${midY} H ${spineX} V ${lastCy}`);
+        kids.forEach((childNode) => {
+          const cRect = childNode.getBoundingClientRect();
+          const cy = cRect.top + cRect.height / 2 - containerRect.top + scrollY;
+          const cleft = cRect.left - containerRect.left + scrollX;
+          addLine(`M ${spineX} ${cy} H ${cleft}`);
+        });
+        return;
+      }
+
+      kids.forEach((childNode) => {
         const cRect = childNode.getBoundingClientRect();
         const cx = cRect.left + cRect.width / 2 - containerRect.left + scrollX;
         const cy = cRect.top - containerRect.top + scrollY;
-  
-        const path = document.createElementNS(svgNS, 'path');
-        path.setAttribute('class', 'org-line');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('d', `M ${px} ${py} V ${midY} H ${cx} V ${cy}`);
-        svg.appendChild(path);
+        addLine(`M ${px} ${py} V ${midY} H ${cx} V ${cy}`);
       });
     });
   

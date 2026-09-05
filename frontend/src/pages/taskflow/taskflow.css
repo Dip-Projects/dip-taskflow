@@ -1766,7 +1766,7 @@ body.sidebar-open { overflow: hidden; }
 .org-tree-container {
   position: relative;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  box-shadow: var(--sh-xs); padding: 20px 10px;
+  box-shadow: var(--sh-xs); padding: 24px 16px;
   overflow: auto;
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
@@ -1776,51 +1776,78 @@ body.sidebar-open { overflow: hidden; }
   pointer-events: none; overflow: visible;
 }
 .org-tree-svg .org-line {
-  stroke: var(--primary); stroke-width: 1.5; stroke-linecap: round;
+  stroke: #94a3b8; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round;
 }
 .org-tree {
   position: relative; z-index: 1;
-  display: flex; align-items: flex-start; justify-content: center; gap: 18px;
+  display: flex; align-items: flex-start; justify-content: center; gap: 22px;
   width: max-content;
   min-width: 100%;
   box-sizing: border-box;
-  padding: 4px 18px 10px;
+  padding: 6px 20px 12px;
 }
 .org-branch {
   display: flex; flex-direction: column; align-items: center;
   flex: 0 0 auto;
 }
 .org-branch-children {
-  display: flex; align-items: flex-start; justify-content: center; gap: 10px;
-  margin-top: 22px;
+  display: flex; align-items: flex-start; justify-content: center; gap: 16px;
+  margin-top: 28px;
   width: max-content;
   flex: 0 0 auto;
+}
+.org-branch-children-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 20px;
+  padding-left: 16px;
 }
 
 .org-node {
   position: relative; z-index: 1;
-  display: inline-flex; align-items: center; gap: 7px;
+  display: flex; flex-direction: column; align-items: center;
   flex-shrink: 0;
-  max-width: 148px;
-  background: var(--surface-2); border: 1.5px solid var(--border);
-  border-radius: 8px; padding: 5px 8px; box-shadow: var(--sh-xs);
+  width: 118px;
+  background: #fff; border: 1px solid #d7dee8;
+  border-radius: 10px; padding: 10px 8px 8px; box-shadow: var(--sh-xs);
 }
-.org-node-root { background: var(--primary-lt); border-color: var(--primary-mid); }
 .org-node-avatar {
-  width: 24px; height: 24px; border-radius: 50%; background: var(--primary);
+  width: 38px; height: 38px; border-radius: 50%; background: #1e4b7b;
   color: #fff; display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 0.68rem; flex-shrink: 0;
+  font-weight: 700; font-size: 0.78rem; flex-shrink: 0; margin-bottom: 6px;
 }
-.org-node-root .org-node-avatar { background: var(--primary-dk); }
-.org-node-info { display: flex; flex-direction: column; line-height: 1.25; text-align: left; min-width: 0; }
+.org-node-info { display: flex; flex-direction: column; line-height: 1.25; text-align: center; min-width: 0; width: 100%; }
 .org-node-name {
-  font-weight: 700; font-size: 0.74rem; color: var(--ink);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 108px;
+  font-weight: 700; font-size: 0.72rem; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
 .org-node-meta {
-  font-size: 0.64rem; color: var(--muted);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 108px;
+  font-size: 0.62rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
 }
+.org-node-d0 {
+  background: #14324f; border-color: #14324f; width: 132px;
+}
+.org-node-d0 .org-node-name,
+.org-node-d0 .org-node-meta { color: #fff; }
+.org-node-d0 .org-node-meta { opacity: 0.78; }
+.org-node-d0 .org-node-avatar { background: #fff; color: #14324f; }
+.org-node-d1 {
+  background: #1e4b7b; border-color: #1e4b7b;
+}
+.org-node-d1 .org-node-name,
+.org-node-d1 .org-node-meta { color: #fff; }
+.org-node-d1 .org-node-meta { opacity: 0.8; }
+.org-node-d1 .org-node-avatar { background: #fff; color: #1e4b7b; }
+.org-node-d2 {
+  background: #d6e6f4; border-color: #b7cfe4;
+}
+.org-node-d2 .org-node-avatar { background: #1e4b7b; }
+.org-node-d3 {
+  background: #fff; border-color: #d7dee8; width: 112px; padding: 8px 7px 7px;
+}
+.org-node-d3 .org-node-avatar { width: 30px; height: 30px; font-size: 0.68rem; margin-bottom: 4px; }
 .org-tree-empty {
   color: var(--muted);
   text-align: center;
