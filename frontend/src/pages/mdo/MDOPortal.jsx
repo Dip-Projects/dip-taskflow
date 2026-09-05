@@ -6,6 +6,7 @@ import "../site/SitePortal.css";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx-js-style";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -155,6 +156,46 @@ function fmtTimeIST(ts) {
     hour12: true,
   });
 }
+function fmtTimeIST24(ts) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+function fmtDMonYY(iso) {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return `${pad(d.getDate())}-${MONTHS_SHORT[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+}
+function lateMinutesFromClockIn(ts) {
+  if (!ts) return 0;
+  const parts = new Date(ts).toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).split(":");
+  const mins = Number(parts[0]) * 60 + Number(parts[1]);
+  return Math.max(0, mins - 9 * 60);
+}
+function excelSheetName(name, used) {
+  let base = String(name || "Engineer").replace(/[:\\/?*\[\]]/g, " ").replace(/\s+/g, " ").trim();
+  if (!base) base = "Engineer";
+  base = base.slice(0, 31);
+  let out = base;
+  let n = 2;
+  while (used.has(out.toLowerCase())) {
+    const suffix = ` (${n})`;
+    out = `${base.slice(0, 31 - suffix.length)}${suffix}`;
+    n += 1;
+  }
+  used.add(out.toLowerCase());
+  return out;
+}
 const DRAWING_MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -255,6 +296,12 @@ const Ico = {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <polyline points="14 2 14 8 20 8" />
+    </svg>
+  ),
+  excel: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f766e" strokeWidth="2" strokeLinecap="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M9 3v18" />
     </svg>
   ),
   addDrawing: (
@@ -400,6 +447,235 @@ async function fetchAttendanceLog(sites, from, to) {
 }
 
 const ENGINEER_ROLES = ["Site Engineer", "Site Incharge", "Site Coordinator"];
+
+function isEngineerRole(role) {
+  const r = String(role || "");
+  return ENGINEER_ROLES.some((x) => r.toLowerCase().includes(x.toLowerCase())) || /engineer|incharge|coordinator/i.test(r);
+}
+
+async function fetchPagedRows(table, select, apply) {
+  const pageSize = 1000;
+  const all = [];
+  for (let page = 0; page < 20; page++) {
+    let q = supabase.from(table).select(select);
+    q = apply(q);
+    const { data, error } = await q.range(page * pageSize, page * pageSize + pageSize - 1);
+    if (error) throw error;
+    all.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return all;
+}
+
+async function resolveAllSiteEngineers(sites) {
+  const byUser = new Map();
+  const add = (username, name, role, row) => {
+    const uname = String(username || "").trim();
+    if (!uname) return;
+    if (sites?.length && row && !rowTouchesSites(row, sites)) return;
+    if (role != null && !isEngineerRole(role)) return;
+    const display = String(name || uname).trim();
+    const prev = byUser.get(normKey(uname));
+    byUser.set(normKey(uname), {
+      username: uname,
+      name: prev ? preferDisplayName(prev.name, display) : display,
+    });
+  };
+
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("username, full_name, designation, role, department, site_name, site_names, is_active")
+  );
+  (users || []).forEach((u) => {
+    if (u.is_active === false) return;
+    add(u.username, u.full_name, u.designation || u.role || u.department, u);
+  });
+
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+    q.select("user_name, full_name, site_name")
+  );
+  (assigns || []).forEach((a) => {
+    add(a.user_name, a.full_name || a.user_name, "Site Engineer", { site_name: a.site_name });
+  });
+
+  const { data: details } = await fromMaybe("user_details", (q) =>
+    q.select("username, name, role, department, site_name, site_names")
+  );
+  (details || []).forEach((u) => {
+    add(u.username, u.name, u.role || u.department, u);
+  });
+
+  return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchEngineerExcelReport(sites, from, to) {
+  if (!from || !to) return [];
+  const dates = dateRange(from, to);
+  if (!dates.length) return [];
+
+  const engineers = await resolveAllSiteEngineers(sites);
+  const byUser = new Map(engineers.map((e) => [normKey(e.username), e]));
+  const byName = new Map(engineers.map((e) => [normKey(e.name), e]));
+
+  let attendance;
+  try {
+    attendance = await fetchPagedRows(
+      "attendance",
+      "user_name, date, clock_in, clock_out, clock_in_location, clock_out_location, status, clock_in_status",
+      (q) => q.gte("date", from).lte("date", to)
+    );
+  } catch (e) {
+    if (!/clock_in_location|clock_out_location/i.test(String(e.message || ""))) throw e;
+    attendance = await fetchPagedRows(
+      "attendance",
+      "user_name, date, clock_in, clock_out, status, clock_in_status",
+      (q) => q.gte("date", from).lte("date", to)
+    );
+  }
+  const dprs = await fetchPagedRows(
+    "dpr_reports",
+    "engineer, date, report_type",
+    (q) => q.gte("date", from).lte("date", to)
+  );
+
+  attendance.forEach((r) => {
+    const key = normKey(r.user_name);
+    if (!key || byUser.has(key)) return;
+    const name = r.user_name;
+    const eng = { username: r.user_name, name };
+    byUser.set(key, eng);
+    byName.set(normKey(name), eng);
+  });
+  dprs.forEach((r) => {
+    const name = String(r.engineer || "").trim();
+    if (!name || byName.has(normKey(name))) return;
+    const eng = { username: name, name };
+    byName.set(normKey(name), eng);
+    byUser.set(normKey(name), eng);
+  });
+
+  const attByUserDate = new Map();
+  attendance.forEach((r) => {
+    attByUserDate.set(`${normKey(r.user_name)}__${r.date}`, r);
+  });
+
+  const dprByNameDate = new Map();
+  dprs.forEach((r) => {
+    const key = `${normKey(r.engineer)}__${r.date}`;
+    if (!dprByNameDate.has(key)) dprByNameDate.set(key, { morning: false, evening: false });
+    const bucket = dprByNameDate.get(key);
+    const type = String(r.report_type || "").toLowerCase();
+    if (type === "morning") bucket.morning = true;
+    if (type === "evening") bucket.evening = true;
+  });
+
+  const list = [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return list.map((eng) => {
+    const rows = dates.map((date) => {
+      const att = attByUserDate.get(`${normKey(eng.username)}__${date}`)
+        || attByUserDate.get(`${normKey(eng.name)}__${date}`);
+      const dpr = dprByNameDate.get(`${normKey(eng.name)}__${date}`)
+        || dprByNameDate.get(`${normKey(eng.username)}__${date}`)
+        || { morning: false, evening: false };
+      const clockIn = att?.clock_in || "";
+      const lateMins = lateMinutesFromClockIn(clockIn);
+      let status = "";
+      if (clockIn) status = lateMins > 0 || isLateAttendance(att) ? "Late" : "On Time";
+      return {
+        date,
+        name: eng.name,
+        clockIn,
+        clockInLocation: att?.clock_in_location || "",
+        clockOut: att?.clock_out || "",
+        clockOutLocation: att?.clock_out_location || "",
+        status,
+        lateMinutes: clockIn ? lateMins : 0,
+        morning: dpr.morning ? "Done" : "Pend",
+        evening: dpr.evening ? "Done" : "Pend",
+      };
+    });
+    return { name: eng.name, username: eng.username, rows };
+  });
+}
+
+function downloadEngineerExcel(sheets, from, to) {
+  const wb = XLSX.utils.book_new();
+  const usedNames = new Set();
+  const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+  const titleStyle = {
+    font: { bold: true, sz: 14, name: "Calibri", color: { rgb: "FF1A3A5C" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FFBDD7EE" } },
+    alignment: { horizontal: "center", vertical: "center" },
+    border,
+  };
+  const headStyle = {
+    font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border,
+  };
+  const bodyStyle = (align = "center") => ({
+    font: { sz: 10, name: "Calibri", color: { rgb: "FF1A2E42" } },
+    alignment: { horizontal: align, vertical: "center" },
+    border,
+  });
+
+  const headers = [
+    "Date", "Employee Name", "Check In Time", "Check In Location",
+    "Check Out Time", "Check Out Location", "Status", "Late Minutes",
+    "Morning Report", "Evening DPR",
+  ];
+
+  (sheets || []).forEach((sheet) => {
+    const ws = {};
+    const name = String(sheet.name || "ENGINEER").toUpperCase();
+    ws.A1 = { v: name, t: "s", s: titleStyle };
+    for (let c = 1; c <= 9; c++) {
+      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: "", t: "s", s: titleStyle };
+    }
+    headers.forEach((h, c) => {
+      ws[XLSX.utils.encode_cell({ r: 1, c })] = { v: h, t: "s", s: headStyle };
+    });
+    (sheet.rows || []).forEach((row, i) => {
+      const r = i + 2;
+      const vals = [
+        fmtDMonYY(row.date),
+        row.name,
+        fmtTimeIST24(row.clockIn),
+        row.clockInLocation,
+        fmtTimeIST24(row.clockOut),
+        row.clockOutLocation,
+        row.status,
+        row.lateMinutes || 0,
+        row.morning,
+        row.evening,
+      ];
+      vals.forEach((v, c) => {
+        ws[XLSX.utils.encode_cell({ r, c })] = {
+          v,
+          t: typeof v === "number" ? "n" : "s",
+          s: bodyStyle(c === 1 ? "left" : "center"),
+        };
+      });
+    });
+    const lastRow = 1 + (sheet.rows?.length || 0);
+    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(lastRow, 1), c: 9 } });
+    ws["!cols"] = [
+      { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 22 },
+      { wch: 16 }, { wch: 22 }, { wch: 12 }, { wch: 14 },
+      { wch: 16 }, { wch: 14 },
+    ];
+    ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
+    XLSX.utils.book_append_sheet(wb, ws, excelSheetName(sheet.name, usedNames));
+  });
+
+  if (!wb.SheetNames.length) {
+    const ws = XLSX.utils.aoa_to_sheet([["No site engineers found"]]);
+    XLSX.utils.book_append_sheet(wb, ws, "Report");
+  }
+  XLSX.writeFile(wb, `Site_Engineer_Report_${from}_to_${to}.xlsx`);
+}
 
 async function resolveEngineers(sites) {
   if (!sites.length) return {};
@@ -904,6 +1180,89 @@ function AttendanceLog({ sites }) {
   );
 }
 
+function EngineerExcelReport({ sites }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sheets, setSheets] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const generate = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const data = await fetchEngineerExcelReport(sites, from, to);
+      setSheets(data);
+    } catch (e) {
+      setErr(e.message || "Failed to build engineer Excel report.");
+      setSheets(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <RangeFilter from={from} to={to} setFrom={setFrom} setTo={setTo} onGenerate={generate} busy={busy} />
+      {err && <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>{err}</div>}
+
+      {sheets && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, color: "var(--ink2)" }}>
+              {sheets.length} engineer{sheets.length !== 1 ? "s" : ""} · {fmtDDMMYYYY(from)} to {fmtDDMMYYYY(to)} · one Excel sheet per engineer
+            </div>
+            <button
+              className="btn btn-out"
+              onClick={() => downloadEngineerExcel(sheets, from, to)}
+              disabled={!sheets.length}
+            >
+              {Ico.dl} Download Excel
+            </button>
+          </div>
+
+          {sheets.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-title">No site engineers found</div>
+              <div className="empty-sub">No site engineers are assigned for the selected sites.</div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid var(--line)" }}>
+                    <th style={{ textAlign: "left", padding: "8px 10px" }}>Engineer</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Days</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Late</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Morning Done</th>
+                    <th style={{ textAlign: "center", padding: "8px 10px" }}>Evening Done</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheets.map((s) => {
+                    const late = s.rows.filter((r) => r.status === "Late").length;
+                    const morning = s.rows.filter((r) => r.morning === "Done").length;
+                    const evening = s.rows.filter((r) => r.evening === "Done").length;
+                    return (
+                      <tr key={s.username || s.name} style={{ borderBottom: "1px solid var(--line)" }}>
+                        <td style={{ padding: "8px 10px", fontWeight: 600 }}>{s.name}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{s.rows.length}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", color: late ? "var(--amber2, #d97706)" : "inherit" }}>{late}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{morning}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{evening}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function AddDrawings({ sites, drawingForm, setDrawingForm, drawingSubmitting, onSubmit }) {
   return (
     <div>
@@ -1186,6 +1545,7 @@ function DprSheetReport({ sites }) {
 const NAV = [
   { key: "attendance", label: "Attendance Report", icon: Ico.attendance },
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
+  { key: "engineer-excel", label: "Engineer Excel Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
@@ -1197,6 +1557,7 @@ const NAV = [
 const NAV_COLORS = {
   attendance: "#2563eb",
   "attendance-log": "#2563eb",
+  "engineer-excel": "#0f766e",
   dpr: "#16a34a",
   "apply-leave": "#7c3aed",
   "my-leave": "#7c3aed",
@@ -1986,6 +2347,8 @@ useEffect(() => {
               <AttendanceReport sites={sites} />
             ) : activeTab === "attendance-log" ? (
               <AttendanceLog sites={sites} />
+            ) : activeTab === "engineer-excel" ? (
+              <EngineerExcelReport sites={sites} />
             ) : activeTab === "dpr" ? (
               <DprSheetReport sites={sites} />
             ) : activeTab === "add-drawings" ? (
