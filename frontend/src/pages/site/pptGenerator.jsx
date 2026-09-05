@@ -208,17 +208,73 @@ function outerBorder(slide, x, y, w, h) {
   rect(slide, x+w-t,   y,       t, h,     color);
 }
 
-// ── Professional table header row ─────────────────────────────────────────────
-function drawTableHeader(slide, colX, colWidths, headers, y, hdrH, fontSize) {
-  // Full-width navy background
-  rect(slide, colX[0], y, colWidths.reduce((a, b) => a + b, 0), hdrH, TBL_HDR_BG);
-  headers.forEach((h, ci) => {
-    if (ci > 0) rect(slide, colX[ci], y, pt(0.5), hdrH, '4A6A8A');  // subtle divider
-    tx(slide, h, colX[ci] + pt(4), y, colWidths[ci] - pt(8), hdrH,
-      { bold: true, size: fontSize, color: TBL_HDR_FG, align: 'center', vAlign: 'middle', font: FONT });
+const CELL_BORDER = [
+  { type: 'solid', pt: 0.6, color: TBL_BORDER },
+  { type: 'solid', pt: 0.6, color: TBL_BORDER },
+  { type: 'solid', pt: 0.6, color: TBL_BORDER },
+  { type: 'solid', pt: 0.6, color: TBL_BORDER },
+];
+const HDR_BORDER = [
+  { type: 'solid', pt: 0.6, color: '4A6A8A' },
+  { type: 'solid', pt: 0.6, color: '4A6A8A' },
+  { type: 'solid', pt: 1.5, color: ORG },
+  { type: 'solid', pt: 0.6, color: '4A6A8A' },
+];
+
+function pptCell(text, opts = {}) {
+  const options = {
+    fontFace: opts.fontFace || FONT,
+    fontSize: opts.fontSize || 9,
+    bold: !!opts.bold,
+    color: opts.color || '1A2E42',
+    align: opts.align || 'left',
+    valign: opts.valign || 'middle',
+    fill: { color: opts.fill || WHT },
+    border: opts.border || CELL_BORDER,
+    margin: opts.margin != null ? opts.margin : 4,
+  };
+  if (opts.colspan > 1) options.colspan = opts.colspan;
+  if (opts.rowspan > 1) options.rowspan = opts.rowspan;
+  return { text: String(text ?? ''), options };
+}
+
+function headerRow(headers, fontSize = 10) {
+  return (headers || []).map((h) =>
+    pptCell(h, {
+      bold: true,
+      color: TBL_HDR_FG,
+      fill: TBL_HDR_BG,
+      align: 'center',
+      fontSize,
+      border: HDR_BORDER,
+    })
+  );
+}
+
+function bodyRow(vals, rowIdx, alignments, fontSize = 9, extras) {
+  return (vals || []).map((val, ci) =>
+    pptCell(val, {
+      fontSize,
+      align: (alignments && alignments[ci]) || (ci === 0 ? 'center' : 'left'),
+      fill: rowIdx % 2 === 0 ? WHT : TBL_ALT_BG,
+      ...(extras && extras[ci] ? extras[ci] : {}),
+    })
+  );
+}
+
+function addPptTable(slide, { x, y, w, colW, rows, fontSize = 9 }) {
+  if (!rows?.length) return;
+  slide.addTable(rows, {
+    x,
+    y,
+    w,
+    colW,
+    fontFace: FONT,
+    fontSize,
+    valign: 'middle',
+    border: CELL_BORDER,
+    align: 'left',
   });
-  // Bottom accent line
-  rect(slide, colX[0], y + hdrH - pt(1.5), colWidths.reduce((a, b) => a + b, 0), pt(1.5), ORG);
 }
 
 // ── Dynamic row height calculator ────────────────────────────────────────────
@@ -233,20 +289,6 @@ function calcRowHeight(colWidths, vals, fontSize, minH, maxH) {
     maxLines = Math.max(maxLines, lines);
   });
   return Math.min(maxH, Math.max(minH, maxLines * lineH + pt(14)));
-}
-// ── Professional table row ────────────────────────────────────────────────────
-function drawTableRow(slide, colX, colWidths, vals, y, rowH, rowIdx, alignments, fontSize) {
-  const bg = rowIdx % 2 === 0 ? WHT : TBL_ALT_BG;
-  const totalW = colWidths.reduce((a, b) => a + b, 0);
-  rect(slide, colX[0], y, totalW, rowH, bg);
-  vals.forEach((val, ci) => {
-    if (ci > 0) rect(slide, colX[ci], y, pt(0.3), rowH, TBL_BORDER);
-    tx(slide, val, colX[ci] + pt(5), y + pt(2), colWidths[ci] - pt(10), rowH - pt(4),
-      { size: fontSize, color: '1A2E42', align: (alignments && alignments[ci]) || (ci === 0 ? 'center' : 'left'),
-        vAlign: 'middle', font: FONT, wrap: true });
-  });
-  // Row bottom border
-  rect(slide, colX[0], y + rowH - pt(0.6), totalW, pt(0.6), TBL_BORDER);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -266,6 +308,153 @@ function makeSlide(pres, hidden = false) {
   }
   return s;
 }
+
+function renderPagedTable(pres, hidden, fd, sectionTitle, {
+  headers,
+  getRow,
+  count,
+  colW,
+  alignments,
+  fontSize = 9,
+  headerFontSize = 10,
+  minRow = pt(24),
+  maxRow = pt(80),
+  extraTopRows,
+  styleRow,
+}) {
+  if (!count) return;
+  const hdrH = pt(28);
+  const extraH = extraTopRows?.length ? extraTopRows.length * pt(24) : 0;
+  let i = 0;
+  while (i < count) {
+    const s = makeSlide(pres, hidden);
+    s.background = { color: WHT };
+    const startY = addHeader(s, fd, sectionTitle) + pt(8);
+    let used = extraH + hdrH;
+    const body = [];
+    while (i < count) {
+      const vals = getRow(i);
+      const rowH = calcRowHeight(colW, vals, fontSize, minRow, maxRow);
+      if (body.length && startY + used + rowH > SAFE_BOTTOM - pt(8)) break;
+      body.push(bodyRow(vals, body.length, alignments, fontSize, styleRow?.(vals, body.length)));
+      used += rowH;
+      i++;
+    }
+    addPptTable(s, {
+      x: SAFE_LEFT,
+      y: startY,
+      w: SAFE_WIDTH,
+      colW,
+      fontSize,
+      rows: [...(extraTopRows || []), headerRow(headers, headerFontSize), ...body],
+    });
+    addSlideNum(s, pres);
+  }
+}
+
+function weightColWidths(table, totalW) {
+  const n = Math.max(1, table.colCount || 1);
+  const weights = Array(n).fill(4);
+  const addRow = (row) => {
+    let col = 0;
+    (row || []).forEach((c) => {
+      const span = c.colspan || 1;
+      weights[col] = Math.max(weights[col], Math.min(String(c.text || '').length, 40));
+      col += span;
+    });
+  };
+  (table.titles || []).forEach(addRow);
+  (table.headers || []).forEach(addRow);
+  (table.body || []).forEach(addRow);
+  const sum = weights.reduce((a, b) => a + b, 0) || n;
+  const widths = weights.map((w) => (w / sum) * totalW);
+  const used = widths.slice(0, -1).reduce((a, b) => a + b, 0);
+  widths[n - 1] = totalW - used;
+  return widths;
+}
+
+function excelCellsToPptRow(row, styleFn) {
+  return (row || []).map((c, ci) => {
+    const extra = styleFn ? styleFn(c, ci) : {};
+    return pptCell(c.text, {
+      colspan: c.colspan,
+      rowspan: c.rowspan,
+      align: extra.align || 'center',
+      fontSize: extra.fontSize || 8,
+      bold: !!extra.bold,
+      fill: extra.fill || WHT,
+      color: extra.color || '1A2E42',
+      border: extra.border,
+    });
+  });
+}
+
+function buildExcelTableSlides(pres, fd, item, sectionTitle, hidden = false) {
+  const table = item?.table;
+  const bodyAll = table?.body || [];
+  if (!table || !bodyAll.length) return false;
+
+  const colW = weightColWidths(table, SAFE_WIDTH);
+  const titles = (table.titles || []).map((row) =>
+    excelCellsToPptRow(row, () => ({
+      bold: true,
+      fill: 'FDF3E7',
+      color: '7A2E00',
+      fontSize: 10,
+      align: 'center',
+    }))
+  );
+  const headers = (table.headers || []).map((row) =>
+    excelCellsToPptRow(row, () => ({
+      bold: true,
+      fill: TBL_HDR_BG,
+      color: TBL_HDR_FG,
+      fontSize: 9,
+      align: 'center',
+      border: HDR_BORDER,
+    }))
+  );
+
+  const prefixH = titles.length * pt(22) + headers.length * pt(26);
+  let i = 0;
+  while (i < bodyAll.length) {
+    const s = makeSlide(pres, hidden);
+    s.background = { color: WHT };
+    const startY = addHeader(s, fd, sectionTitle) + pt(6);
+    let used = prefixH;
+    const chunk = [];
+    while (i < bodyAll.length) {
+      const vals = bodyAll[i].map((c) => c.text);
+      const rowH = calcRowHeight(colW, vals, 8, pt(18), pt(56));
+      if (chunk.length && startY + used + rowH > SAFE_BOTTOM - pt(8)) break;
+      chunk.push(bodyAll[i]);
+      used += rowH;
+      i++;
+    }
+    const bodyRows = chunk.map((row, ri) =>
+      excelCellsToPptRow(row, () => ({
+        fontSize: 8,
+        fill: ri % 2 ? TBL_ALT_BG : WHT,
+        align: 'center',
+      }))
+    );
+    addPptTable(s, {
+      x: SAFE_LEFT,
+      y: startY,
+      w: SAFE_WIDTH,
+      colW,
+      fontSize: 8,
+      rows: [...titles, ...headers, ...bodyRows],
+    });
+    addSlideNum(s, pres);
+  }
+  return true;
+}
+
+function itemHasContent(item) {
+  return !!(item && (item.dataUrl || (item.table && item.table.body && item.table.body.length)));
+}
+
 // ── Title Slide ───────────────────────────────────────────────────────────────
 async function buildTitleSlide(pres, fd, hidden = false) {
   const s = makeSlide(pres, hidden);
@@ -325,31 +514,25 @@ async function buildTitleSlide(pres, fd, hidden = false) {
 // ── Contents Slide ───────────────────────────────────────────────────────────
 async function buildContentsSlide(pres, fd, sections, hidden = false) {
   if (!sections || !sections.length) return;
-  const LINE_H = pt(32);
-  const GAP    = pt(5);
 
   const s = makeSlide(pres, hidden);
   s.background = { color: WHT };
   const contentY = addHeader(s, fd, 'Report Contents');
 
-  let y = contentY + pt(8);
-  let slideNo = 2;
-
-  sections.forEach((sec, idx) => {
-    if (y + LINE_H > SAFE_BOTTOM - pt(4)) return;
-    // Subtle alternating row
-    const bg = idx % 2 === 0 ? WHT : 'F5F8FF';
-    rect(s, SAFE_LEFT, y, SAFE_WIDTH, LINE_H, bg);
-    rect(s, SAFE_LEFT, y + LINE_H - pt(0.3), SAFE_WIDTH, pt(0.3), TBL_BORDER);
-
-    // Number badge
-    rect(s, SAFE_LEFT + pt(2), y + pt(4), pt(22), pt(22), NAVY);
-    tx(s, (idx+1)+'', SAFE_LEFT + pt(2), y + pt(4), pt(22), pt(22),
-      { bold: true, size: 9, color: WHT, align: 'center', vAlign: 'middle', font: FONT });
-
-    tx(s, sec.title || '', SAFE_LEFT + pt(34), y, SAFE_WIDTH - pt(38), LINE_H,
-      { bold: true, size: 11, color: '1A2E42', align: 'left', vAlign: 'middle', font: FONT });
-    y += LINE_H + GAP;
+  const srW = pt(40);
+  const rows = [
+    headerRow(['#', 'SECTION'], 10),
+    ...sections.map((sec, idx) =>
+      bodyRow([String(idx + 1), sec.title || ''], idx, ['center', 'left'], 11)
+    ),
+  ];
+  addPptTable(s, {
+    x: SAFE_LEFT,
+    y: contentY + pt(8),
+    w: SAFE_WIDTH,
+    colW: [srW, SAFE_WIDTH - srW],
+    fontSize: 11,
+    rows,
   });
 
   addSlideNum(s, pres);
@@ -363,54 +546,17 @@ async function buildActivitiesSlide(pres, fd, hidden = false) {
   const COL_SR   = pt(36);
   const COL_NAME = pt(210);
   const COL_NOTE = SAFE_WIDTH - COL_SR - COL_NAME;
-  const HDR_H    = pt(28);
-  // Taller rows to avoid content overflow
-  const ROW_FONT = 9;
-  const HDR_FONT = 10;
-  const MIN_ROW = pt(24), MAX_ROW = pt(80), ROW_FONT_OA = 10;
-
-  let i = 0, slideNo = 1;
-  while (i < acts.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    const startY = addHeader(s, fd, 'Detailed Status of Activities') + pt(6);
-    let y = startY;
-    const SAFE_BTM = SAFE_BOTTOM - pt(20);
-
-    // Header row — professional navy
-    const colX = [SAFE_LEFT, SAFE_LEFT + COL_SR, SAFE_LEFT + COL_SR + COL_NAME];
-    const colW = [COL_SR, COL_NAME, COL_NOTE];
-    drawTableHeader(s, colX, colW, ['SR', 'ACTIVITY NAME', 'STATUS / NOTE'], y, HDR_H, HDR_FONT);
-    y += HDR_H;
-
-    let rowIdx = 0;
-    while (i < acts.length) {
-      const act  = acts[i];
-      // Estimate row height based on text length
-      const statusLen = (act.status || '').length;
-      const nameLen   = (act.name || '').length;
-      // Approx chars per line at ROW_FONT
-      const noteCharsPerLine  = Math.floor(COL_NOTE   / (ROW_FONT * 0.55 / 72));
-      const nameCharsPerLine  = Math.floor(COL_NAME   / (ROW_FONT * 0.55 / 72));
-      const noteLines  = Math.ceil(statusLen / Math.max(noteCharsPerLine, 1));
-      const nameLines  = Math.ceil(nameLen   / Math.max(nameCharsPerLine, 1));
-      const textLines  = Math.max(noteLines, nameLines, 1);
-      const lineH      = (ROW_FONT + 2) / 72;
-      const rowH = Math.min(MAX_ROW, Math.max(MIN_ROW, textLines * lineH + pt(10)));
-
-      if (y + rowH > SAFE_BTM) break;
-
-      drawTableRow(s, colX, colW,
-        [String(i+1), (act.name || '').toUpperCase(), act.status || ''],
-        y, rowH, rowIdx, ['center', 'left', 'left'], ROW_FONT);
-
-      y += rowH; i++; rowIdx++;
-    }
-
-    // Outer border
-    outerBorder(s, SAFE_LEFT, startY, SAFE_WIDTH, y - startY);
-    addSlideNum(s, pres);
-  }
+  renderPagedTable(pres, hidden, fd, 'Detailed Status of Activities', {
+    headers: ['SR', 'ACTIVITY NAME', 'STATUS / NOTE'],
+    count: acts.length,
+    getRow: (i) => [String(i + 1), (acts[i].name || '').toUpperCase(), acts[i].status || ''],
+    colW: [COL_SR, COL_NAME, COL_NOTE],
+    alignments: ['center', 'left', 'left'],
+    fontSize: 9,
+    headerFontSize: 10,
+    minRow: pt(24),
+    maxRow: pt(80),
+  });
 }
 
 // ── Image grid helper (graphical / site photos / checklist / cube / mom / barchart)
@@ -535,41 +681,18 @@ async function buildNextWeekSlide(pres, fd, hidden = false) {
   const plans = (fd.nextWeekPlans || []).filter(Boolean);
   if (!plans.length) return;
 
-  const MIN_ROW = pt(30), MAX_ROW = pt(80);
-  let i = 0;
-
-  while (i < plans.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    const startY = addHeader(s, fd, 'Next Week Planning');
-    let y = startY + pt(10);
-
-    while (i < plans.length) {
-      const rowH = calcRowHeight(
-        [pt(40), SAFE_WIDTH - pt(56)],
-        [String(i + 1), plans[i]],
-        10, MIN_ROW, MAX_ROW
-      );
-      if (y + rowH > SAFE_BOTTOM) break;
-
-      const bg = i % 2 ? 'F5F8FF' : WHT;
-      rect(s, SAFE_LEFT, y, SAFE_WIDTH, rowH, bg);
-      rect(s, SAFE_LEFT, y + rowH - pt(0.4), SAFE_WIDTH, pt(0.4), TBL_BORDER);
-
-      // SR badge — navy
-      rect(s, SAFE_LEFT, y, pt(40), rowH, NAVY);
-      tx(s, String(i + 1), SAFE_LEFT, y, pt(40), rowH,
-        { color: WHT, bold: true, size: 10, align: 'center', vAlign: 'middle', font: FONT });
-
-      tx(s, plans[i], SAFE_LEFT + pt(52), y, SAFE_WIDTH - pt(56), rowH,
-        { size: 10, color: '1A2E42', vAlign: 'middle', font: FONT });
-
-      y += rowH;
-      i++;
-    }
-
-    addSlideNum(s, pres);
-  }
+  const srW = pt(40);
+  renderPagedTable(pres, hidden, fd, 'Next Week Planning', {
+    headers: ['SR', 'PLAN'],
+    count: plans.length,
+    getRow: (i) => [String(i + 1), plans[i]],
+    colW: [srW, SAFE_WIDTH - srW],
+    alignments: ['center', 'left'],
+    fontSize: 10,
+    minRow: pt(30),
+    maxRow: pt(80),
+    styleRow: () => [{ fill: NAVY, color: WHT, bold: true, align: 'center' }, {}],
+  });
 }
 
 // ── Drawing Register ─────────────────────────────────────────────────────────
@@ -580,43 +703,21 @@ async function buildDrawingRegisterSlide(pres, fd, hidden = false) {
   });
   if (!rows.length) return;
 
-  const hdrs     = fd.drawingRegisterHeaders || ['Architect GFC Drawing','Structure GFC Drawing','MEPF GFC Drawing'];
-  const headers  = ['SR.NO.', ...hdrs];
-  const HDR_H    = pt(32);
-  const ROWS_H    = pt(26);
-  const TABLE_W  = SAFE_WIDTH;
-  const SR_W     = TABLE_W * 0.06;
-  const COL_W    = (TABLE_W - SR_W) / hdrs.length;
-  const colWidths = [SR_W, ...hdrs.map((_, i) => i === hdrs.length-1 ? TABLE_W - SR_W - COL_W*(hdrs.length-1) : COL_W)];
-  const colX = colWidths.reduce((acc, w, i) => { acc.push(i===0 ? SAFE_LEFT : acc[i-1]+colWidths[i-1]); return acc; }, []);
-const ROW_FONT = 9;
-const MIN_ROW  = pt(26);
-const MAX_ROW  = pt(90);    
-  const maxPerSlide = Math.floor((SAFE_BOTTOM - SAFE_TOP - HDR_H - pt(8)) / ROWS_H) || 1;
-  let idx = 0, slideNo = 1;
-
-  while (idx < rows.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    addHeader(s, fd, 'Drawing Register');
-    let y = SAFE_TOP + pt(10);
-
-    drawTableHeader(s, colX, colWidths, headers.map(h => h.toUpperCase()), y, HDR_H, 9);
-    y += HDR_H;
-
-    let placed = 0;
-while (idx < rows.length && placed < maxPerSlide) {
-  const row = rows[idx];
-  const vals = [String(idx+1), ...hdrs.map((_, hi) => row['col'+hi] || '')];
-  const rowH = calcRowHeight(colWidths, vals, ROW_FONT, MIN_ROW, MAX_ROW);
-  if (y + rowH > SAFE_BOTTOM - pt(8)) break;
-  drawTableRow(s, colX, colWidths, vals, y, rowH, placed, null, ROW_FONT);
-  y += rowH; idx++; placed++;
-}
-
-    outerBorder(s, SAFE_LEFT, SAFE_TOP+pt(10), TABLE_W, y - SAFE_TOP - pt(10));
-    addSlideNum(s, pres);
-  }
+  const hdrs = fd.drawingRegisterHeaders || ['Architect GFC Drawing','Structure GFC Drawing','MEPF GFC Drawing'];
+  const TABLE_W = SAFE_WIDTH;
+  const SR_W = TABLE_W * 0.06;
+  const COL_W = (TABLE_W - SR_W) / hdrs.length;
+  const colWidths = [SR_W, ...hdrs.map((_, i) => i === hdrs.length - 1 ? TABLE_W - SR_W - COL_W * (hdrs.length - 1) : COL_W)];
+  renderPagedTable(pres, hidden, fd, 'Drawing Register', {
+    headers: ['SR.NO.', ...hdrs.map((h) => String(h).toUpperCase())],
+    count: rows.length,
+    getRow: (i) => [String(i + 1), ...hdrs.map((_, hi) => rows[i]['col' + hi] || '')],
+    colW: colWidths,
+    fontSize: 9,
+    headerFontSize: 9,
+    minRow: pt(26),
+    maxRow: pt(90),
+  });
 }
 
 // ── Office Activity ───────────────────────────────────────────────────────────
@@ -624,104 +725,59 @@ async function buildOfficeActivitySlide(pres, fd, hidden = false) {
   const items = (fd.officeActivityItems || []).filter(Boolean);
   if (!items.length) return;
 
-  const CAT_H   = pt(24);
-  const HDR_H   = pt(28);
-  const MIN_ROW = pt(24);
-  const MAX_ROW = pt(80);
-  const ROW_FONT = 10;
-
-  const SR_W  = SAFE_WIDTH * 0.07;
+  const SR_W = SAFE_WIDTH * 0.07;
   const DET_W = SAFE_WIDTH - SR_W;
-  const colX  = [SAFE_LEFT, SAFE_LEFT + SR_W];
-  const colW  = [SR_W, DET_W];
-
-  let idx = 0;
-
-  while (idx < items.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    addHeader(s, fd, 'Office Activity');
-    let y = SAFE_TOP + pt(10);
-
-    // Category banner
-    rect(s, SAFE_LEFT, y, SAFE_WIDTH, CAT_H, '2C4A6E');
-    tx(s, 'BACK OFFICE WORK', SAFE_LEFT + pt(10), y, SAFE_WIDTH - pt(20), CAT_H,
-      { bold: true, size: 9, color: WHT, align: 'center', vAlign: 'middle', font: FONT });
-    y += CAT_H;
-
-    drawTableHeader(s, colX, colW, ['SR.NO.', 'DETAILS'], y, HDR_H, ROW_FONT);
-    y += HDR_H;
-
-    let placed = 0;
-    while (idx < items.length) {
-      const vals = [String(idx + 1), items[idx]];
-      const rowH = calcRowHeight(colW, vals, ROW_FONT, MIN_ROW, MAX_ROW);
-      if (y + rowH > SAFE_BOTTOM - pt(8)) break;
-
-      drawTableRow(s, colX, colW, vals, y, rowH, placed, ['center', 'left'], ROW_FONT);
-      y += rowH;
-      idx++;
-      placed++;
-    }
-
-    outerBorder(s, SAFE_LEFT, SAFE_TOP + pt(10), SAFE_WIDTH, y - SAFE_TOP - pt(10));
-    addSlideNum(s, pres);
-  }
+  renderPagedTable(pres, hidden, fd, 'Office Activity', {
+    headers: ['SR.NO.', 'DETAILS'],
+    count: items.length,
+    getRow: (i) => [String(i + 1), items[i]],
+    colW: [SR_W, DET_W],
+    alignments: ['center', 'left'],
+    fontSize: 10,
+    minRow: pt(24),
+    maxRow: pt(80),
+    extraTopRows: [[
+      pptCell('BACK OFFICE WORK', {
+        colspan: 2,
+        bold: true,
+        fill: '2C4A6E',
+        color: WHT,
+        align: 'center',
+        fontSize: 9,
+      }),
+    ]],
+  });
 }
 
 // ── Visitor Register ──────────────────────────────────────────────────────────
 async function buildVisitorRegisterSlide(pres, fd, hidden = false) {
-  const photos = (fd.visitorPhotos || []).filter(p => p && p.dataUrl);
+  const photos = (fd.visitorPhotos || []).filter((p) => p && (p.dataUrl || p.table));
 
-  // Photo mode — render like MOM/Cube/Barchart range-captured images
   if (photos.length) {
     await buildRangeCaptureSlides(pres, fd, photos, 'Visitor Register', hidden);
     return;
   }
 
-  // Manual mode — existing typed-table rendering
   const rows = (fd.visitorRegisterData || []).filter(r => r.name || r.type);
   if (!rows.length) return;
-
-  const HDR_H   = pt(28);
-  const MIN_ROW = pt(28);
-  const MAX_ROW = pt(100);
-  const ROW_FONT = 9;
 
   const SR_W    = SAFE_WIDTH * 0.06;
   const TYPE_W  = SAFE_WIDTH * 0.20;
   const NAME_W  = SAFE_WIDTH * 0.24;
   const INSTR_W = SAFE_WIDTH - SR_W - TYPE_W - NAME_W;
-  const colWidths = [SR_W, TYPE_W, NAME_W, INSTR_W];
-  const colX = colWidths.reduce((acc, w, i) => {
-    acc.push(i === 0 ? SAFE_LEFT : acc[i-1] + colWidths[i-1]); return acc;
-  }, []);
-  const headers = ['SR.NO.', 'VISITOR TYPE', 'NAME / COMPANY', 'INSTRUCTIONS'];
-
-  let idx = 0;
-  while (idx < rows.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    addHeader(s, fd, 'Visitor Register');
-    let y = SAFE_TOP + pt(10);
-
-    drawTableHeader(s, colX, colWidths, headers, y, HDR_H, ROW_FONT);
-    y += HDR_H;
-
-    let placed = 0;
-    while (idx < rows.length) {
-      const row = rows[idx];
+  renderPagedTable(pres, hidden, fd, 'Visitor Register', {
+    headers: ['SR.NO.', 'VISITOR TYPE', 'NAME / COMPANY', 'INSTRUCTIONS'],
+    count: rows.length,
+    getRow: (i) => {
+      const row = rows[i];
       const typeLabel = row.type === '__other__' ? (row.typeOther || 'Other') : (row.type || '');
-      const vals = [String(idx+1), typeLabel, row.name||'', row.instruction||''];
-      const rowH = calcRowHeight(colWidths, vals, ROW_FONT, MIN_ROW, MAX_ROW);
-      if (y + rowH > SAFE_BOTTOM - pt(8)) break;
-      drawTableRow(s, colX, colWidths, vals, y, rowH, placed, null, ROW_FONT);
-      y += rowH; idx++; placed++;
-    }
-
-    outerBorder(s, SAFE_LEFT, SAFE_TOP+pt(10), SAFE_WIDTH, y - SAFE_TOP - pt(10));
-    addSlideNum(s, pres);
-  }
+      return [String(i + 1), typeLabel, row.name || '', row.instruction || ''];
+    },
+    colW: [SR_W, TYPE_W, NAME_W, INSTR_W],
+    fontSize: 9,
+    minRow: pt(28),
+    maxRow: pt(100),
+  });
 }
 
 // ── Drawing & Decision Pending ────────────────────────────────────────────────
@@ -729,53 +785,27 @@ async function buildDrawingDecisionSlide(pres, fd, hidden = false) {
   const rows = (fd.drawingDecisionData || []).filter(r => r.drawingName);
   if (!rows.length) return;
 
-  const HDR_H   = pt(28);
-  const MIN_ROW = pt(26);
-  const MAX_ROW = pt(80);
-  const ROW_FONT = 9;
-
   const SR_W   = SAFE_WIDTH * 0.06;
   const DATE_W = SAFE_WIDTH * 0.18;
   const DWG_W  = SAFE_WIDTH - SR_W - DATE_W;
-  const colWidths = [SR_W, DWG_W, DATE_W];
-  const colX = colWidths.reduce((acc, w, i) => {
-    acc.push(i === 0 ? SAFE_LEFT : acc[i - 1] + colWidths[i - 1]);
-    return acc;
-  }, []);
-  const headers = ['SR.', 'DRAWING / DECISION NAME', 'REQUIRED DATE'];
-
-  let idx = 0;
-
-  while (idx < rows.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    addHeader(s, fd, 'Drawing & Decision Pending');
-    let y = SAFE_TOP + pt(10);
-
-    drawTableHeader(s, colX, colWidths, headers, y, HDR_H, ROW_FONT);
-    y += HDR_H;
-
-    let placed = 0;
-    while (idx < rows.length) {
-      const row = rows[idx];
+  renderPagedTable(pres, hidden, fd, 'Drawing & Decision Pending', {
+    headers: ['SR.', 'DRAWING / DECISION NAME', 'REQUIRED DATE'],
+    count: rows.length,
+    getRow: (i) => {
+      const row = rows[i];
       let dateDisp = row.requiredDate || '';
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateDisp)) {
         const [yr, mo, da] = dateDisp.split('-');
         dateDisp = `${da}/${mo}/${yr}`;
       }
-      const vals = [String(idx + 1), row.drawingName || '', dateDisp];
-      const rowH = calcRowHeight(colWidths, vals, ROW_FONT, MIN_ROW, MAX_ROW);
-      if (y + rowH > SAFE_BOTTOM - pt(8)) break;
-
-      drawTableRow(s, colX, colWidths, vals, y, rowH, placed, null, ROW_FONT);
-      y += rowH;
-      idx++;
-      placed++;
-    }
-
-    outerBorder(s, SAFE_LEFT, SAFE_TOP + pt(10), SAFE_WIDTH, y - SAFE_TOP - pt(10));
-    addSlideNum(s, pres);
-  }
+      return [String(i + 1), row.drawingName || '', dateDisp];
+    },
+    colW: [SR_W, DWG_W, DATE_W],
+    alignments: ['center', 'left', 'center'],
+    fontSize: 9,
+    minRow: pt(26),
+    maxRow: pt(80),
+  });
 }
 
 // ── Delay Points ──────────────────────────────────────────────────────────────
@@ -783,53 +813,26 @@ async function buildDelayPointsSlide(pres, fd, hidden = false) {
   const points = (fd.delayPoints || []).filter(Boolean);
   if (!points.length) return;
 
-  const MIN_ROW = pt(30);
-  const MAX_ROW = pt(90);
-  const ROW_FONT = 10;
   const BADGE_W = pt(40);
-
-  let idx = 0;
-
-  while (idx < points.length) {
-    const s = makeSlide(pres, hidden);
-    s.background = { color: WHT };
-    const startY = addHeader(s, fd, 'Delay Points / Highlights / Red Flag');
-    let y = startY + pt(6);
-
-    let placed = 0;
-    while (idx < points.length) {
-      const textColW = SAFE_WIDTH - pt(52);
-      const rowH = calcRowHeight(
-        [BADGE_W, textColW],
-        [String(idx + 1), points[idx]],
-        ROW_FONT, MIN_ROW, MAX_ROW
-      );
-      if (y + rowH > SAFE_BOTTOM - pt(8)) break;
-
-      const bg = placed % 2 ? 'FFF5F5' : WHT;
-      rect(s, SAFE_LEFT, y, SAFE_WIDTH, rowH, bg);
-      rect(s, SAFE_LEFT, y + rowH - pt(0.5), SAFE_WIDTH, pt(0.5), 'FCA5A5');
-
-      // Red badge
-      rect(s, SAFE_LEFT, y, BADGE_W, rowH, 'DC2626');
-      tx(s, String(idx + 1), SAFE_LEFT, y, BADGE_W, rowH,
-        { color: WHT, bold: true, size: ROW_FONT, align: 'center', vAlign: 'middle', font: FONT });
-
-      tx(s, points[idx], SAFE_LEFT + pt(52), y, textColW, rowH,
-        { size: ROW_FONT, color: '1A2E42', vAlign: 'middle', font: FONT });
-
-      y += rowH;
-      idx++;
-      placed++;
-    }
-
-    addSlideNum(s, pres);
-  }
+  renderPagedTable(pres, hidden, fd, 'Delay Points / Highlights / Red Flag', {
+    headers: ['#', 'POINT'],
+    count: points.length,
+    getRow: (i) => [String(i + 1), points[i]],
+    colW: [BADGE_W, SAFE_WIDTH - BADGE_W],
+    alignments: ['center', 'left'],
+    fontSize: 10,
+    minRow: pt(30),
+    maxRow: pt(90),
+    styleRow: (_vals, rowIdx) => [
+      { fill: 'DC2626', color: WHT, bold: true, align: 'center' },
+      { fill: rowIdx % 2 ? 'FFF5F5' : WHT },
+    ],
+  });
 }
 
-// ── MOM / Barchart / Cube (range-captured images) ────────────────────────────
+// ── MOM / Barchart / Cube (native tables when captured from Excel) ────────────
 async function buildRangeCaptureSlides(pres, fd, items, sectionTitle, hidden = false) {
-  const filtered = (items || []).filter(i => i && i.dataUrl);
+  const filtered = (items || []).filter(itemHasContent);
   if (!filtered.length) return;
 
   const CAPTION_H   = pt(26);
@@ -837,6 +840,10 @@ async function buildRangeCaptureSlides(pres, fd, items, sectionTitle, hidden = f
 
   for (let slideNo = 0; slideNo < filtered.length; slideNo++) {
     const item = filtered[slideNo];
+    if (item.table && buildExcelTableSlides(pres, fd, item, sectionTitle, hidden)) {
+      continue;
+    }
+    if (!item.dataUrl) continue;
     const s = makeSlide(pres, hidden);
     s.background = { color: WHT };
     const startY    = addHeader(s, fd, sectionTitle) + pt(8);
@@ -1004,9 +1011,9 @@ const activeSections = (sections || []).filter(sec => {
     if (sec.hidden) return false;
     const title = sec.title.toLowerCase().trim();
     if (title === 'site photographs')
-      return (sitePhotos||[]).some(p => p.dataUrl);
+      return (sitePhotos||[]).some(itemHasContent);
     if (title === 'graphical report of work')
-      return (graphicalImages||[]).some(i => i.dataUrl);
+      return (graphicalImages||[]).some(itemHasContent);
     if (title === 'detailed status of activities')
       return (activities||[]).some(a => a.name);
     if (title === 'next week planning')
@@ -1016,19 +1023,19 @@ const activeSections = (sections || []).filter(sec => {
     if (title === 'office activity')
       return (officeItems||[]).filter(Boolean).length > 0;
     if (title === 'visitor register')
-      return (visitors||[]).some(v => v.name) || (visitorPhotos||[]).some(p => p.dataUrl);
+      return (visitors||[]).some(v => v.name) || (visitorPhotos||[]).some(itemHasContent);
     if (title === 'drawing & decision pending')
       return (drawDecision||[]).some(d => d.drawingName);
     if (title === 'weekly site checklist')
-      return (checklistPhotos||[]).some(p => p.dataUrl);
+      return (checklistPhotos||[]).some(itemHasContent);
     if (title === 'delay points / highlights / red flag')
       return (delayPoints||[]).filter(Boolean).length > 0;
     if (title === 'mom review')
-      return (momItems||[]).some(i => i.dataUrl);
+      return (momItems||[]).some(itemHasContent);
     if (title === 'barchart & worksheet')
-      return (barchartItems||[]).some(i => i.dataUrl);
+      return (barchartItems||[]).some(itemHasContent);
     if (title === 'cube testing register')
-      return (cubeItems||[]).some(i => i.dataUrl);
+      return (cubeItems||[]).some(itemHasContent);
     return true;
   });
 

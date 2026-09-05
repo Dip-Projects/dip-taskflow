@@ -517,6 +517,56 @@ function detectHeaderInfo(raw, merges) {
 
   return { titleRows, labelRows, headerEnd };
 }
+
+function extractTableRange(sheetData, sheetMerges, headerInfo, r1, r2, c1, c2) {
+  const titleRows = headerInfo?.titleRows || [];
+  const labelRows = headerInfo?.labelRows || [];
+  const colCount = c2 - c1 + 1;
+  const mergeSpansByRow = {};
+  (sheetMerges || []).forEach((m) => {
+    if (m.s.r !== m.e.r) return;
+    const span = m.e.c - m.s.c + 1;
+    if (span <= 1) return;
+    if (!mergeSpansByRow[m.s.r]) mergeSpansByRow[m.s.r] = [];
+    mergeSpansByRow[m.s.r].push({ startCol: m.s.c, endCol: m.e.c });
+  });
+
+  const sliceRow = (ri) => {
+    const row = sheetData[ri] || [];
+    const cells = [];
+    let ci = c1;
+    while (ci <= c2) {
+      const span = (mergeSpansByRow[ri] || []).find(
+        (s) => ci >= s.startCol && ci <= s.endCol,
+      );
+      if (span) {
+        const start = Math.max(span.startCol, c1);
+        const end = Math.min(span.endCol, c2);
+        if (ci === start) {
+          const colspan = end - start + 1;
+          cells.push({
+            text: String(row[span.startCol] ?? row[ci] ?? ""),
+            ...(colspan > 1 ? { colspan } : {}),
+          });
+        }
+        ci = end + 1;
+        continue;
+      }
+      cells.push({ text: String(row[ci] ?? "") });
+      ci++;
+    }
+    return cells;
+  };
+
+  return {
+    titles: titleRows.map(sliceRow),
+    headers: labelRows.length ? labelRows.map(sliceRow) : [],
+    body: Array.from({ length: Math.max(0, r2 - r1 + 1) }, (_, i) =>
+      sliceRow(r1 + i),
+    ),
+    colCount,
+  };
+}
 // ADD this helper function right above renderTableImage
 const yieldToMain = () =>
   new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
@@ -1356,12 +1406,22 @@ function ExcelRangeCapture({
         await new Promise((r) => setTimeout(r, 0));
         const end = Math.min(start + chunk - 1, n.r2);
         const dataUrl = await drawRangeImage(start, end, n.c1, n.c2);
-        if (dataUrl)
+        const table = extractTableRange(
+          sheetData,
+          sheetMerges,
+          headerInfo,
+          start,
+          end,
+          n.c1,
+          n.c2,
+        );
+        if (dataUrl || table.body.length)
           newItems.push({
             dataUrl,
             caption: "",
-            kind: "table-image",
+            kind: "table",
             sheet: activeSheet,
+            table,
           });
       }
       if (newItems.length) setItems((prev) => [...prev, ...newItems]);
@@ -1407,7 +1467,7 @@ function ExcelRangeCapture({
             }}
           />
           <div style={{ color: "#ffcfa0", fontWeight: 700, fontSize: 15 }}>
-            Generating images…
+            Capturing table…
           </div>
         </div>
       )}
@@ -1635,7 +1695,7 @@ function ExcelRangeCapture({
                   flexWrap: "wrap",
                 }}
               >
-                <span className="wpr-range-label">Rows per image:</span>
+                <span className="wpr-range-label">Rows per table:</span>
                 <input
                   className="finput"
                   type="number"
@@ -2042,7 +2102,7 @@ function ExcelRangeCapture({
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               Upload an Excel file — then select the exact range you want to
-              capture as a branded image.
+              capture as a real PowerPoint table.
             </div>
           )}
         </div>
@@ -2055,7 +2115,7 @@ function ExcelRangeCapture({
             item.dataUrl ? (
               <div key={i} className="wpr-xl-captured-card">
                 <div className="wpr-xl-captured-card-hdr">
-                  {item.kind === "table-image" ? "📊" : "🖼"}{" "}
+                  {item.kind === "table" || item.kind === "table-image" ? "📊" : "🖼"}{" "}
                   {item.caption || `Item ${i + 1}`}
                 </div>
                 <img
@@ -3778,7 +3838,7 @@ export default function WprGenerator({ user, supabase }) {
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             Upload photos of cube test results, or load an Excel file, select
-            the data range, and capture it as an image with a branded header.
+            the data range, and capture it as a real PowerPoint table.
           </div>
           <ExcelRangeCapture
             items={cubeItems}
@@ -4625,7 +4685,7 @@ export default function WprGenerator({ user, supabase }) {
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             Upload MOM photos or select a range from your MOM Excel sheet to
-            capture it as a branded table image.
+            capture it as a real PowerPoint table.
           </div>
           <ExcelRangeCapture
             items={momItems}
