@@ -212,8 +212,17 @@ async function notifyAssigneeOpenTasksList(userId, toNumber, fullName) {
     return { ok: false, reason: 'bad_args' };
   }
   try {
+    const { data: u } = await supabase
+      .from('users')
+      .select('id, username, full_name, role, designation, department')
+      .eq('id', userId)
+      .maybeSingle();
+    // Never spam admin with day-list WhatsApp
+    if (u && isAdminUser(u)) {
+      return { ok: false, reason: 'admin_skipped' };
+    }
     return await sendOpenTasksListPicker(toNumber, userId, {
-      fullName,
+      fullName: fullName || u?.full_name,
       dayYmd: istYmd(),
     });
   } catch (err) {
@@ -248,22 +257,70 @@ async function completeAllOpenTasksForUser(user, opts = {}) {
   return { done, total: tasks.length, dayYmd };
 }
 
+function isAdminUser(u) {
+  return String(u?.role || '').toLowerCase().trim() === 'admin';
+}
+
+function isProcessControllerUser(u) {
+  if (isAdminUser(u)) return false;
+  const role = String(u?.role || '').toLowerCase().trim();
+  const des = String(u?.designation || '').toLowerCase().trim();
+  const blob = `${role} ${des} ${u?.department || ''}`.toLowerCase();
+  if (role === 'pc' || des === 'pc') return true;
+  if (/\bpc\b/.test(blob)) return true;
+  if (blob.includes('process controller')) return true;
+  return false;
+}
+
+function isBeenaParmarPc(u) {
+  if (!isProcessControllerUser(u)) return false;
+  const name = `${u.full_name || ''} ${u.username || ''}`.toLowerCase();
+  return /beena/.test(name);
+}
+
 /**
- * Daily digest: today's open (+ overdue) list picker per user with WhatsApp.
+ * Who gets the daily Site WhatsApp list:
+ * - If WA_DIGEST_USERNAMES set → those usernames only
+ * - Else Beena Parmar (Process Controller) match
+ * - Else any Process Controller (fallback if Beena not found)
+ * Never admin.
+ */
+function digestRecipientAllowed(u) {
+  if (!u || isAdminUser(u)) return false;
+  const allow = String(process.env.WA_DIGEST_USERNAMES || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (allow.length) {
+    return allow.includes(String(u.username || '').toLowerCase());
+  }
+  return isBeenaParmarPc(u) || isProcessControllerUser(u);
+}
+
+/**
+ * Daily digest: today's open (+ overdue) list picker — Process Controller (Beena) only, not admin.
  */
 async function runOpenTasksListDigestCron() {
   const dayYmd = istYmd();
   const { data: users, error } = await supabase
     .from('users')
-    .select('id, full_name, whatsapp_number, username, is_active')
+    .select('id, full_name, whatsapp_number, username, role, designation, department, is_active')
     .not('whatsapp_number', 'is', null)
     .neq('is_active', false);
 
   if (error) throw error;
 
+  const pool = users || [];
+  let recipients = pool.filter(digestRecipientAllowed);
+  // Prefer Beena when env not set and both Beena + other PCs exist
+  if (!process.env.WA_DIGEST_USERNAMES) {
+    const beenaOnly = recipients.filter(isBeenaParmarPc);
+    if (beenaOnly.length) recipients = beenaOnly;
+  }
+
   let sent = 0;
   let skipped = 0;
-  for (const u of users || []) {
+  for (const u of recipients) {
     if (!normalizeWhatsAppNumber(u.whatsapp_number)) {
       skipped += 1;
       continue;
@@ -280,7 +337,15 @@ async function runOpenTasksListDigestCron() {
     if (result.ok && result.count > 0) sent += 1;
     else skipped += 1;
   }
-  return { sent, skipped, users: (users || []).length, dayYmd, dayLabel: dayLabel(dayYmd) };
+  return {
+    sent,
+    skipped,
+    users: pool.length,
+    recipients: recipients.length,
+    dayYmd,
+    dayLabel: dayLabel(dayYmd),
+    note: 'Daily list goes to Process Controller Beena only (not admin). Set WA_DIGEST_USERNAMES to override.',
+  };
 }
 
 module.exports = {
@@ -296,4 +361,7 @@ module.exports = {
   runOpenTasksListDigestCron,
   buildListRows,
   formatStatusSummary,
+  isProcessControllerUser,
+  isBeenaParmarPc,
+  digestRecipientAllowed,
 };

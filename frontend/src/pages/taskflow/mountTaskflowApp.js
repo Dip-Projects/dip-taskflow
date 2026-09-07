@@ -1700,17 +1700,41 @@ export async function mountTaskflowApp(opts = {}) {
   function syncTaskEmployeeDropdown() {
     if (!els.fEmployee) return;
     const deptId = els.fDepartment?.value || '';
-    const list = employeesForDepartmentId(deptId);
+    let list = employeesForDepartmentId(deptId);
+    // Prefer Process Controller Beena at top for day/WhatsApp task assign
+    list = [...list].sort((a, b) => {
+      const score = (e) => {
+        const blob = `${e.designation || ''} ${e.role || ''} ${e.full_name || ''}`.toLowerCase();
+        let s = 0;
+        if (blob.includes('process controller') || /\bpc\b/.test(blob)) s += 2;
+        if (/beena/.test(blob)) s += 4;
+        if (String(e.role || '').toLowerCase() === 'admin') s -= 5;
+        return s;
+      };
+      return score(b) - score(a);
+    });
+    // Never offer admin as assignee in Add Task (site day tasks → Beena PC)
+    list = list.filter((e) => String(e.role || '').toLowerCase() !== 'admin');
     const prev = els.fEmployee.value;
     fillSelect(els.fEmployee, list, {
       placeholder: deptId
         ? list.length
-          ? 'Select employee'
+          ? 'Select employee (prefer Beena Parmar — PC)'
           : 'No employees in this department'
         : 'Select department first',
       labelKey: 'full_name',
     });
-    if (prev && list.some((e) => e.id === prev)) els.fEmployee.value = prev;
+    if (prev && list.some((e) => e.id === prev)) {
+      els.fEmployee.value = prev;
+    } else {
+      // Auto-select Beena / PC when present
+      const beena = list.find((e) => /beena/i.test(`${e.full_name || ''} ${e.username || ''}`));
+      const pc = list.find((e) =>
+        /process controller|\bpc\b/i.test(`${e.designation || ''} ${e.role || ''}`)
+      );
+      if (beena) els.fEmployee.value = beena.id;
+      else if (pc) els.fEmployee.value = pc.id;
+    }
   }
 
   function syncFilterEmployeeDropdown() {
@@ -1857,6 +1881,11 @@ export async function mountTaskflowApp(opts = {}) {
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
+    const assignee = (state.master.employees || []).find((e) => e.id === els.fEmployee.value);
+    if (assignee && String(assignee.role || '').toLowerCase() === 'admin') {
+      showFormMsg(els.addTaskMsg, 'Admin ko assign mat karo — site day tasks sirf Beena Parmar (Process Controller) ko.');
+      return;
+    }
     formData.append('project_id', els.fProject.value);
     formData.append('task_type_id', els.fTaskType.value);
     formData.append('description', document.getElementById('f-description').value);

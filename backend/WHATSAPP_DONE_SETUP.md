@@ -3,6 +3,9 @@
 Site people get **one WhatsApp list per day** for that day’s tasks
 (Monday’s tasks on Monday, Tuesday’s on Tuesday, …).
 
+**Daily morning digest is only for Process Controller Beena Parmar** (not admin).
+Assign day tasks to **Beena Parmar**. Override with `WA_DIGEST_USERNAMES`.
+
 Overdue open tasks (due earlier, still open) also appear in **today’s** list.
 
 ## How it works
@@ -40,6 +43,8 @@ META_WEBHOOK_VERIFY_TOKEN=dip-taskflow-wa
 CRON_SECRET=your_cron_secret
 WA_LIST_DEBOUNCE_MS=20000
 WHATSAPP_TASK_LIST_TEMPLATE=task_notification_v2
+# Optional: only these usernames get the daily list (default = Beena Parmar PC)
+# WA_DIGEST_USERNAMES=beena.parmar
 ```
 
 ## Cron

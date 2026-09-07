@@ -538,9 +538,13 @@ function buildNav(user, visMap) {
   }
 
   const showChat = visAllows(visMap, "team-chat", user);
+  const role = String(user?.role || "").toLowerCase();
+  const isAdmin = role === "admin";
+  // Day-wise My Tasks: not for admin (Beena PC / site assignees use it)
+  const showMyTasks = !isAdmin;
 
   return [
-    { key: "my-tasks", label: "My Tasks", icon: Ico.tasks },
+    ...(showMyTasks ? [{ key: "my-tasks", label: "My Tasks", icon: Ico.tasks }] : []),
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
