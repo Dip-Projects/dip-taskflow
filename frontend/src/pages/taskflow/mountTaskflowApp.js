@@ -2643,30 +2643,30 @@ export async function mountTaskflowApp(opts = {}) {
 
   function paintOfficeMyTasks() {
     const isAdmin = state.user.role === 'admin';
-    // Admin: do not show personal day-task board (Beena's work). Keep Other Pending tabs only.
+    const dayRow = document.getElementById('officeMyTasksDayRow');
+    if (dayRow) dayRow.hidden = true;
     if (isAdmin) {
-      const dayRow = document.getElementById('officeMyTasksDayRow');
       const odBar = document.getElementById('myTasksOpenDoneBar');
-      if (dayRow) dayRow.hidden = true;
       if (odBar) odBar.hidden = true;
-      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Day tasks sirf Beena Parmar (Process Controller) ke liye. Admin yahan assign kare — My Tasks Beena login pe dikhenge.</td></tr>`;
-      els.myTasksList.innerHTML = `<div class="empty-state">Day tasks → Beena Parmar (PC). Admin assign kare; WhatsApp list Beena ko jati hai.</div>`;
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Admin personal day board band. Assign tasks; Beena / employees My Tasks pe dekhenge.</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state">Admin yahan assign kare — My Tasks employee login pe.</div>`;
       return;
     }
 
-    const visibleTasks = filterOfficeMyByDay(officeMyAllTasks);
-    const recurringTasks = [];
+    // No Mon–Sun filter — show all open/done by tab only
+    const visibleTasks = (officeMyAllTasks || []).filter((t) =>
+      officeMyShowDone ? t.status === 'Completed' : (t.status !== 'Completed' && !isRejectedTask(t))
+    );
     myTasksTimerCache = visibleTasks;
-    renderMyTasksTable(els.myTasksTableBody, visibleTasks, recurringTasks);
+    renderMyTasksTable(els.myTasksTableBody, visibleTasks, []);
     els.myTasksList.innerHTML = '';
     els.myTasksList.classList.add('task-list');
     visibleTasks.forEach((t) =>
       els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true }))
     );
     if (!visibleTasks.length) {
-      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks for this day</div>`;
+      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks</div>`;
     }
-    renderOfficeDayRow();
   }
 
   async function loadMyTasks() {

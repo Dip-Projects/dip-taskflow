@@ -51,17 +51,38 @@ function normalizeRole(role) {
     .trim();
 }
 
-/** Site Engineer → 2 Excel uploads (Site Work + Site Engineer). */
+/** Site Engineer (incl. Jr) — only these may scan EA QR / upload plans. */
 function isSiteEngineerRole(role) {
   const r = normalizeRole(role);
+  if (!r) return false;
+  if (r.includes("incharge") || r.includes("head") || r.includes("coordinator") || r.includes("co ordinator")) {
+    return false;
+  }
   return (
     r.includes("site engineer") ||
     r === "siteengineer" ||
-    (r.includes("engineer") && r.includes("site") && !r.includes("head"))
+    r.includes("jr site engineer") ||
+    r.includes("junior site engineer") ||
+    (r.includes("engineer") && r.includes("site"))
   );
 }
 
-/** Head / Incharge / Coordinator / others → only weekly plan (1 file). */
+function assertSiteEngineerMayScan(employee, authUser) {
+  const role =
+    employee?.role ||
+    authUser?.designation ||
+    authUser?.site_role ||
+    authUser?.role ||
+    "";
+  if (!isSiteEngineerRole(role)) {
+    throw new Error(
+      "Sirf Site Engineer EA meeting QR scan / plan upload kar sakte hain. Aapka role: " +
+        (role || "—")
+    );
+  }
+}
+
+/** Site Engineer → 2 Excel uploads (Site Work + Site Engineer). */
 function needsDualExcelUpload(role) {
   return isSiteEngineerRole(role);
 }
@@ -282,6 +303,7 @@ export default function QrAttendance() {
       if (!user) throw new Error("Please log in first, then scan the EA meeting QR.");
       const employee = await fetchLoggedInEmployee(user);
       if (!employee?.username) throw new Error("Could not load your employee details.");
+      assertSiteEngineerMayScan(employee, authUser);
       await stopScanner();
       const row = await markPresent(employee);
       setScannedEmployee(employee);
@@ -310,7 +332,7 @@ export default function QrAttendance() {
     } finally {
       setBusy(false);
     }
-  }, [user, markPresent, stopScanner]);
+  }, [user, authUser, markPresent, stopScanner]);
 
   const handleDecoded = useCallback(
     async (decodedText) => {
@@ -470,7 +492,8 @@ export default function QrAttendance() {
               {message && <div className="qr-error">{message}</div>}
               {!busy && phase === "scan" && !camError && (
                 <div className="qr-note">
-                  Monday EA meeting attendance (not clock-in). Scan the desk QR or open the EA link.
+                  Monday EA meeting — <strong>Site Engineers only</strong>. Scan desk QR, mark present, upload plan.
+                  Beena (PC) + aapki site pe files dikhengi.
                 </div>
               )}
             </div>

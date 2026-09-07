@@ -303,54 +303,12 @@ function digestRecipientAllowed(u) {
  * Daily digest: today's open (+ overdue) list picker — Process Controller (Beena) only, not admin.
  */
 async function runOpenTasksListDigestCron() {
-  const dayYmd = istYmd();
-  const { data: users, error } = await supabase
-    .from('users')
-    .select('id, full_name, whatsapp_number, username, role, designation, department, is_active')
-    .not('whatsapp_number', 'is', null)
-    .neq('is_active', false);
-
-  if (error) throw error;
-
-  const pool = users || [];
-  let recipients = pool.filter(digestRecipientAllowed);
-  // Prefer Beena when env not set and both Beena + other PCs exist
-  if (!process.env.WA_DIGEST_USERNAMES) {
-    const beenaOnly = recipients.filter(isBeenaParmarPc);
-    if (beenaOnly.length) recipients = beenaOnly;
-  }
-
-  let sent = 0;
-  let skipped = 0;
-  for (const u of recipients) {
-    if (!normalizeWhatsAppNumber(u.whatsapp_number)) {
-      skipped += 1;
-      continue;
-    }
-    const tasks = await loadOpenTasksForUser(u.id, { dayYmd });
-    if (!tasks.length) {
-      skipped += 1;
-      continue;
-    }
-    const result = await sendOpenTasksListPicker(u.whatsapp_number, u.id, {
-      fullName: u.full_name || u.username || 'Team member',
-      dayYmd,
-    });
-    if (result.ok && result.count > 0) sent += 1;
-    else skipped += 1;
-  }
+  // Daily Mon–Sun WhatsApp day-list disabled (product decision).
   return {
-    sent,
-    skipped,
-    users: pool.length,
-    recipients: recipients.map((u) => ({
-      id: u.id,
-      username: u.username,
-      full_name: u.full_name,
-    })),
-    dayYmd,
-    dayLabel: dayLabel(dayYmd),
-    note: 'Daily list → Beena only (not admin). Set WA_DIGEST_USERNAMES to override.',
+    sent: 0,
+    skipped: 0,
+    disabled: true,
+    note: 'Daily WhatsApp day-list digest is disabled.',
   };
 }
 

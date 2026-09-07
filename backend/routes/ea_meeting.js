@@ -3,14 +3,9 @@ const supabase = require('../lib/supabaseClient');
 const { requireAuth } = require('../middleware/auth');
 const {
   sendWhatsAppText,
-  sendWhatsAppInteractiveList,
-  sendWhatsAppTemplate,
   normalizeWhatsAppNumber,
 } = require('../lib/whatsapp');
 const {
-  loadOpenTasksForUser,
-  sendOpenTasksListPicker,
-  istYmd,
   isAdminUser,
   userCanViewAllEaUploads,
   findBeenaOrPcUsers,
@@ -19,18 +14,36 @@ const {
 const router = express.Router();
 router.use(requireAuth);
 
-function clip(s, n) {
-  const t = String(s || '').replace(/\s+/g, ' ').trim();
-  if (t.length <= n) return t;
-  return `${t.slice(0, Math.max(0, n - 1))}…`;
-}
-
 function usernamesFor(user) {
   return [...new Set(
     [user.username, user.user_name]
       .map((s) => String(s || '').trim())
       .filter(Boolean)
   )];
+}
+
+function normSite(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sitesForUser(user) {
+  const out = [];
+  if (user?.site_name) out.push(user.site_name);
+  if (Array.isArray(user?.site_names)) out.push(...user.site_names);
+  return [...new Set(out.map(normSite).filter(Boolean))];
+}
+
+async function loadUserProfile(user) {
+  if (!user?.id) return user || {};
+  const { data } = await supabase
+    .from('users')
+    .select('id, full_name, username, role, designation, department, site_name, site_names, whatsapp_number')
+    .eq('id', user.id)
+    .maybeSingle();
+  return { ...user, ...(data || {}) };
 }
 
 /** Own EA rows only (uploader). */
@@ -46,9 +59,7 @@ async function loadOwnEaRows(user) {
       .order('meeting_week_start', { ascending: false })
       .limit(40);
     if (error) {
-      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-        return [];
-      }
+      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) return [];
       throw error;
     }
     if (data?.length) return data;
@@ -62,61 +73,59 @@ async function loadOwnEaRows(user) {
       .order('meeting_week_start', { ascending: false })
       .limit(40);
     if (error) {
-      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-        return [];
-      }
+      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) return [];
       throw error;
     }
     if (data?.length) return data;
   }
 
-  const displayName = String(user.full_name || user.name || '').trim();
-  if (displayName) {
-    const { data, error } = await supabase
-      .from('ea_meeting_attendance')
-      .select('*')
-      .ilike('employee_name', displayName)
-      .order('meeting_week_start', { ascending: false })
-      .limit(40);
-    if (!error && data?.length) return data;
-  }
-
   return [];
 }
 
-/** Beena / PC: all recent EA uploads (not admin). */
-async function loadAllEaRows() {
+async function loadAllEaRows(limit = 200) {
   const { data, error } = await supabase
     .from('ea_meeting_attendance')
     .select('*')
     .order('meeting_week_start', { ascending: false })
-    .limit(80);
+    .limit(limit);
   if (error) {
-    if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-      return [];
-    }
+    if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) return [];
     throw error;
   }
   return data || [];
 }
 
+/** Same-site colleagues see uploads for their site(s). */
+async function loadSiteEaRows(user) {
+  const sites = sitesForUser(user);
+  if (!sites.length) return [];
+  const all = await loadAllEaRows(120);
+  return all.filter((r) => sites.includes(normSite(r.employee_site_name)));
+}
+
 /**
  * Visibility:
  * - Admin → nothing
- * - Beena / Process Controller → all EA uploads
- * - Everyone else → only own uploads
+ * - Beena / PC → all
+ * - Site staff → own + same site uploads
  */
 async function loadEaRowsForViewer(user) {
-  if (isAdminUser(user)) return { rows: [], viewer: 'admin_hidden' };
-  if (userCanViewAllEaUploads(user)) {
-    return { rows: await loadAllEaRows(), viewer: 'beena_pc' };
+  const profile = await loadUserProfile(user);
+  if (isAdminUser(profile)) return { rows: [], viewer: 'admin_hidden', profile };
+  if (userCanViewAllEaUploads(profile)) {
+    return { rows: await loadAllEaRows(120), viewer: 'beena_pc', profile };
   }
-  return { rows: await loadOwnEaRows(user), viewer: 'uploader' };
+  const own = await loadOwnEaRows(profile);
+  const siteRows = await loadSiteEaRows(profile);
+  const byId = new Map();
+  [...own, ...siteRows].forEach((r) => byId.set(r.id, r));
+  return { rows: [...byId.values()], viewer: 'site_or_uploader', profile };
 }
 
 function mapEaItem(r, { forBeena }) {
   const uploaded = !!r.plan_submitted_at;
   const who = r.employee_name || r.employee_username || 'Employee';
+  const site = r.employee_site_name || '—';
   const base = uploaded
     ? `EA plan submitted (${r.meeting_week_start})`
     : `EA meeting — upload weekly plan (${r.meeting_week_start})`;
@@ -124,10 +133,11 @@ function mapEaItem(r, { forBeena }) {
     id: `ea:${r.id}`,
     source: 'ea_meeting',
     ea_id: r.id,
-    description: forBeena ? `${who}: ${base}` : base,
+    description: forBeena ? `${who} · ${site}: ${base}` : base,
     employee_name: r.employee_name,
     employee_username: r.employee_username,
     employee_id: r.employee_id,
+    employee_site_name: r.employee_site_name,
     status: uploaded ? 'Completed' : 'Pending',
     priority: 'High',
     target_date: r.meeting_week_end || r.meeting_week_start,
@@ -138,12 +148,12 @@ function mapEaItem(r, { forBeena }) {
     attachment_2_url: r.attachment_2_url,
     attachment_2_name: r.attachment_2_name,
     plan_submitted_at: r.plan_submitted_at,
+    scanned_at: r.scanned_at,
     project: { name: 'Monday EA Meeting' },
     upload_path: '/site/qr-scan',
   };
 }
 
-/** Portal My Tasks — uploader own rows; Beena sees all; admin none. */
 router.get('/my', async (req, res) => {
   try {
     const { rows, viewer } = await loadEaRowsForViewer(req.user);
@@ -155,10 +165,10 @@ router.get('/my', async (req, res) => {
       viewer,
       note:
         viewer === 'admin_hidden'
-          ? 'EA uploads are not shown to admin. Beena (PC) + uploader only.'
+          ? 'EA uploads hidden for admin.'
           : viewer === 'beena_pc'
-            ? 'Process Controller view: all EA meeting uploads (uploader + Beena only).'
-            : 'Your EA uploads only. Beena (PC) can also see them.',
+            ? 'Beena/PC: all Site Engineer EA uploads + files.'
+            : 'Apni uploads + same site ke EA files. Beena bhi dekh sakti hai.',
     });
   } catch (err) {
     console.error('EA my list:', err.message);
@@ -166,159 +176,110 @@ router.get('/my', async (req, res) => {
   }
 });
 
-async function notifyUploaderWhatsApp(user, opts = {}) {
-  const { data: full } = await supabase
-    .from('users')
-    .select('id, full_name, username, whatsapp_number')
-    .eq('id', user.id)
-    .maybeSingle();
+/** Beena / PC: attendance-style report (date range). */
+router.get('/report', async (req, res) => {
+  try {
+    const profile = await loadUserProfile(req.user);
+    if (isAdminUser(profile) || !userCanViewAllEaUploads(profile)) {
+      return res.status(403).json({
+        error: 'Only Beena / Process Controller can open EA meeting attendance report.',
+      });
+    }
+    const from = String(req.query.from || '').slice(0, 10);
+    const to = String(req.query.to || '').slice(0, 10);
+    let q = supabase
+      .from('ea_meeting_attendance')
+      .select('*')
+      .order('meeting_week_start', { ascending: false })
+      .order('scanned_at', { ascending: false });
+    if (from) q = q.gte('meeting_week_start', from);
+    if (to) q = q.lte('meeting_week_start', to);
+    const { data, error } = await q.limit(500);
+    if (error) {
+      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
+        return res.json({ rows: [], note: 'Run ea_meeting_attendance.sql in Supabase.' });
+      }
+      throw error;
+    }
+    const rows = (data || []).map((r) => ({
+      id: r.id,
+      week_start: r.meeting_week_start,
+      week_end: r.meeting_week_end,
+      scanned_at: r.scanned_at,
+      employee_name: r.employee_name,
+      employee_username: r.employee_username,
+      employee_role: r.employee_role,
+      site: r.employee_site_name,
+      status: r.attendance_status || 'present',
+      plan_uploaded: !!r.plan_submitted_at,
+      plan_submitted_at: r.plan_submitted_at,
+      file_1: r.attachment_1_name,
+      file_1_url: r.attachment_1_url,
+      file_2: r.attachment_2_name,
+      file_2_url: r.attachment_2_url,
+    }));
+    res.json({ rows, from: from || null, to: to || null, count: rows.length });
+  } catch (err) {
+    console.error('EA report:', err.message);
+    res.status(500).json({ error: err.message || 'Could not load EA report' });
+  }
+});
 
+async function notifyUploaderWhatsApp(user, opts = {}) {
+  const full = await loadUserProfile(user);
   const wa = full?.whatsapp_number;
-  const fullName = full?.full_name || full?.username || user.full_name || 'Team member';
-  const lookupUser = {
-    id: user.id,
-    username: full?.username || user.username,
-    user_name: user.user_name || full?.username,
-    full_name: full?.full_name || user.full_name,
-    name: full?.full_name || user.full_name,
-  };
-  const eaRows = await loadOwnEaRows(lookupUser);
-  const pendingEa = eaRows.filter((r) => !r.plan_submitted_at);
+  const fullName = full?.full_name || full?.username || 'Team member';
 
   if (!normalizeWhatsAppNumber(wa)) {
-    return {
-      ok: false,
-      reason: 'no_whatsapp',
-      pendingEa: pendingEa.length,
-      eaRows: eaRows.length,
-      hint: 'Set whatsapp_number on users table for this employee',
-    };
+    return { ok: false, reason: 'no_whatsapp', who: fullName };
   }
 
   if (opts.kind === 'uploaded') {
     await sendWhatsAppText(
       wa,
-      `✅ EA meeting weekly plan uploaded.\nWeek: ${opts.weekStart || '—'}\nSite → My Tasks (Done).\nBeena (PC) can also see this upload.`
+      `✅ EA weekly plan uploaded.\nWeek: ${opts.weekStart || '—'}\nSite → My Tasks.\nBeena + your site can see the files.`
     );
-    await sendOpenTasksListPicker(wa, full?.id || user.id, { fullName });
-    return { ok: true, kind: 'uploaded', eaRows: eaRows.length, who: fullName };
+    return { ok: true, kind: 'uploaded', who: fullName };
   }
 
-  const userId = full?.id || user.id;
-  const today = istYmd();
-  const openTasks = await loadOpenTasksForUser(userId, { dayYmd: today });
-  const rows = [];
-
-  pendingEa.slice(0, 3).forEach((r) => {
-    rows.push({
-      id: `tf_ea_${r.id}`,
-      title: clip('EA: upload plan', 24),
-      description: clip(`Week ${r.meeting_week_start} · Site → QR`, 72),
-    });
-  });
-
-  if (openTasks.length) {
-    rows.push({
-      id: 'tf_done_all',
-      title: '✅ Mark ALL tasks done',
-      description: clip(`${openTasks.length} TaskFlow task(s)`, 72),
-    });
-  }
-
-  openTasks.slice(0, Math.max(0, 9 - rows.length)).forEach((t, i) => {
-    rows.push({
-      id: `tf_done_${t.id}`,
-      title: clip(`${i + 1}. ${t.description || 'Task'}`, 24),
-      description: clip(`${t.project?.name || '—'} · Due ${t.target_date || '—'}`, 72),
-    });
-  });
-
-  if (!rows.length) {
-    await sendWhatsAppText(
-      wa,
-      `✅ EA meeting present marked.\nNo pending uploads or tasks.\nSite → My Tasks.`
-    );
-    return { ok: true, kind: 'present_empty', who: fullName };
-  }
-
-  const body = clip(
-    `Hi ${fullName},\nEA meeting present ✅\nPending: ${pendingEa.length} EA upload(s), ${openTasks.length} task(s).\nTap Select (or Site → My Tasks / QR).`,
-    1024
+  await sendWhatsAppText(
+    wa,
+    `✅ EA meeting present marked.\nWeek: ${opts.weekStart || '—'}\nAb weekly plan upload karein (Site Engineer).\nOpen: Site → QR scan.`
   );
-
-  const listResult = await sendWhatsAppInteractiveList(wa, {
-    header: 'EA + My Tasks',
-    body,
-    footer: 'Reply LIST anytime',
-    button: 'Select',
-    sections: [{ title: 'Pending', rows }],
-  });
-
-  if (!listResult.ok) {
-    await sendWhatsAppTemplate(wa, process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2', [
-      fullName,
-      clip(
-        `EA present. ${pendingEa.length} EA upload pending, ${openTasks.length} tasks. Open Site My Tasks.`,
-        200
-      ),
-      'Monday EA Meeting',
-      pendingEa[0]?.meeting_week_start || new Date().toISOString().slice(0, 10),
-      'High',
-    ]);
-  }
-
-  return {
-    ok: true,
-    kind: 'present',
-    listOk: listResult.ok,
-    pendingEa: pendingEa.length,
-    tasks: openTasks.length,
-    who: fullName,
-  };
+  return { ok: true, kind: 'present', who: fullName };
 }
 
-/** Also notify Beena (PC) — never admin. */
 async function notifyBeenaAboutEa(uploaderUser, opts = {}) {
   const beenas = await findBeenaOrPcUsers();
-  const uploaderName =
-    uploaderUser.full_name || uploaderUser.username || 'Team member';
+  const profile = await loadUserProfile(uploaderUser);
+  const uploaderName = profile.full_name || profile.username || 'Site Engineer';
+  const site = profile.site_name || (Array.isArray(profile.site_names) ? profile.site_names[0] : '') || '—';
   const results = [];
 
   for (const b of beenas) {
-    // Don't double-send if uploader IS Beena
     if (b.id === uploaderUser.id) {
       results.push({ username: b.username, skipped: 'self' });
       continue;
     }
-    const wa = b.whatsapp_number;
-    if (!normalizeWhatsAppNumber(wa)) {
+    if (!normalizeWhatsAppNumber(b.whatsapp_number)) {
       results.push({ username: b.username, ok: false, reason: 'no_whatsapp' });
       continue;
     }
-
     if (opts.kind === 'uploaded') {
-      const fileHint = opts.fileName ? `\nFile: ${opts.fileName}` : '';
       await sendWhatsAppText(
-        wa,
-        `📋 EA upload by ${uploaderName}\nWeek: ${opts.weekStart || '—'}${fileHint}\nSite → My Tasks (you can see all EA uploads).\nAdmin ko nahi dikhta.`
+        b.whatsapp_number,
+        `📋 EA upload — ${uploaderName}\nSite: ${site}\nWeek: ${opts.weekStart || '—'}${
+          opts.fileName ? `\nFile: ${opts.fileName}` : ''
+        }\nSite → EA Attendance Report / My Tasks.`
       );
-      // Beena's own day task list (assigned to her)
-      await sendOpenTasksListPicker(wa, b.id, {
-        fullName: b.full_name || b.username,
-        dayYmd: istYmd(),
-      });
-      results.push({ username: b.username, ok: true, kind: 'uploaded' });
-      continue;
+    } else {
+      await sendWhatsAppText(
+        b.whatsapp_number,
+        `✅ EA present — ${uploaderName}\nSite: ${site}\nWeek: ${opts.weekStart || '—'}\nPlan upload pending ho sakta hai.`
+      );
     }
-
-    // present
-    await sendWhatsAppText(
-      wa,
-      `✅ EA present: ${uploaderName}\nWeek: ${opts.weekStart || '—'}\nPending weekly plan upload may follow.\nSite → My Tasks → Monday (all EA uploads).`
-    );
-    results.push({ username: b.username, ok: true, kind: 'present' });
+    results.push({ username: b.username, ok: true, kind: opts.kind || 'present' });
   }
-
   return results;
 }
 
@@ -330,7 +291,6 @@ async function notifyUserEaAndTasks(user, opts = {}) {
 
 router.post('/notify', async (req, res) => {
   try {
-    // Admin should not trigger EA personal notify as "viewer" — still ok if they scan by mistake
     const kind = req.body?.kind || 'present';
     const result = await notifyUserEaAndTasks(req.user, {
       kind,

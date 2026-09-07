@@ -297,7 +297,7 @@ export default function TaskflowDom() {
           <div className="my-tasks-tabs" id="myTasksOpenDoneBar" style={{marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center'}}>
             <button type="button" className="my-tasks-tab-btn active" data-opendone="open" id="officeMyOpenBtn">Open</button>
             <button type="button" className="my-tasks-tab-btn" data-opendone="done" id="officeMyDoneBtn">Done</button>
-            <button type="button" className="primary-btn primary-btn-inline" id="officeSendWaListBtn" style={{marginLeft: 'auto'}} title="Beena ko aaj ki WhatsApp list bhejo">
+            <button type="button" className="primary-btn primary-btn-inline" id="officeSendWaListBtn" hidden style={{display:'none'}} title="Daily WhatsApp list disabled">
               WhatsApp list abhi
             </button>
           </div>

@@ -5,6 +5,7 @@ import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
 import SiteMyTasks from "./SiteMyTasks";
+import EaMeetingReport from "./EaMeetingReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
@@ -490,6 +491,24 @@ function showLeaveApprovalsMenu(user, visMap) {
 }
 
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
+function isBeenaOrPcUser(user) {
+  if (!user) return false;
+  if (String(user.role || "").toLowerCase() === "admin") return false;
+  const name = `${user.full_name || user.name || ""} ${user.username || user.user_name || ""}`.toLowerCase();
+  if (/beena/.test(name)) return true;
+  const blob = `${user.role || ""} ${user.designation || ""} ${user.department || ""}`.toLowerCase();
+  return /\bpc\b/.test(blob) || blob.includes("process controller");
+}
+
+function isBeenaOrPcUser(user) {
+  if (!user) return false;
+  if (String(user.role || "").toLowerCase() === "admin") return false;
+  const name = `${user.full_name || user.name || ""} ${user.username || user.user_name || ""}`.toLowerCase();
+  if (/beena/.test(name)) return true;
+  const blob = `${user.role || ""} ${user.designation || ""} ${user.department || ""}`.toLowerCase();
+  return /\bpc\b/.test(blob) || blob.includes("process controller");
+}
+
 function buildNav(user, visMap) {
   const showSiteLeave = showLeaveApprovalsMenu(user, visMap);
 
@@ -540,11 +559,18 @@ function buildNav(user, visMap) {
   const showChat = visAllows(visMap, "team-chat", user);
   const role = String(user?.role || "").toLowerCase();
   const isAdmin = role === "admin";
-  // Day-wise My Tasks: not for admin (Beena PC / site assignees use it)
   const showMyTasks = !isAdmin;
+  const showEaReport = isBeenaOrPcUser(user) || isBeenaOrPcUser({
+    ...user,
+    full_name: user?.name,
+    designation: user?.role || user?.designation,
+  });
 
   return [
     ...(showMyTasks ? [{ key: "my-tasks", label: "My Tasks", icon: Ico.tasks }] : []),
+    ...(showEaReport
+      ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
+      : []),
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -2087,6 +2113,8 @@ useEffect(() => {
   const navUser = {
     ...user,
     id: user.id || authUser?.id,
+    full_name: authUser?.full_name || user.name || user.full_name,
+    username: authUser?.username || user.user_name || user.username,
     _isApprover: isApprover,
     is_head: !!(user.is_head || authUser?.is_head),
     role: authUser?.role || user.role,
@@ -2107,6 +2135,8 @@ useEffect(() => {
         return <SiteTeamChat user={user} />;
       case "my-tasks":
         return <SiteMyTasks />;
+      case "ea-attendance":
+        return <EaMeetingReport />;
       case "clock-in":
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":
