@@ -50,11 +50,20 @@ export default function SiteMyTasks() {
     try {
       const [officeTasks, eaRes] = await Promise.all([
         api("/tasks/my").catch(() => []),
-        api("/ea-meeting/my").catch(() => ({ items: [], note: "" })),
+        api("/ea-meeting/my"),
       ]);
       const eaItems = Array.isArray(eaRes?.items) ? eaRes.items : [];
-      setDataNote(eaRes?.note || "");
-      setTasks([...(Array.isArray(officeTasks) ? officeTasks : []), ...eaItems]);
+      setDataNote(
+        eaRes?.note
+          || "EA uploads: Open = pending plan; Done = already uploaded (this week)."
+      );
+      // Prefer Done tab when only completed EA exists (common after successful upload)
+      const office = Array.isArray(officeTasks) ? officeTasks : [];
+      const merged = [...office, ...eaItems];
+      setTasks(merged);
+      const hasOpen = merged.some((t) => isOpenStatus(t.status));
+      const hasEaDone = eaItems.some((t) => !isOpenStatus(t.status));
+      if (!hasOpen && hasEaDone) setShowDone(true);
     } catch (err) {
       setError(err.message || "Could not load tasks");
       setTasks([]);
@@ -135,7 +144,23 @@ export default function SiteMyTasks() {
         <div className="smt-empty">Loading tasks…</div>
       ) : visible.length === 0 ? (
         <div className="smt-empty">
-          {showDone ? "No completed tasks yet." : "No open tasks. You’re all caught up."}
+          {showDone
+            ? "No completed tasks yet."
+            : (
+              <>
+                No open tasks.
+                {doneTasks.some((t) => t.source === "ea_meeting") ? (
+                  <>
+                    {" "}
+                    <button type="button" className="smt-refresh" style={{ marginLeft: 8 }} onClick={() => setShowDone(true)}>
+                      EA upload Done tab mein dekho →
+                    </button>
+                  </>
+                ) : (
+                  " You’re all caught up."
+                )}
+              </>
+            )}
         </div>
       ) : (
         <ul className="smt-list">

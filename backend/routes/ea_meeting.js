@@ -19,25 +19,64 @@ function clip(s, n) {
 }
 
 function usernamesFor(user) {
-  return [user.username, user.user_name].map((s) => String(s || '').trim()).filter(Boolean);
+  return [...new Set(
+    [user.username, user.user_name]
+      .map((s) => String(s || '').trim())
+      .filter(Boolean)
+  )];
 }
 
 async function loadMyEaRows(user) {
   const names = usernamesFor(user);
-  if (!names.length) return [];
-  const { data, error } = await supabase
-    .from('ea_meeting_attendance')
-    .select('*')
-    .in('employee_username', names)
-    .order('meeting_week_start', { ascending: false })
-    .limit(20);
-  if (error) {
-    if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-      return [];
+  const uid = user?.id != null ? String(user.id) : null;
+
+  // 1) Match by TaskFlow user id (most reliable)
+  if (uid) {
+    const { data, error } = await supabase
+      .from('ea_meeting_attendance')
+      .select('*')
+      .eq('employee_id', uid)
+      .order('meeting_week_start', { ascending: false })
+      .limit(20);
+    if (error) {
+      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
+        return [];
+      }
+      throw error;
     }
-    throw error;
+    if (data?.length) return data;
   }
-  return data || [];
+
+  // 2) Match by username(s)
+  if (names.length) {
+    const { data, error } = await supabase
+      .from('ea_meeting_attendance')
+      .select('*')
+      .in('employee_username', names)
+      .order('meeting_week_start', { ascending: false })
+      .limit(20);
+    if (error) {
+      if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
+        return [];
+      }
+      throw error;
+    }
+    if (data?.length) return data;
+  }
+
+  // 3) Fallback by display name (old rows with mismatched username)
+  const displayName = String(user.full_name || user.name || '').trim();
+  if (displayName) {
+    const { data, error } = await supabase
+      .from('ea_meeting_attendance')
+      .select('*')
+      .ilike('employee_name', displayName)
+      .order('meeting_week_start', { ascending: false })
+      .limit(20);
+    if (!error && data?.length) return data;
+  }
+
+  return [];
 }
 
 /** Portal My Tasks — EA meeting items + note where data lives. */
@@ -86,25 +125,41 @@ async function notifyUserEaAndTasks(user, opts = {}) {
     .maybeSingle();
 
   const wa = full?.whatsapp_number;
-  if (!normalizeWhatsAppNumber(wa)) {
-    return { ok: false, reason: 'no_whatsapp' };
-  }
-
-  const fullName = full.full_name || full.username || 'Team member';
-  const eaRows = await loadMyEaRows(full);
+  const fullName = full?.full_name || full?.username || user.full_name || 'Team member';
+  // Merge JWT + DB user so EA rows match even if username sources differ
+  const lookupUser = {
+    id: user.id,
+    username: full?.username || user.username,
+    user_name: user.user_name || full?.username,
+    full_name: full?.full_name || user.full_name,
+    name: full?.full_name || user.full_name,
+  };
+  const eaRows = await loadMyEaRows(lookupUser);
   const pendingEa = eaRows.filter((r) => !r.plan_submitted_at);
+
+  if (!normalizeWhatsAppNumber(wa)) {
+    return {
+      ok: false,
+      reason: 'no_whatsapp',
+      pendingEa: pendingEa.length,
+      eaRows: eaRows.length,
+      hint: 'Set whatsapp_number on users table for this employee',
+    };
+  }
 
   if (opts.kind === 'uploaded') {
     await sendWhatsAppText(
       wa,
-      `✅ EA meeting weekly plan uploaded.\nWeek: ${opts.weekStart || '—'}\nSaved in ea_meeting_attendance.\nCheck Site Portal → My Tasks.`
+      `✅ EA meeting weekly plan uploaded.\nWeek: ${opts.weekStart || '—'}\nOpen Site Portal → My Tasks (Done tab) to see files.\nTable: ea_meeting_attendance`
     );
-    await sendOpenTasksListPicker(wa, full.id, { fullName });
-    return { ok: true, kind: 'uploaded' };
+    // Still send open TaskFlow list if any
+    await sendOpenTasksListPicker(wa, full?.id || user.id, { fullName });
+    return { ok: true, kind: 'uploaded', eaRows: eaRows.length };
   }
 
   // After present: one list with EA upload row(s) + open TaskFlow tasks
-  const openTasks = await loadOpenTasksForUser(full.id);
+  const userId = full?.id || user.id;
+  const openTasks = await loadOpenTasksForUser(userId);
   const rows = [];
 
   pendingEa.slice(0, 3).forEach((r) => {

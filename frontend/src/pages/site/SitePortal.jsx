@@ -1720,7 +1720,14 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
   const [user, setUser] = useState(null);
   const [userReady, setUserReady] = useState(false);
   const [visMap, setVisMap] = useState(null);
-  const [activeTab, setActiveTab] = useState("clock-in");
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const t = new URLSearchParams(window.location.search).get("tab");
+      return t || "clock-in";
+    } catch {
+      return "clock-in";
+    }
+  });
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth > 999 : true
   );

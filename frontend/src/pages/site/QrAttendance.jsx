@@ -240,22 +240,26 @@ export default function QrAttendance() {
 
   const markPresent = useCallback(async (employee) => {
     const bounds = currentWeekBounds();
+    // Always prefer TaskFlow auth identity so My Tasks / WhatsApp can find the row
+    const authUsername = authUser?.username || user?.username || user?.user_name || employee.username;
+    const authId = authUser?.id != null ? String(authUser.id) : (employee.id != null ? String(employee.id) : null);
     const payload = {
       meeting_week_start: bounds.start,
       meeting_week_end: bounds.end,
       scanned_at: new Date().toISOString(),
-      employee_id: employee.id != null ? String(employee.id) : null,
-      employee_username: employee.username,
-      employee_name: employee.name || null,
-      employee_role: employee.role || null,
-      employee_department: employee.department || null,
+      employee_id: authId,
+      employee_username: authUsername,
+      employee_name: employee.name || authUser?.full_name || null,
+      employee_role: employee.role || authUser?.designation || authUser?.role || null,
+      employee_department: employee.department || authUser?.department || null,
       employee_site_name:
         employee.site_name ||
         (Array.isArray(employee.site_names) ? employee.site_names[0] : null) ||
+        authUser?.site_name ||
         null,
       attendance_status: "present",
-      scanned_by_username: employee.username || null,
-      scanned_by_name: employee.name || null,
+      scanned_by_username: authUsername || null,
+      scanned_by_name: employee.name || authUser?.full_name || null,
       updated_at: new Date().toISOString(),
     };
 
@@ -267,7 +271,7 @@ export default function QrAttendance() {
 
     if (error) throw error;
     return data;
-  }, []);
+  }, [authUser, user]);
 
   const checkInCurrentUser = useCallback(async () => {
     if (handlingRef.current) return;
@@ -284,10 +288,13 @@ export default function QrAttendance() {
       setAttendanceRow(row);
       setPhase("popup");
       try {
-        await api("/ea-meeting/notify", {
+        const wa = await api("/ea-meeting/notify", {
           method: "POST",
           body: JSON.stringify({ kind: "present", weekStart: currentWeekBounds().start }),
         });
+        if (wa?.reason === "no_whatsapp") {
+          console.warn("EA present saved but user has no whatsapp_number");
+        }
       } catch (waErr) {
         console.warn("EA WhatsApp notify skip:", waErr.message);
       }
@@ -532,13 +539,17 @@ export default function QrAttendance() {
               <div className="qr-done-ico">✓</div>
               <h2>{dualExcel ? "Excel uploads submitted" : "EA weekly plan submitted"}</h2>
               <p>
-                Saved in Supabase table <strong>ea_meeting_attendance</strong> (not clock-in).
-                It also appears under <strong>Site → My Tasks</strong>
-                {dualExcel ? " as uploaded Excel" : " as uploaded weekly plan"}.
+                Saved in <strong>ea_meeting_attendance</strong>.
+                Portal pe dikhne ke liye: <strong>Site → My Tasks → Done</strong> tab
+                (upload complete hone ke baad Open empty ho sakta hai).
+                WhatsApp tab aayega agar aapke account pe <strong>whatsapp_number</strong> set hai.
               </p>
               <div className="qr-plan-actions">
-                <button type="button" className="qr-btn-primary" onClick={() => navigate("/site")}>
-                  Back to Site Portal
+                <button type="button" className="qr-btn-primary" onClick={() => navigate("/site?tab=my-tasks")}>
+                  Open My Tasks
+                </button>
+                <button type="button" className="qr-btn-secondary" onClick={() => navigate("/site")}>
+                  Site Portal
                 </button>
               </div>
             </div>
