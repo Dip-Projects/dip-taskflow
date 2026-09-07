@@ -26,6 +26,7 @@ function signToken(user) {
     is_mis_executive: !!user.is_mis_executive,
     can_add_site: !!user.can_add_site,
     can_add_employee: !!user.can_add_employee,
+    can_add_task: !!user.can_add_task,
     can_resolve_tickets: !!user.can_resolve_tickets,
   };
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: TOKEN_LIFETIME });
@@ -74,4 +75,30 @@ function requireAdminOrMis(req, res, next) {
   return res.status(403).json({ error: 'Only an admin or MIS executive can do this' });
 }
 
-module.exports = { requireAuth, requireAdmin, requireAdminOrMis, signToken };
+/** Admin, Permissions can_add_task, or Who sees what grants Add task for their role. */
+async function requireCanAddTask(req, res, next) {
+  if (req.user?.role === 'admin' || req.user?.can_add_task) return next();
+  try {
+    const { canSee, mergeMap } = require('../lib/navVisibility');
+    const supabase = require('../lib/supabaseClient');
+    const { data } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'nav_visibility')
+      .maybeSingle();
+    if (canSee('add', req.user, mergeMap(data?.value || null))) return next();
+  } catch (err) {
+    console.warn('requireCanAddTask nav check:', err.message);
+  }
+  return res.status(403).json({
+    error: 'No permission to add tasks. Ask admin: Permissions → Add task = Yes, or MIS: Who sees what → Add task.',
+  });
+}
+
+module.exports = {
+  requireAuth,
+  requireAdmin,
+  requireAdminOrMis,
+  requireCanAddTask,
+  signToken,
+};

@@ -93,9 +93,9 @@ router.get('/', async (req, res) => {
   try {
     let { data, error } = await supabase
       .from('users')
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_add_task, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
       .order('created_at', { ascending: true });
-    if (error && /can_switch_office_mdo/i.test(error.message || '')) {
+    if (error && /can_switch_office_mdo|can_add_task/i.test(error.message || '')) {
       ({ data, error } = await supabase
         .from('users')
         .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, created_at, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
@@ -198,7 +198,7 @@ router.patch('/:id', async (req, res) => {
     const body = req.body || {};
     const {
       full_name, department, designation, role, is_active, can_verify,
-      is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets,
+      is_mis_executive, can_add_site, can_add_employee, can_add_task, can_resolve_tickets,
       can_switch_office_site, can_switch_office_mdo, reporting_head_id,
       is_head, site_name, site_names, whatsapp_number
     } = body;
@@ -241,6 +241,7 @@ router.patch('/:id', async (req, res) => {
     if (is_mis_executive !== undefined) updates.is_mis_executive = asBool(is_mis_executive);
     if (can_add_site !== undefined) updates.can_add_site = asBool(can_add_site);
     if (can_add_employee !== undefined) updates.can_add_employee = asBool(can_add_employee);
+    if (can_add_task !== undefined) updates.can_add_task = asBool(can_add_task);
     if (can_resolve_tickets !== undefined) updates.can_resolve_tickets = asBool(can_resolve_tickets);
     if (can_switch_office_site !== undefined) updates.can_switch_office_site = asBool(can_switch_office_site);
     if (can_switch_office_mdo !== undefined) updates.can_switch_office_mdo = asBool(can_switch_office_mdo);
@@ -263,9 +264,9 @@ router.patch('/:id', async (req, res) => {
     }
 
     const selectFull =
-      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
+      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_add_task, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
     const selectNoMdo =
-      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
+      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_add_task, can_resolve_tickets, can_switch_office_site, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
 
     let { data, error } = await supabase
       .from('users')
@@ -273,6 +274,13 @@ router.patch('/:id', async (req, res) => {
       .eq('id', id)
       .select(selectFull)
       .single();
+
+    if (error && /can_add_task/i.test(error.message || '')) {
+      return res.status(400).json({
+        error: 'Run backend/sql/add_can_add_task.sql in Supabase, then try again.',
+        hint: 'Missing users.can_add_task column',
+      });
+    }
 
     if (error && /can_switch_office_mdo/i.test(error.message || '')) {
       const { can_switch_office_mdo: _drop, ...withoutMdo } = updates;

@@ -726,7 +726,7 @@ export default function TaskflowDom() {
         <section id="view-permissions" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">Permissions</h2>
-            <p className="view-sub">Decide what each employee is allowed to do — including who gets the Office ↔ Site and Office ↔ MDO switches — without making them a full admin.</p>
+            <p className="view-sub">Decide what each employee is allowed to do — Add task (with + Add dept/project/type on the form), Add site, Office ↔ Site / MDO — without making them a full admin.</p>
           </div>
           <div className="table-card table-card--stack">
             <div className="table-scroll">
@@ -735,6 +735,7 @@ export default function TaskflowDom() {
                   <tr>
                     <th>Name</th>
                     <th>Role</th>
+                    <th className="perm-col">Add task</th>
                     <th className="perm-col">Add site</th>
                     <th className="perm-col">Add employee</th>
                     <th className="perm-col">Resolve tickets</th>

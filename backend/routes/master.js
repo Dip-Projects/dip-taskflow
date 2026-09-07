@@ -1,6 +1,6 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireCanAddTask } = require('../middleware/auth');
 const { MODULES, ROLES, mergeMap, canSee, isMisExecutive } = require('../lib/navVisibility');
 const {
   getReminderSettings,
@@ -19,7 +19,7 @@ router.get('/departments', async (req, res) => {
   res.json(data);
 });
 
-router.post('/departments', requireAdmin, async (req, res) => {
+router.post('/departments', requireCanAddTask, async (req, res) => {
   const { name } = req.body || {};
   if (!name) return res.status(400).json({ error: 'Department name is required' });
   const { data, error } = await supabase.from('departments').insert({ name }).select('id, name').single();
@@ -33,7 +33,7 @@ router.get('/projects', async (req, res) => {
   res.json(data);
 });
 
-router.post('/projects', requireAdmin, async (req, res) => {
+router.post('/projects', requireCanAddTask, async (req, res) => {
   const name = String((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ error: 'Project name is required' });
   let { data, error } = await supabase.from('projects').insert({ name }).select('id, name').single();
@@ -67,7 +67,7 @@ router.get('/task-types', async (req, res) => {
   res.json(data);
 });
 
-router.post('/task-types', requireAdmin, async (req, res) => {
+router.post('/task-types', requireCanAddTask, async (req, res) => {
   const { name } = req.body || {};
   if (!name) return res.status(400).json({ error: 'Task type name is required' });
   const { data, error } = await supabase.from('task_types').insert({ name }).select('id, name').single();

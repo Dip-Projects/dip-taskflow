@@ -1271,8 +1271,10 @@ export async function mountTaskflowApp(opts = {}) {
     const row = map[key];
     const who = viewerNavRole();
     if (who === 'client') return false;
-    // Admin must always keep Add / All / Overdue (API is admin-only)
+    // Admin always keeps Add / All / Overdue menus
     if (who === 'admin' && (key === 'add' || key === 'all' || key === 'overdue')) return true;
+    // Per-user Add task flag (Permissions) overrides role map for "add"
+    if (key === 'add' && (state.user?.role === 'admin' || state.user?.can_add_task)) return true;
     if (!row) return true;
     return row[who] !== false;
   }
@@ -1282,10 +1284,14 @@ export async function mountTaskflowApp(opts = {}) {
     const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
     const canAddSite = isAdmin || !!state.user.can_add_site;
     const canAddEmployee = isAdmin || !!state.user.can_add_employee;
+    const canAddTask = isAdmin || !!state.user.can_add_task;
     const canResolveTickets = isAdmin || !!state.user.can_resolve_tickets;
   
     const taskItems = [];
-    if (visOk('add') && isAdmin) taskItems.push({ key:'add', label:'➕ Add new task' });
+    // Admin always; Permissions “Add task”; or Who sees what grants the role
+    if (isAdmin || canAddTask || visOk('add')) {
+      taskItems.push({ key: 'add', label: '➕ Add new task' });
+    }
     if (visOk('all') && isAdmin) taskItems.push({ key:'all', label:'📋 All delegated tasks' });
     if (visOk('overdue') && isAdmin) taskItems.push({ key:'overdue', label:'⏰ Overdue tasks' });
     if (visOk('my')) taskItems.push({ key:'my', label:'✅ My tasks' });
@@ -5671,7 +5677,7 @@ export async function mountTaskflowApp(opts = {}) {
   });
   // ─── Permissions (admin only) ──────────────────────────────────────────────────
   async function loadPermissions() {
-    els.permissionsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
+    els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading employees…</td></tr>`;
     try {
       const employees = (await api('/employees')).filter((e) => !isClientUserRow(e));
       renderPermissionsTable(employees);
@@ -5679,7 +5685,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
   function renderPermissionsTable(employees) {
     if (!employees.length) {
-      els.permissionsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">No employees yet</td></tr>`;
+      els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">No employees yet</td></tr>`;
       return;
     }
     els.permissionsTableBody.innerHTML = '';
@@ -5691,6 +5697,7 @@ export async function mountTaskflowApp(opts = {}) {
         <td><span class="role-pill ${emp.role}">${emp.role}</span></td>
       `;
       const flags = [
+        ['can_add_task', 'Add task'],
         ['can_add_site', 'Add site'],
         ['can_add_employee', 'Add employee'],
         ['can_resolve_tickets', 'Resolve tickets'],
@@ -5755,9 +5762,9 @@ export async function mountTaskflowApp(opts = {}) {
       modules.forEach((mod) => {
         const tr = document.createElement('tr');
         const name = document.createElement('td');
-        const lockedAdd = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
+        const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
         name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${
-          lockedAdd ? ' · always Admin only (cannot hide)' : ''
+          adminLocked ? ' · Admin always on; other roles editable' : ''
         }</div>`;
         tr.appendChild(name);
         const row = state.navVis[mod.key] || {};
@@ -5766,12 +5773,13 @@ export async function mountTaskflowApp(opts = {}) {
           td.className = 'perm-col';
           const cb = document.createElement('input');
           cb.type = 'checkbox';
-          cb.checked = lockedAdd ? r === 'admin' : row[r] !== false;
+          const adminAlways = adminLocked && r === 'admin';
+          cb.checked = adminAlways ? true : row[r] !== false;
           cb.dataset.mod = mod.key;
           cb.dataset.role = r;
-          if (lockedAdd) {
+          if (adminAlways) {
             cb.disabled = true;
-            cb.title = 'Add / All / Overdue tasks stay Admin-only';
+            cb.title = 'Admin always has this screen';
           }
           td.appendChild(cb);
           tr.appendChild(td);
@@ -5788,17 +5796,12 @@ export async function mountTaskflowApp(opts = {}) {
     if (!body) return;
     const map = {};
     body.querySelectorAll('input[type="checkbox"][data-mod]').forEach((cb) => {
-      if (cb.disabled) {
-        // Keep locked modules (Add/All/Overdue) as admin-only even if UI was stale
-        const k = cb.dataset.mod;
-        if (!map[k]) map[k] = {};
-        if (k === 'add' || k === 'all' || k === 'overdue') {
-          map[k][cb.dataset.role] = cb.dataset.role === 'admin';
-          return;
-        }
-      }
       const k = cb.dataset.mod;
       if (!map[k]) map[k] = {};
+      if (cb.disabled && (k === 'add' || k === 'all' || k === 'overdue') && cb.dataset.role === 'admin') {
+        map[k].admin = true;
+        return;
+      }
       map[k][cb.dataset.role] = cb.checked;
     });
     try {

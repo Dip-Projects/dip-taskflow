@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin, requireAdminOrMis } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireAdminOrMis, requireCanAddTask } = require('../middleware/auth');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
 const {
   workTimerAnchor,
@@ -388,10 +388,10 @@ async function uploadFile(file, folder) {
   return data.publicUrl;
 }
 
-// ----------------------------- create task (admin only) -----------------------------
+// ----------------------------- create task (admin or can_add_task) -----------------------------
 router.post(
   '/',
-  requireAdmin,
+  requireCanAddTask,
   upload.fields([
     { name: 'attachment', maxCount: 1 },
     { name: 'voice_note', maxCount: 1 }
@@ -1018,7 +1018,7 @@ router.get('/:id/checkpoints', async (req, res) => {
   }
 });
 
-router.post('/:id/checkpoints', requireAdmin, async (req, res) => {
+router.post('/:id/checkpoints', requireCanAddTask, async (req, res) => {
   try {
     const labels = parseCheckpointLabels(req.body?.labels || req.body?.checkpoints);
     const rows = await saveTaskCheckpoints(req.params.id, labels);
