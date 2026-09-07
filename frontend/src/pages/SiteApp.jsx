@@ -1,13 +1,16 @@
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { syncSiteUser } from '../lib/api';
 import SitePortal from './site/SitePortal';
+import QrAttendance from './site/QrAttendance';
 import './SurfaceToggle.css';
 
 export default function SiteApp() {
-  const { user, isAuthenticated, logout, canToggleSite, canToggleMdo, isSiteEngineer } = useAuth();
+  const { user, isAuthenticated, canToggleSite, canToggleMdo, isSiteEngineer } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const isQrScan = /\/site\/qr-scan\/?$/.test(location.pathname);
 
   useEffect(() => {
     if (user) syncSiteUser(user);
@@ -36,7 +39,7 @@ export default function SiteApp() {
 
   return (
     <div className="site-shell site-theme">
-      {canToggleSite && (
+      {canToggleSite && !isQrScan && (
         <div className="tf-surface-bar">
           <span className="tf-surface-label">Switch view</span>
           <div className="tf-surface-toggle">
@@ -50,7 +53,10 @@ export default function SiteApp() {
         </div>
       )}
       <div className="site-shell-body">
-        <SitePortal />
+        <Routes>
+          <Route path="qr-scan" element={<QrAttendance />} />
+          <Route path="*" element={<SitePortal />} />
+        </Routes>
       </div>
     </div>
   );

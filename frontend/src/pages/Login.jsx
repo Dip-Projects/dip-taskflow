@@ -1,13 +1,19 @@
 import { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { useNavigate, Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { postLoginPath } from '../lib/api';
 import logo from '../assets/logo.png';
 import './Login.css';
 
+function getSafeNext(raw) {
+  if (!raw || !raw.startsWith('/site/qr-scan')) return null;
+  return raw;
+}
+
 export default function Login() {
   const { login, isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -15,8 +21,10 @@ export default function Login() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
+  const safeNext = getSafeNext(searchParams.get('next'));
+
   if (isAuthenticated && user) {
-    return <Navigate to={postLoginPath(user)} replace />;
+    return <Navigate to={safeNext || postLoginPath(user)} replace />;
   }
 
   const onSubmit = async (e) => {
@@ -30,7 +38,7 @@ export default function Login() {
     setLoading(true);
     try {
       const { path } = await login(username.trim(), password);
-      navigate(path, { replace: true });
+      navigate(safeNext || path, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid username or password.');
     } finally {

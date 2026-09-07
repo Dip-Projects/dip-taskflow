@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { postLoginPath } from './lib/api';
@@ -33,7 +33,15 @@ const ClientApp = lazyChunk(() => import('./pages/ClientApp'));
 
 function RequireAuth({ children }) {
   const { isAuthenticated } = useAuth();
-  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!isAuthenticated) {
+    const next = `${location.pathname}${location.search || ''}`;
+    const to =
+      next.startsWith('/site/qr-scan')
+        ? `/login?next=${encodeURIComponent(next)}`
+        : '/login';
+    return <Navigate to={to} replace />;
+  }
   return children;
 }
 

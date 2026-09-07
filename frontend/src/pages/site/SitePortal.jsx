@@ -2848,6 +2848,7 @@ useEffect(() => {
           onMenuToggle={() => setSidebarOpen((p) => !p)}
           menuOpen={sidebarOpen}
           onLogout={handleLogout}
+          showQrScanner
         />
 
         <div className="body">

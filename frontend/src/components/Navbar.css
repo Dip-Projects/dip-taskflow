@@ -83,6 +83,28 @@
           justify-content: center;
           flex-shrink: 0;
         }
+        .navbar-qr {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          border: 1.5px solid rgba(255,255,255,.45);
+          background: rgba(255,255,255,.14);
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          flex-shrink: 0;
+          padding: 0;
+          transition: background .15s, transform .1s;
+        }
+        .navbar-qr:hover { background: rgba(255,255,255,.28); }
+        .navbar-qr:active { transform: scale(.96); }
+        .navbar-qr.act {
+          background: #fff;
+          color: #7a2e00;
+          border-color: #fff;
+        }
         .navbar-user-info {
           display: flex;
           flex-direction: column;
@@ -288,6 +310,7 @@
           .navbar-right { position: absolute; right: 20px; top: 10px; }
           .navbar-left { position: absolute; left: 8px; top: 10px; }
           .navbar-avatar { width: 30px; height: 30px; font-size: 12px;margin-top: 4px; }
+          .navbar-qr { width: 30px; height: 30px; margin-top: 4px; }
           .navbar-logout {
             width: 30px; height: 30px;
             padding: 0;
