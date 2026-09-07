@@ -418,7 +418,11 @@ export default function QrAttendance() {
       try {
         await api("/ea-meeting/notify", {
           method: "POST",
-          body: JSON.stringify({ kind: "uploaded", weekStart: week.start }),
+          body: JSON.stringify({
+            kind: "uploaded",
+            weekStart: week.start,
+            fileName: file1?.name || null,
+          }),
         });
       } catch (waErr) {
         console.warn("EA upload WhatsApp skip:", waErr.message);

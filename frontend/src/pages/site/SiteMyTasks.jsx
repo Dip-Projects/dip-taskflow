@@ -132,7 +132,8 @@ export default function SiteMyTasks() {
       ]);
       const eaItems = Array.isArray(eaRes?.items) ? eaRes.items : [];
       setDataNote(
-        "Monday tasks Mon pe, Tuesday Tue pe. WhatsApp pe din ka list picker aata hai — Select se Done; reply LIST."
+        eaRes?.note ||
+          "Uploader + Beena (PC) only. Admin ko EA uploads nahi dikhte. WhatsApp bhi inhi ko."
       );
       const office = Array.isArray(officeTasks) ? officeTasks : [];
       setTasks([...office, ...eaItems]);

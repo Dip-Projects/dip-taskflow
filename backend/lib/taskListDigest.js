@@ -397,6 +397,29 @@ async function sendDayListToBeenaNow() {
   return { ok: true, dayYmd, dayLabel: dayLabel(dayYmd), results };
 }
 
+/** Find Beena (preferred) or Process Controllers for EA/task visibility + WA. Never admin. */
+async function findBeenaOrPcUsers() {
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, full_name, whatsapp_number, username, role, designation, department, is_active')
+    .neq('is_active', false);
+  if (error) throw error;
+  let recipients = (users || []).filter(digestRecipientAllowed);
+  if (!process.env.WA_DIGEST_USERNAMES) {
+    const beenaOnly = recipients.filter(isBeenaParmarPc);
+    if (beenaOnly.length) recipients = beenaOnly;
+  }
+  return recipients;
+}
+
+function userCanViewAllEaUploads(user) {
+  if (!user || isAdminUser(user)) return false;
+  if (process.env.WA_DIGEST_USERNAMES) {
+    return digestRecipientAllowed(user);
+  }
+  return isBeenaParmarPc(user) || isProcessControllerUser(user);
+}
+
 module.exports = {
   istYmd,
   taskDueYmd,
@@ -409,8 +432,11 @@ module.exports = {
   completeAllOpenTasksForUser,
   runOpenTasksListDigestCron,
   sendDayListToBeenaNow,
+  findBeenaOrPcUsers,
+  userCanViewAllEaUploads,
   buildListRows,
   formatStatusSummary,
+  isAdminUser,
   isProcessControllerUser,
   isBeenaParmarPc,
   digestRecipientAllowed,
