@@ -4,6 +4,7 @@ import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
+import SiteMyTasks from "./SiteMyTasks";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
@@ -448,6 +449,12 @@ const Ico = {
       <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
     </svg>
   ),
+  tasks: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  ),
 };
 
 function visAllows(visMap, key, user) {
@@ -533,6 +540,7 @@ function buildNav(user, visMap) {
   const showChat = visAllows(visMap, "team-chat", user);
 
   return [
+    { key: "my-tasks", label: "My Tasks", icon: Ico.tasks },
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -2086,6 +2094,8 @@ useEffect(() => {
     switch (tab) {
       case "team-chat":
         return <SiteTeamChat user={user} />;
+      case "my-tasks":
+        return <SiteMyTasks />;
       case "clock-in":
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":

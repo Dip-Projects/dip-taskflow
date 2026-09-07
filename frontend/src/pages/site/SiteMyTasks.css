@@ -1,0 +1,191 @@
+.smt-page {
+  padding: 8px 4px 32px;
+  max-width: 720px;
+}
+
+.smt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.smt-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #3d1200;
+}
+
+.smt-sub {
+  margin: 0;
+  font-size: 13px;
+  color: #6b635b;
+  line-height: 1.4;
+}
+
+.smt-refresh {
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  color: #3d1200;
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.smt-refresh:disabled {
+  opacity: 0.6;
+}
+
+.smt-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.smt-tab {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  color: #6b635b;
+  font-weight: 650;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.smt-tab.act {
+  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  border-color: transparent;
+  color: #fff;
+}
+
+.smt-error {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.smt-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: #6b635b;
+  font-size: 14px;
+  background: #fffefb;
+  border: 1px dashed #e8e2d8;
+  border-radius: 14px;
+}
+
+.smt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smt-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  background: #fffefb;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(15, 13, 10, 0.04);
+}
+
+.smt-card.done {
+  opacity: 0.72;
+}
+
+.smt-check-wrap {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.smt-check {
+  width: 20px;
+  height: 20px;
+  accent-color: #16a34a;
+  cursor: pointer;
+}
+
+.smt-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.smt-desc {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f0d0a;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.smt-card.done .smt-desc {
+  text-decoration: line-through;
+  color: #6b635b;
+}
+
+.smt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b635b;
+}
+
+.smt-pri {
+  font-weight: 700;
+  color: #9a3412;
+}
+
+.smt-status {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c96a10;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.smt-done-btn {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #166534, #16a34a);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.smt-done-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+@media (max-width: 560px) {
+  .smt-card {
+    flex-wrap: wrap;
+  }
+  .smt-done-btn {
+    margin-left: 32px;
+  }
+}

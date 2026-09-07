@@ -47,6 +47,7 @@ app.use('/api/mis-report',      require('./routes/mis_report'));
 app.use('/api/delay-report',    require('./routes/delay_report'));
 app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
+app.use('/api/whatsapp',        require('./routes/whatsapp'));
 app.get('/api/health', (_, res) => {
   const phoneId = !!(process.env.META_PHONE_NUMBER_ID && String(process.env.META_PHONE_NUMBER_ID).trim());
   const accessToken = !!(process.env.META_ACCESS_TOKEN && String(process.env.META_ACCESS_TOKEN).trim());
@@ -58,6 +59,11 @@ app.get('/api/health', (_, res) => {
     whatsappEnv: {
       META_PHONE_NUMBER_ID: phoneId,
       META_ACCESS_TOKEN: accessToken,
+      META_WEBHOOK_VERIFY_TOKEN: !!(
+        process.env.META_WEBHOOK_VERIFY_TOKEN ||
+        process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN
+      ),
+      WHATSAPP_TASK_DONE_TEMPLATE: !!process.env.WHATSAPP_TASK_DONE_TEMPLATE,
     },
   });
 });

@@ -9,7 +9,10 @@ const {
   assignedWorkDeadline,
   holdSecondsBetween,
 } = require('../lib/taskOverdue');
-const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const {
+  sendWhatsAppTemplate,
+  notifyTaskAssignedWithDone,
+} = require('../lib/whatsapp');
 const router = express.Router();
 router.use(requireAuth);
 
@@ -513,7 +516,7 @@ if (!isMdoOffice && !project_id) {
         data.checkpoints = [];
       }
 
-      // Assignee WhatsApp (best-effort)
+      // Assignee WhatsApp + Done button (best-effort)
       const { data: assigneeUser } = await supabase
         .from('users')
         .select('whatsapp_number, full_name')
@@ -525,13 +528,18 @@ if (!isMdoOffice && !project_id) {
           data.assigned_at || data.created_at,
           data.hours_to_complete ?? hours_to_complete
         );
-        await notifyWa(assigneeUser.whatsapp_number, 'task_notification_v2', [
-          assigneeUser.full_name || 'Team member',
-          (description || 'New task').slice(0, 200),
-          data.project?.name || '—',
-          dueLabel,
-          priority || 'Medium',
-        ]);
+        try {
+          await notifyTaskAssignedWithDone(assigneeUser.whatsapp_number, {
+            fullName: assigneeUser.full_name || 'Team member',
+            description: description || 'New task',
+            project: data.project?.name || '—',
+            dueLabel,
+            priority: priority || 'Medium',
+            taskId: data.id,
+          });
+        } catch (waErr) {
+          console.warn('WhatsApp assign notify skip:', waErr.message);
+        }
       } else {
         console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
       }
@@ -972,7 +980,13 @@ router.patch('/:id/status', async (req, res) => {
 
     const at = nowIso();
     const updates = { status };
-    if (status === 'Rejected') {
+    if (status === 'Completed') {
+      updates.completed_at = at;
+      updates.status_note = status_note
+        ? String(status_note).slice(0, 500)
+        : `Completed by ${req.user.full_name}`;
+      updates.task_events = withTaskEvent(existing, 'completed', req.user.id);
+    } else if (status === 'Rejected') {
       updates.status_note = `Rejected by ${req.user.full_name}${status_note ? `: ${status_note}` : ''}`;
       updates.rejected_at = at;
       updates.task_events = withTaskEvent(existing, 'rejected', req.user.id);
