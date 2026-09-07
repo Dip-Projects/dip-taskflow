@@ -273,16 +273,18 @@ function isProcessControllerUser(u) {
 }
 
 function isBeenaParmarPc(u) {
-  if (!isProcessControllerUser(u)) return false;
+  if (!u || isAdminUser(u)) return false;
   const name = `${u.full_name || ''} ${u.username || ''}`.toLowerCase();
-  return /beena/.test(name);
+  // Primary target: anyone named Beena (Beena Parmar). Designation text often varies.
+  if (!/beena/.test(name)) return false;
+  return true;
 }
 
 /**
- * Who gets the daily Site WhatsApp list:
+ * Who gets the daily WhatsApp list:
  * - If WA_DIGEST_USERNAMES set → those usernames only
- * - Else Beena Parmar (Process Controller) match
- * - Else any Process Controller (fallback if Beena not found)
+ * - Else Beena (by name) only
+ * - Else any Process Controller (fallback if no Beena in DB)
  * Never admin.
  */
 function digestRecipientAllowed(u) {
@@ -341,11 +343,58 @@ async function runOpenTasksListDigestCron() {
     sent,
     skipped,
     users: pool.length,
-    recipients: recipients.length,
+    recipients: recipients.map((u) => ({
+      id: u.id,
+      username: u.username,
+      full_name: u.full_name,
+    })),
     dayYmd,
     dayLabel: dayLabel(dayYmd),
-    note: 'Daily list goes to Process Controller Beena only (not admin). Set WA_DIGEST_USERNAMES to override.',
+    note: 'Daily list → Beena only (not admin). Set WA_DIGEST_USERNAMES to override.',
   };
+}
+
+/** Find Beena (or WA_DIGEST_USERNAMES) and send today's list now. */
+async function sendDayListToBeenaNow() {
+  const dayYmd = istYmd();
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, full_name, whatsapp_number, username, role, designation, department, is_active')
+    .neq('is_active', false);
+  if (error) throw error;
+
+  let recipients = (users || []).filter(digestRecipientAllowed);
+  if (!process.env.WA_DIGEST_USERNAMES) {
+    const beenaOnly = recipients.filter(isBeenaParmarPc);
+    if (beenaOnly.length) recipients = beenaOnly;
+  }
+  if (!recipients.length) {
+    return {
+      ok: false,
+      reason: 'no_beena',
+      hint: 'No Beena / Process Controller found. Check users.full_name contains Beena, or set WA_DIGEST_USERNAMES.',
+    };
+  }
+
+  const results = [];
+  for (const u of recipients) {
+    if (!normalizeWhatsAppNumber(u.whatsapp_number)) {
+      results.push({
+        username: u.username,
+        ok: false,
+        reason: 'no_whatsapp',
+        hint: 'Set whatsapp_number on this user',
+      });
+      continue;
+    }
+    const result = await sendOpenTasksListPicker(u.whatsapp_number, u.id, {
+      fullName: u.full_name || u.username,
+      dayYmd,
+      sayEmpty: true,
+    });
+    results.push({ username: u.username, full_name: u.full_name, ...result });
+  }
+  return { ok: true, dayYmd, dayLabel: dayLabel(dayYmd), results };
 }
 
 module.exports = {
@@ -359,6 +408,7 @@ module.exports = {
   scheduleOpenTasksListDigest,
   completeAllOpenTasksForUser,
   runOpenTasksListDigestCron,
+  sendDayListToBeenaNow,
   buildListRows,
   formatStatusSummary,
   isProcessControllerUser,

@@ -71,6 +71,10 @@ export default function TaskflowDom() {
               <div className="field">
                 <label htmlFor="f-employee">Assign to <span className="req">*</span></label>
                 <select id="f-employee" required><option value="">Select employee</option></select>
+                <label className="checkbox-row" style={{marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', fontSize: 13}}>
+                  <input type="checkbox" id="f-beena-only" defaultChecked />
+                  <span>Only Beena Parmar (Process Controller) — WhatsApp day list</span>
+                </label>
               </div>
             </div>
             <div className="field-grid">
@@ -289,7 +293,17 @@ export default function TaskflowDom() {
         <section id="view-my" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">My tasks</h2>
-            <p className="view-sub">Your active and pending tasks are listed here.</p>
+            <p className="view-sub">Monday ke tasks Mon pe, Tuesday Tue pe — WhatsApp pe bhi usi din ka list aata hai.</p>
+          </div>
+
+          <div className="smt-day-row" id="officeMyTasksDayRow" role="tablist" aria-label="Week days" style={{marginBottom: 12}}></div>
+
+          <div className="my-tasks-tabs" id="myTasksOpenDoneBar" style={{marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center'}}>
+            <button type="button" className="my-tasks-tab-btn active" data-opendone="open" id="officeMyOpenBtn">Open</button>
+            <button type="button" className="my-tasks-tab-btn" data-opendone="done" id="officeMyDoneBtn">Done</button>
+            <button type="button" className="primary-btn primary-btn-inline" id="officeSendWaListBtn" style={{marginLeft: 'auto'}} title="Beena ko aaj ki WhatsApp list bhejo">
+              WhatsApp list abhi
+            </button>
           </div>
 
           <div className="my-tasks-tabs" id="myTasksTabBar" hidden={true}>

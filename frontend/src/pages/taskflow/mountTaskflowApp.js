@@ -1701,39 +1701,49 @@ export async function mountTaskflowApp(opts = {}) {
     if (!els.fEmployee) return;
     const deptId = els.fDepartment?.value || '';
     let list = employeesForDepartmentId(deptId);
-    // Prefer Process Controller Beena at top for day/WhatsApp task assign
-    list = [...list].sort((a, b) => {
-      const score = (e) => {
-        const blob = `${e.designation || ''} ${e.role || ''} ${e.full_name || ''}`.toLowerCase();
-        let s = 0;
-        if (blob.includes('process controller') || /\bpc\b/.test(blob)) s += 2;
-        if (/beena/.test(blob)) s += 4;
-        if (String(e.role || '').toLowerCase() === 'admin') s -= 5;
-        return s;
-      };
-      return score(b) - score(a);
-    });
-    // Never offer admin as assignee in Add Task (site day tasks → Beena PC)
+    const beenaOnly = document.getElementById('f-beena-only')?.checked !== false;
     list = list.filter((e) => String(e.role || '').toLowerCase() !== 'admin');
+    if (beenaOnly) {
+      const beena = list.filter((e) => /beena/i.test(`${e.full_name || ''} ${e.username || ''}`));
+      if (beena.length) list = beena;
+      else {
+        const pcs = list.filter((e) =>
+          /process controller|\bpc\b/i.test(`${e.designation || ''} ${e.role || ''} ${e.department || ''}`)
+        );
+        if (pcs.length) list = pcs;
+      }
+    } else {
+      list = [...list].sort((a, b) => {
+        const score = (e) => {
+          const blob = `${e.designation || ''} ${e.role || ''} ${e.full_name || ''}`.toLowerCase();
+          let s = 0;
+          if (blob.includes('process controller') || /\bpc\b/.test(blob)) s += 2;
+          if (/beena/.test(blob)) s += 4;
+          return s;
+        };
+        return score(b) - score(a);
+      });
+    }
     const prev = els.fEmployee.value;
     fillSelect(els.fEmployee, list, {
       placeholder: deptId
         ? list.length
-          ? 'Select employee (prefer Beena Parmar — PC)'
-          : 'No employees in this department'
+          ? beenaOnly
+            ? 'Beena Parmar (PC)'
+            : 'Select employee'
+          : beenaOnly
+            ? 'Beena not in this department — uncheck filter or pick her dept'
+            : 'No employees in this department'
         : 'Select department first',
       labelKey: 'full_name',
     });
     if (prev && list.some((e) => e.id === prev)) {
       els.fEmployee.value = prev;
+    } else if (list.length === 1) {
+      els.fEmployee.value = list[0].id;
     } else {
-      // Auto-select Beena / PC when present
       const beena = list.find((e) => /beena/i.test(`${e.full_name || ''} ${e.username || ''}`));
-      const pc = list.find((e) =>
-        /process controller|\bpc\b/i.test(`${e.designation || ''} ${e.role || ''}`)
-      );
       if (beena) els.fEmployee.value = beena.id;
-      else if (pc) els.fEmployee.value = pc.id;
     }
   }
 
@@ -2540,42 +2550,188 @@ export async function mountTaskflowApp(opts = {}) {
     });
   }
   
-  // ─── My Tasks ────────────────────────────────────────────────────────────────
+  // ─── My Tasks (day-wise Mon…Sun + Open/Done) ───────────────────────────────
+  function istYmdLocal(d = new Date()) {
+    return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  }
+  function weekMondayLocal(ymd) {
+    const [Y, M, D] = ymd.split('-').map(Number);
+    const d = new Date(Y, M - 1, D);
+    const wd = d.getDay();
+    const diff = wd === 0 ? -6 : 1 - wd;
+    d.setDate(d.getDate() + diff);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function addDaysLocal(ymd, n) {
+    const [Y, M, D] = ymd.split('-').map(Number);
+    const d = new Date(Y, M - 1, D);
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function taskDueYmdLocal(task) {
+    const raw = task?.target_date;
+    if (!raw) return null;
+    const s = String(raw);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    try { return istYmdLocal(new Date(s)); } catch { return null; }
+  }
+
+  let officeMyDayYmd = istYmdLocal();
+  let officeMyShowDone = false;
+  let officeMyAllTasks = [];
+
+  function renderOfficeDayRow() {
+    const row = document.getElementById('officeMyTasksDayRow');
+    if (!row) return;
+    const today = istYmdLocal();
+    const mon = weekMondayLocal(today);
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    row.innerHTML = '';
+    row.style.cssText = 'display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;';
+    names.forEach((label, i) => {
+      const ymd = addDaysLocal(mon, i);
+      const [Y, M, D] = ymd.split('-').map(Number);
+      const dayNum = new Date(Y, M - 1, D).getDate();
+      const openN = officeMyAllTasks.filter((t) => {
+        const due = taskDueYmdLocal(t);
+        if (t.status === 'Completed' || isRejectedTask(t)) return false;
+        if (!due) return ymd === today;
+        return due === ymd || (ymd === today && due < today);
+      }).length;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const act = ymd === officeMyDayYmd;
+      btn.style.cssText = `flex:0 0 auto;min-width:52px;padding:8px;border-radius:12px;border:1px solid ${ymd === today ? '#c96a10' : '#e8e2d8'};background:${act ? 'linear-gradient(135deg,#7a2e00,#c96a10)' : '#fff'};color:${act ? '#fff' : '#3d1200'};cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;`;
+      btn.innerHTML = `<span style="font-size:11px;font-weight:700">${label}</span><span style="font-size:15px;font-weight:800">${dayNum}</span><span style="font-size:9px">${openN ? openN + ' open' : '—'}</span>`;
+      btn.addEventListener('click', () => {
+        officeMyDayYmd = ymd;
+        officeMyShowDone = false;
+        document.getElementById('officeMyOpenBtn')?.classList.add('active');
+        document.getElementById('officeMyDoneBtn')?.classList.remove('active');
+        paintOfficeMyTasks();
+        renderOfficeDayRow();
+      });
+      row.appendChild(btn);
+    });
+  }
+
+  function filterOfficeMyByDay(tasks) {
+    const today = istYmdLocal();
+    const dayYmd = officeMyDayYmd;
+    return (tasks || []).filter((t) => {
+      const due = taskDueYmdLocal(t);
+      const done = t.status === 'Completed';
+      if (officeMyShowDone) {
+        if (!done) return false;
+        if (due === dayYmd) return true;
+        if (t.completed_at && istYmdLocal(t.completed_at) === dayYmd) return true;
+        return false;
+      }
+      if (done || isRejectedTask(t)) return false;
+      if (!due) return dayYmd === today;
+      if (due === dayYmd) return true;
+      if (dayYmd === today && due < today) return true;
+      return false;
+    });
+  }
+
+  function paintOfficeMyTasks() {
+    const isAdmin = state.user.role === 'admin';
+    // Admin: do not show personal day-task board (Beena's work). Keep Other Pending tabs only.
+    if (isAdmin) {
+      const dayRow = document.getElementById('officeMyTasksDayRow');
+      const odBar = document.getElementById('myTasksOpenDoneBar');
+      if (dayRow) dayRow.hidden = true;
+      if (odBar) odBar.hidden = true;
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Day tasks sirf Beena Parmar (Process Controller) ke liye. Admin yahan assign kare — My Tasks Beena login pe dikhenge.</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state">Day tasks → Beena Parmar (PC). Admin assign kare; WhatsApp list Beena ko jati hai.</div>`;
+      return;
+    }
+
+    const visibleTasks = filterOfficeMyByDay(officeMyAllTasks);
+    const recurringTasks = [];
+    myTasksTimerCache = visibleTasks;
+    renderMyTasksTable(els.myTasksTableBody, visibleTasks, recurringTasks);
+    els.myTasksList.innerHTML = '';
+    els.myTasksList.classList.add('task-list');
+    visibleTasks.forEach((t) =>
+      els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true }))
+    );
+    if (!visibleTasks.length) {
+      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks for this day</div>`;
+    }
+    renderOfficeDayRow();
+  }
+
   async function loadMyTasks() {
     els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading tasks…</td></tr>`;
     els.myTasksList.innerHTML = '<div class="empty-state">Loading tasks…</div>';
-  
+
     const isAdmin = state.user.role === 'admin';
     const tabBar = document.getElementById('myTasksTabBar');
     if (tabBar) tabBar.hidden = !isAdmin;
-  
-    try {
-      const allTasks = await api('/tasks/my');
-      const visibleTasks = allTasks.filter(
-        (task) => task.status !== 'Completed' && !isRejectedTask(task)
-      );
-  
-      // Admin can be personally assigned recurring tasks too — those never
-      // showed up anywhere before (the Recurring Tasks nav item is the admin's
-      // management/CRUD view, not their own to-do list). They're merged into
-      // this same table/list — one unified "My Task" view, not a separate
-      // section — with a 🔁 marker so they're still easy to tell apart.
-      const recurringTasks = isAdmin ? await api('/recurring-tasks/my').catch(() => []) : [];
 
-      myTasksTimerCache = visibleTasks;
-  
-      renderMyTasksTable(els.myTasksTableBody, visibleTasks, recurringTasks);
-  
-      els.myTasksList.innerHTML = '';
-      els.myTasksList.classList.add('task-list');
-      visibleTasks.forEach(t => els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true })));
-      recurringTasks.forEach(t => els.myTasksList.appendChild(buildEmployeeRecurringCard(t, loadMyTasks)));
-      if (!visibleTasks.length && !recurringTasks.length) {
-        els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks found</div>`;
+    try {
+      if (isAdmin) {
+        officeMyAllTasks = [];
+        paintOfficeMyTasks();
+        const recurringTasks = await api('/recurring-tasks/my').catch(() => []);
+        if (recurringTasks.length) {
+          // Admin personal recurring still optional — skip to keep Beena-only messaging clear
+        }
+        return;
       }
-    } catch (err) { showToast(err.message, 'error'); }
+
+      const allTasks = await api('/tasks/my');
+      officeMyAllTasks = Array.isArray(allTasks) ? allTasks : [];
+      paintOfficeMyTasks();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
   }
-  
+
+  __tfReadyFns.push(() => {
+    document.getElementById('f-beena-only')?.addEventListener('change', () => syncTaskEmployeeDropdown());
+    document.getElementById('officeMyOpenBtn')?.addEventListener('click', () => {
+      officeMyShowDone = false;
+      document.getElementById('officeMyOpenBtn')?.classList.add('active');
+      document.getElementById('officeMyDoneBtn')?.classList.remove('active');
+      paintOfficeMyTasks();
+    });
+    document.getElementById('officeMyDoneBtn')?.addEventListener('click', () => {
+      officeMyShowDone = true;
+      document.getElementById('officeMyDoneBtn')?.classList.add('active');
+      document.getElementById('officeMyOpenBtn')?.classList.remove('active');
+      paintOfficeMyTasks();
+    });
+    const waBtn = document.getElementById('officeSendWaListBtn');
+    if (waBtn) {
+      const canSend =
+        state.user?.role === 'admin' ||
+        !!state.user?.is_mis_executive ||
+        /beena/i.test(`${state.user?.full_name || ''} ${state.user?.username || ''}`);
+      waBtn.hidden = !canSend;
+      waBtn.addEventListener('click', async () => {
+        try {
+          showToast('Sending WhatsApp list to Beena…');
+          const res = await api('/whatsapp/send-day-list-now', { method: 'POST', body: {} });
+          if (res?.ok) {
+            const r0 = res.results?.[0];
+            if (r0?.reason === 'no_whatsapp') {
+              showToast('Beena pe whatsapp_number missing hai', 'error');
+            } else {
+              showToast(`WhatsApp list sent (${res.dayLabel || 'today'}) ✅`, 'success');
+            }
+          } else {
+            showToast(res?.hint || res?.reason || 'Could not send', 'error');
+          }
+        } catch (err) {
+          showToast(err.message || 'Send failed', 'error');
+        }
+      });
+    }
+  });
+
   // ─── "My Tasks" tabs (admin only): My Task ↔ Other Pending Work ───────────
   __tfReadyFns.push(() => {
     document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((btn) => {

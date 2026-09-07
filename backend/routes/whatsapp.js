@@ -8,11 +8,13 @@ const {
   sendOpenTasksListPicker,
   completeAllOpenTasksForUser,
   runOpenTasksListDigestCron,
+  sendDayListToBeenaNow,
   loadOpenTasksForUser,
   loadTasksForUser,
   formatStatusSummary,
   istYmd,
 } = require('../lib/taskListDigest');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -290,5 +292,25 @@ async function handleListDigestCron(req, res) {
 
 router.post('/cron/tasks-list-digest', handleListDigestCron);
 router.get('/cron/tasks-list-digest', handleListDigestCron);
+
+/** Admin / MIS / Beena: send today's WhatsApp list to Beena now. */
+router.post('/send-day-list-now', requireAuth, async (req, res) => {
+  try {
+    const role = String(req.user?.role || '').toLowerCase();
+    const isStaff =
+      role === 'admin' || !!req.user?.is_mis_executive;
+    const isBeena = /beena/i.test(
+      `${req.user?.full_name || ''} ${req.user?.username || ''}`
+    );
+    if (!isStaff && !isBeena) {
+      return res.status(403).json({ error: 'Only admin/MIS or Beena can trigger this' });
+    }
+    const result = await sendDayListToBeenaNow();
+    res.json(result);
+  } catch (err) {
+    console.error('send-day-list-now:', err.message);
+    res.status(500).json({ error: err.message || 'Send failed' });
+  }
+});
 
 module.exports = router;
