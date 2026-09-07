@@ -12,7 +12,12 @@ import {
 import "./QrAttendance.css";
 
 const POPUP_MS = 2600;
-export const DESK_QR_TOKEN = "DIP-DESK-ATTENDANCE";
+/** Monday EA meeting desk QR (not clock-in). */
+export const EA_MEETING_QR_TOKEN = "DIP-EA-MEETING";
+/** @deprecated old token — still accepted so existing printed QR keeps working */
+export const DESK_QR_TOKEN = EA_MEETING_QR_TOKEN;
+const EA_QR_TOKENS = new Set(["DIP-EA-MEETING", "DIP-DESK-ATTENDANCE"]);
+const EA_TABLE = "ea_meeting_attendance";
 
 function todayIST() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -74,32 +79,40 @@ function isExcelFile(file) {
   );
 }
 
-function isDeskAttendanceQr(raw) {
+function isEaMeetingQr(raw) {
   const text = String(raw || "").trim();
   if (!text) return false;
-  if (text === DESK_QR_TOKEN) return true;
+  if (EA_QR_TOKENS.has(text)) return true;
   try {
     const obj = JSON.parse(text);
-    if (obj && (obj.code === DESK_QR_TOKEN || obj.type === "desk_attendance")) return true;
+    if (
+      obj &&
+      (EA_QR_TOKENS.has(obj.code) ||
+        obj.type === "ea_meeting" ||
+        obj.type === "desk_attendance")
+    ) {
+      return true;
+    }
   } catch {
     /* not json */
   }
   try {
     const url = new URL(text);
-    const code = url.searchParams.get("code") || url.searchParams.get("desk");
-    if (code === DESK_QR_TOKEN) return true;
+    const code = url.searchParams.get("code") || url.searchParams.get("desk") || url.searchParams.get("ea");
+    if (EA_QR_TOKENS.has(code)) return true;
     if (url.pathname.replace(/\/+$/, "") === "/site/qr-scan" && url.searchParams.has("code")) {
-      return url.searchParams.get("code") === DESK_QR_TOKEN;
+      return EA_QR_TOKENS.has(url.searchParams.get("code"));
     }
   } catch {
     /* not a url */
   }
-  return text.includes(DESK_QR_TOKEN);
+  return [...EA_QR_TOKENS].some((t) => text.includes(t));
 }
 
-function hasDeskCodeInUrl() {
+function hasEaCodeInUrl() {
   try {
-    return new URLSearchParams(window.location.search).get("code") === DESK_QR_TOKEN;
+    const code = new URLSearchParams(window.location.search).get("code");
+    return EA_QR_TOKENS.has(code);
   } catch {
     return false;
   }
@@ -177,7 +190,7 @@ async function uploadPlanFile(file, employee, slot) {
   const datePath = buildSiteDatePath(todayIST());
   const userFolder = String(employee.username || "user").replace(/[^\w.\-]+/g, "_");
   const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
-  const path = `${prefix}/${datePath}/weekly plan/${userFolder}/${slot}.${ext}`;
+  const path = `${prefix}/${datePath}/ea-meeting/${userFolder}/${slot}.${ext}`;
 
   const url = await uploadViaApi({
     path,
@@ -193,7 +206,7 @@ export default function QrAttendance() {
   const { user: authUser, isAuthenticated } = useAuth();
   const user = siteUserFromAuth(authUser);
 
-  const [phase, setPhase] = useState(hasDeskCodeInUrl() ? "loading" : "scan");
+  const [phase, setPhase] = useState(hasEaCodeInUrl() ? "loading" : "scan");
   const [camError, setCamError] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -225,8 +238,10 @@ export default function QrAttendance() {
   }, []);
 
   const markPresent = useCallback(async (employee) => {
+    const bounds = currentWeekBounds();
     const payload = {
-      scan_date: todayIST(),
+      meeting_week_start: bounds.start,
+      meeting_week_end: bounds.end,
       scanned_at: new Date().toISOString(),
       employee_id: employee.id != null ? String(employee.id) : null,
       employee_username: employee.username,
@@ -244,8 +259,8 @@ export default function QrAttendance() {
     };
 
     const { data, error } = await supabase
-      .from("qr_site_attendance")
-      .upsert(payload, { onConflict: "employee_username,scan_date" })
+      .from(EA_TABLE)
+      .upsert(payload, { onConflict: "employee_username,meeting_week_start" })
       .select()
       .single();
 
@@ -259,7 +274,7 @@ export default function QrAttendance() {
     setBusy(true);
     setMessage("");
     try {
-      if (!user) throw new Error("Please log in first, then scan the desk QR.");
+      if (!user) throw new Error("Please log in first, then scan the EA meeting QR.");
       const employee = await fetchLoggedInEmployee(user);
       if (!employee?.username) throw new Error("Could not load your employee details.");
       await stopScanner();
@@ -273,7 +288,7 @@ export default function QrAttendance() {
         window.history.replaceState({}, "", url.pathname + url.search);
       }
     } catch (err) {
-      setMessage(err.message || "Could not mark attendance.");
+      setMessage(err.message || "Could not mark EA meeting attendance.");
       handlingRef.current = false;
       setPhase("scan");
     } finally {
@@ -283,8 +298,8 @@ export default function QrAttendance() {
 
   const handleDecoded = useCallback(
     async (decodedText) => {
-      if (!isDeskAttendanceQr(decodedText)) {
-        setMessage("Please scan the desk attendance QR only.");
+      if (!isEaMeetingQr(decodedText)) {
+        setMessage("Please scan the Monday EA meeting QR only.");
         handlingRef.current = false;
         return;
       }
@@ -295,12 +310,12 @@ export default function QrAttendance() {
 
   useEffect(() => {
     if (isAuthenticated) return;
-    const next = `${window.location.pathname}${window.location.search || `?code=${DESK_QR_TOKEN}`}`;
+    const next = `${window.location.pathname}${window.location.search || `?code=${EA_MEETING_QR_TOKEN}`}`;
     navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true });
   }, [isAuthenticated, navigate]);
 
   useEffect(() => {
-    if (!user || !hasDeskCodeInUrl()) return;
+    if (!user || !hasEaCodeInUrl()) return;
     checkInCurrentUser();
   }, [user, checkInCurrentUser]);
 
@@ -373,10 +388,8 @@ export default function QrAttendance() {
         a2 = await uploadPlanFile(file2, scannedEmployee, "site-engineer");
       }
       const { error } = await supabase
-        .from("qr_site_attendance")
+        .from(EA_TABLE)
         .update({
-          week_start: week.start,
-          week_end: week.end,
           attachment_1_url: a1.url,
           attachment_1_name: a1.name,
           attachment_2_url: a2.url,
@@ -388,7 +401,7 @@ export default function QrAttendance() {
       if (error) throw error;
       setPhase("done");
     } catch (err) {
-      setMessage(err.message || "Could not save weekly plan.");
+      setMessage(err.message || "Could not save EA meeting uploads.");
     } finally {
       setSubmitting(false);
     }
@@ -423,10 +436,15 @@ export default function QrAttendance() {
             <div className="qr-scan-body">
               <div id="qr-reader" className="qr-reader" />
               {(busy || phase === "loading") && (
-                <div className="qr-busy">Marking you present…</div>
+                <div className="qr-busy">Marking EA meeting present…</div>
               )}
               {camError && <div className="qr-note">{camError}</div>}
               {message && <div className="qr-error">{message}</div>}
+              {!busy && phase === "scan" && !camError && (
+                <div className="qr-note">
+                  Monday EA meeting attendance (not clock-in). Scan the desk QR or open the EA link.
+                </div>
+              )}
             </div>
           )}
 
@@ -437,7 +455,7 @@ export default function QrAttendance() {
                 <div>
                   <strong>{scannedEmployee.name}</strong>
                   <span>
-                    {scannedEmployee.role || "—"} · Present for {todayIST()}
+                    {scannedEmployee.role || "—"} · EA meeting present · week {week.start}
                   </span>
                 </div>
               </div>
@@ -445,7 +463,7 @@ export default function QrAttendance() {
               <label className="qr-label">
                 {dualExcel
                   ? "Excel uploads (2 required for Site Engineer)"
-                  : "Site weekly plan"}
+                  : "EA weekly plan"}
                 <span className="qr-week">
                   {week.start} → {week.end}
                 </span>
@@ -461,7 +479,7 @@ export default function QrAttendance() {
                     ? file1.name
                     : dualExcel
                       ? "1. Site Work Excel"
-                      : "Choose weekly plan file"}
+                      : "Choose EA weekly plan file"}
                 </span>
               </label>
               {dualExcel && (
@@ -486,7 +504,7 @@ export default function QrAttendance() {
                     ? "Saving…"
                     : dualExcel
                       ? "Submit Excel uploads"
-                      : "Submit weekly plan"}
+                      : "Submit EA weekly plan"}
                 </button>
               </div>
             </form>
@@ -495,10 +513,11 @@ export default function QrAttendance() {
           {phase === "done" && (
             <div className="qr-done">
               <div className="qr-done-ico">✓</div>
-              <h2>{dualExcel ? "Excel uploads submitted" : "Weekly plan submitted"}</h2>
+              <h2>{dualExcel ? "Excel uploads submitted" : "EA weekly plan submitted"}</h2>
               <p>
-                Attendance and {dualExcel ? "Excel files" : "weekly plan"} for{" "}
-                <strong>{scannedEmployee?.name}</strong> are saved in the QR attendance table only.
+                EA meeting attendance and {dualExcel ? "Excel files" : "weekly plan"} for{" "}
+                <strong>{scannedEmployee?.name}</strong> are saved in the{" "}
+                <strong>ea_meeting_attendance</strong> table only (not clock-in).
               </p>
               <div className="qr-plan-actions">
                 <button type="button" className="qr-btn-primary" onClick={() => navigate("/site")}>
@@ -518,13 +537,13 @@ export default function QrAttendance() {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2>Marked present</h2>
+            <h2>EA meeting · Present</h2>
             <p className="qr-popup-name">{scannedEmployee.name}</p>
             <p className="qr-popup-meta">
               {scannedEmployee.role || "Employee"}
               {scannedEmployee.department ? ` · ${scannedEmployee.department}` : ""}
             </p>
-            <p className="qr-popup-hint">Opening report submission…</p>
+            <p className="qr-popup-hint">Opening plan upload…</p>
           </div>
         </div>
       )}
