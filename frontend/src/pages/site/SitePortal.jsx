@@ -500,15 +500,6 @@ function isBeenaOrPcUser(user) {
   return /\bpc\b/.test(blob) || blob.includes("process controller");
 }
 
-function isBeenaOrPcUser(user) {
-  if (!user) return false;
-  if (String(user.role || "").toLowerCase() === "admin") return false;
-  const name = `${user.full_name || user.name || ""} ${user.username || user.user_name || ""}`.toLowerCase();
-  if (/beena/.test(name)) return true;
-  const blob = `${user.role || ""} ${user.designation || ""} ${user.department || ""}`.toLowerCase();
-  return /\bpc\b/.test(blob) || blob.includes("process controller");
-}
-
 function buildNav(user, visMap) {
   const showSiteLeave = showLeaveApprovalsMenu(user, visMap);
 
