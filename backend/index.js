@@ -48,6 +48,7 @@ app.use('/api/delay-report',    require('./routes/delay_report'));
 app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
 app.use('/api/whatsapp',        require('./routes/whatsapp'));
+app.use('/api/ea-meeting',      require('./routes/ea_meeting'));
 app.get('/api/health', (_, res) => {
   const phoneId = !!(process.env.META_PHONE_NUMBER_ID && String(process.env.META_PHONE_NUMBER_ID).trim());
   const accessToken = !!(process.env.META_ACCESS_TOKEN && String(process.env.META_ACCESS_TOKEN).trim());

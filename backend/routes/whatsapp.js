@@ -174,6 +174,20 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
+      // EA upload reminder from list
+      const eaMatch = payload.match(/^tf_ea_([0-9a-f-]{36})$/i);
+      if (eaMatch) {
+        const base =
+          process.env.PUBLIC_APP_URL ||
+          process.env.APP_URL ||
+          'https://dip-taskflow.vercel.app';
+        await sendWhatsAppText(
+          msg.from,
+          `📋 EA weekly plan upload still pending.\nOpen: ${base.replace(/\/$/, '')}/site/qr-scan?code=DIP-EA-MEETING\n\nAfter upload it will show as Done in Site → My Tasks.\nData table: ea_meeting_attendance`
+        );
+        continue;
+      }
+
       // List / button: Mark ALL done
       if (payload === 'tf_done_all' || /^ALL$/i.test(text)) {
         const { done, total } = await completeAllOpenTasksForUser(user);

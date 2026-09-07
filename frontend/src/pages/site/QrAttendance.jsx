@@ -4,6 +4,7 @@ import { Html5Qrcode } from "html5-qrcode";
 import Navbar from "../../components/Navbar";
 import { useAuth } from "../../auth/AuthContext";
 import { supabase } from "../../lib/supabase";
+import { api } from "../../lib/api";
 import {
   ensureSiteBucket,
   SITE_FILES_BUCKET,
@@ -282,6 +283,14 @@ export default function QrAttendance() {
       setScannedEmployee(employee);
       setAttendanceRow(row);
       setPhase("popup");
+      try {
+        await api("/ea-meeting/notify", {
+          method: "POST",
+          body: JSON.stringify({ kind: "present", weekStart: currentWeekBounds().start }),
+        });
+      } catch (waErr) {
+        console.warn("EA WhatsApp notify skip:", waErr.message);
+      }
       const url = new URL(window.location.href);
       if (url.searchParams.has("code")) {
         url.searchParams.delete("code");
@@ -399,6 +408,14 @@ export default function QrAttendance() {
         })
         .eq("id", attendanceRow.id);
       if (error) throw error;
+      try {
+        await api("/ea-meeting/notify", {
+          method: "POST",
+          body: JSON.stringify({ kind: "uploaded", weekStart: week.start }),
+        });
+      } catch (waErr) {
+        console.warn("EA upload WhatsApp skip:", waErr.message);
+      }
       setPhase("done");
     } catch (err) {
       setMessage(err.message || "Could not save EA meeting uploads.");
@@ -515,9 +532,9 @@ export default function QrAttendance() {
               <div className="qr-done-ico">✓</div>
               <h2>{dualExcel ? "Excel uploads submitted" : "EA weekly plan submitted"}</h2>
               <p>
-                EA meeting attendance and {dualExcel ? "Excel files" : "weekly plan"} for{" "}
-                <strong>{scannedEmployee?.name}</strong> are saved in the{" "}
-                <strong>ea_meeting_attendance</strong> table only (not clock-in).
+                Saved in Supabase table <strong>ea_meeting_attendance</strong> (not clock-in).
+                It also appears under <strong>Site → My Tasks</strong>
+                {dualExcel ? " as uploaded Excel" : " as uploaded weekly plan"}.
               </p>
               <div className="qr-plan-actions">
                 <button type="button" className="qr-btn-primary" onClick={() => navigate("/site")}>

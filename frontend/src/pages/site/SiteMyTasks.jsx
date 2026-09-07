@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
 import "./SiteMyTasks.css";
 
@@ -35,18 +36,25 @@ function dueLabel(task) {
 }
 
 export default function SiteMyTasks() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
   const [showDone, setShowDone] = useState(false);
+  const [dataNote, setDataNote] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await api("/tasks/my");
-      setTasks(Array.isArray(data) ? data : []);
+      const [officeTasks, eaRes] = await Promise.all([
+        api("/tasks/my").catch(() => []),
+        api("/ea-meeting/my").catch(() => ({ items: [], note: "" })),
+      ]);
+      const eaItems = Array.isArray(eaRes?.items) ? eaRes.items : [];
+      setDataNote(eaRes?.note || "");
+      setTasks([...(Array.isArray(officeTasks) ? officeTasks : []), ...eaItems]);
     } catch (err) {
       setError(err.message || "Could not load tasks");
       setTasks([]);
@@ -65,6 +73,13 @@ export default function SiteMyTasks() {
 
   const markDone = async (task) => {
     if (!task?.id || busyId) return;
+    if (task.source === "ea_meeting") {
+      if (!task.plan_submitted_at) {
+        navigate(task.upload_path || "/site/qr-scan");
+        return;
+      }
+      return;
+    }
     setBusyId(task.id);
     setError("");
     try {
@@ -88,8 +103,9 @@ export default function SiteMyTasks() {
         <div>
           <h1 className="smt-title">My Tasks</h1>
           <p className="smt-sub">
-            Tick Done here or on WhatsApp — both mark the task complete.
+            Office tasks + Monday EA meeting uploads. Tick Done or open QR to upload.
           </p>
+          {dataNote ? <p className="smt-sub" style={{ marginTop: 6 }}>{dataNote}</p> : null}
         </div>
         <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
           Refresh
@@ -125,6 +141,7 @@ export default function SiteMyTasks() {
         <ul className="smt-list">
           {visible.map((task) => {
             const open = isOpenStatus(task.status);
+            const isEa = task.source === "ea_meeting";
             const projectName = task.project?.name || task.projects?.name || "—";
             return (
               <li key={task.id} className={`smt-card${open ? "" : " done"}`}>
@@ -133,8 +150,8 @@ export default function SiteMyTasks() {
                     type="checkbox"
                     className="smt-check"
                     checked={!open}
-                    disabled={!open || busyId === task.id}
-                    onChange={() => open && markDone(task)}
+                    disabled={!open || busyId === task.id || (isEa && !task.plan_submitted_at)}
+                    onChange={() => open && !isEa && markDone(task)}
                     aria-label="Mark task done"
                   />
                 </label>
@@ -151,7 +168,24 @@ export default function SiteMyTasks() {
                       </>
                     ) : null}
                   </div>
-                  <div className="smt-status">{task.status}</div>
+                  <div className="smt-status">{isEa ? (open ? "EA pending upload" : "EA uploaded") : task.status}</div>
+                  {!open && isEa && (task.attachment_1_url || task.attachment_2_url) ? (
+                    <div className="smt-meta" style={{ marginTop: 6 }}>
+                      {task.attachment_1_url ? (
+                        <a href={task.attachment_1_url} target="_blank" rel="noreferrer">
+                          {task.attachment_1_name || "File 1"}
+                        </a>
+                      ) : null}
+                      {task.attachment_2_url ? (
+                        <>
+                          <span>·</span>
+                          <a href={task.attachment_2_url} target="_blank" rel="noreferrer">
+                            {task.attachment_2_name || "File 2"}
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 {open && (
                   <button
@@ -160,7 +194,7 @@ export default function SiteMyTasks() {
                     disabled={busyId === task.id}
                     onClick={() => markDone(task)}
                   >
-                    {busyId === task.id ? "…" : "Done"}
+                    {busyId === task.id ? "…" : isEa ? "Upload" : "Done"}
                   </button>
                 )}
               </li>
