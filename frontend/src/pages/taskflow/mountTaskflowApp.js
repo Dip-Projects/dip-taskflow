@@ -1240,13 +1240,40 @@ export async function mountTaskflowApp(opts = {}) {
     checkLeaveCoverAlerts();
   }
   
+  function viewerNavRole() {
+    const u = state.user || {};
+    const role = String(u.role || '').toLowerCase().trim();
+    const dept = String(u.department || '').toLowerCase().trim();
+    const desig = String(u.designation || '').toLowerCase().trim();
+    if (role === 'client' || dept === 'client') return 'client';
+    if (role === 'admin') return 'admin';
+    if (u.is_mis_executive || /\bmis\b/.test(`${u.department || ''} ${u.designation || ''}`)) {
+      return 'mis';
+    }
+    const blob = `${role} ${dept} ${desig}`;
+    const head =
+      !!u.is_head ||
+      role === 'head' ||
+      desig === 'head' ||
+      /site incharge|project head|site head/.test(blob);
+    if (
+      dept === 'site engineer' ||
+      /site engineer|jr\.?\s*site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+    ) {
+      return head ? 'site_head' : 'site';
+    }
+    if (head && /incharge|project head|\bhead\b/.test(blob)) return 'site_head';
+    return 'employee';
+  }
+
   function visOk(key) {
     const map = state.navVis || {};
     const row = map[key];
+    const who = viewerNavRole();
+    if (who === 'client') return false;
+    // Admin must always keep Add / All / Overdue (API is admin-only)
+    if (who === 'admin' && (key === 'add' || key === 'all' || key === 'overdue')) return true;
     if (!row) return true;
-    const role = (state.user?.role || '').toLowerCase();
-    const deptDesig = `${state.user?.department || ''} ${state.user?.designation || ''}`.toLowerCase();
-    const who = role === 'admin' ? 'admin' : (state.user?.is_mis_executive || /\bmis\b/.test(deptDesig)) ? 'mis' : 'employee';
     return row[who] !== false;
   }
   
@@ -5706,7 +5733,10 @@ export async function mountTaskflowApp(opts = {}) {
   }
   async function togglePermission(emp, flag) {
     try {
-      await api(`/employees/${emp.id}`, { method: 'PATCH', body: { [flag]: !emp[flag] } });
+      const next = !emp[flag];
+      const body = { [flag]: next };
+      await api(`/employees/${emp.id}`, { method: 'PATCH', body });
+      emp[flag] = next;
       showToast(`Permission updated for ${emp.full_name} ✅`, 'success');
       loadPermissions();
     } catch (err) { showToast(err.message, 'error'); }
@@ -5725,7 +5755,10 @@ export async function mountTaskflowApp(opts = {}) {
       modules.forEach((mod) => {
         const tr = document.createElement('tr');
         const name = document.createElement('td');
-        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}</div>`;
+        const lockedAdd = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
+        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${
+          lockedAdd ? ' · always Admin only (cannot hide)' : ''
+        }</div>`;
         tr.appendChild(name);
         const row = state.navVis[mod.key] || {};
         roles.forEach((r) => {
@@ -5733,9 +5766,13 @@ export async function mountTaskflowApp(opts = {}) {
           td.className = 'perm-col';
           const cb = document.createElement('input');
           cb.type = 'checkbox';
-          cb.checked = row[r] !== false;
+          cb.checked = lockedAdd ? r === 'admin' : row[r] !== false;
           cb.dataset.mod = mod.key;
           cb.dataset.role = r;
+          if (lockedAdd) {
+            cb.disabled = true;
+            cb.title = 'Add / All / Overdue tasks stay Admin-only';
+          }
           td.appendChild(cb);
           tr.appendChild(td);
         });
@@ -5751,6 +5788,15 @@ export async function mountTaskflowApp(opts = {}) {
     if (!body) return;
     const map = {};
     body.querySelectorAll('input[type="checkbox"][data-mod]').forEach((cb) => {
+      if (cb.disabled) {
+        // Keep locked modules (Add/All/Overdue) as admin-only even if UI was stale
+        const k = cb.dataset.mod;
+        if (!map[k]) map[k] = {};
+        if (k === 'add' || k === 'all' || k === 'overdue') {
+          map[k][cb.dataset.role] = cb.dataset.role === 'admin';
+          return;
+        }
+      }
       const k = cb.dataset.mod;
       if (!map[k]) map[k] = {};
       map[k][cb.dataset.role] = cb.checked;

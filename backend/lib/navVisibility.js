@@ -95,6 +95,11 @@ function mergeMap(saved) {
   }
   // Who sees what is MIS-only — never show to admin even if a saved map says so.
   base.visibility = { admin: false, mis: true, employee: false, site: false, site_head: false };
+  // Add / All / Overdue task screens are admin-only in the app (API requireAdmin).
+  // Never let a saved map hide them for admin — that caused "Add task sometimes missing".
+  for (const k of ['add', 'all', 'overdue']) {
+    base[k] = { ...(base[k] || {}), admin: true, mis: false, employee: false, site: false, site_head: false };
+  }
   return base;
 }
 

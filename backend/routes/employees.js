@@ -195,12 +195,20 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const body = req.body || {};
     const {
       full_name, department, designation, role, is_active, can_verify,
       is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets,
       can_switch_office_site, can_switch_office_mdo, reporting_head_id,
       is_head, site_name, site_names, whatsapp_number
-    } = req.body || {};
+    } = body;
+
+    const asBool = (v) => {
+      if (v === true || v === false) return v;
+      if (v === 'true' || v === 1 || v === '1') return true;
+      if (v === 'false' || v === 0 || v === '0') return false;
+      return !!v;
+    };
 
     const updates = {};
     if (full_name !== undefined) updates.full_name = full_name;
@@ -228,14 +236,14 @@ router.patch('/:id', async (req, res) => {
       updates.site_name = siteList[0] || null;
       updates.site_names = siteList.length ? siteList : null;
     }
-    if (is_active !== undefined) updates.is_active = is_active;
-    if (can_verify !== undefined) updates.can_verify = can_verify;
-    if (is_mis_executive !== undefined) updates.is_mis_executive = is_mis_executive;
-    if (can_add_site !== undefined) updates.can_add_site = can_add_site;
-    if (can_add_employee !== undefined) updates.can_add_employee = can_add_employee;
-    if (can_resolve_tickets !== undefined) updates.can_resolve_tickets = !!can_resolve_tickets;
-    if (can_switch_office_site !== undefined) updates.can_switch_office_site = !!can_switch_office_site;
-    if (can_switch_office_mdo !== undefined) updates.can_switch_office_mdo = !!can_switch_office_mdo;
+    if (is_active !== undefined) updates.is_active = asBool(is_active);
+    if (can_verify !== undefined) updates.can_verify = asBool(can_verify);
+    if (is_mis_executive !== undefined) updates.is_mis_executive = asBool(is_mis_executive);
+    if (can_add_site !== undefined) updates.can_add_site = asBool(can_add_site);
+    if (can_add_employee !== undefined) updates.can_add_employee = asBool(can_add_employee);
+    if (can_resolve_tickets !== undefined) updates.can_resolve_tickets = asBool(can_resolve_tickets);
+    if (can_switch_office_site !== undefined) updates.can_switch_office_site = asBool(can_switch_office_site);
+    if (can_switch_office_mdo !== undefined) updates.can_switch_office_mdo = asBool(can_switch_office_mdo);
     // reporting_head_id is optional — '' / null clears it back to "no head / top level".
     // Can't be your own reporting head — guard against that here too (frontend already excludes it).
     if (reporting_head_id !== undefined) {
@@ -246,15 +254,40 @@ router.patch('/:id', async (req, res) => {
     }
 
     if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: 'Nothing to update' });
+      console.warn('Employee PATCH empty body keys:', Object.keys(body));
+      return res.status(400).json({
+        error: 'Nothing to update',
+        hint: 'No recognized fields in request. Try again or hard-refresh the Permissions page.',
+        received: Object.keys(body),
+      });
     }
 
-    const { data, error } = await supabase
+    const selectFull =
+      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
+    const selectNoMdo =
+      'id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, reporting_head_id, is_head, site_name, site_names, whatsapp_number';
+
+    let { data, error } = await supabase
       .from('users')
       .update(updates)
       .eq('id', id)
-      .select('id, username, full_name, department, designation, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, reporting_head_id, is_head, site_name, site_names, whatsapp_number')
+      .select(selectFull)
       .single();
+
+    if (error && /can_switch_office_mdo/i.test(error.message || '')) {
+      const { can_switch_office_mdo: _drop, ...withoutMdo } = updates;
+      if (!Object.keys(withoutMdo).length) {
+        return res.status(400).json({
+          error: 'Column can_switch_office_mdo missing in database. Run the Office↔MDO SQL migration, or toggle another permission.',
+        });
+      }
+      ({ data, error } = await supabase
+        .from('users')
+        .update(withoutMdo)
+        .eq('id', id)
+        .select(selectNoMdo)
+        .single());
+    }
 
     if (error) throw error;
 
