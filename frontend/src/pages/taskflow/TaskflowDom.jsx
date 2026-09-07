@@ -71,10 +71,6 @@ export default function TaskflowDom() {
               <div className="field">
                 <label htmlFor="f-employee">Assign to <span className="req">*</span></label>
                 <select id="f-employee" required><option value="">Select employee</option></select>
-                <label className="checkbox-row" style={{marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', fontSize: 13}}>
-                  <input type="checkbox" id="f-beena-only" defaultChecked />
-                  <span>Only Beena Parmar (Process Controller) — WhatsApp day list</span>
-                </label>
               </div>
             </div>
             <div className="field-grid">

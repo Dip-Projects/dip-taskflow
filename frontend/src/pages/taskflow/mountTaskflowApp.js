@@ -1733,50 +1733,23 @@ export async function mountTaskflowApp(opts = {}) {
   function syncTaskEmployeeDropdown() {
     if (!els.fEmployee) return;
     const deptId = els.fDepartment?.value || '';
-    let list = employeesForDepartmentId(deptId);
-    const beenaOnly = document.getElementById('f-beena-only')?.checked !== false;
-    list = list.filter((e) => String(e.role || '').toLowerCase() !== 'admin');
-    if (beenaOnly) {
-      const beena = list.filter((e) => /beena/i.test(`${e.full_name || ''} ${e.username || ''}`));
-      if (beena.length) list = beena;
-      else {
-        const pcs = list.filter((e) =>
-          /process controller|\bpc\b/i.test(`${e.designation || ''} ${e.role || ''} ${e.department || ''}`)
-        );
-        if (pcs.length) list = pcs;
-      }
-    } else {
-      list = [...list].sort((a, b) => {
-        const score = (e) => {
-          const blob = `${e.designation || ''} ${e.role || ''} ${e.full_name || ''}`.toLowerCase();
-          let s = 0;
-          if (blob.includes('process controller') || /\bpc\b/.test(blob)) s += 2;
-          if (/beena/.test(blob)) s += 4;
-          return s;
-        };
-        return score(b) - score(a);
-      });
-    }
+    let list = employeesForDepartmentId(deptId).filter(
+      (e) => String(e.role || '').toLowerCase() !== 'admin'
+    );
+    list = [...list].sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+    );
     const prev = els.fEmployee.value;
     fillSelect(els.fEmployee, list, {
       placeholder: deptId
         ? list.length
-          ? beenaOnly
-            ? 'Beena Parmar (PC)'
-            : 'Select employee'
-          : beenaOnly
-            ? 'Beena not in this department — uncheck filter or pick her dept'
-            : 'No employees in this department'
+          ? 'Select employee'
+          : 'No employees in this department'
         : 'Select department first',
       labelKey: 'full_name',
     });
     if (prev && list.some((e) => e.id === prev)) {
       els.fEmployee.value = prev;
-    } else if (list.length === 1) {
-      els.fEmployee.value = list[0].id;
-    } else {
-      const beena = list.find((e) => /beena/i.test(`${e.full_name || ''} ${e.username || ''}`));
-      if (beena) els.fEmployee.value = beena.id;
     }
   }
 
@@ -1926,7 +1899,7 @@ export async function mountTaskflowApp(opts = {}) {
     formData.append('assigned_to', els.fEmployee.value);
     const assignee = (state.master.employees || []).find((e) => e.id === els.fEmployee.value);
     if (assignee && String(assignee.role || '').toLowerCase() === 'admin') {
-      showFormMsg(els.addTaskMsg, 'Admin ko assign mat karo — site day tasks sirf Beena Parmar (Process Controller) ko.');
+      showFormMsg(els.addTaskMsg, 'Admin ko assign mat karo — kisi employee / PC ko assign karo.');
       return;
     }
     formData.append('project_id', els.fProject.value);
@@ -2724,7 +2697,6 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   __tfReadyFns.push(() => {
-    document.getElementById('f-beena-only')?.addEventListener('change', () => syncTaskEmployeeDropdown());
     document.getElementById('officeMyOpenBtn')?.addEventListener('click', () => {
       officeMyShowDone = false;
       document.getElementById('officeMyOpenBtn')?.classList.add('active');
