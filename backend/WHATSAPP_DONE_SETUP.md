@@ -1,22 +1,26 @@
-# WhatsApp task Done — list picker (recommended for site teams)
+# WhatsApp task Done — daily list picker (site teams)
 
-Site people get **one message** with all open tasks (not one WhatsApp per task).
-They tap **Select** → pick a task or **Mark ALL done**.
+Site people get **one WhatsApp list per day** for that day’s tasks
+(Monday’s tasks on Monday, Tuesday’s on Tuesday, …).
+
+Overdue open tasks (due earlier, still open) also appear in **today’s** list.
 
 ## How it works
 
-1. Admin assigns tasks → WhatsApp gets **one list** of all open tasks (Select → Done / Mark ALL).
-2. Monday morning cron (`0 3 * * 1` UTC ≈ 8:30 IST) re-sends open-task lists.
-3. User taps a row → that task Completes → updated list if any left.
-4. Or reply: `LIST` | `ALL` | `1,3`
+1. Admin assigns tasks with a **target_date** (Mon / Tue / …).
+2. **Daily cron** (~8:30 IST, `0 3 * * *` UTC) sends each user a **list picker**
+   of that day’s open tasks (+ overdue).
+3. User taps **Select** → pick a task or **Mark ALL done**.
+4. After Done, WhatsApp shows:
+   - which task(s) completed  
+   - **Completed** list for the day  
+   - **Still open** list  
+   - then a refreshed Select list if anything left
+5. Or reply: `LIST` | `ALL` | `1,3`
 
-Note: if admin creates 5 tasks as 5 separate API calls, the employee may get up to 5
-list refreshes (each showing the full open set). Prefer assigning then checking WhatsApp
-once; Monday cron also consolidates.
+Portal: **Site → My Tasks** has **Mon–Sun** day tabs + Open / Done.
 
-Portal: **Site → My Tasks** still has checkboxes.
-
-## Meta setup (required for Done from WhatsApp)
+## Meta setup
 
 ### Webhook
 - URL: `https://dip-taskflow.vercel.app/api/whatsapp/webhook`
@@ -24,17 +28,8 @@ Portal: **Site → My Tasks** still has checkboxes.
 - Subscribe: **messages**
 
 ### Interactive list
-List messages need the **24-hour customer care window** (user messaged you recently),
-or you open the window with a template first.
-
-If list send fails, we fall back to `task_notification_v2` with a short summary
-(still **one** message, not five).
-
-Optional: create a soft utility template and set:
-
-```text
-WHATSAPP_TASK_LIST_TEMPLATE=task_notification_v2
-```
+Needs the **24-hour customer care window**, or open it with a template first.
+If list fails → fallback template `task_notification_v2` (one summary).
 
 ### Env (Vercel)
 
@@ -44,15 +39,24 @@ META_ACCESS_TOKEN=...
 META_WEBHOOK_VERIFY_TOKEN=dip-taskflow-wa
 CRON_SECRET=your_cron_secret
 WA_LIST_DEBOUNCE_MS=20000
+WHATSAPP_TASK_LIST_TEMPLATE=task_notification_v2
 ```
 
-## Optional single-task Done template
+## Cron
 
-Only if you still want per-task Quick Reply (not needed with list picker):
+```text
+/api/whatsapp/cron/tasks-list-digest
+schedule: 0 3 * * *   (every day ~08:30 IST)
+```
 
-See older `site_task_done_v1` notes — set `WHATSAPP_TASK_DONE_TEMPLATE`.
+Manual test (with secret):
+
+```text
+GET /api/whatsapp/cron/tasks-list-digest?secret=YOUR_CRON_SECRET
+```
 
 ## Limits
 
-- WhatsApp list: max **10 rows** (we use 1 = ALL + up to 9 tasks).
-- More than 9 open → rest in **Site → My Tasks**.
+- WhatsApp list: max **10 rows** (1 = ALL + up to 9 tasks).
+- More than 9 open today → rest in **Site → My Tasks**.
+- User must have `users.whatsapp_number` set.

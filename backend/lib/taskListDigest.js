@@ -17,16 +17,84 @@ function isOpenStatus(status) {
   return s !== 'Completed' && s !== 'Rejected';
 }
 
-async function loadOpenTasksForUser(userId) {
+/** Calendar day in IST as YYYY-MM-DD */
+function istYmd(d = new Date()) {
+  return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function taskDueYmd(task) {
+  const raw = task?.target_date;
+  if (!raw) return null;
+  const s = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  try {
+    return istYmd(new Date(s));
+  } catch {
+    return null;
+  }
+}
+
+function dayLabel(ymd) {
+  try {
+    const d = new Date(`${ymd}T12:00:00+05:30`);
+    return d.toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'Asia/Kolkata',
+    });
+  } catch {
+    return ymd;
+  }
+}
+
+/**
+ * Load assignee tasks. When dayYmd set:
+ * - open: due that day OR overdue (due before day, still open)
+ * - completed: completed with due that day (for status summary)
+ */
+async function loadTasksForUser(userId, opts = {}) {
+  const dayYmd = opts.dayYmd || null;
   const { data, error } = await supabase
     .from('tasks')
-    .select('id, description, status, priority, target_date, project:projects(name)')
+    .select('id, description, status, priority, target_date, completed_at, project:projects(name)')
     .eq('assigned_to', userId)
     .neq('status', 'Rejected')
     .order('target_date', { ascending: true });
 
   if (error) throw error;
-  return (data || []).filter((t) => isOpenStatus(t.status));
+  const all = data || [];
+
+  if (!dayYmd) {
+    return {
+      open: all.filter((t) => isOpenStatus(t.status)),
+      done: all.filter((t) => t.status === 'Completed'),
+      dayYmd: null,
+    };
+  }
+
+  const open = all.filter((t) => {
+    if (!isOpenStatus(t.status)) return false;
+    const due = taskDueYmd(t);
+    if (!due) return true; // no due → show in today's list
+    return due <= dayYmd; // today + overdue
+  });
+
+  const done = all.filter((t) => {
+    if (t.status !== 'Completed') return false;
+    const due = taskDueYmd(t);
+    if (due === dayYmd) return true;
+    // completed today even if due another day
+    if (t.completed_at && istYmd(t.completed_at) === dayYmd) return true;
+    return false;
+  });
+
+  return { open, done, dayYmd };
+}
+
+async function loadOpenTasksForUser(userId, opts = {}) {
+  const { open } = await loadTasksForUser(userId, opts);
+  return open;
 }
 
 function buildListRows(tasks) {
@@ -41,49 +109,82 @@ function buildListRows(tasks) {
   // Meta: max 10 rows total → 1 ALL + up to 9 tasks
   tasks.slice(0, 9).forEach((t, i) => {
     const project = t.project?.name || '—';
-    const due = t.target_date || '—';
+    const due = taskDueYmd(t) || t.target_date || '—';
+    const overdue = due !== '—' && due < istYmd() ? ' · LATE' : '';
     rows.push({
       id: `tf_done_${t.id}`,
       title: clip(`${i + 1}. ${t.description || 'Task'}`, 24),
-      description: clip(`${project} · Due ${due}${t.priority ? ` · ${t.priority}` : ''}`, 72),
+      description: clip(`${project} · Due ${due}${overdue}${t.priority ? ` · ${t.priority}` : ''}`, 72),
     });
   });
 
   return rows;
 }
 
+function formatStatusSummary({ open, done, dayYmd, justDoneLabel }) {
+  const label = dayYmd ? dayLabel(dayYmd) : 'all days';
+  const lines = [];
+  if (justDoneLabel) lines.push(`✅ Done: ${clip(justDoneLabel, 100)}`);
+  lines.push(`📅 ${label}`);
+  if (done.length) {
+    lines.push(`Completed (${done.length}):`);
+    done.slice(0, 8).forEach((t, i) => {
+      lines.push(`  ✓ ${i + 1}. ${clip(t.description || 'Task', 60)}`);
+    });
+    if (done.length > 8) lines.push(`  …+${done.length - 8} more`);
+  } else {
+    lines.push('Completed: none yet');
+  }
+  if (open.length) {
+    lines.push(`Still open (${open.length}):`);
+    open.slice(0, 8).forEach((t, i) => {
+      lines.push(`  ${i + 1}. ${clip(t.description || 'Task', 60)}`);
+    });
+    if (open.length > 8) lines.push(`  …+${open.length - 8} more`);
+  } else {
+    lines.push('Still open: none — all caught up ✅');
+  }
+  return lines.join('\n');
+}
+
 /**
- * One WhatsApp list message for all open tasks (lazy-friendly picker).
+ * One WhatsApp list for open tasks (default: today IST + overdue).
  */
 async function sendOpenTasksListPicker(toNumber, userId, opts = {}) {
   const fullName = opts.fullName || 'Team member';
-  const tasks = await loadOpenTasksForUser(userId);
+  const dayYmd = opts.dayYmd !== undefined ? opts.dayYmd : istYmd();
+  const bundle = await loadTasksForUser(userId, { dayYmd: dayYmd || undefined });
+  const tasks = bundle.open;
 
   if (!tasks.length) {
     if (opts.sayEmpty) {
-      await sendWhatsAppText(toNumber, 'No open tasks. You’re all caught up ✅');
+      const summary = formatStatusSummary(bundle);
+      await sendWhatsAppText(toNumber, summary);
     }
-    return { ok: true, count: 0 };
+    return { ok: true, count: 0, dayYmd: bundle.dayYmd, done: bundle.done.length };
   }
 
+  const dayName = dayYmd ? dayLabel(dayYmd) : 'Open';
+  const doneN = bundle.done.length;
   const extra =
     tasks.length > 9 ? `\n(+${tasks.length - 9} more in Site → My Tasks)` : '';
   const body = clip(
-    `Hi ${fullName},\nYou have ${tasks.length} open task(s).${extra}\n\nTap Select → pick a task (or Mark ALL done).`,
+    `Hi ${fullName},\n${dayName} — ${tasks.length} open task(s)${doneN ? `, ${doneN} done` : ''}.${extra}\n\nTap Select → mark done (or Mark ALL). Reply LIST anytime.`,
     1024
   );
 
   const listResult = await sendWhatsAppInteractiveList(toNumber, {
-    header: 'DIP My Tasks',
+    header: clip(dayYmd ? `${dayName.split(',')[0]} tasks` : 'DIP My Tasks', 60),
     body,
     footer: 'Or reply ALL / LIST',
     button: 'Select',
     sections: [{ title: 'Open tasks', rows: buildListRows(tasks) }],
   });
 
-  if (listResult.ok) return { ok: true, count: tasks.length, via: 'list' };
+  if (listResult.ok) {
+    return { ok: true, count: tasks.length, via: 'list', dayYmd, done: doneN };
+  }
 
-  // Outside 24h window: short template nudge (no per-task spam)
   const tmpl = process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2';
   const preview = tasks
     .slice(0, 3)
@@ -91,25 +192,30 @@ async function sendOpenTasksListPicker(toNumber, userId, opts = {}) {
     .join('; ');
   await sendWhatsAppTemplate(toNumber, tmpl, [
     fullName,
-    clip(`${tasks.length} open: ${preview}`, 200),
+    clip(`${dayName}: ${tasks.length} open: ${preview}`, 200),
     'DIP Projects',
-    new Date().toISOString().slice(0, 10),
+    dayYmd || new Date().toISOString().slice(0, 10),
     'Open',
   ]);
-  return { ok: true, count: tasks.length, via: 'template_fallback', listError: listResult };
+  return {
+    ok: true,
+    count: tasks.length,
+    via: 'template_fallback',
+    listError: listResult,
+    dayYmd,
+    done: doneN,
+  };
 }
 
-/**
- * Send (or refresh) the open-tasks list picker for an assignee.
- * Call after each assign — one list of ALL open tasks (not one msg per task body).
- * On Vercel we await this so the send is not killed after the HTTP response.
- */
 async function notifyAssigneeOpenTasksList(userId, toNumber, fullName) {
   if (!normalizeWhatsAppNumber(toNumber) || !userId) {
     return { ok: false, reason: 'bad_args' };
   }
   try {
-    return await sendOpenTasksListPicker(toNumber, userId, { fullName });
+    return await sendOpenTasksListPicker(toNumber, userId, {
+      fullName,
+      dayYmd: istYmd(),
+    });
   } catch (err) {
     console.warn('WA list digest failed:', err.message);
     return { ok: false, reason: 'exception', error: err.message };
@@ -121,8 +227,9 @@ function scheduleOpenTasksListDigest(userId, toNumber, fullName) {
   return notifyAssigneeOpenTasksList(userId, toNumber, fullName);
 }
 
-async function completeAllOpenTasksForUser(user) {
-  const tasks = await loadOpenTasksForUser(user.id);
+async function completeAllOpenTasksForUser(user, opts = {}) {
+  const dayYmd = opts.dayYmd !== undefined ? opts.dayYmd : istYmd();
+  const tasks = await loadOpenTasksForUser(user.id, { dayYmd: dayYmd || undefined });
   let done = 0;
   const at = new Date().toISOString();
   for (const t of tasks) {
@@ -138,13 +245,14 @@ async function completeAllOpenTasksForUser(user) {
     }
     if (!error) done += 1;
   }
-  return { done, total: tasks.length };
+  return { done, total: tasks.length, dayYmd };
 }
 
 /**
- * Send list digests to everyone with open tasks + WhatsApp number.
+ * Daily digest: today's open (+ overdue) list picker per user with WhatsApp.
  */
 async function runOpenTasksListDigestCron() {
+  const dayYmd = istYmd();
   const { data: users, error } = await supabase
     .from('users')
     .select('id, full_name, whatsapp_number, username, is_active')
@@ -160,21 +268,26 @@ async function runOpenTasksListDigestCron() {
       skipped += 1;
       continue;
     }
-    const tasks = await loadOpenTasksForUser(u.id);
+    const tasks = await loadOpenTasksForUser(u.id, { dayYmd });
     if (!tasks.length) {
       skipped += 1;
       continue;
     }
     const result = await sendOpenTasksListPicker(u.whatsapp_number, u.id, {
       fullName: u.full_name || u.username || 'Team member',
+      dayYmd,
     });
     if (result.ok && result.count > 0) sent += 1;
     else skipped += 1;
   }
-  return { sent, skipped, users: (users || []).length };
+  return { sent, skipped, users: (users || []).length, dayYmd, dayLabel: dayLabel(dayYmd) };
 }
 
 module.exports = {
+  istYmd,
+  taskDueYmd,
+  dayLabel,
+  loadTasksForUser,
   loadOpenTasksForUser,
   sendOpenTasksListPicker,
   notifyAssigneeOpenTasksList,
@@ -182,4 +295,5 @@ module.exports = {
   completeAllOpenTasksForUser,
   runOpenTasksListDigestCron,
   buildListRows,
+  formatStatusSummary,
 };

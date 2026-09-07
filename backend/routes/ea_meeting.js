@@ -7,7 +7,7 @@ const {
   sendWhatsAppTemplate,
   normalizeWhatsAppNumber,
 } = require('../lib/whatsapp');
-const { loadOpenTasksForUser, sendOpenTasksListPicker } = require('../lib/taskListDigest');
+const { loadOpenTasksForUser, sendOpenTasksListPicker, istYmd } = require('../lib/taskListDigest');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -159,7 +159,8 @@ async function notifyUserEaAndTasks(user, opts = {}) {
 
   // After present: one list with EA upload row(s) + open TaskFlow tasks
   const userId = full?.id || user.id;
-  const openTasks = await loadOpenTasksForUser(userId);
+  const today = istYmd();
+  const openTasks = await loadOpenTasksForUser(userId, { dayYmd: today });
   const rows = [];
 
   pendingEa.slice(0, 3).forEach((r) => {

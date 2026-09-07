@@ -9,6 +9,9 @@ const {
   completeAllOpenTasksForUser,
   runOpenTasksListDigestCron,
   loadOpenTasksForUser,
+  loadTasksForUser,
+  formatStatusSummary,
+  istYmd,
 } = require('../lib/taskListDigest');
 
 const router = express.Router();
@@ -117,18 +120,18 @@ async function completeTaskFromWhatsApp(taskId, user) {
 
 async function afterSingleComplete(from, user, result) {
   if (result.ok) {
-    const label = result.already ? 'already marked complete' : 'marked complete';
-    await sendWhatsAppText(
-      from,
-      `✅ Task ${label}.\n${(result.task?.description || '').slice(0, 120)}`
-    );
-    const remaining = await loadOpenTasksForUser(user.id);
-    if (remaining.length) {
+    const dayYmd = istYmd();
+    const bundle = await loadTasksForUser(user.id, { dayYmd });
+    const summary = formatStatusSummary({
+      ...bundle,
+      justDoneLabel: result.task?.description || 'Task',
+    });
+    await sendWhatsAppText(from, summary);
+    if (bundle.open.length) {
       await sendOpenTasksListPicker(from, user.id, {
         fullName: user.full_name || user.username,
+        dayYmd,
       });
-    } else {
-      await sendWhatsAppText(from, 'No open tasks left. Nice work ✅');
     }
     return;
   }
@@ -188,12 +191,14 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
-      // List / button: Mark ALL done
+      // List / button: Mark ALL done (today + overdue only)
       if (payload === 'tf_done_all' || /^ALL$/i.test(text)) {
-        const { done, total } = await completeAllOpenTasksForUser(user);
+        const dayYmd = istYmd();
+        const { done, total } = await completeAllOpenTasksForUser(user, { dayYmd });
+        const bundle = await loadTasksForUser(user.id, { dayYmd });
         await sendWhatsAppText(
           msg.from,
-          `✅ Marked ${done}/${total} open task(s) complete.`
+          `✅ Marked ${done}/${total} task(s) complete for today.\n\n${formatStatusSummary(bundle)}`
         );
         continue;
       }
@@ -206,38 +211,52 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
-      // Text commands: LIST / ALL / 1,3
+      // Text commands: LIST / ALL / 1,3 — scoped to today (+ overdue)
       if (text) {
-        const open = await loadOpenTasksForUser(user.id);
+        const dayYmd = istYmd();
+        const open = await loadOpenTasksForUser(user.id, { dayYmd });
         const parsed = parseNumberReply(text, open);
         if (parsed?.list) {
           await sendOpenTasksListPicker(msg.from, user.id, {
             fullName: user.full_name || user.username,
             sayEmpty: true,
+            dayYmd,
           });
           continue;
         }
         if (parsed?.all) {
-          const { done, total } = await completeAllOpenTasksForUser(user);
+          const { done, total } = await completeAllOpenTasksForUser(user, { dayYmd });
+          const bundle = await loadTasksForUser(user.id, { dayYmd });
           await sendWhatsAppText(
             msg.from,
-            `✅ Marked ${done}/${total} open task(s) complete.`
+            `✅ Marked ${done}/${total} task(s) complete.\n\n${formatStatusSummary(bundle)}`
           );
           continue;
         }
         if (parsed?.indexes) {
           let okCount = 0;
+          let lastDesc = '';
           for (const i of parsed.indexes) {
             const t = open[i];
             if (!t) continue;
             const result = await completeTaskFromWhatsApp(t.id, user);
-            if (result.ok) okCount += 1;
+            if (result.ok) {
+              okCount += 1;
+              lastDesc = t.description || lastDesc;
+            }
           }
-          await sendWhatsAppText(msg.from, `✅ Completed ${okCount} task(s).`);
-          const remaining = await loadOpenTasksForUser(user.id);
-          if (remaining.length) {
+          const bundle = await loadTasksForUser(user.id, { dayYmd });
+          await sendWhatsAppText(
+            msg.from,
+            formatStatusSummary({
+              ...bundle,
+              justDoneLabel: okCount === 1 ? lastDesc : `${okCount} tasks`,
+            })
+          );
+          if (bundle.open.length) {
             await sendOpenTasksListPicker(msg.from, user.id, {
               fullName: user.full_name || user.username,
+              dayYmd,
             });
           }
         }

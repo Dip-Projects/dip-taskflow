@@ -48,6 +48,69 @@
   margin-bottom: 14px;
 }
 
+.smt-day-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.smt-day {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 8px 8px 6px;
+  border-radius: 12px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.smt-day.today {
+  border-color: #c96a10;
+}
+
+.smt-day.act {
+  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  border-color: transparent;
+  color: #fff;
+}
+
+.smt-day-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.smt-day-num {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.smt-day-count {
+  font-size: 9px;
+  font-weight: 650;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.smt-day.act .smt-day-name,
+.smt-day.act .smt-day-count {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.smt-late {
+  font-weight: 800;
+  color: #b91c1c;
+}
+
 .smt-tab {
   height: 34px;
   padding: 0 14px;
