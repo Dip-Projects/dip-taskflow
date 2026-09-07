@@ -4,6 +4,12 @@ const {
   normalizeWhatsAppNumber,
   sendWhatsAppText,
 } = require('../lib/whatsapp');
+const {
+  sendOpenTasksListPicker,
+  completeAllOpenTasksForUser,
+  runOpenTasksListDigestCron,
+  loadOpenTasksForUser,
+} = require('../lib/taskListDigest');
 
 const router = express.Router();
 
@@ -109,6 +115,50 @@ async function completeTaskFromWhatsApp(taskId, user) {
   return { ok: true, task };
 }
 
+async function afterSingleComplete(from, user, result) {
+  if (result.ok) {
+    const label = result.already ? 'already marked complete' : 'marked complete';
+    await sendWhatsAppText(
+      from,
+      `✅ Task ${label}.\n${(result.task?.description || '').slice(0, 120)}`
+    );
+    const remaining = await loadOpenTasksForUser(user.id);
+    if (remaining.length) {
+      await sendOpenTasksListPicker(from, user.id, {
+        fullName: user.full_name || user.username,
+      });
+    } else {
+      await sendWhatsAppText(from, 'No open tasks left. Nice work ✅');
+    }
+    return;
+  }
+  if (result.reason === 'forbidden') {
+    await sendWhatsAppText(from, 'That task is not assigned to you.');
+  } else if (result.reason === 'not_found') {
+    await sendWhatsAppText(from, 'Task not found or already removed.');
+  } else {
+    await sendWhatsAppText(from, 'Could not complete the task. Please use Site Portal → My Tasks.');
+  }
+}
+
+function parseNumberReply(text, openTasks) {
+  const raw = String(text || '').trim().toUpperCase();
+  if (!raw) return null;
+  if (raw === 'ALL' || raw === 'DONE ALL' || raw === 'HO GAYA') return { all: true };
+  if (raw === 'LIST' || raw === 'TASKS' || raw === 'MENU') return { list: true };
+
+  const parts = raw.split(/[\s,]+/).filter(Boolean);
+  const idxs = [];
+  for (const p of parts) {
+    if (!/^\d+$/.test(p)) return null;
+    const n = Number(p);
+    if (n < 1 || n > openTasks.length) return null;
+    idxs.push(n - 1);
+  }
+  if (!idxs.length) return null;
+  return { indexes: [...new Set(idxs)] };
+}
+
 router.post('/webhook', async (req, res) => {
   // Always ack quickly so Meta does not retry.
   res.sendStatus(200);
@@ -116,34 +166,96 @@ router.post('/webhook', async (req, res) => {
   try {
     const inbound = extractInbound(req.body);
     for (const msg of inbound) {
-      const payload = String(msg.buttonPayload || msg.text || '').trim();
-      const doneMatch = payload.match(/^tf_done_([0-9a-f-]{36})$/i);
-      if (!doneMatch) continue;
-
+      const payload = String(msg.buttonPayload || '').trim();
+      const text = String(msg.text || '').trim();
       const user = await findUserByWhatsApp(msg.from);
       if (!user) {
-        console.warn('WA Done: unknown number', msg.from);
+        if (payload || text) console.warn('WA: unknown number', msg.from);
         continue;
       }
 
-      const result = await completeTaskFromWhatsApp(doneMatch[1], user);
-      if (result.ok) {
-        const label = result.already ? 'already marked complete' : 'marked complete';
+      // List / button: Mark ALL done
+      if (payload === 'tf_done_all' || /^ALL$/i.test(text)) {
+        const { done, total } = await completeAllOpenTasksForUser(user);
         await sendWhatsAppText(
           msg.from,
-          `✅ Task ${label}.\n${(result.task?.description || '').slice(0, 120)}\n\nYou can also manage tasks in Site Portal → My Tasks.`
+          `✅ Marked ${done}/${total} open task(s) complete.`
         );
-      } else if (result.reason === 'forbidden') {
-        await sendWhatsAppText(msg.from, 'That task is not assigned to you.');
-      } else if (result.reason === 'not_found') {
-        await sendWhatsAppText(msg.from, 'Task not found or already removed.');
-      } else {
-        await sendWhatsAppText(msg.from, 'Could not complete the task. Please use Site Portal → My Tasks.');
+        continue;
+      }
+
+      // List / button: single task
+      const doneMatch = payload.match(/^tf_done_([0-9a-f-]{36})$/i);
+      if (doneMatch) {
+        const result = await completeTaskFromWhatsApp(doneMatch[1], user);
+        await afterSingleComplete(msg.from, user, result);
+        continue;
+      }
+
+      // Text commands: LIST / ALL / 1,3
+      if (text) {
+        const open = await loadOpenTasksForUser(user.id);
+        const parsed = parseNumberReply(text, open);
+        if (parsed?.list) {
+          await sendOpenTasksListPicker(msg.from, user.id, {
+            fullName: user.full_name || user.username,
+            sayEmpty: true,
+          });
+          continue;
+        }
+        if (parsed?.all) {
+          const { done, total } = await completeAllOpenTasksForUser(user);
+          await sendWhatsAppText(
+            msg.from,
+            `✅ Marked ${done}/${total} open task(s) complete.`
+          );
+          continue;
+        }
+        if (parsed?.indexes) {
+          let okCount = 0;
+          for (const i of parsed.indexes) {
+            const t = open[i];
+            if (!t) continue;
+            const result = await completeTaskFromWhatsApp(t.id, user);
+            if (result.ok) okCount += 1;
+          }
+          await sendWhatsAppText(msg.from, `✅ Completed ${okCount} task(s).`);
+          const remaining = await loadOpenTasksForUser(user.id);
+          if (remaining.length) {
+            await sendOpenTasksListPicker(msg.from, user.id, {
+              fullName: user.full_name || user.username,
+            });
+          }
+        }
       }
     }
   } catch (err) {
     console.error('WhatsApp webhook handler error:', err.message);
   }
 });
+
+function cronAuthorized(req) {
+  const secret = process.env.CRON_SECRET || '';
+  const hdr = req.headers['authorization'] || '';
+  return (
+    (secret && hdr === `Bearer ${secret}`) ||
+    (secret && req.query.secret === secret) ||
+    (!secret && process.env.VERCEL !== '1')
+  );
+}
+
+async function handleListDigestCron(req, res) {
+  try {
+    if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
+    const result = await runOpenTasksListDigestCron();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('WA list digest cron:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+router.post('/cron/tasks-list-digest', handleListDigestCron);
+router.get('/cron/tasks-list-digest', handleListDigestCron);
 
 module.exports = router;

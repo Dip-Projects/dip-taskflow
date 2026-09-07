@@ -11,8 +11,8 @@ const {
 } = require('../lib/taskOverdue');
 const {
   sendWhatsAppTemplate,
-  notifyTaskAssignedWithDone,
 } = require('../lib/whatsapp');
+const { notifyAssigneeOpenTasksList } = require('../lib/taskListDigest');
 const router = express.Router();
 router.use(requireAuth);
 
@@ -516,7 +516,7 @@ if (!isMdoOffice && !project_id) {
         data.checkpoints = [];
       }
 
-      // Assignee WhatsApp + Done button (best-effort)
+      // One WhatsApp list of ALL open tasks (not a separate Done msg per task)
       const { data: assigneeUser } = await supabase
         .from('users')
         .select('whatsapp_number, full_name')
@@ -524,21 +524,14 @@ if (!isMdoOffice && !project_id) {
         .maybeSingle();
 
       if (assigneeUser?.whatsapp_number) {
-        const dueLabel = fmtEmployeeDueLabel(
-          data.assigned_at || data.created_at,
-          data.hours_to_complete ?? hours_to_complete
-        );
         try {
-          await notifyTaskAssignedWithDone(assigneeUser.whatsapp_number, {
-            fullName: assigneeUser.full_name || 'Team member',
-            description: description || 'New task',
-            project: data.project?.name || '—',
-            dueLabel,
-            priority: priority || 'Medium',
-            taskId: data.id,
-          });
+          await notifyAssigneeOpenTasksList(
+            assigned_to,
+            assigneeUser.whatsapp_number,
+            assigneeUser.full_name || 'Team member'
+          );
         } catch (waErr) {
-          console.warn('WhatsApp assign notify skip:', waErr.message);
+          console.warn('WhatsApp list digest skip:', waErr.message);
         }
       } else {
         console.warn('Task created but assignee has no whatsapp_number:', assigned_to);

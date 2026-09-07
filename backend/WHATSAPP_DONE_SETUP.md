@@ -1,62 +1,58 @@
-# WhatsApp Done button — Meta template (optional but recommended)
+# WhatsApp task Done — list picker (recommended for site teams)
 
-Without this template, TaskFlow still sends `task_notification_v2` and then
-tries an interactive **Done** button. Interactive buttons only work inside the
-**24-hour customer care window**. For reliable Done outside that window, create
-this template in Meta Business Manager.
+Site people get **one message** with all open tasks (not one WhatsApp per task).
+They tap **Select** → pick a task or **Mark ALL done**.
 
-## 1. Create template
+## How it works
 
-Meta Business Suite → WhatsApp Manager → Message templates → Create
+1. Admin assigns tasks → WhatsApp gets **one list** of all open tasks (Select → Done / Mark ALL).
+2. Monday morning cron (`0 3 * * 1` UTC ≈ 8:30 IST) re-sends open-task lists.
+3. User taps a row → that task Completes → updated list if any left.
+4. Or reply: `LIST` | `ALL` | `1,3`
 
-| Field | Value |
-|--------|--------|
-| Name | `site_task_done_v1` (or any name; set same in Vercel env) |
-| Category | **Utility** |
-| Language | English |
+Note: if admin creates 5 tasks as 5 separate API calls, the employee may get up to 5
+list refreshes (each showing the full open set). Prefer assigning then checking WhatsApp
+once; Monday cron also consolidates.
 
-**Body** (5 variables):
+Portal: **Site → My Tasks** still has checkboxes.
+
+## Meta setup (required for Done from WhatsApp)
+
+### Webhook
+- URL: `https://dip-taskflow.vercel.app/api/whatsapp/webhook`
+- Verify token: `META_WEBHOOK_VERIFY_TOKEN` (e.g. `dip-taskflow-wa`)
+- Subscribe: **messages**
+
+### Interactive list
+List messages need the **24-hour customer care window** (user messaged you recently),
+or you open the window with a template first.
+
+If list send fails, we fall back to `task_notification_v2` with a short summary
+(still **one** message, not five).
+
+Optional: create a soft utility template and set:
 
 ```text
-Hi {{1}},
-
-New task assigned:
-{{2}}
-
-Project: {{3}}
-Due: {{4}}
-Priority: {{5}}
-
-Open Site Portal → My Tasks, or tap Done below when finished.
+WHATSAPP_TASK_LIST_TEMPLATE=task_notification_v2
 ```
 
-**Buttons** → Add **Quick reply** → label: `Done`
-
-Submit for approval.
-
-## 2. Vercel env
+### Env (Vercel)
 
 ```text
-WHATSAPP_TASK_DONE_TEMPLATE=site_task_done_v1
-WHATSAPP_TASK_DONE_LANG=en
+META_PHONE_NUMBER_ID=...
+META_ACCESS_TOKEN=...
 META_WEBHOOK_VERIFY_TOKEN=dip-taskflow-wa
+CRON_SECRET=your_cron_secret
+WA_LIST_DEBOUNCE_MS=20000
 ```
 
-(Keep existing `META_PHONE_NUMBER_ID` + `META_ACCESS_TOKEN`.)
+## Optional single-task Done template
 
-## 3. Webhook
+Only if you still want per-task Quick Reply (not needed with list picker):
 
-Meta App → WhatsApp → Configuration → Callback URL:
+See older `site_task_done_v1` notes — set `WHATSAPP_TASK_DONE_TEMPLATE`.
 
-```text
-https://dip-taskflow.vercel.app/api/whatsapp/webhook
-```
+## Limits
 
-Verify token: same as `META_WEBHOOK_VERIFY_TOKEN`  
-Subscribe to: **messages**
-
-## 4. Behaviour
-
-- Assign task → WhatsApp notify + Done
-- Tap Done on WhatsApp → task `Completed`
-- Site Portal → **My Tasks** → checkbox / Done → same
+- WhatsApp list: max **10 rows** (we use 1 = ALL + up to 9 tasks).
+- More than 9 open → rest in **Site → My Tasks**.

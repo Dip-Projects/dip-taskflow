@@ -167,9 +167,64 @@ async function sendWhatsAppText(toNumber, text) {
 }
 
 /**
+ * Interactive list picker (session / 24h window).
+ * rows: [{ id, title, description? }] — max 10 rows total across sections.
+ */
+async function sendWhatsAppInteractiveList(toNumber, opts = {}) {
+  const to = normalizeWhatsAppNumber(toNumber);
+  if (!to) return { ok: false, reason: 'no_number' };
+
+  const sections = (opts.sections || [])
+    .map((sec) => ({
+      title: String(sec.title || 'Tasks').slice(0, 24),
+      rows: (sec.rows || []).slice(0, 10).map((r) => ({
+        id: String(r.id || '').slice(0, 200),
+        title: String(r.title || 'Item').slice(0, 24),
+        ...(r.description
+          ? { description: String(r.description).slice(0, 72) }
+          : {}),
+      })),
+    }))
+    .filter((s) => s.rows.length);
+
+  if (!sections.length) return { ok: false, reason: 'no_rows' };
+
+  // Cap total rows at 10
+  let budget = 10;
+  for (const sec of sections) {
+    if (sec.rows.length > budget) sec.rows = sec.rows.slice(0, budget);
+    budget -= sec.rows.length;
+  }
+
+  const interactive = {
+    type: 'list',
+    body: { text: String(opts.body || 'Your tasks').slice(0, 1024) },
+    action: {
+      button: String(opts.button || 'Select').slice(0, 20),
+      sections: sections.filter((s) => s.rows.length),
+    },
+  };
+  if (opts.header) {
+    interactive.header = { type: 'text', text: String(opts.header).slice(0, 60) };
+  }
+  if (opts.footer) {
+    interactive.footer = { text: String(opts.footer).slice(0, 60) };
+  }
+
+  const result = await metaSend({
+    to,
+    type: 'interactive',
+    interactive,
+  });
+  if (result.ok) console.log('WhatsApp list sent to', to);
+  return result;
+}
+
+/**
  * Notify assignee about a new task and offer Done.
  * Prefer WHATSAPP_TASK_DONE_TEMPLATE (Quick Reply) when set; else classic
  * template + best-effort interactive Done button.
+ * @deprecated Prefer scheduleOpenTasksListDigest / list picker for site teams.
  */
 async function notifyTaskAssignedWithDone(toNumber, opts = {}) {
   const {
@@ -238,6 +293,7 @@ module.exports = {
   sendWhatsAppTemplate,
   sendWhatsAppTemplateWithButtons,
   sendWhatsAppInteractiveButtons,
+  sendWhatsAppInteractiveList,
   sendWhatsAppText,
   notifyTaskAssignedWithDone,
   normalizeWhatsAppNumber,

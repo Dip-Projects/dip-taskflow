@@ -21,6 +21,10 @@
     {
       "path": "/api/delay-report/cron/monday-whatsapp",
       "schedule": "30 3 * * 1"
+    },
+    {
+      "path": "/api/whatsapp/cron/tasks-list-digest",
+      "schedule": "0 3 * * 1"
     }
   ],
   "headers": [
