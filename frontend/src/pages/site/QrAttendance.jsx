@@ -37,12 +37,41 @@ function currentWeekBounds() {
   return { start: isoDate(monday), end: isoDate(sunday) };
 }
 
-function isCoordinatorRole(role) {
-  const r = String(role || "")
+function normalizeRole(role) {
+  return String(role || "")
     .toLowerCase()
     .replace(/-/g, " ")
-    .replace(/\s+/g, " ");
-  return r.includes("coordinator") || r.includes("co ordinator");
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Site Engineer → 2 Excel uploads (Site Work + Site Engineer). */
+function isSiteEngineerRole(role) {
+  const r = normalizeRole(role);
+  return (
+    r.includes("site engineer") ||
+    r === "siteengineer" ||
+    (r.includes("engineer") && r.includes("site") && !r.includes("head"))
+  );
+}
+
+/** Head / Incharge / Coordinator / others → only weekly plan (1 file). */
+function needsDualExcelUpload(role) {
+  return isSiteEngineerRole(role);
+}
+
+function isExcelFile(file) {
+  if (!file) return false;
+  const name = String(file.name || "").toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+  return (
+    name.endsWith(".xlsx") ||
+    name.endsWith(".xls") ||
+    name.endsWith(".csv") ||
+    type.includes("spreadsheet") ||
+    type.includes("excel") ||
+    type === "text/csv"
+  );
 }
 
 function isDeskAttendanceQr(raw) {
@@ -177,7 +206,7 @@ export default function QrAttendance() {
   const scannerRef = useRef(null);
   const handlingRef = useRef(false);
   const week = currentWeekBounds();
-  const coordinator = isCoordinatorRole(scannedEmployee?.role);
+  const dualExcel = needsDualExcelUpload(scannedEmployee?.role);
 
   const stopScanner = useCallback(async () => {
     const inst = scannerRef.current;
@@ -316,20 +345,32 @@ export default function QrAttendance() {
     e.preventDefault();
     if (!attendanceRow?.id) return;
     if (!file1) {
-      setMessage("Please attach at least one file.");
+      setMessage(
+        dualExcel
+          ? "Please attach Site Work Excel (file 1)."
+          : "Please attach your weekly plan file."
+      );
       return;
     }
-    if (coordinator && !file2) {
-      setMessage("Co-ordinators must attach two files.");
+    if (dualExcel && !file2) {
+      setMessage("Site Engineers must attach 2 Excel files (Site Work + Site Engineer).");
+      return;
+    }
+    if (dualExcel && (!isExcelFile(file1) || !isExcelFile(file2))) {
+      setMessage("Both attachments must be Excel files (.xlsx / .xls / .csv).");
       return;
     }
     setSubmitting(true);
     setMessage("");
     try {
-      const a1 = await uploadPlanFile(file1, scannedEmployee, "file1");
+      const a1 = await uploadPlanFile(
+        file1,
+        scannedEmployee,
+        dualExcel ? "site-work" : "weekly-plan"
+      );
       let a2 = { url: null, name: null };
-      if (coordinator && file2) {
-        a2 = await uploadPlanFile(file2, scannedEmployee, "file2");
+      if (dualExcel && file2) {
+        a2 = await uploadPlanFile(file2, scannedEmployee, "site-engineer");
       }
       const { error } = await supabase
         .from("qr_site_attendance")
@@ -402,19 +443,35 @@ export default function QrAttendance() {
               </div>
 
               <label className="qr-label">
-                {coordinator ? "Report attachments (2 required for Co-ordinator)" : "Report attachment"}
+                {dualExcel
+                  ? "Excel uploads (2 required for Site Engineer)"
+                  : "Site weekly plan"}
                 <span className="qr-week">
                   {week.start} → {week.end}
                 </span>
               </label>
               <label className="qr-file">
-                <input type="file" onChange={(e) => setFile1(e.target.files?.[0] || null)} />
-                <span>{file1 ? file1.name : coordinator ? "Choose file 1" : "Choose file"}</span>
+                <input
+                  type="file"
+                  accept={dualExcel ? ".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : undefined}
+                  onChange={(e) => setFile1(e.target.files?.[0] || null)}
+                />
+                <span>
+                  {file1
+                    ? file1.name
+                    : dualExcel
+                      ? "1. Site Work Excel"
+                      : "Choose weekly plan file"}
+                </span>
               </label>
-              {coordinator && (
+              {dualExcel && (
                 <label className="qr-file">
-                  <input type="file" onChange={(e) => setFile2(e.target.files?.[0] || null)} />
-                  <span>{file2 ? file2.name : "Choose file 2"}</span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={(e) => setFile2(e.target.files?.[0] || null)}
+                  />
+                  <span>{file2 ? file2.name : "2. Site Engineer Excel"}</span>
                 </label>
               )}
 
@@ -425,7 +482,11 @@ export default function QrAttendance() {
                   Scan again
                 </button>
                 <button type="submit" className="qr-btn-primary" disabled={submitting}>
-                  {submitting ? "Saving…" : "Submit weekly plan"}
+                  {submitting
+                    ? "Saving…"
+                    : dualExcel
+                      ? "Submit Excel uploads"
+                      : "Submit weekly plan"}
                 </button>
               </div>
             </form>
@@ -434,10 +495,10 @@ export default function QrAttendance() {
           {phase === "done" && (
             <div className="qr-done">
               <div className="qr-done-ico">✓</div>
-              <h2>Weekly plan submitted</h2>
+              <h2>{dualExcel ? "Excel uploads submitted" : "Weekly plan submitted"}</h2>
               <p>
-                Attendance and weekly plan for <strong>{scannedEmployee?.name}</strong> are saved in the QR
-                attendance table only.
+                Attendance and {dualExcel ? "Excel files" : "weekly plan"} for{" "}
+                <strong>{scannedEmployee?.name}</strong> are saved in the QR attendance table only.
               </p>
               <div className="qr-plan-actions">
                 <button type="button" className="qr-btn-primary" onClick={() => navigate("/site")}>
