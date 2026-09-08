@@ -5606,7 +5606,8 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadPermissions() {
     els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading employees…</td></tr>`;
     try {
-      const employees = (await api('/employees')).filter((e) => !isClientUserRow(e));
+      const employees = (await api('/employees'))
+        .filter((e) => !isClientUserRow(e) && e.is_active !== false);
       renderPermissionsTable(employees);
     } catch (err) { showToast(err.message, 'error'); }
   }
