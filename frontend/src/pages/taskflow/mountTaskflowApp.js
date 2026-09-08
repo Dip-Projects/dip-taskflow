@@ -1624,8 +1624,8 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('verifications', adminVerifs.length);
   
         // Reschedule requests awaiting admin decision (API already Pending-only)
-        const reschedReqs = await api('/tasks/reschedule-requests').catch(() => []);
-        setNavBadge('reschedule-requests', reschedReqs.filter((t) => t.reschedule_status === 'Pending').length);
+        const reschedReqs = await api('/tasks/reschedule-requests?status=Pending').catch(() => []);
+        setNavBadge('reschedule-requests', reschedReqs.length);
   
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
@@ -3601,39 +3601,58 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // ─── Reschedule requests ────────────────────────────────────────────────────
-  // Admin-only inbox: emp requests awaiting Approve / Reject.
+  // Admin inbox + history: Pending / Approved / Rejected stay visible.
   // Admin direct Reschedule updates the date immediately (no request row).
   async function loadRescheduleRequests() {
     const wrap = document.getElementById('reschedRequestsList');
     const sub = document.getElementById('reschedViewSub');
+    const filterEl = document.getElementById('resched-filter-status');
+    const filtersCard = document.getElementById('reschedFiltersCard');
     const isAdmin = state.user.role === 'admin';
     if (!isAdmin) {
+      if (filtersCard) filtersCard.hidden = true;
       if (sub) sub.textContent = 'Only admins review reschedule requests.';
       if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
       const tbody = document.getElementById('reschedRequestsTableBody');
       if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
       return;
     }
+    if (filtersCard) filtersCard.hidden = false;
     if (sub) {
-      sub.textContent = "Employees' requests to move a task's date — approve to apply the new date, or reject to leave it as is. Admin direct reschedule updates immediately (no approval).";
+      sub.textContent = "Employees' date-change requests — Pending need action; Approved / Rejected stay here for history. Admin direct reschedule updates immediately (no request row).";
     }
     if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
     if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     try {
-      const tasks = await api('/tasks/reschedule-requests');
-      const pending = (tasks || []).filter((t) => t.reschedule_status === 'Pending');
-      renderRescheduleRequests(wrap, pending, true);
-      if (tbody) renderRescheduleRequestsTable(tbody, pending, true);
+      const st = filterEl?.value ?? 'Pending';
+      const qs = st ? `?status=${encodeURIComponent(st)}` : '';
+      const tasks = await api(`/tasks/reschedule-requests${qs}`);
+      const list = Array.isArray(tasks) ? tasks : [];
+      const emptyMsg = st === 'Pending'
+        ? 'No reschedule requests pending'
+        : st === 'Approved'
+          ? 'No approved reschedule requests'
+          : st === 'Rejected'
+            ? 'No rejected reschedule requests'
+            : 'No reschedule requests';
+      renderRescheduleRequests(wrap, list, true, emptyMsg);
+      if (tbody) renderRescheduleRequestsTable(tbody, list, true, emptyMsg);
     } catch (err) { showToast(err.message, 'error'); }
   }
+
+  __tfReadyFns.push(() => {
+    document.getElementById('resched-filter-status')?.addEventListener('change', () => {
+      if (state.activeView === 'reschedule-requests') loadRescheduleRequests();
+    });
+  });
   
   // Desktop table view — was previously missing, so the desktop table stayed
   // empty forever even though the nav badge and the mobile card list both had
   // the right count/data.
-  function renderRescheduleRequestsTable(tbody, tasks, isAdmin) {
+  function renderRescheduleRequestsTable(tbody, tasks, isAdmin, emptyMsg) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">🎉</span>${isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -3685,9 +3704,9 @@ export async function mountTaskflowApp(opts = {}) {
     });
   }
   
-  function renderRescheduleRequests(wrap, tasks, isAdmin) {
+  function renderRescheduleRequests(wrap, tasks, isAdmin, emptyMsg) {
     if (!tasks.length) {
-      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>${isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests'}</div>`;
+      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</div>`;
       return;
     }
     wrap.innerHTML = '';

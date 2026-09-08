@@ -837,12 +837,25 @@ export default function TaskflowDom() {
           <div id="verificationsList" className="task-list view-mobile-only"></div>
         </section>
 
-        {/* RESCHEDULE REQUESTS — admin sees every pending one (approve/reject);
-             everyone else sees only their own, read-only. */}
+        {/* RESCHEDULE REQUESTS — admin inbox + history (Pending / Approved / Rejected);
+             employees do not use this screen for actions. */}
         <section id="view-reschedule-requests" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">🗓️ Reschedule requests</h2>
             <p className="view-sub" id="reschedViewSub">Tasks where a new date has been requested.</p>
+          </div>
+          <div className="filters-card" id="reschedFiltersCard">
+            <div className="filters-row">
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="resched-filter-status">Status</label>
+                <select id="resched-filter-status" defaultValue="Pending">
+                  <option value="Pending">Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                  <option value="">All</option>
+                </select>
+              </div>
+            </div>
           </div>
           <div className="table-card view-desktop-only">
             <div className="table-scroll">

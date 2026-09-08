@@ -1450,8 +1450,8 @@ router.post('/:id/reschedule-request', async (req, res) => {
   }
 });
 
-// List reschedule requests — admin sees every pending one (to action);
-// everyone else sees only their own (whatever the current status is), read-only.
+// List reschedule requests — admin sees Pending / Approved / Rejected history
+// (optional ?status= filter). Everyone else sees only their own, read-only.
 router.get('/reschedule-requests', async (req, res) => {
   try {
     let query = supabase
@@ -1461,7 +1461,11 @@ router.get('/reschedule-requests', async (req, res) => {
       .order('reschedule_requested_at', { ascending: false });
 
     if (req.user.role === 'admin') {
-      query = query.eq('reschedule_status', 'Pending');
+      const st = String(req.query.status || '').trim();
+      if (st === 'Pending' || st === 'Approved' || st === 'Rejected') {
+        query = query.eq('reschedule_status', st);
+      }
+      // no status → all decided + pending (history stays in the inbox)
     } else {
       query = query.eq('assigned_to', req.user.id);
     }
