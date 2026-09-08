@@ -289,10 +289,10 @@ export default function TaskflowDom() {
         <section id="view-my" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">My tasks</h2>
-            <p className="view-sub">Monday ke tasks Mon pe, Tuesday Tue pe — WhatsApp pe bhi usi din ka list aata hai.</p>
+            <p className="view-sub">Tasks assigned to you. Open / Done se filter karo.</p>
           </div>
 
-          <div className="smt-day-row" id="officeMyTasksDayRow" role="tablist" aria-label="Week days" style={{marginBottom: 12}}></div>
+          <div className="smt-day-row" id="officeMyTasksDayRow" hidden role="tablist" aria-label="Week days" style={{display: 'none', marginBottom: 12}}></div>
 
           <div className="my-tasks-tabs" id="myTasksOpenDoneBar" style={{marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center'}}>
             <button type="button" className="my-tasks-tab-btn active" data-opendone="open" id="officeMyOpenBtn">Open</button>

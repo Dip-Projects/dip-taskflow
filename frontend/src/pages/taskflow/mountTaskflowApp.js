@@ -1219,8 +1219,11 @@ export async function mountTaskflowApp(opts = {}) {
     if (isMobileNav()) closeSidebar();
     else openSidebar();
     if (state.user.role === 'admin') {
-      await loadMasterData(); switchView('add');
+      await loadMasterData();
+      switchView('add');
     } else {
+      // Employees with Add task need master dropdowns; always preload
+      await loadMasterData().catch(() => {});
       switchView('my');
     }
     // Refresh badge counts now and every 15s
@@ -1677,6 +1680,7 @@ export async function mountTaskflowApp(opts = {}) {
     document.querySelectorAll('.nav-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.view === viewKey);
     });
+    if (viewKey === 'add')            loadMasterData();
     if (viewKey === 'all')           loadAllTasks();
     if (viewKey === 'overdue')       loadOverdueTasks();
     if (viewKey === 'my')            loadMyTasks();
@@ -2648,8 +2652,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (isAdmin) {
       const odBar = document.getElementById('myTasksOpenDoneBar');
       if (odBar) odBar.hidden = true;
-      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Admin personal day board band. Assign tasks; Beena / employees My Tasks pe dekhenge.</td></tr>`;
-      els.myTasksList.innerHTML = `<div class="empty-state">Admin yahan assign kare — My Tasks employee login pe.</div>`;
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Admin ke personal My Tasks band hain. Assign → employee ke My Tasks pe dikhega.</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state">Tasks assign karo — assignee ke My Tasks mein aayenge.</div>`;
       return;
     }
 
