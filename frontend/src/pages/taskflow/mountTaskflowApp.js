@@ -1737,9 +1737,7 @@ export async function mountTaskflowApp(opts = {}) {
   function syncTaskEmployeeDropdown() {
     if (!els.fEmployee) return;
     const deptId = els.fDepartment?.value || '';
-    let list = employeesForDepartmentId(deptId).filter(
-      (e) => String(e.role || '').toLowerCase() !== 'admin'
-    );
+    let list = employeesForDepartmentId(deptId);
     list = [...list].sort((a, b) =>
       String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
     );
@@ -1901,11 +1899,6 @@ export async function mountTaskflowApp(opts = {}) {
     const formData = new FormData();
     formData.append('department_id', els.fDepartment.value);
     formData.append('assigned_to', els.fEmployee.value);
-    const assignee = (state.master.employees || []).find((e) => e.id === els.fEmployee.value);
-    if (assignee && String(assignee.role || '').toLowerCase() === 'admin') {
-      showFormMsg(els.addTaskMsg, 'Admin ko assign mat karo — kisi employee / PC ko assign karo.');
-      return;
-    }
     formData.append('project_id', els.fProject.value);
     formData.append('task_type_id', els.fTaskType.value);
     formData.append('description', document.getElementById('f-description').value);
