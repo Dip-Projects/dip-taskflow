@@ -289,18 +289,14 @@ export default function TaskflowDom() {
         <section id="view-my" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">My tasks</h2>
-            <p className="view-sub">Tasks assigned to you. Open / Done se filter karo.</p>
+            <p className="view-sub">Tasks assigned to you.</p>
           </div>
 
-          <div className="smt-day-row" id="officeMyTasksDayRow" hidden role="tablist" aria-label="Week days" style={{display: 'none', marginBottom: 12}}></div>
-
-          <div className="my-tasks-tabs" id="myTasksOpenDoneBar" style={{marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center'}}>
-            <button type="button" className="my-tasks-tab-btn active" data-opendone="open" id="officeMyOpenBtn">Open</button>
-            <button type="button" className="my-tasks-tab-btn" data-opendone="done" id="officeMyDoneBtn">Done</button>
-            <button type="button" className="primary-btn primary-btn-inline" id="officeSendWaListBtn" hidden style={{display:'none'}} title="Daily WhatsApp list disabled">
-              WhatsApp list abhi
-            </button>
-          </div>
+          <div className="smt-day-row" id="officeMyTasksDayRow" hidden style={{display: 'none'}}></div>
+          <div className="my-tasks-tabs" id="myTasksOpenDoneBar" hidden style={{display: 'none'}}></div>
+          <button type="button" id="officeMyOpenBtn" hidden></button>
+          <button type="button" id="officeMyDoneBtn" hidden></button>
+          <button type="button" id="officeSendWaListBtn" hidden></button>
 
           <div className="my-tasks-tabs" id="myTasksTabBar" hidden={true}>
             <button type="button" className="my-tasks-tab-btn active" data-mytab="mytask">My Task</button>

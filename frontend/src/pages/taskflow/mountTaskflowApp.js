@@ -2646,21 +2646,13 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function paintOfficeMyTasks() {
-    const isAdmin = state.user.role === 'admin';
     const dayRow = document.getElementById('officeMyTasksDayRow');
     if (dayRow) dayRow.hidden = true;
-    if (isAdmin) {
-      const odBar = document.getElementById('myTasksOpenDoneBar');
-      if (odBar) odBar.hidden = true;
-      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
-      els.myTasksList.innerHTML = `<div class="empty-state">No tasks</div>`;
-      return;
-    }
+    const odBar = document.getElementById('myTasksOpenDoneBar');
+    if (odBar) odBar.hidden = true;
 
-    // No Mon–Sun filter — show all open/done by tab only
-    const visibleTasks = (officeMyAllTasks || []).filter((t) =>
-      officeMyShowDone ? t.status === 'Completed' : (t.status !== 'Completed' && !isRejectedTask(t))
-    );
+    // Classic My Tasks: full list (no Open/Done / Mon–Sun split)
+    const visibleTasks = Array.isArray(officeMyAllTasks) ? officeMyAllTasks : [];
     myTasksTimerCache = visibleTasks;
     renderMyTasksTable(els.myTasksTableBody, visibleTasks, []);
     els.myTasksList.innerHTML = '';
@@ -2669,6 +2661,7 @@ export async function mountTaskflowApp(opts = {}) {
       els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true }))
     );
     if (!visibleTasks.length) {
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
       els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks</div>`;
     }
   }
@@ -2682,16 +2675,6 @@ export async function mountTaskflowApp(opts = {}) {
     if (tabBar) tabBar.hidden = !isAdmin;
 
     try {
-      if (isAdmin) {
-        officeMyAllTasks = [];
-        paintOfficeMyTasks();
-        const recurringTasks = await api('/recurring-tasks/my').catch(() => []);
-        if (recurringTasks.length) {
-          // Admin personal recurring still optional — skip to keep Beena-only messaging clear
-        }
-        return;
-      }
-
       const allTasks = await api('/tasks/my');
       officeMyAllTasks = Array.isArray(allTasks) ? allTasks : [];
       paintOfficeMyTasks();
@@ -2701,44 +2684,7 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   __tfReadyFns.push(() => {
-    document.getElementById('officeMyOpenBtn')?.addEventListener('click', () => {
-      officeMyShowDone = false;
-      document.getElementById('officeMyOpenBtn')?.classList.add('active');
-      document.getElementById('officeMyDoneBtn')?.classList.remove('active');
-      paintOfficeMyTasks();
-    });
-    document.getElementById('officeMyDoneBtn')?.addEventListener('click', () => {
-      officeMyShowDone = true;
-      document.getElementById('officeMyDoneBtn')?.classList.add('active');
-      document.getElementById('officeMyOpenBtn')?.classList.remove('active');
-      paintOfficeMyTasks();
-    });
-    const waBtn = document.getElementById('officeSendWaListBtn');
-    if (waBtn) {
-      const canSend =
-        state.user?.role === 'admin' ||
-        !!state.user?.is_mis_executive ||
-        /beena/i.test(`${state.user?.full_name || ''} ${state.user?.username || ''}`);
-      waBtn.hidden = !canSend;
-      waBtn.addEventListener('click', async () => {
-        try {
-          showToast('Sending WhatsApp list to Beena…');
-          const res = await api('/whatsapp/send-day-list-now', { method: 'POST', body: {} });
-          if (res?.ok) {
-            const r0 = res.results?.[0];
-            if (r0?.reason === 'no_whatsapp') {
-              showToast('Beena pe whatsapp_number missing hai', 'error');
-            } else {
-              showToast(`WhatsApp list sent (${res.dayLabel || 'today'}) ✅`, 'success');
-            }
-          } else {
-            showToast(res?.hint || res?.reason || 'Could not send', 'error');
-          }
-        } catch (err) {
-          showToast(err.message || 'Send failed', 'error');
-        }
-      });
-    }
+    // Open/Done day-list UI removed — keep stub ids harmless if referenced
   });
 
   // ─── "My Tasks" tabs (admin only): My Task ↔ Other Pending Work ───────────
