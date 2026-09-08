@@ -83,13 +83,8 @@ export default function SiteMyTasks() {
         method: "PATCH",
         body: JSON.stringify({ status: "Completed" }),
       });
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === task.id
-            ? { ...t, status: "Completed", completed_at: new Date().toISOString() }
-            : t
-        )
-      );
+      // Completed office tasks leave My Tasks; admin still sees them in All delegated
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
     } catch (err) {
       setError(err.message || "Could not mark complete");
     } finally {

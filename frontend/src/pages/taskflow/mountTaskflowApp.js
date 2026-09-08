@@ -2647,8 +2647,9 @@ export async function mountTaskflowApp(opts = {}) {
     const odBar = document.getElementById('myTasksOpenDoneBar');
     if (odBar) odBar.hidden = true;
 
-    // Classic My Tasks: full list (no Open/Done / Mon–Sun split)
-    const visibleTasks = Array.isArray(officeMyAllTasks) ? officeMyAllTasks : [];
+    // Classic My Tasks: open work only — Completed is admin All-delegated history
+    const visibleTasks = (Array.isArray(officeMyAllTasks) ? officeMyAllTasks : [])
+      .filter((t) => t.status !== 'Completed' && !isRejectedTask(t));
     myTasksTimerCache = visibleTasks;
     renderMyTasksTable(els.myTasksTableBody, visibleTasks, []);
     els.myTasksList.innerHTML = '';

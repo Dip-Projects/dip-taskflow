@@ -588,6 +588,8 @@ router.get('/all', requireAdmin, async (req, res) => {
   }
 });
 // ----------------------------- my tasks (everyone — only their own) -----------------------------
+// Completed tasks stay on admin "All delegated" only — employees should not
+// keep seeing finished work in My Tasks (Office or Site).
 router.get('/my', async (req, res) => {
   try {
     await resolveTaskSelect();
@@ -596,6 +598,7 @@ router.get('/my', async (req, res) => {
       .select(TASK_SELECT)
       .eq('assigned_to', req.user.id)
       .neq('status', 'Rejected')
+      .neq('status', 'Completed')
       .order('target_date', { ascending: true });
 
     if (req.query.status) query = query.eq('status', req.query.status);
