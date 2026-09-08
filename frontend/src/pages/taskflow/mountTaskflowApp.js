@@ -2193,7 +2193,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (task.is_on_hold) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
       } else if (task.verification_status === 'Pending Verification') {
-        statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
+        statusHtml += verifyingStatusPillHtml(task);
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
@@ -2409,7 +2409,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (task.is_on_hold) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
       } else if (task.verification_status === 'Pending Verification') {
-        statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
+        statusHtml += verifyingStatusPillHtml(task);
       } else if (task.verification_status === 'Verification Rejected') {
         statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
       } else if (task.verification_status === 'Updation Required') {
@@ -2876,7 +2876,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (task.is_on_hold) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
       } else if (task.verification_status === 'Pending Verification') {
-        statusHtml += `<br><span class="pill pill-PendingVerification" style="margin-top:4px">⏳ Verifying</span>`;
+        statusHtml += verifyingStatusPillHtml(task);
       } else if (task.verification_status === 'Verified') {
         statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
       } else if (task.verification_status === 'Verification Rejected') {
@@ -2975,6 +2975,14 @@ export async function mountTaskflowApp(opts = {}) {
     return plannedDateCellHtml(task);
   }
   
+  function verifyingStatusPillHtml(task) {
+    const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
+    const label = who
+      ? `⏳ Verifying · ${escapeHtml(who)}`
+      : '⏳ Verifying';
+    return `<br><span class="pill pill-PendingVerification" style="margin-top:4px" title="${who ? `Verifier: ${escapeHtml(who)}` : ''}">${label}</span>`;
+  }
+
   function verificationBadgeHtml(task) {
     if (task.verification_status === 'Updation Required') {
       return `<span class="pill pill-Pending" style="font-size:0.7rem">📝 Updation Required</span>`;
