@@ -273,7 +273,7 @@ export default function TaskflowDom() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Employee</th><th>Task</th><th>Frequency</th><th>Overdue since</th><th>Days overdue</th>
+                      <th>Employee</th><th>Project</th><th>Task</th><th>Frequency</th><th>Overdue since</th><th>Days overdue</th>
                     </tr>
                   </thead>
                   <tbody id="overdueRecurringTableBody"></tbody>

@@ -2309,7 +2309,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!tbody || !cards) return;
   
     if (tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</td></tr>`;
       cards.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</div>`;
       return;
     }
@@ -2317,9 +2317,11 @@ export async function mountTaskflowApp(opts = {}) {
     tbody.innerHTML = '';
     cards.innerHTML = '';
     tasks.forEach((task) => {
+      const projectName = task.project?.name || '—';
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
+        <td><strong style="font-weight:600">${escapeHtml(projectName)}</strong></td>
         <td>${escapeHtml(task.description ?? '')}</td>
         <td>${escapeHtml(freqLabel(task))}</td>
         <td>${escapeHtml(fmtDateOnly(task.oldest_overdue_date))}</td>
@@ -2336,6 +2338,7 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="task-card-body">
           <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(projectName)}</div>
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
           <div class="task-detail-line"><span class="task-detail-label">Overdue since:</span> ${escapeHtml(fmtDateOnly(task.oldest_overdue_date))}</div>
         </div>
