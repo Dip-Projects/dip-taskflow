@@ -2652,8 +2652,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (isAdmin) {
       const odBar = document.getElementById('myTasksOpenDoneBar');
       if (odBar) odBar.hidden = true;
-      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Admin ke personal My Tasks band hain. Assign → employee ke My Tasks pe dikhega.</td></tr>`;
-      els.myTasksList.innerHTML = `<div class="empty-state">Tasks assign karo — assignee ke My Tasks mein aayenge.</div>`;
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state">No tasks</div>`;
       return;
     }
 
