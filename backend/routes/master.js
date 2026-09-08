@@ -75,7 +75,7 @@ router.post('/task-types', requireCanAddTask, async (req, res) => {
   res.status(201).json(data);
 });
 
-router.get('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
+router.get('/task-types/:id/checkpoints', requireCanAddTask, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('task_type_checkpoint_templates')
@@ -89,7 +89,7 @@ router.get('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
   }
 });
 
-router.put('/task-types/:id/checkpoints', requireAdmin, async (req, res) => {
+router.put('/task-types/:id/checkpoints', requireCanAddTask, async (req, res) => {
   try {
     const taskTypeId = req.params.id;
     const labels = (req.body?.labels || [])

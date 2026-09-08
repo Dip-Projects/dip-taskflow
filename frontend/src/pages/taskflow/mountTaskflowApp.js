@@ -3280,7 +3280,10 @@ export async function mountTaskflowApp(opts = {}) {
       const template = await api(`/master/task-types/${typeId}/checkpoints`);
       labels = (template || []).map((r) => r.label).filter(Boolean);
     } catch (err) {
+      listEl.innerHTML = '';
       if (msgEl) { msgEl.textContent = err.message || 'Could not load checkpoints'; msgEl.hidden = false; }
+      if (assignBtn) assignBtn.disabled = true;
+      return;
     }
 
     if (!labels.length) {
