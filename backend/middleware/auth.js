@@ -91,23 +91,34 @@ function requireAdminOrMis(req, res, next) {
   return res.status(403).json({ error: 'Only an admin or MIS executive can do this' });
 }
 
-/** Admin, Permissions can_add_task, or Who sees what grants Add task for their role. */
+/** Admin, Permissions can_add_task (live DB), or Who sees what grants Add task. */
 async function requireCanAddTask(req, res, next) {
   if (req.user?.role === 'admin' || req.user?.can_add_task) return next();
   try {
-    const { canSee, mergeMap } = require('../lib/navVisibility');
     const supabase = require('../lib/supabaseClient');
+    // Permissions toggle updates DB immediately; JWT may still be old until re-login
+    const { data: u } = await supabase
+      .from('users')
+      .select('can_add_task, role, is_mis_executive, department, designation')
+      .eq('id', req.user.id)
+      .maybeSingle();
+    if (u?.role === 'admin' || u?.can_add_task) {
+      req.user.can_add_task = true;
+      return next();
+    }
+    const { canSee, mergeMap } = require('../lib/navVisibility');
     const { data } = await supabase
       .from('app_settings')
       .select('value')
       .eq('key', 'nav_visibility')
       .maybeSingle();
-    if (canSee('add', req.user, mergeMap(data?.value || null))) return next();
+    const liveUser = { ...req.user, ...(u || {}) };
+    if (canSee('add', liveUser, mergeMap(data?.value || null))) return next();
   } catch (err) {
     console.warn('requireCanAddTask nav check:', err.message);
   }
   return res.status(403).json({
-    error: 'No permission to add tasks. Ask admin: Permissions → Add task = Yes, or MIS: Who sees what → Add task.',
+    error: 'No permission to add tasks. Ask admin: Permissions → Add task = Yes, or MIS: Who sees what → Add task. Then log out and log in again.',
   });
 }
 

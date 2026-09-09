@@ -1218,6 +1218,21 @@ export async function mountTaskflowApp(opts = {}) {
     // Desktop: sidebar open by default; mobile: closed
     if (isMobileNav()) closeSidebar();
     else openSidebar();
+
+    // Refresh permissions from DB (e.g. Add task just enabled by admin)
+    try {
+      const me = await api('/auth/me');
+      if (me && me.id) {
+        state.user = { ...state.user, ...me };
+        localStorage.setItem('tf_user', JSON.stringify(state.user));
+        if (typeof window.dispatchEvent === 'function') {
+          window.dispatchEvent(new CustomEvent('tf:user-refreshed', { detail: state.user }));
+        }
+        buildNav();
+        setupTopbarQuick();
+      }
+    } catch (_) { /* keep cached user */ }
+
     if (state.user.role === 'admin') {
       await loadMasterData();
       switchView('add');
@@ -3299,7 +3314,10 @@ export async function mountTaskflowApp(opts = {}) {
       labels = (template || []).map((r) => r.label).filter(Boolean);
     } catch (err) {
       listEl.innerHTML = '';
-      if (msgEl) { msgEl.textContent = err.message || 'Could not load checkpoints'; msgEl.hidden = false; }
+      const hint = /permission|403|add task/i.test(err.message || '')
+        ? ' (Add task permission ke baad logout → login zaroor karo.)'
+        : '';
+      if (msgEl) { msgEl.textContent = (err.message || 'Could not load checkpoints') + hint; msgEl.hidden = false; }
       if (assignBtn) assignBtn.disabled = true;
       return;
     }

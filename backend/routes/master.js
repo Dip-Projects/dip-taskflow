@@ -75,7 +75,9 @@ router.post('/task-types', requireCanAddTask, async (req, res) => {
   res.status(201).json(data);
 });
 
-router.get('/task-types/:id/checkpoints', requireCanAddTask, async (req, res) => {
+// Any logged-in user can READ templates (needed when assigning a task).
+// Saving templates still requires Add-task permission.
+router.get('/task-types/:id/checkpoints', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('task_type_checkpoint_templates')
