@@ -689,29 +689,41 @@ router.get('/attendance', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Heads + HR + admin: list (heads see own submissions; HR sees all) */
+/** Heads + HR + admin: list (heads see own submissions; HR/admin see all) */
 router.get('/recruitments', async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
     if (canHrOrAdmin(req.user)) return res.json({ recruitments: list });
     if (!isHead(req.user)) return res.status(403).json({ error: 'Only Head or HR can view recruitments' });
-    const mine = list.filter((r) => r.submitted_by === req.user.id);
+    const uid = String(req.user.id || '');
+    const mine = list.filter((r) => String(r.submitted_by || '') === uid);
     res.json({ recruitments: mine });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load recruitments' });
   }
 });
 
+/** Accept JSON (preferred for requirements) or multipart (legacy CV upload). */
+function parseRecruitmentBody(req, res, next) {
+  const ct = String(req.headers['content-type'] || '');
+  if (ct.includes('multipart/form-data')) {
+    return upload.single('cv')(req, res, next);
+  }
+  return next();
+}
+
 /** Head / admin submits hiring requirement (not candidate details) → HR */
-router.post('/recruitments', upload.single('cv'), async (req, res) => {
+router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
   try {
     if (!isHead(req.user) && !canHrOrAdmin(req.user)) {
       return res.status(403).json({ error: 'Only Head or HR can submit recruitment' });
     }
     const body = req.body || {};
-    const kind = String(body.kind || '').trim().toLowerCase() === 'requirement'
-      ? 'requirement'
-      : (body.designation || body.experience_required ? 'requirement' : 'candidate');
+    const kindRaw = String(body.kind || '').trim().toLowerCase();
+    const looksLikeRequirement =
+      kindRaw === 'requirement' ||
+      !!(body.designation || body.experience_required || body.experience);
+    const kind = looksLikeRequirement ? 'requirement' : 'candidate';
 
     // Manpower / hiring requirement from Office (no candidate name/mobile)
     if (kind === 'requirement') {
@@ -732,7 +744,6 @@ router.post('/recruitments', upload.single('cv'), async (req, res) => {
         skills: String(body.skills || '').trim(),
         urgency: String(body.urgency || 'Normal').trim() || 'Normal',
         notes: String(body.notes || '').trim(),
-        // Display helpers for older HR UI rows
         candidate_name: `Hiring: ${designation}`,
         phone: '',
         email: '',

@@ -710,7 +710,9 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
   const applyUrl = `${publicOrigin()}/apply`;
 
   const isRequirement = (c) =>
-    c?.kind === 'requirement' || c?.source === 'office_requirement';
+    c?.kind === 'requirement' ||
+    c?.source === 'office_requirement' ||
+    (!!c?.designation && !!c?.experience_required && !c?.application && c?.source !== 'public_qr');
 
   const requirements = (apiCandidates || []).filter(isRequirement);
   const candidates = (apiCandidates || []).filter((c) => !isRequirement(c));

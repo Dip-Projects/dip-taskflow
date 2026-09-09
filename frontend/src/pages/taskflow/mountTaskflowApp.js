@@ -4795,9 +4795,13 @@ export async function mountTaskflowApp(opts = {}) {
     if (body) body.innerHTML = '<tr><td colspan="5" class="empty-state">Loading…</td></tr>';
     try {
       const data = await api('/hr/recruitments');
-      const rows = (data.recruitments || []).filter(
-        (r) => r.kind === 'requirement' || (!r.source && !r.application && (r.designation || r.role_applied))
-      );
+      const rows = (data.recruitments || []).filter((r) => {
+        if (r.kind === 'requirement' || r.source === 'office_requirement') return true;
+        // legacy office rows without kind (not QR candidates)
+        if (r.application || r.source === 'public_qr') return false;
+        if (r.designation && r.experience_required) return true;
+        return false;
+      });
       if (!body) return;
       if (!rows.length) {
         body.innerHTML = '<tr><td colspan="5" class="empty-state">No requirements sent yet</td></tr>';
@@ -4829,18 +4833,22 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
     try {
-      const fd = new FormData();
-      fd.append('kind', 'requirement');
-      fd.append('designation', designation);
-      fd.append('role_applied', designation);
-      fd.append('experience_required', experience);
-      fd.append('openings', String(openings));
-      fd.append('department', document.getElementById('hr-rec-department')?.value || '');
-      fd.append('location', document.getElementById('hr-rec-location')?.value || '');
-      fd.append('skills', document.getElementById('hr-rec-skills')?.value || '');
-      fd.append('urgency', document.getElementById('hr-rec-urgency')?.value || 'Normal');
-      fd.append('notes', document.getElementById('hr-rec-notes')?.value || '');
-      await api('/hr/recruitments', { method: 'POST', body: fd, isForm: true });
+      // JSON (not FormData) — reliable on Vercel; no CV file on requirement form
+      await api('/hr/recruitments', {
+        method: 'POST',
+        body: {
+          kind: 'requirement',
+          designation,
+          role_applied: designation,
+          experience_required: experience,
+          openings,
+          department: document.getElementById('hr-rec-department')?.value?.trim() || '',
+          location: document.getElementById('hr-rec-location')?.value?.trim() || '',
+          skills: document.getElementById('hr-rec-skills')?.value?.trim() || '',
+          urgency: document.getElementById('hr-rec-urgency')?.value || 'Normal',
+          notes: document.getElementById('hr-rec-notes')?.value?.trim() || '',
+        },
+      });
       e.target.reset();
       const openingsEl = document.getElementById('hr-rec-openings');
       if (openingsEl) openingsEl.value = '1';
