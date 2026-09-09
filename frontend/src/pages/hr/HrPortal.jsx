@@ -702,10 +702,74 @@ function LeavesView({ leaves, loading, error, onReload }) {
   );
 }
 
+function formatStatusAt(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16);
+    return d.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return String(iso).slice(0, 16);
+  }
+}
+
+function StatusHistoryModal({ row, onClose }) {
+  const title = row?.candidate_name || row?.designation || 'Recruitment';
+  const hist = Array.isArray(row?.status_history) ? row.status_history : [];
+  return (
+    <div className="hr-modal-backdrop" onClick={onClose} role="presentation">
+      <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" style={{ maxWidth: 520, maxHeight: '85vh', overflow: 'auto' }}>
+        <h3 style={{ marginTop: 0 }}>Status history — {title}</h3>
+        <p className="hr-sub" style={{ marginTop: 0 }}>
+          Kab konsa status change hua, kaun ne change kiya.
+        </p>
+        {!hist.length ? (
+          <div className="hr-empty">No status history yet. Next change se yahan dikhega.</div>
+        ) : (
+          <ol style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {hist.map((h, i) => (
+              <li key={`${h.at}-${i}`} style={{ fontSize: '0.85rem', lineHeight: 1.45 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {h.from ? (
+                    <>
+                      {h.from} → <span style={{ color: '#6b2d0f' }}>{h.to}</span>
+                    </>
+                  ) : (
+                    <span style={{ color: '#6b2d0f' }}>{h.to}</span>
+                  )}
+                </div>
+                <div style={{ opacity: 0.75 }}>
+                  {formatStatusAt(h.at)}
+                  {h.by_name ? ` · ${h.by_name}` : ''}
+                </div>
+                {h.note ? <div style={{ opacity: 0.7, fontStyle: 'italic' }}>{h.note}</div> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+        <button type="button" className="hr-btn ghost" style={{ marginTop: 14 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function lastStatusChange(row) {
+  const hist = Array.isArray(row?.status_history) ? row.status_history : [];
+  if (!hist.length) return null;
+  return hist[hist.length - 1];
+}
+
 function RecruitmentView({ apiCandidates, onReload, busySet }) {
   const [busy, setBusy] = useState(false);
   const [applyQr, setApplyQr] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [historyRow, setHistoryRow] = useState(null);
   const statuses = RECRUIT_STATUSES;
   const applyUrl = `${publicOrigin()}/apply`;
 
@@ -746,7 +810,7 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
     <div className="hr-panel">
       <p className="hr-sub" style={{ marginTop: 0 }}>
         Office se <strong>hiring requirement</strong> aati hai (designation / experience / openings).
-        Candidate name–mobile apply QR se aata hai.
+        Candidate name–mobile apply QR se aata hai. Status change history <strong>History</strong> pe dikhegi.
       </p>
 
       <div className="hr-toolbar">
@@ -766,37 +830,53 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
               <th>From</th>
               <th>Skills / notes</th>
               <th>Status</th>
+              <th>History</th>
             </tr>
           </thead>
           <tbody>
             {!requirements.length ? (
-              <tr><td colSpan={8} className="hr-empty">No hiring requirements yet.</td></tr>
+              <tr><td colSpan={9} className="hr-empty">No hiring requirements yet.</td></tr>
             ) : (
-              requirements.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.designation || c.role_applied || '—'}</td>
-                  <td>{c.experience_required || '—'}</td>
-                  <td>{c.openings != null ? c.openings : '—'}</td>
-                  <td>{[c.department, c.location].filter(Boolean).join(' · ') || '—'}</td>
-                  <td>{c.urgency || 'Normal'}</td>
-                  <td>{c.submitted_by_name || '—'}</td>
-                  <td style={{ maxWidth: 220, fontSize: '0.78rem' }}>
-                    {[c.skills, c.notes].filter(Boolean).join(' — ') || '—'}
-                  </td>
-                  <td>
-                    <select
-                      value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
-                      disabled={busy}
-                      onChange={(e) => update(c.id, { status: e.target.value })}
-                    >
-                      {!statuses.includes(c.status) && c.status ? (
-                        <option value={c.status}>{c.status}</option>
+              requirements.map((c) => {
+                const last = lastStatusChange(c);
+                return (
+                  <tr key={c.id}>
+                    <td>{c.designation || c.role_applied || '—'}</td>
+                    <td>{c.experience_required || '—'}</td>
+                    <td>{c.openings != null ? c.openings : '—'}</td>
+                    <td>{[c.department, c.location].filter(Boolean).join(' · ') || '—'}</td>
+                    <td>{c.urgency || 'Normal'}</td>
+                    <td>{c.submitted_by_name || '—'}</td>
+                    <td style={{ maxWidth: 220, fontSize: '0.78rem' }}>
+                      {[c.skills, c.notes].filter(Boolean).join(' — ') || '—'}
+                    </td>
+                    <td>
+                      <select
+                        value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
+                        disabled={busy}
+                        onChange={(e) => update(c.id, { status: e.target.value })}
+                      >
+                        {!statuses.includes(c.status) && c.status ? (
+                          <option value={c.status}>{c.status}</option>
+                        ) : null}
+                        {statuses.map((s) => <option key={s}>{s}</option>)}
+                      </select>
+                      {last ? (
+                        <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
+                          {last.from ? `${last.from} → ` : ''}{last.to}
+                          <br />
+                          {formatStatusAt(last.at)}
+                        </div>
                       ) : null}
-                      {statuses.map((s) => <option key={s}>{s}</option>)}
-                    </select>
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td>
+                      <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
+                        History
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -845,68 +925,84 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
               <th>Interview</th>
               <th>Status</th>
               <th>Notes</th>
+              <th>History</th>
             </tr>
           </thead>
           <tbody>
             {!candidates.length ? (
-              <tr><td colSpan={8} className="hr-empty">No candidate applications yet.</td></tr>
+              <tr><td colSpan={9} className="hr-empty">No candidate applications yet.</td></tr>
             ) : (
-              candidates.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    {c.candidate_name}
-                    {c.aadhaar ? <div style={{ fontSize: '0.72rem', opacity: 0.65 }}>Aadhaar: {c.aadhaar}</div> : null}
-                  </td>
-                  <td>{c.role_applied || c.application?.position_applied || '—'}</td>
-                  <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
-                  <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
-                  <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {c.application ? (
-                        <button type="button" className="hr-btn ghost" onClick={() => setDetail(c)}>View form</button>
+              candidates.map((c) => {
+                const last = lastStatusChange(c);
+                return (
+                  <tr key={c.id}>
+                    <td>
+                      {c.candidate_name}
+                      {c.aadhaar ? <div style={{ fontSize: '0.72rem', opacity: 0.65 }}>Aadhaar: {c.aadhaar}</div> : null}
+                    </td>
+                    <td>{c.role_applied || c.application?.position_applied || '—'}</td>
+                    <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
+                    <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {c.application ? (
+                          <button type="button" className="hr-btn ghost" onClick={() => setDetail(c)}>View form</button>
+                        ) : null}
+                        {c.cv_url ? (
+                          <a href={c.cv_url} target="_blank" rel="noreferrer">CV</a>
+                        ) : !c.application ? '—' : null}
+                      </div>
+                    </td>
+                    <td>
+                      <input
+                        type="datetime-local"
+                        value={c.interview_at ? String(c.interview_at).slice(0, 16) : ''}
+                        disabled={busy}
+                        onChange={(e) => update(c.id, {
+                          interview_at: e.target.value ? new Date(e.target.value).toISOString() : null,
+                          status: e.target.value ? 'Interview Lined Up' : c.status,
+                        })}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
+                        disabled={busy}
+                        onChange={(e) => update(c.id, { status: e.target.value })}
+                      >
+                        {!statuses.includes(c.status) && c.status ? (
+                          <option value={c.status}>{c.status}</option>
+                        ) : null}
+                        {statuses.map((s) => <option key={s}>{s}</option>)}
+                      </select>
+                      {last ? (
+                        <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
+                          {last.from ? `${last.from} → ` : ''}{last.to}
+                          <br />
+                          {formatStatusAt(last.at)}
+                        </div>
                       ) : null}
-                      {c.cv_url ? (
-                        <a href={c.cv_url} target="_blank" rel="noreferrer">CV</a>
-                      ) : !c.application ? '—' : null}
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      type="datetime-local"
-                      value={c.interview_at ? String(c.interview_at).slice(0, 16) : ''}
-                      disabled={busy}
-                      onChange={(e) => update(c.id, {
-                        interview_at: e.target.value ? new Date(e.target.value).toISOString() : null,
-                        status: e.target.value ? 'Interview Lined Up' : c.status,
-                      })}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
-                      disabled={busy}
-                      onChange={(e) => update(c.id, { status: e.target.value })}
-                    >
-                      {!statuses.includes(c.status) && c.status ? (
-                        <option value={c.status}>{c.status}</option>
-                      ) : null}
-                      {statuses.map((s) => <option key={s}>{s}</option>)}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      defaultValue={c.interview_notes || c.notes || ''}
-                      placeholder="Interview / process notes"
-                      disabled={busy}
-                      onBlur={(e) => {
-                        if (e.target.value !== (c.interview_notes || c.notes || '')) {
-                          update(c.id, { interview_notes: e.target.value });
-                        }
-                      }}
-                    />
-                  </td>
-                </tr>
-              ))
+                    </td>
+                    <td>
+                      <input
+                        defaultValue={c.interview_notes || c.notes || ''}
+                        placeholder="Interview / process notes"
+                        disabled={busy}
+                        onBlur={(e) => {
+                          if (e.target.value !== (c.interview_notes || c.notes || '')) {
+                            update(c.id, { interview_notes: e.target.value });
+                          }
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
+                        History
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -922,6 +1018,10 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
             <button type="button" className="hr-btn ghost" onClick={() => setDetail(null)}>Close</button>
           </div>
         </div>
+      ) : null}
+
+      {historyRow ? (
+        <StatusHistoryModal row={historyRow} onClose={() => setHistoryRow(null)} />
       ) : null}
     </div>
   );

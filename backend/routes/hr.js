@@ -90,6 +90,31 @@ function canHrOrAdmin(user) {
   return user?.role === 'admin' || isHrUser(user);
 }
 
+/** Timeline entry when recruitment status is set / changed */
+function statusHistoryEntry({ from = null, to, by = null, by_name = 'System', note = '' } = {}) {
+  return {
+    from: from || null,
+    to: String(to || '').trim() || 'Request Received',
+    at: new Date().toISOString(),
+    by,
+    by_name: by_name || 'System',
+    note: String(note || '').trim(),
+  };
+}
+
+function ensureStatusHistory(row, actor) {
+  if (Array.isArray(row.status_history) && row.status_history.length) return row.status_history;
+  return [
+    statusHistoryEntry({
+      from: null,
+      to: row.status || 'Request Received',
+      by: row.submitted_by || actor?.id || null,
+      by_name: row.submitted_by_name || actor?.full_name || actor?.username || 'System',
+      note: 'Created',
+    }),
+  ];
+}
+
 async function ensureBucket() {
   const { data: existing } = await supabase.storage.getBucket(BUCKET);
   if (existing) return;
@@ -389,6 +414,15 @@ router.post('/public/apply', publicDocsUpload, async (req, res) => {
       source: 'public_qr',
       submitted_by: null,
       submitted_by_name: 'Walk-in / QR Apply',
+      status_history: [
+        statusHistoryEntry({
+          from: null,
+          to: 'Request Received',
+          by: null,
+          by_name: 'Walk-in / QR Apply',
+          note: 'Application submitted',
+        }),
+      ],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -756,6 +790,15 @@ router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
         source: 'office_requirement',
         submitted_by: req.user.id,
         submitted_by_name: req.user.full_name || req.user.username,
+        status_history: [
+          statusHistoryEntry({
+            from: null,
+            to: 'Request Received',
+            by: req.user.id,
+            by_name: req.user.full_name || req.user.username,
+            note: 'Hiring requirement submitted',
+          }),
+        ],
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -800,6 +843,15 @@ router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
       source: 'office_candidate',
       submitted_by: req.user.id,
       submitted_by_name: req.user.full_name || req.user.username,
+      status_history: [
+        statusHistoryEntry({
+          from: null,
+          to: 'Request Received',
+          by: req.user.id,
+          by_name: req.user.full_name || req.user.username,
+          note: 'Candidate submitted',
+        }),
+      ],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -814,16 +866,37 @@ router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
   }
 });
 
-/** HR updates pipeline status / interview */
+/** HR updates pipeline status / interview — status changes are logged */
 router.patch('/recruitments/:id', requireAdminOrHr, async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
     const idx = list.findIndex((r) => r.id === req.params.id);
     if (idx < 0) return res.status(404).json({ error: 'Not found' });
+
+    const prev = list[idx];
+    const history = ensureStatusHistory({ ...prev }, req.user);
+    const prevStatus = String(prev.status || 'Request Received');
+
     const allowed = ['status', 'interview_at', 'interview_notes', 'notes', 'role_applied'];
     allowed.forEach((k) => {
       if (req.body[k] !== undefined) list[idx][k] = req.body[k];
     });
+
+    const nextStatus = String(list[idx].status || prevStatus);
+    if (req.body.status !== undefined && nextStatus !== prevStatus) {
+      history.push(
+        statusHistoryEntry({
+          from: prevStatus,
+          to: nextStatus,
+          by: req.user.id,
+          by_name: req.user.full_name || req.user.username || 'HR',
+          note: String(req.body.status_note || '').trim(),
+        })
+      );
+    }
+
+    list[idx].status_history = history;
+    list[idx].pipeline_step = nextStatus;
     list[idx].updated_at = new Date().toISOString();
     await writeJson(RECRUIT_PATH, list);
     res.json({ recruitment: list[idx] });
