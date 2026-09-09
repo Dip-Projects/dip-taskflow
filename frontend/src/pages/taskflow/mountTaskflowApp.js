@@ -1416,7 +1416,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (isHeadUser || isAdmin) {
       appendCollapsibleNav(
         'HR / Hiring',
-        [makeNavButton('new-recruitment', '🧑‍💼 New Recruitment')],
+        [makeNavButton('new-recruitment', '🧑‍💼 Hiring requirement')],
         { collapsed: true, sectionId: 'hr-hiring' }
       );
     }
@@ -4805,19 +4805,21 @@ export async function mountTaskflowApp(opts = {}) {
     if (body) body.innerHTML = '<tr><td colspan="5" class="empty-state">Loading…</td></tr>';
     try {
       const data = await api('/hr/recruitments');
-      const rows = data.recruitments || [];
+      const rows = (data.recruitments || []).filter(
+        (r) => r.kind === 'requirement' || (!r.source && !r.application && (r.designation || r.role_applied))
+      );
       if (!body) return;
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="5" class="empty-state">No submissions yet</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="empty-state">No requirements sent yet</td></tr>';
         return;
       }
       body.innerHTML = rows.map((r) => `
         <tr>
-          <td>${escapeHtml(r.candidate_name || '')}</td>
-          <td>${escapeHtml(r.role_applied || '—')}</td>
+          <td>${escapeHtml(r.designation || r.role_applied || r.candidate_name || '—')}</td>
+          <td>${escapeHtml(r.experience_required || '—')}</td>
+          <td>${escapeHtml(String(r.openings != null ? r.openings : '—'))}</td>
           <td>${escapeHtml(r.status || '')}</td>
           <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
-          <td>${r.cv_url ? `<a href="${escapeHtml(r.cv_url)}" target="_blank" rel="noopener">CV</a>` : '—'}</td>
         </tr>`).join('');
     } catch (err) {
       if (body) body.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
@@ -4851,20 +4853,33 @@ export async function mountTaskflowApp(opts = {}) {
     e.preventDefault();
     const msg = document.getElementById('hrRecruitMsg');
     if (msg) { msg.hidden = true; msg.textContent = ''; }
-    const name = document.getElementById('hr-rec-name')?.value?.trim();
-    if (!name) return;
+    const designation = document.getElementById('hr-rec-designation')?.value?.trim();
+    const experience = document.getElementById('hr-rec-experience')?.value?.trim();
+    const openingsRaw = document.getElementById('hr-rec-openings')?.value;
+    const openings = Math.max(1, Math.min(50, parseInt(openingsRaw, 10) || 1));
+    if (!designation || !experience) {
+      if (msg) { msg.textContent = 'Designation and experience are required'; msg.hidden = false; }
+      return;
+    }
     try {
       const fd = new FormData();
-      fd.append('candidate_name', name);
-      fd.append('role_applied', document.getElementById('hr-rec-role')?.value || '');
-      fd.append('phone', document.getElementById('hr-rec-phone')?.value || '');
-      fd.append('email', document.getElementById('hr-rec-email')?.value || '');
+      fd.append('kind', 'requirement');
+      fd.append('designation', designation);
+      fd.append('role_applied', designation);
+      fd.append('experience_required', experience);
+      fd.append('openings', String(openings));
+      fd.append('department', document.getElementById('hr-rec-department')?.value || '');
+      fd.append('location', document.getElementById('hr-rec-location')?.value || '');
+      fd.append('skills', document.getElementById('hr-rec-skills')?.value || '');
+      fd.append('urgency', document.getElementById('hr-rec-urgency')?.value || 'Normal');
       fd.append('notes', document.getElementById('hr-rec-notes')?.value || '');
-      const cv = document.getElementById('hr-rec-cv')?.files?.[0];
-      if (cv) fd.append('cv', cv);
       await api('/hr/recruitments', { method: 'POST', body: fd, isForm: true });
       e.target.reset();
-      showToast('Submitted to HR', 'success');
+      const openingsEl = document.getElementById('hr-rec-openings');
+      if (openingsEl) openingsEl.value = '1';
+      const urg = document.getElementById('hr-rec-urgency');
+      if (urg) urg.value = 'Normal';
+      showToast('Requirement sent to HR', 'success');
       loadHrRecruitmentMine();
     } catch (err) {
       if (msg) { msg.textContent = err.message; msg.hidden = false; }

@@ -702,13 +702,59 @@ router.get('/recruitments', async (req, res) => {
   }
 });
 
-/** Head submits new recruitment request → visible to HR */
+/** Head / admin submits hiring requirement (not candidate details) → HR */
 router.post('/recruitments', upload.single('cv'), async (req, res) => {
   try {
     if (!isHead(req.user) && !canHrOrAdmin(req.user)) {
       return res.status(403).json({ error: 'Only Head or HR can submit recruitment' });
     }
     const body = req.body || {};
+    const kind = String(body.kind || '').trim().toLowerCase() === 'requirement'
+      ? 'requirement'
+      : (body.designation || body.experience_required ? 'requirement' : 'candidate');
+
+    // Manpower / hiring requirement from Office (no candidate name/mobile)
+    if (kind === 'requirement') {
+      const designation = String(body.designation || body.role_applied || body.role || '').trim();
+      const experience_required = String(body.experience_required || body.experience || '').trim();
+      if (!designation) return res.status(400).json({ error: 'Designation needed is required' });
+      if (!experience_required) return res.status(400).json({ error: 'Experience required is required' });
+      const openings = Math.max(1, Math.min(50, parseInt(body.openings, 10) || 1));
+      const row = {
+        id: uid(),
+        kind: 'requirement',
+        designation,
+        role_applied: designation,
+        experience_required,
+        openings,
+        department: String(body.department || '').trim(),
+        location: String(body.location || '').trim(),
+        skills: String(body.skills || '').trim(),
+        urgency: String(body.urgency || 'Normal').trim() || 'Normal',
+        notes: String(body.notes || '').trim(),
+        // Display helpers for older HR UI rows
+        candidate_name: `Hiring: ${designation}`,
+        phone: '',
+        email: '',
+        status: 'Request Received',
+        pipeline_step: 'Request Received',
+        interview_at: null,
+        interview_notes: '',
+        cv_url: null,
+        cv_path: null,
+        source: 'office_requirement',
+        submitted_by: req.user.id,
+        submitted_by_name: req.user.full_name || req.user.username,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const list = await readJson(RECRUIT_PATH, []);
+      list.unshift(row);
+      await writeJson(RECRUIT_PATH, list);
+      return res.status(201).json({ recruitment: row });
+    }
+
+    // Legacy / rare: candidate-style submit (CV attach) — still supported
     const name = String(body.candidate_name || body.name || '').trim();
     if (!name) return res.status(400).json({ error: 'Candidate name is required' });
 
@@ -728,6 +774,7 @@ router.post('/recruitments', upload.single('cv'), async (req, res) => {
 
     const row = {
       id: uid(),
+      kind: 'candidate',
       candidate_name: name,
       role_applied: String(body.role_applied || body.role || '').trim(),
       phone: String(body.phone || '').trim(),
@@ -739,6 +786,7 @@ router.post('/recruitments', upload.single('cv'), async (req, res) => {
       interview_notes: '',
       cv_url,
       cv_path,
+      source: 'office_candidate',
       submitted_by: req.user.id,
       submitted_by_name: req.user.full_name || req.user.username,
       created_at: new Date().toISOString(),

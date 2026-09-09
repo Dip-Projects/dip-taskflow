@@ -88,6 +88,11 @@ function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onS
     const s = String(r.status || '').toLowerCase();
     return s === 'present' || s === 'half' || r.clock_in;
   }).length;
+  const openHiring = (candidates || []).filter((c) => {
+    const st = String(c.status || '').toLowerCase();
+    if (st === 'hired' || st === 'rejected' || st === 'approved') return false;
+    return true;
+  }).length;
   const birthdays = alerts?.birthdays || [];
   const insuranceDue = alerts?.insuranceDue || [];
 
@@ -97,7 +102,7 @@ function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onS
         <div className="hr-stat"><div className="n">{active}</div><div className="l">Active employees</div></div>
         <div className="hr-stat"><div className="n">{present}</div><div className="l">Present today</div></div>
         <div className="hr-stat"><div className="n">{pendingLeaves}</div><div className="l">Pending leaves</div></div>
-        <div className="hr-stat"><div className="n">{candidates.length}</div><div className="l">Open hiring</div></div>
+        <div className="hr-stat"><div className="n">{openHiring}</div><div className="l">Open hiring</div></div>
       </div>
 
       <div className="hr-panel">
@@ -704,6 +709,12 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
   const statuses = RECRUIT_STATUSES;
   const applyUrl = `${publicOrigin()}/apply`;
 
+  const isRequirement = (c) =>
+    c?.kind === 'requirement' || c?.source === 'office_requirement';
+
+  const requirements = (apiCandidates || []).filter(isRequirement);
+  const candidates = (apiCandidates || []).filter((c) => !isRequirement(c));
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -732,8 +743,62 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
   return (
     <div className="hr-panel">
       <p className="hr-sub" style={{ marginTop: 0 }}>
-        Interview walk-in: candidate yeh QR / link scan kare → application form phone pe open → submit = recruitment entry.
+        Office se <strong>hiring requirement</strong> aati hai (designation / experience / openings).
+        Candidate name–mobile apply QR se aata hai.
       </p>
+
+      <div className="hr-toolbar">
+        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy}>Refresh</button>
+      </div>
+
+      <h3 style={{ margin: '8px 0 10px', fontSize: '0.95rem' }}>Hiring requirements (from Office)</h3>
+      <div className="hr-table-wrap" style={{ marginBottom: 20 }}>
+        <table className="hr-table">
+          <thead>
+            <tr>
+              <th>Designation</th>
+              <th>Experience</th>
+              <th>Openings</th>
+              <th>Dept / Location</th>
+              <th>Urgency</th>
+              <th>From</th>
+              <th>Skills / notes</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {!requirements.length ? (
+              <tr><td colSpan={8} className="hr-empty">No hiring requirements yet.</td></tr>
+            ) : (
+              requirements.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.designation || c.role_applied || '—'}</td>
+                  <td>{c.experience_required || '—'}</td>
+                  <td>{c.openings != null ? c.openings : '—'}</td>
+                  <td>{[c.department, c.location].filter(Boolean).join(' · ') || '—'}</td>
+                  <td>{c.urgency || 'Normal'}</td>
+                  <td>{c.submitted_by_name || '—'}</td>
+                  <td style={{ maxWidth: 220, fontSize: '0.78rem' }}>
+                    {[c.skills, c.notes].filter(Boolean).join(' — ') || '—'}
+                  </td>
+                  <td>
+                    <select
+                      value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
+                      disabled={busy}
+                      onChange={(e) => update(c.id, { status: e.target.value })}
+                    >
+                      {!statuses.includes(c.status) && c.status ? (
+                        <option value={c.status}>{c.status}</option>
+                      ) : null}
+                      {statuses.map((s) => <option key={s}>{s}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <div className="hr-apply-qr" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16, padding: 12, border: '1px solid var(--hr-line, #e2d5c6)', borderRadius: 10 }}>
         {applyQr?.qr ? (
@@ -762,12 +827,10 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
         </div>
       </div>
 
+      <h3 style={{ margin: '8px 0 10px', fontSize: '0.95rem' }}>Candidates (apply / walk-in)</h3>
       <p className="hr-sub">
         Pipeline: Request → Post Create → Post Live → Shortlist → Interview Lined Up → Interview Done → Offer → Approved / Hired / Rejected.
       </p>
-      <div className="hr-toolbar">
-        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy}>Refresh</button>
-      </div>
       <div className="hr-table-wrap">
         <table className="hr-table">
           <thead>
@@ -783,10 +846,10 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
             </tr>
           </thead>
           <tbody>
-            {!apiCandidates.length ? (
-              <tr><td colSpan={8} className="hr-empty">No recruitment requests yet.</td></tr>
+            {!candidates.length ? (
+              <tr><td colSpan={8} className="hr-empty">No candidate applications yet.</td></tr>
             ) : (
-              apiCandidates.map((c) => (
+              candidates.map((c) => (
                 <tr key={c.id}>
                   <td>
                     {c.candidate_name}

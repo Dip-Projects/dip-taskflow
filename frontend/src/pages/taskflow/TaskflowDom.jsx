@@ -880,47 +880,71 @@ export default function TaskflowDom() {
           <div id="reschedRequestsList" className="task-list view-mobile-only"></div>
         </section>
 
-        {/* NEW RECRUITMENT (heads) */}
+        {/* HIRING REQUIREMENT (heads) — not a candidate form */}
         <section id="view-new-recruitment" className="view" hidden={true}>
           <div className="view-heading">
-            <h2 className="view-title">New Recruitment</h2>
-            <p className="view-sub">Submit a candidate request — HR will see it immediately and run interview / offer process.</p>
+            <h2 className="view-title">Hiring requirement</h2>
+            <p className="view-sub">
+              Employee chahiye? Designation, experience, openings batao — HR hiring chalayega.
+              Candidate name / mobile yahan nahi (woh apply / interview pe aata hai).
+            </p>
           </div>
           <form id="hrRecruitForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
             <div className="field">
-              <label htmlFor="hr-rec-name">Candidate name <span className="req">*</span></label>
-              <input id="hr-rec-name" required placeholder="Full name" />
+              <label htmlFor="hr-rec-designation">Designation needed <span className="req">*</span></label>
+              <input id="hr-rec-designation" required placeholder="e.g. Site Engineer, Sales Executive, Safety Officer" />
             </div>
             <div className="field">
-              <label htmlFor="hr-rec-role">Role / designation needed</label>
-              <input id="hr-rec-role" placeholder="e.g. Site Engineer, Sales Executive" />
+              <label htmlFor="hr-rec-experience">Experience required <span className="req">*</span></label>
+              <select id="hr-rec-experience" required defaultValue="">
+                <option value="" disabled>Select experience</option>
+                <option value="Fresher / 0–1 year">Fresher / 0–1 year</option>
+                <option value="1–2 years">1–2 years</option>
+                <option value="2–3 years">2–3 years</option>
+                <option value="3–5 years">3–5 years</option>
+                <option value="5–8 years">5–8 years</option>
+                <option value="8+ years">8+ years</option>
+                <option value="Any">Any</option>
+              </select>
             </div>
             <div className="field">
-              <label htmlFor="hr-rec-phone">Phone</label>
-              <input id="hr-rec-phone" placeholder="WhatsApp / mobile" />
+              <label htmlFor="hr-rec-openings">No. of openings <span className="req">*</span></label>
+              <input id="hr-rec-openings" type="number" min="1" max="50" defaultValue="1" required />
             </div>
             <div className="field">
-              <label htmlFor="hr-rec-email">Email</label>
-              <input id="hr-rec-email" type="email" />
+              <label htmlFor="hr-rec-department">Department</label>
+              <input id="hr-rec-department" placeholder="e.g. Engg. Division, MDO, Sales, PMC" />
             </div>
             <div className="field">
-              <label htmlFor="hr-rec-cv">CV / resume</label>
-              <input id="hr-rec-cv" type="file" accept=".pdf,.doc,.docx,image/*" />
+              <label htmlFor="hr-rec-location">Location / site</label>
+              <input id="hr-rec-location" placeholder="Office / site name / city" />
             </div>
             <div className="field">
-              <label htmlFor="hr-rec-notes">Notes</label>
-              <textarea id="hr-rec-notes" rows={3} placeholder="Why needed, location, expected joining…" />
+              <label htmlFor="hr-rec-skills">Key skills / job requirement</label>
+              <textarea id="hr-rec-skills" rows={3} placeholder="e.g. AutoCAD, site supervision, Hindi+English, 2-wheeler…" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-urgency">Urgency</label>
+              <select id="hr-rec-urgency" defaultValue="Normal">
+                <option value="Normal">Normal</option>
+                <option value="Soon (2–3 weeks)">Soon (2–3 weeks)</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-notes">Additional notes</label>
+              <textarea id="hr-rec-notes" rows={2} placeholder="Budget range, reporting to, shift, why needed…" />
             </div>
             <p id="hrRecruitMsg" className="form-error" hidden={true}></p>
-            <button type="submit" className="primary-btn primary-btn-inline">Submit to HR</button>
+            <button type="submit" className="primary-btn primary-btn-inline">Send requirement to HR</button>
           </form>
           <div className="table-card" style={{ marginTop: 24 }}>
-            <h3 style={{ marginTop: 0 }}>My submissions</h3>
+            <h3 style={{ marginTop: 0 }}>My requirements</h3>
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Candidate</th><th>Role</th><th>Status</th><th>Submitted</th><th>CV</th>
+                    <th>Designation</th><th>Experience</th><th>Openings</th><th>Status</th><th>Submitted</th>
                   </tr>
                 </thead>
                 <tbody id="hrRecruitMineBody"></tbody>
