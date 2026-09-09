@@ -1420,14 +1420,6 @@ export async function mountTaskflowApp(opts = {}) {
         { collapsed: true, sectionId: 'hr-hiring' }
       );
     }
-
-    if (state.user.role !== 'client') {
-      appendCollapsibleNav(
-        'My profile docs',
-        [makeNavButton('my-documents', '📄 My Documents')],
-        { collapsed: true, sectionId: 'my-docs' }
-      );
-    }
   }
   
   const NAV_SECTION_BY_VIEW = {
@@ -1442,7 +1434,6 @@ export async function mountTaskflowApp(opts = {}) {
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
     'new-recruitment': 'hr-hiring',
-    'my-documents': 'my-docs',
     corrections: 'corrections', updations: 'corrections',
     'tickets-open': 'support', 'tickets-resolved': 'support', tickets: 'support',
     'drawings-add': 'drawings', 'drawings-all': 'drawings',
@@ -1729,7 +1720,6 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'buddyrequests')  loadBuddyRequests();
     if (viewKey === 'leaveapprovals')  { loadLeaveApprovals(); checkLeaveCoverAlerts(); }
     if (viewKey === 'new-recruitment') loadHrRecruitmentMine();
-    if (viewKey === 'my-documents')    loadHrMyDocuments();
     if (viewKey === 'drawings-add')  renderDrawingAddView();
     if (viewKey === 'drawings-all')  loadAllDrawings();
     if (viewKey === 'daily-report')  loadDailyReport();
@@ -4826,29 +4816,6 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
-  async function loadHrMyDocuments() {
-    const body = document.getElementById('hrMyDocBody');
-    if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state">Loading…</td></tr>';
-    try {
-      const data = await api('/hr/documents');
-      const rows = data.documents || [];
-      if (!body) return;
-      if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="4" class="empty-state">No documents uploaded yet</td></tr>';
-        return;
-      }
-      body.innerHTML = rows.map((d) => `
-        <tr>
-          <td>${escapeHtml(d.doc_type || '')}</td>
-          <td>${escapeHtml(d.title || '')}</td>
-          <td>${d.file_url ? `<a href="${escapeHtml(d.file_url)}" target="_blank" rel="noopener">${escapeHtml(d.file_name || 'Open')}</a>` : '—'}</td>
-          <td>${escapeHtml((d.created_at || '').slice(0, 10))}</td>
-        </tr>`).join('');
-    } catch (err) {
-      if (body) body.innerHTML = `<tr><td colspan="4" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
-    }
-  }
-
   document.getElementById('hrRecruitForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const msg = document.getElementById('hrRecruitMsg');
@@ -4881,31 +4848,6 @@ export async function mountTaskflowApp(opts = {}) {
       if (urg) urg.value = 'Normal';
       showToast('Requirement sent to HR', 'success');
       loadHrRecruitmentMine();
-    } catch (err) {
-      if (msg) { msg.textContent = err.message; msg.hidden = false; }
-      else showToast(err.message, 'error');
-    }
-  });
-
-  document.getElementById('hrMyDocForm')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const msg = document.getElementById('hrMyDocMsg');
-    if (msg) { msg.hidden = true; msg.textContent = ''; }
-    const file = document.getElementById('hr-mydoc-file')?.files?.[0];
-    if (!file) return;
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('doc_type', document.getElementById('hr-mydoc-type')?.value || 'Other');
-      fd.append('title', document.getElementById('hr-mydoc-title')?.value || file.name);
-      fd.append('employee_id', state.user.id);
-      fd.append('employee_name', state.user.full_name || state.user.username || '');
-      fd.append('department', state.user.department || 'General');
-      fd.append('designation', state.user.designation || 'Staff');
-      await api('/hr/documents', { method: 'POST', body: fd, isForm: true });
-      e.target.reset();
-      showToast('Document uploaded — HR can see it in folders', 'success');
-      loadHrMyDocuments();
     } catch (err) {
       if (msg) { msg.textContent = err.message; msg.hidden = false; }
       else showToast(err.message, 'error');

@@ -953,48 +953,6 @@ export default function TaskflowDom() {
           </div>
         </section>
 
-        {/* MY DOCUMENTS (employees upload — HR sees in folders) */}
-        <section id="view-my-documents" className="view" hidden={true}>
-          <div className="view-heading">
-            <h2 className="view-title">My Documents</h2>
-            <p className="view-sub">Upload Aadhaar, PAN, insurance, certificates — HR sees them under Department → Designation folders.</p>
-          </div>
-          <form id="hrMyDocForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
-            <div className="field">
-              <label htmlFor="hr-mydoc-type">Document type</label>
-              <select id="hr-mydoc-type">
-                <option>Aadhaar</option>
-                <option>PAN</option>
-                <option>Insurance</option>
-                <option>PF / ESI</option>
-                <option>Bank details</option>
-                <option>Education certificate</option>
-                <option>Other</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="hr-mydoc-title">Title</label>
-              <input id="hr-mydoc-title" placeholder="Optional title" />
-            </div>
-            <div className="field">
-              <label htmlFor="hr-mydoc-file">File <span className="req">*</span></label>
-              <input id="hr-mydoc-file" type="file" required />
-            </div>
-            <p id="hrMyDocMsg" className="form-error" hidden={true}></p>
-            <button type="submit" className="primary-btn primary-btn-inline">Upload document</button>
-          </form>
-          <div className="table-card" style={{ marginTop: 24 }}>
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr><th>Type</th><th>Title</th><th>File</th><th>Uploaded</th></tr>
-                </thead>
-                <tbody id="hrMyDocBody"></tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
         {/* APPLY LEAVE (everyone) */}
         <section id="view-applyleave" className="view" hidden={true}>
           <div className="view-header-row">
