@@ -619,6 +619,76 @@ router.post('/public/onboard/:token', publicDocsUpload, async (req, res) => {
 
 router.use(requireAuth);
 
+/**
+ * Read-only: existing Site/MDO `attendance` table only.
+ * No inserts/updates/schema changes — SELECT only.
+ */
+async function fetchAttendanceRows({ from, to, dateEq } = {}) {
+  const pageSize = 1000;
+  const selectCols = 'id, date, user_name, clock_in, clock_out, status, clock_in_status';
+  const all = [];
+  for (let page = 0; page < 30; page++) {
+    let q = supabase.from('attendance').select(selectCols);
+    if (dateEq) q = q.eq('date', dateEq);
+    if (from) q = q.gte('date', from);
+    if (to) q = q.lte('date', to);
+    q = q.order('date', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1);
+    const { data, error } = await q;
+    if (error) throw error;
+    all.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return all;
+}
+
+/** HR/admin: list attendance from existing public.attendance (Site clock-in data). */
+router.get('/attendance', requireAdminOrHr, async (req, res) => {
+  try {
+    const from = String(req.query.from || '').trim() || null;
+    const to = String(req.query.to || '').trim() || null;
+    const date = String(req.query.date || '').trim() || null;
+    if (!date && !from && !to) {
+      return res.status(400).json({ error: 'Provide date=YYYY-MM-DD or from & to' });
+    }
+    if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) || (date && !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+      return res.status(400).json({ error: 'Dates must be YYYY-MM-DD' });
+    }
+
+    const rows = await fetchAttendanceRows(
+      date ? { dateEq: date } : { from, to }
+    );
+
+    // Optional display names from users (read-only). Never writes.
+    const usernames = [...new Set(rows.map((r) => r.user_name).filter(Boolean))];
+    const nameByUser = {};
+    if (usernames.length) {
+      const { data: users } = await supabase
+        .from('users')
+        .select('username, full_name')
+        .in('username', usernames.slice(0, 500));
+      (users || []).forEach((u) => {
+        if (u.username) nameByUser[u.username] = u.full_name || u.username;
+      });
+    }
+
+    const attendance = rows.map((r) => ({
+      id: r.id,
+      date: r.date,
+      user_name: r.user_name,
+      name: nameByUser[r.user_name] || r.user_name || null,
+      status: r.status || (r.clock_in ? 'present' : null),
+      clock_in: r.clock_in,
+      clock_out: r.clock_out,
+      clock_in_status: r.clock_in_status || null,
+    }));
+
+    res.json({ attendance, count: attendance.length });
+  } catch (err) {
+    console.error('hr attendance:', err.message);
+    res.status(500).json({ error: err.message || 'Could not load attendance' });
+  }
+});
+
 /** Heads + HR + admin: list (heads see own submissions; HR sees all) */
 router.get('/recruitments', async (req, res) => {
   try {

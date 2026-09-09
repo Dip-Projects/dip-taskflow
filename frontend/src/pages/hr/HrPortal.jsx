@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../../lib/api';
-import { fromMaybe } from '../../lib/supabase';
 import { generateExpCertificatePdf } from './letters/generateExpCertPdf';
 import {
   OFFER_TEMPLATES,
@@ -550,28 +549,11 @@ function AttendanceView() {
     setLoading(true);
     setError('');
     try {
-      let { data, error: err } = await fromMaybe('attendance', (q) =>
-        q
-          .select('id, date, user_name, name, status, clock_in, clock_out')
-          .gte('date', from)
-          .lte('date', to)
-          .order('date', { ascending: false })
-          .limit(2000)
-      );
-      if (err && /name|column/i.test(err.message || '')) {
-        ({ data, error: err } = await fromMaybe('attendance', (q) =>
-          q
-            .select('id, date, user_name, status, clock_in, clock_out')
-            .gte('date', from)
-            .lte('date', to)
-            .order('date', { ascending: false })
-            .limit(2000)
-        ));
-      }
-      if (err) throw err;
-      setRows(data || []);
+      const params = new URLSearchParams({ from, to });
+      const data = await api(`/hr/attendance?${params.toString()}`);
+      setRows(Array.isArray(data.attendance) ? data.attendance : []);
     } catch (e) {
-      setError(e.message || 'Could not load attendance (check Supabase attendance table).');
+      setError(e.message || 'Could not load attendance from existing attendance table.');
       setRows([]);
     } finally {
       setLoading(false);
@@ -1944,13 +1926,8 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     loadAlerts();
     (async () => {
       try {
-        const { data } = await fromMaybe('attendance', (q) =>
-          q
-            .select('id, date, user_name, status, clock_in')
-            .eq('date', todayISO())
-            .limit(500)
-        );
-        setAttendanceToday(data || []);
+        const data = await api(`/hr/attendance?date=${encodeURIComponent(todayISO())}`);
+        setAttendanceToday(Array.isArray(data.attendance) ? data.attendance : []);
       } catch {
         setAttendanceToday([]);
       }
