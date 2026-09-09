@@ -2308,6 +2308,27 @@ export default function TaskflowDom() {
           </div>
         </div>
 
+        {/* Monthly day-of-month picker */}
+        <div className="field" id="monthlyDayField" hidden={true}>
+          <label htmlFor="rec-monthly-day">Day of month <span className="req">*</span></label>
+          <select id="rec-monthly-day" defaultValue="1">
+            {Array.from({ length: 31 }, (_, i) => {
+              const d = i + 1;
+              const suf =
+                d === 1 || d === 21 || d === 31 ? 'st'
+                  : d === 2 || d === 22 ? 'nd'
+                    : d === 3 || d === 23 ? 'rd'
+                      : 'th';
+              return (
+                <option key={d} value={d}>
+                  {d}{suf} of every month
+                </option>
+              );
+            })}
+          </select>
+          <p className="form-note">Short months (e.g. Feb): if day is past month-end, task fires on last day.</p>
+        </div>
+
         {/* Active period */}
         <div className="field-grid">
           <div className="field">

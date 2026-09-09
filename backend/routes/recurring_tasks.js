@@ -43,7 +43,19 @@ function shouldFireOn(task, date) {
     const days = (task.frequency_days || '').split(',').map(Number);
     return days.includes(date.getDay());
   }
-  if (freq === 'Monthly') return date.getDate() === start.getDate();
+  if (freq === 'Monthly') {
+    // Prefer explicit day-of-month in frequency_days; fall back to start_date day
+    const raw = String(task.frequency_days || '').split(',')[0].trim();
+    let wanted = Number(raw);
+    if (!Number.isFinite(wanted) || wanted < 1 || wanted > 31) {
+      wanted = start.getDate();
+    }
+    const y = date.getFullYear();
+    const m = date.getMonth();
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const fireDay = Math.min(wanted, lastDay);
+    return date.getDate() === fireDay;
+  }
   if (freq === 'Yearly') return date.getDate() === start.getDate() && date.getMonth() === start.getMonth();
   return false;
 }
@@ -143,6 +155,12 @@ router.post('/', requireAdmin, async (req, res) => {
     if (frequency === 'Weekly' && (!frequency_days || frequency_days.length === 0)) {
       return res.status(400).json({ error: 'Please select at least one day for weekly tasks' });
     }
+    if (frequency === 'Monthly') {
+      const day = Number(Array.isArray(frequency_days) ? frequency_days[0] : String(frequency_days || '').split(',')[0]);
+      if (!Number.isFinite(day) || day < 1 || day > 31) {
+        return res.status(400).json({ error: 'Please select a day of the month (1–31) for monthly tasks' });
+      }
+    }
 
     const { data: rt, error } = await supabase
       .from('recurring_tasks')
@@ -155,7 +173,7 @@ router.post('/', requireAdmin, async (req, res) => {
         description,
         priority: priority || 'Medium',
         frequency,
-        frequency_days: frequency === 'Weekly'
+        frequency_days: (frequency === 'Weekly' || frequency === 'Monthly')
           ? (Array.isArray(frequency_days) ? frequency_days.join(',') : frequency_days)
           : null,
         start_date,
@@ -318,6 +336,16 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     }
     if (updates.frequency_days && Array.isArray(updates.frequency_days)) {
       updates.frequency_days = updates.frequency_days.join(',');
+    }
+    // When switching away from Weekly/Monthly, clear day list unless provided
+    if (updates.frequency && updates.frequency !== 'Weekly' && updates.frequency !== 'Monthly') {
+      if (updates.frequency_days === undefined) updates.frequency_days = null;
+    }
+    if (updates.frequency === 'Monthly') {
+      const day = Number(String(updates.frequency_days || '').split(',')[0]);
+      if (!Number.isFinite(day) || day < 1 || day > 31) {
+        return res.status(400).json({ error: 'Please select a day of the month (1–31) for monthly tasks' });
+      }
     }
 
     const { data, error } = await supabase

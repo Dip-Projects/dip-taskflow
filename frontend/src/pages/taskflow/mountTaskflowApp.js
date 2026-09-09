@@ -6541,6 +6541,8 @@ export async function mountTaskflowApp(opts = {}) {
     description:   () => document.getElementById('rec-description'),
     priority:      () => document.getElementById('rec-priority'),
     weeklyField:   () => document.getElementById('weeklyDaysField'),
+    monthlyField:  () => document.getElementById('monthlyDayField'),
+    monthlyDay:    () => document.getElementById('rec-monthly-day'),
     startDate:     () => document.getElementById('rec-start'),
     endDate:       () => document.getElementById('rec-end'),
     checkpointsList: () => document.getElementById('checkpointsList'),
@@ -6561,6 +6563,11 @@ export async function mountTaskflowApp(opts = {}) {
   
   let recurringSelectedFreq = '';
   
+  function syncRecurringFreqFields() {
+    if (recEls.weeklyField()) recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
+    if (recEls.monthlyField()) recEls.monthlyField().hidden = recurringSelectedFreq !== 'Monthly';
+  }
+
   function initRecurringModal() {
     // Frequency buttons
     document.querySelectorAll('.freq-btn').forEach(btn => {
@@ -6568,8 +6575,18 @@ export async function mountTaskflowApp(opts = {}) {
         document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('selected'));
         btn.classList.add('selected');
         recurringSelectedFreq = btn.dataset.freq;
-        recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
+        syncRecurringFreqFields();
+        // Default monthly day from start date if empty/unset
+        if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay() && recEls.startDate()?.value) {
+          const d = Number(String(recEls.startDate().value).slice(8, 10));
+          if (d >= 1 && d <= 31) recEls.monthlyDay().value = String(d);
+        }
       });
+    });
+    recEls.startDate()?.addEventListener('change', () => {
+      if (recurringSelectedFreq !== 'Monthly' || !recEls.monthlyDay()) return;
+      const d = Number(String(recEls.startDate().value || '').slice(8, 10));
+      if (d >= 1 && d <= 31) recEls.monthlyDay().value = String(d);
     });
   
     // Add checkpoint
@@ -6688,11 +6705,13 @@ export async function mountTaskflowApp(opts = {}) {
     recEls.formMsg().hidden = true;
     recEls.checkpointsList().innerHTML = '';
     document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('selected'));
-    recEls.weeklyField().hidden = true;
+    if (recEls.weeklyField()) recEls.weeklyField().hidden = true;
+    if (recEls.monthlyField()) recEls.monthlyField().hidden = true;
     recEls.newTaskTypeRow().hidden = true;
     recEls.taskTypeMsg().hidden = true;
     // uncheck all days
     document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => c.checked = false);
+    if (recEls.monthlyDay()) recEls.monthlyDay().value = '1';
   
     if (task) {
       // Edit mode
@@ -6711,12 +6730,20 @@ export async function mountTaskflowApp(opts = {}) {
       recurringSelectedFreq = task.frequency || '';
       const freqBtn = document.querySelector(`.freq-btn[data-freq="${recurringSelectedFreq}"]`);
       if (freqBtn) freqBtn.classList.add('selected');
+      syncRecurringFreqFields();
       if (recurringSelectedFreq === 'Weekly') {
-        recEls.weeklyField().hidden = false;
         const days = (task.frequency_days || '').split(',').map(Number);
         document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => {
           c.checked = days.includes(Number(c.value));
         });
+      }
+      if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay()) {
+        const raw = String(task.frequency_days || '').split(',')[0];
+        let day = Number(raw);
+        if (!Number.isFinite(day) || day < 1 || day > 31) {
+          day = Number(String(task.start_date || '').slice(8, 10)) || 1;
+        }
+        recEls.monthlyDay().value = String(Math.min(31, Math.max(1, day)));
       }
       // Checkpoints
       (task.checkpoints || [])
@@ -6770,6 +6797,15 @@ export async function mountTaskflowApp(opts = {}) {
       if (!freqDays.length) {
         recEls.formMsg().textContent = 'Please select at least one day'; recEls.formMsg().hidden = false; return;
       }
+    }
+    if (recurringSelectedFreq === 'Monthly') {
+      const day = Number(recEls.monthlyDay()?.value || 0);
+      if (!Number.isFinite(day) || day < 1 || day > 31) {
+        recEls.formMsg().textContent = 'Please select a day of the month (1–31)';
+        recEls.formMsg().hidden = false;
+        return;
+      }
+      freqDays.push(day);
     }
   
     const body = {
@@ -6843,6 +6879,21 @@ export async function mountTaskflowApp(opts = {}) {
       const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       const days = task.frequency_days.split(',').map(Number).map(d => dayNames[d]).join(', ');
       return `Weekly (${days})`;
+    }
+    if (task.frequency === 'Monthly') {
+      const raw = String(task.frequency_days || '').split(',')[0];
+      let day = Number(raw);
+      if (!Number.isFinite(day) || day < 1 || day > 31) {
+        day = Number(String(task.start_date || '').slice(8, 10)) || null;
+      }
+      if (day) {
+        const suf =
+          day === 1 || day === 21 || day === 31 ? 'st'
+            : day === 2 || day === 22 ? 'nd'
+              : day === 3 || day === 23 ? 'rd'
+                : 'th';
+        return `Monthly (${day}${suf})`;
+      }
     }
     return task.frequency;
   }
