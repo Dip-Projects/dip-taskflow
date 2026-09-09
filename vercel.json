@@ -41,6 +41,7 @@
     { "source": "/legacy/(.*)", "destination": "/api" },
     { "source": "/login", "destination": "/index.html" },
     { "source": "/apply", "destination": "/index.html" },
+    { "source": "/apply/(.*)", "destination": "/index.html" },
     { "source": "/onboard", "destination": "/index.html" },
     { "source": "/onboard/(.*)", "destination": "/index.html" },
     { "source": "/app", "destination": "/index.html" },
@@ -52,6 +53,7 @@
     { "source": "/client", "destination": "/index.html" },
     { "source": "/client/(.*)", "destination": "/index.html" },
     { "source": "/hr", "destination": "/index.html" },
-    { "source": "/hr/(.*)", "destination": "/index.html" }
+    { "source": "/hr/(.*)", "destination": "/index.html" },
+    { "source": "/((?!api/|assets/|legacy/).*)", "destination": "/index.html" }
   ]
 }
