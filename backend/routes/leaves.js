@@ -1,6 +1,6 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdminOrHr } = require('../middleware/auth');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const { elapsedWorkingHours } = require('../lib/workingHours');
 const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
@@ -1019,7 +1019,7 @@ router.post('/:id/resolve-cover', async (req, res) => {
 });
 
 // ----------------------------- all leave requests (admin) -----------------------------
-router.get('/all', requireAdmin, async (req, res) => {
+router.get('/all', requireAdminOrHr, async (req, res) => {
   try {
     const data = await selectLeaves((q) => {
       let filtered = q;
@@ -1034,7 +1034,7 @@ router.get('/all', requireAdmin, async (req, res) => {
 });
 
 // ----------------------------- approve (admin) -----------------------------
-router.patch('/:id/approve', requireAdmin, async (req, res) => {
+router.patch('/:id/approve', requireAdminOrHr, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1162,7 +1162,7 @@ router.patch('/:id/approve', requireAdmin, async (req, res) => {
 });
 
 // ----------------------------- reject (admin) -----------------------------
-router.patch('/:id/reject', requireAdmin, async (req, res) => {
+router.patch('/:id/reject', requireAdminOrHr, async (req, res) => {
   try {
     const { id } = req.params;
     const { reason } = req.body || {};

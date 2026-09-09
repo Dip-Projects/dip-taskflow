@@ -21,6 +21,10 @@
     {
       "path": "/api/delay-report/cron/monday-whatsapp",
       "schedule": "30 3 * * 1"
+    },
+    {
+      "path": "/api/hr/cron/insurance-whatsapp",
+      "schedule": "30 2 * * *"
     }
   ],
   "headers": [
@@ -36,6 +40,9 @@
     { "source": "/config.js", "destination": "/api" },
     { "source": "/legacy/(.*)", "destination": "/api" },
     { "source": "/login", "destination": "/index.html" },
+    { "source": "/apply", "destination": "/index.html" },
+    { "source": "/onboard", "destination": "/index.html" },
+    { "source": "/onboard/(.*)", "destination": "/index.html" },
     { "source": "/app", "destination": "/index.html" },
     { "source": "/app/(.*)", "destination": "/index.html" },
     { "source": "/site", "destination": "/index.html" },
@@ -43,6 +50,8 @@
     { "source": "/mdo", "destination": "/index.html" },
     { "source": "/mdo/(.*)", "destination": "/index.html" },
     { "source": "/client", "destination": "/index.html" },
-    { "source": "/client/(.*)", "destination": "/index.html" }
+    { "source": "/client/(.*)", "destination": "/index.html" },
+    { "source": "/hr", "destination": "/index.html" },
+    { "source": "/hr/(.*)", "destination": "/index.html" }
   ]
 }

@@ -1,12 +1,14 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdminOrHr } = require('../middleware/auth');
 const { onboardUserToProjectChats } = require('../lib/projectChat');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireAdmin); // every route here is admin-only
+router.use(requireAdminOrHr); // admin + HR
+
+const ALLOWED_ROLES = ['admin', 'employee', 'head', 'client', 'hr'];
 
 // ----------------------------- helpers -----------------------------
 
@@ -120,8 +122,8 @@ router.post('/', async (req, res) => {
     if (!full_name || !department || !designation || !role) {
       return res.status(400).json({ error: 'Please fill in all required fields' });
     }
-    if (!['admin', 'employee', 'head', 'client'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin, employee, head, or client' });
+    if (!ALLOWED_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin, employee, head, client, or hr' });
     }
 
     const username = await generateUniqueUsername(full_name);
@@ -218,8 +220,8 @@ router.patch('/:id', async (req, res) => {
       updates.whatsapp_number = whatsapp_number ? String(whatsapp_number).trim() : null;
     }
     if (role !== undefined) {
-      if (!['admin', 'employee', 'head', 'client'].includes(role)) {
-        return res.status(400).json({ error: 'Role must be admin, employee, head, or client' });
+      if (!ALLOWED_ROLES.includes(role)) {
+        return res.status(400).json({ error: 'Role must be admin, employee, head, client, or hr' });
       }
       updates.role = role;
       // Keep is_head in sync with Head role unless explicitly overridden below

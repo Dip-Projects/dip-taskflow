@@ -35,8 +35,9 @@ placeholders, so going forward only the real `.env` ever holds secrets.
 cd backend
 npm install
 npm run seed          # creates starter departments/projects/task types
-                       # + one admin login (admin / Admin@123)
-                       # + one employee login (charmy / Charmy@123)
+                       # + admin (admin / Admin@123)
+                       # + employee (charmy / Charmy@123)
+                       # + HR (hr / Hr@123) → /hr portal
 npm start              # → http://localhost:4000
 ```
 

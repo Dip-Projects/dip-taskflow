@@ -40,6 +40,7 @@ app.use('/api/clients',         require('./routes/clients_admin'));
 app.use('/api/sites',           require('./routes/sites'));
 app.use('/api/recurring-tasks', require('./routes/recurring_tasks'));
 app.use('/api/leaves',          require('./routes/leaves'));
+app.use('/api/hr',              require('./routes/hr'));
 app.use('/api/tickets',         require('./routes/tickets'));
 app.use('/api/drawings',        require('./routes/drawings'));
 app.use('/api/storage',         require('./routes/storage'));

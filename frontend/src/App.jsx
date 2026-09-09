@@ -30,6 +30,9 @@ const TaskflowApp = lazyChunk(() => import('./pages/TaskflowApp'));
 const SiteApp = lazyChunk(() => import('./pages/SiteApp'));
 const MdoApp = lazyChunk(() => import('./pages/MdoApp'));
 const ClientApp = lazyChunk(() => import('./pages/ClientApp'));
+const HrApp = lazyChunk(() => import('./pages/HrApp'));
+const CandidateApplyPage = lazyChunk(() => import('./pages/public/CandidateApplyPage'));
+const EmployeeOnboardPage = lazyChunk(() => import('./pages/public/EmployeeOnboardPage'));
 
 function RequireAuth({ children }) {
   const { isAuthenticated } = useAuth();
@@ -76,6 +79,8 @@ export default function App() {
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/apply" element={<CandidateApplyPage />} />
+            <Route path="/onboard/:token" element={<EmployeeOnboardPage />} />
             <Route
               path="/app/*"
               element={
@@ -105,6 +110,14 @@ export default function App() {
               element={
                 <RequireAuth>
                   <ClientApp />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/hr/*"
+              element={
+                <RequireAuth>
+                  <HrApp />
                 </RequireAuth>
               }
             />

@@ -82,12 +82,24 @@ export async function login(username, password) {
   return data.user;
 }
 
+/** HR / Human Resources — dedicated HRMS portal. */
+export function isHr(user) {
+  if (!user) return false;
+  const role = String(user.role || '').toLowerCase().trim();
+  if (role === 'hr') return true;
+  const blob = [user.role, user.designation, user.department]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /\bhr\b|human\s*resource/.test(blob);
+}
+
 /** Process Controller = MDO portal (attendance log, DPR, drawings, leave). */
 export function isProcessController(user) {
   if (!user) return false;
   const role = String(user.role || '').toLowerCase().trim();
   const dept = String(user.department || '').toLowerCase().trim();
-  if (role === 'admin' || role === 'client' || dept === 'client') return false;
+  if (role === 'admin' || role === 'client' || role === 'hr' || dept === 'client') return false;
+  if (isHr(user)) return false;
   const blob = [user.role, user.designation, user.department]
     .map((s) => String(s || '').toLowerCase())
     .join(' ');
@@ -108,6 +120,7 @@ export function processControllerPath() {
 /** Where should this user land after login? */
 export function postLoginPath(user) {
   if (isClient(user)) return '/client';
+  if (isHr(user)) return '/hr';
   if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();
   const dept = (user.department || '').trim().toLowerCase();
   if (dept === 'site engineer') return '/site';

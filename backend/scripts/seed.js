@@ -20,7 +20,7 @@ async function upsertByName(table, names) {
   console.log(`✅ ${table}: added ${toInsert.length}, ${existingNames.size} already existed`);
 }
 
-async function upsertUser({ username, password, full_name, role }) {
+async function upsertUser({ username, password, full_name, role, department, designation }) {
   const { data: existing, error: fetchErr } = await supabase
     .from('users')
     .select('id')
@@ -34,7 +34,10 @@ async function upsertUser({ username, password, full_name, role }) {
   }
 
   const password_hash = await bcrypt.hash(password, 10);
-  const { error } = await supabase.from('users').insert({ username, password_hash, full_name, role });
+  const row = { username, password_hash, full_name, role };
+  if (department) row.department = department;
+  if (designation) row.designation = designation;
+  const { error } = await supabase.from('users').insert(row);
   if (error) throw error;
   console.log(`✅ created ${role} login → username: "${username}"  password: "${password}"`);
 }
@@ -47,6 +50,14 @@ async function upsertUser({ username, password, full_name, role }) {
 
     await upsertUser({ username: 'admin', password: 'Admin@123', full_name: 'Admin User', role: 'admin' });
     await upsertUser({ username: 'charmy', password: 'Charmy@123', full_name: 'Charmy Desai', role: 'employee' });
+    await upsertUser({
+      username: 'hr',
+      password: 'Hr@123',
+      full_name: 'HR User',
+      role: 'hr',
+      department: 'HR',
+      designation: 'HR',
+    });
 
     console.log('\n🎉 Seed complete — log in with the credentials above, then add real employees in Supabase → Table editor → users.');
     process.exit(0);

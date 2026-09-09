@@ -62,12 +62,28 @@ function requireAuth(req, res, next) {
   }
 }
 
+function isHrUser(user) {
+  if (!user) return false;
+  const role = String(user.role || '').toLowerCase().trim();
+  if (role === 'hr') return true;
+  const blob = [user.role, user.designation, user.department]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /\bhr\b|human\s*resource/.test(blob);
+}
+
 // Use after requireAuth on routes that only the admin should reach.
 function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Only an admin can do this' });
   }
   next();
+}
+
+/** Admin or HR — employee master, leave approvals, HRMS APIs. */
+function requireAdminOrHr(req, res, next) {
+  if (req.user?.role === 'admin' || isHrUser(req.user)) return next();
+  return res.status(403).json({ error: 'Only an admin or HR can do this' });
 }
 
 function requireAdminOrMis(req, res, next) {
@@ -98,7 +114,9 @@ async function requireCanAddTask(req, res, next) {
 module.exports = {
   requireAuth,
   requireAdmin,
+  requireAdminOrHr,
   requireAdminOrMis,
   requireCanAddTask,
   signToken,
+  isHrUser,
 };

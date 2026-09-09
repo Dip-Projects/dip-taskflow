@@ -880,6 +880,97 @@ export default function TaskflowDom() {
           <div id="reschedRequestsList" className="task-list view-mobile-only"></div>
         </section>
 
+        {/* NEW RECRUITMENT (heads) */}
+        <section id="view-new-recruitment" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">New Recruitment</h2>
+            <p className="view-sub">Submit a candidate request — HR will see it immediately and run interview / offer process.</p>
+          </div>
+          <form id="hrRecruitForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
+            <div className="field">
+              <label htmlFor="hr-rec-name">Candidate name <span className="req">*</span></label>
+              <input id="hr-rec-name" required placeholder="Full name" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-role">Role / designation needed</label>
+              <input id="hr-rec-role" placeholder="e.g. Site Engineer, Sales Executive" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-phone">Phone</label>
+              <input id="hr-rec-phone" placeholder="WhatsApp / mobile" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-email">Email</label>
+              <input id="hr-rec-email" type="email" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-cv">CV / resume</label>
+              <input id="hr-rec-cv" type="file" accept=".pdf,.doc,.docx,image/*" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-rec-notes">Notes</label>
+              <textarea id="hr-rec-notes" rows={3} placeholder="Why needed, location, expected joining…" />
+            </div>
+            <p id="hrRecruitMsg" className="form-error" hidden={true}></p>
+            <button type="submit" className="primary-btn primary-btn-inline">Submit to HR</button>
+          </form>
+          <div className="table-card" style={{ marginTop: 24 }}>
+            <h3 style={{ marginTop: 0 }}>My submissions</h3>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Candidate</th><th>Role</th><th>Status</th><th>Submitted</th><th>CV</th>
+                  </tr>
+                </thead>
+                <tbody id="hrRecruitMineBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* MY DOCUMENTS (employees upload — HR sees in folders) */}
+        <section id="view-my-documents" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">My Documents</h2>
+            <p className="view-sub">Upload Aadhaar, PAN, insurance, certificates — HR sees them under Department → Designation folders.</p>
+          </div>
+          <form id="hrMyDocForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
+            <div className="field">
+              <label htmlFor="hr-mydoc-type">Document type</label>
+              <select id="hr-mydoc-type">
+                <option>Aadhaar</option>
+                <option>PAN</option>
+                <option>Insurance</option>
+                <option>PF / ESI</option>
+                <option>Bank details</option>
+                <option>Education certificate</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="hr-mydoc-title">Title</label>
+              <input id="hr-mydoc-title" placeholder="Optional title" />
+            </div>
+            <div className="field">
+              <label htmlFor="hr-mydoc-file">File <span className="req">*</span></label>
+              <input id="hr-mydoc-file" type="file" required />
+            </div>
+            <p id="hrMyDocMsg" className="form-error" hidden={true}></p>
+            <button type="submit" className="primary-btn primary-btn-inline">Upload document</button>
+          </form>
+          <div className="table-card" style={{ marginTop: 24 }}>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Type</th><th>Title</th><th>File</th><th>Uploaded</th></tr>
+                </thead>
+                <tbody id="hrMyDocBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         {/* APPLY LEAVE (everyone) */}
         <section id="view-applyleave" className="view" hidden={true}>
           <div className="view-header-row">
@@ -1419,6 +1510,7 @@ export default function TaskflowDom() {
             <option value="">Select role</option>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
+            <option value="hr">HR</option>
             <option value="admin">Admin</option>
           </select>
         </div>
@@ -1474,6 +1566,7 @@ export default function TaskflowDom() {
           <select id="edit-emp-role" required>
             <option value="employee">Employee</option>
             <option value="head">Head</option>
+            <option value="hr">HR</option>
             <option value="admin">Admin</option>
           </select>
         </div>

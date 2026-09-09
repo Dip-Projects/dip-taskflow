@@ -9,6 +9,7 @@ import {
   canToggleMdo,
   isSiteEngineer,
   isProcessController,
+  isHr,
   syncSiteUser,
 } from '../lib/api';
 
@@ -49,6 +50,7 @@ export function AuthProvider({ children }) {
       canToggleMdo: canToggleMdo(user),
       isSiteEngineer: isSiteEngineer(user),
       isProcessController: isProcessController(user),
+      isHr: isHr(user),
     }),
     [user, token, login, logout, refreshUser]
   );

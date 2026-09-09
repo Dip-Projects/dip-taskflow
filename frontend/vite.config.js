@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
         resolveDependencies: (_filename, deps) =>
           deps.filter(
             (d) =>
-              !/site-portal|taskflow|client-portal|SiteApp|Taskflow|ClientApp|heic2any|jspdf|html2canvas|pptxgen|xlsx|exceljs/i.test(
+              !/site-portal|taskflow|client-portal|hr-portal|SiteApp|Taskflow|ClientApp|HrApp|heic2any|jspdf|html2canvas|pptxgen|xlsx|exceljs/i.test(
                 d
               )
           ),
@@ -63,6 +63,7 @@ export default defineConfig(({ mode }) => {
             if (id.includes('/pages/client/')) return 'client-portal';
             if (id.includes('/pages/site/')) return 'site-portal';
             if (id.includes('/pages/taskflow/')) return 'taskflow';
+            if (id.includes('/pages/hr/')) return 'hr-portal';
           },
         },
       },
