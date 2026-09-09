@@ -1,8 +1,9 @@
 import { useEffect, memo } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { isHr } from '../../lib/api';
 import TaskflowDom from './TaskflowDom';
-import { mountTaskflowApp } from './mountTaskflowApp';
+import { mountTaskflowApp, unmountTaskflowApp } from './mountTaskflowApp';
 import './taskflow.css';
 import '../SurfaceToggle.css';
 
@@ -18,6 +19,8 @@ export default function TaskflowApp() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    // Pure HR accounts belong on /hr — never start TaskFlow badge polling here
+    if (isHr(user) && String(user?.role || '').toLowerCase() !== 'admin') return;
 
     let cancelled = false;
     let tries = 0;
@@ -57,10 +60,16 @@ export default function TaskflowApp() {
     tryMount();
     return () => {
       cancelled = true;
+      unmountTaskflowApp();
     };
   }, [isAuthenticated, token, user, logout, navigate]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  // HR portal is separate from Office TaskFlow
+  if (isHr(user) && String(user?.role || '').toLowerCase() !== 'admin') {
+    return <Navigate to="/hr" replace />;
+  }
 
   const dept = (user?.department || '').trim().toLowerCase();
   if (dept === 'site engineer' && !canToggleSite) {

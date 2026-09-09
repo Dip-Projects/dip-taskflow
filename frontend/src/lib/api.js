@@ -63,7 +63,13 @@ export async function api(path, options = {}) {
 
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== '/auth/login') {
+    // Wipe storage + notify AuthContext so UI does not stay "logged in" with a dead token
     clearSession();
+    try {
+      window.dispatchEvent(new CustomEvent('tf:session-cleared'));
+    } catch {
+      /* ignore */
+    }
   }
   if (!res.ok) {
     const err = new Error(data.error || 'Request failed');

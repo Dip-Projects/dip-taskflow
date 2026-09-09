@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState, useCallback } from 'react';
+import { createContext, useContext, useMemo, useState, useCallback, useEffect } from 'react';
 import {
   getStoredUser,
   getToken,
@@ -18,6 +18,16 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getStoredUser());
   const [token, setToken] = useState(() => getToken());
+
+  // api() clears localStorage on 401 — keep React auth state in sync
+  useEffect(() => {
+    const onCleared = () => {
+      setUser(null);
+      setToken(null);
+    };
+    window.addEventListener('tf:session-cleared', onCleared);
+    return () => window.removeEventListener('tf:session-cleared', onCleared);
+  }, []);
 
   const login = useCallback(async (username, password) => {
     const u = await apiLogin(username, password);

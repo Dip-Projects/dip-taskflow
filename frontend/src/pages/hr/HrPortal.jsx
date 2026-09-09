@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../../lib/api';
-import { supabase } from '../../lib/supabase';
+import { fromMaybe } from '../../lib/supabase';
 import { generateExpCertificatePdf } from './letters/generateExpCertPdf';
 import {
   OFFER_TEMPLATES,
@@ -550,21 +550,23 @@ function AttendanceView() {
     setLoading(true);
     setError('');
     try {
-      let { data, error: err } = await supabase
-        .from('attendance')
-        .select('id, date, user_name, name, status, clock_in, clock_out')
-        .gte('date', from)
-        .lte('date', to)
-        .order('date', { ascending: false })
-        .limit(2000);
-      if (err && /name/i.test(err.message || '')) {
-        ({ data, error: err } = await supabase
-          .from('attendance')
-          .select('id, date, user_name, status, clock_in, clock_out')
+      let { data, error: err } = await fromMaybe('attendance', (q) =>
+        q
+          .select('id, date, user_name, name, status, clock_in, clock_out')
           .gte('date', from)
           .lte('date', to)
           .order('date', { ascending: false })
-          .limit(2000));
+          .limit(2000)
+      );
+      if (err && /name|column/i.test(err.message || '')) {
+        ({ data, error: err } = await fromMaybe('attendance', (q) =>
+          q
+            .select('id, date, user_name, status, clock_in, clock_out')
+            .gte('date', from)
+            .lte('date', to)
+            .order('date', { ascending: false })
+            .limit(2000)
+        ));
       }
       if (err) throw err;
       setRows(data || []);
@@ -1942,11 +1944,12 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     loadAlerts();
     (async () => {
       try {
-        const { data } = await supabase
-          .from('attendance')
-          .select('id, date, user_name, status, clock_in')
-          .eq('date', todayISO())
-          .limit(500);
+        const { data } = await fromMaybe('attendance', (q) =>
+          q
+            .select('id, date, user_name, status, clock_in')
+            .eq('date', todayISO())
+            .limit(500)
+        );
         setAttendanceToday(data || []);
       } catch {
         setAttendanceToday([]);

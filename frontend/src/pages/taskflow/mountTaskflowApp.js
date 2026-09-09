@@ -1573,6 +1573,10 @@ export async function mountTaskflowApp(opts = {}) {
   // Poll badge counts from the API and update nav
   async function refreshNavBadges() {
     try {
+      // HR uses /hr portal — do not hammer TaskFlow APIs in the background
+      const roleLc = String(state.user?.role || '').toLowerCase();
+      if (roleLc === 'hr') return;
+
       if (state.user?.role !== 'admin') {
         // Employee: my tasks (pending), corrections, updations, verifications
         const myTasks = await api('/tasks/my');
@@ -9844,4 +9848,16 @@ export async function mountTaskflowApp(opts = {}) {
   _listenersBound = true;
 
   if (state.token && state.user) await enterApp();
+}
+
+/** Stop background polls when leaving /app (e.g. navigate to /hr). */
+export function unmountTaskflowApp() {
+  if (window._badgeInterval) {
+    clearInterval(window._badgeInterval);
+    window._badgeInterval = null;
+  }
+  if (window._timerInterval) {
+    clearInterval(window._timerInterval);
+    window._timerInterval = null;
+  }
 }
