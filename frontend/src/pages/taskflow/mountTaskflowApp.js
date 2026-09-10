@@ -3039,24 +3039,35 @@ export async function mountTaskflowApp(opts = {}) {
     return '';
   }
   
+  function isMdoOfficeUser(user = state.user) {
+    const dept = String(user?.department || '').toLowerCase().trim();
+    return dept === 'mdo office' || /\bmdo\b/.test(dept);
+  }
+
   function buildCardMenuItems(task, { showAssignee }) {
     const isActuallyMine = task.assigned_to_user?.id === state.user.id;
     const canManageThisTask = state.user.role === 'admin' || isActuallyMine;
     const isPendingVerification = task.verification_status === 'Pending Verification';
     const isOnHold = !!task.is_on_hold;
     const isAdminManaging = showAssignee && state.user.role === 'admin';
+    const isMdoOffice = isMdoOfficeUser();
     const isTicketRaised = task.status === 'Ticket Raised';
     const isReschedulePending = task.reschedule_status === 'Pending';
     const items = [];
   
-    if (!isAdminManaging && task.status === 'Pending') {
+    if (!isAdminManaging && !isMdoOffice && task.status === 'Pending') {
       return items;
     }
   
+    // Admin (all tasks) + MDO OFFICE emp (own tasks): mark complete like admin
+    if (
+      task.status !== 'Completed'
+      && (isAdminManaging || (isMdoOffice && isActuallyMine))
+    ) {
+      items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
+    }
+
     if (isAdminManaging) {
-      if (task.status !== 'Completed') {
-        items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
-      }
       items.push({ label: '🗓️ Reschedule', onClick: () => openRescheduleModal(task.id, task.target_date) });
       items.push({ label: '🔁 Reassign', onClick: () => openReassignModal(task.id) });
       if (task.status !== 'Rejected') {
@@ -3134,7 +3145,7 @@ export async function mountTaskflowApp(opts = {}) {
         updateStatus(task.id, 'Rejected', reason);
       }));
     }
-    if (task.status === 'In Progress' && state.user.role === 'admin') {
+    if (task.status === 'In Progress' && (state.user.role === 'admin' || isMdoOfficeUser())) {
       buttons.push(makeActionBtn('action-complete', 'Mark complete', () => updateStatus(task.id, 'Completed')));
     }
     if (task.status === 'Rejected' && state.user.role === 'admin') {
