@@ -340,10 +340,93 @@ router.post('/cron/insurance-whatsapp', handleInsuranceCron);
 router.get('/cron/insurance-whatsapp', handleInsuranceCron);
 
 /**
+ * Public signed upload (apply / onboard) — browser PUTs file to Supabase,
+ * so Vercel body limit does not block CVs / scans.
+ * Only paths under hr/applications/ or hr/joining/ are allowed.
+ */
+router.post('/public/signed-upload', async (req, res) => {
+  try {
+    const path = String(req.body?.path || '').replace(/^\/+/, '');
+    if (!path || !/^hr\/(applications|joining)\//.test(path)) {
+      return res.status(400).json({ error: 'Invalid upload path' });
+    }
+    if (path.includes('..') || path.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid upload path' });
+    }
+    await ensureBucket();
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUploadUrl(path, { upsert: true });
+    if (error) {
+      console.error('public signed-upload:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    res.json({
+      bucket: BUCKET,
+      path: data.path || path,
+      token: data.token,
+      signedUrl: data.signedUrl,
+      publicUrl: urlData.publicUrl,
+    });
+  } catch (err) {
+    console.error('public signed-upload:', err.message);
+    res.status(500).json({ error: err.message || 'Could not prepare upload' });
+  }
+});
+
+function publicDocsUploadMaybe(req, res, next) {
+  const ct = String(req.headers['content-type'] || '');
+  if (ct.includes('multipart/form-data')) {
+    return publicDocsUpload(req, res, (err) => {
+      if (err) {
+        const msg =
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'File too large (max 25MB). Try a smaller PDF/image.'
+            : err.message || 'Upload parse failed';
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  }
+  next();
+}
+
+function docsFromBodyMeta(raw) {
+  const src = typeof raw === 'string' ? parseMaybeJson(raw, {}) : raw || {};
+  const out = {};
+  for (const key of DOC_FIELD_NAMES) {
+    const v = src[key];
+    if (!v) continue;
+    if (key === 'education_certs' && Array.isArray(v)) {
+      out[key] = v
+        .filter((f) => f && f.path && f.url)
+        .map((f) => ({
+          path: String(f.path),
+          url: String(f.url),
+          name: String(f.name || 'file'),
+          mime: f.mime || null,
+          size: f.size || null,
+        }));
+    } else if (v.path && v.url) {
+      out[key] = {
+        path: String(v.path),
+        url: String(v.url),
+        name: String(v.name || 'file'),
+        mime: v.mime || null,
+        size: v.size || null,
+      };
+    }
+  }
+  return out;
+}
+
+/**
  * Public candidate application (QR / interview walk-in) — no login.
  * Required: name, mobile, aadhaar. Rest optional + file uploads.
+ * Prefer JSON + pre-uploaded docs (signed URL); multipart still works for small files.
  */
-router.post('/public/apply', publicDocsUpload, async (req, res) => {
+router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
   try {
     const body = req.body || {};
     const name = String(body.full_name || body.candidate_name || '').trim();
@@ -352,9 +435,12 @@ router.post('/public/apply', publicDocsUpload, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Full name is required' });
     if (phone.length < 10) return res.status(400).json({ error: 'Valid mobile number is required' });
     if (aadhaar.length < 12) return res.status(400).json({ error: 'Valid Aadhaar (12 digits) is required' });
-    if (!req.files?.cv?.length) return res.status(400).json({ error: 'Updated CV is required' });
 
-    const docs = await collectUploadedDocs(req.files, `hr/applications/${uid()}`);
+    let docs = docsFromBodyMeta(body.documents);
+    if (!docs.cv && req.files?.cv?.length) {
+      docs = await collectUploadedDocs(req.files, `hr/applications/${uid()}`);
+    }
+    if (!docs.cv) return res.status(400).json({ error: 'Updated CV is required' });
     const education = parseMaybeJson(body.education, []);
     const sources = parseMaybeJson(body.sources, []);
     if (typeof body.sources === 'string' && !body.sources.trim().startsWith('[')) {
@@ -494,7 +580,7 @@ router.get('/public/onboard/:token', async (req, res) => {
 });
 
 /** Employee joining details + docs (no login). PDF is for HR only — not returned here. */
-router.post('/public/onboard/:token', publicDocsUpload, async (req, res) => {
+router.post('/public/onboard/:token', publicDocsUploadMaybe, async (req, res) => {
   try {
     const token = String(req.params.token || '').trim();
     const hit = await findOnboardTarget(token);
@@ -522,7 +608,10 @@ router.post('/public/onboard/:token', publicDocsUpload, async (req, res) => {
 
     const empKey =
       hit.kind === 'hr_only' ? hit.staff[hit.hrIdx].id : target.employee_id || target.id;
-    const docs = await collectUploadedDocs(req.files, `hr/joining/${empKey}`);
+    let docs = docsFromBodyMeta(body.documents);
+    if (!Object.keys(docs).length && req.files) {
+      docs = await collectUploadedDocs(req.files, `hr/joining/${empKey}`);
+    }
     const now = new Date().toISOString();
     const designation = String(body.designation || target.designation || '').trim() || 'Staff';
     const department =
@@ -944,8 +1033,29 @@ router.get('/documents/tree', requireAdminOrHr, async (req, res) => {
   }
 });
 
+/**
+ * Register a document after the browser uploaded bytes via signed URL
+ * (avoids Vercel ~4.5 MB body cap). Still accepts multipart for tiny files / local.
+ */
+function documentsUploadMaybe(req, res, next) {
+  const ct = String(req.headers['content-type'] || '');
+  if (ct.includes('multipart/form-data')) {
+    return upload.single('file')(req, res, (err) => {
+      if (err) {
+        const msg =
+          err.code === 'LIMIT_FILE_SIZE'
+            ? 'File too large (max 25MB)'
+            : err.message || 'Upload parse failed';
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  }
+  next();
+}
+
 /** Employee uploads own doc OR HR registers for employee */
-router.post('/documents', upload.single('file'), async (req, res) => {
+router.post('/documents', documentsUploadMaybe, async (req, res) => {
   try {
     const body = req.body || {};
     const employee_id = body.employee_id || req.user.id;
@@ -953,21 +1063,34 @@ router.post('/documents', upload.single('file'), async (req, res) => {
     const department = String(body.department || req.user.department || 'General').trim() || 'General';
     const designation = String(body.designation || req.user.designation || 'Staff').trim() || 'Staff';
     const doc_type = String(body.doc_type || 'Other').trim();
-    const title = String(body.title || req.file?.originalname || 'Document').trim();
+    const title = String(body.title || req.file?.originalname || body.file_name || 'Document').trim();
 
-    if (!canHrOrAdmin(req.user) && employee_id !== req.user.id) {
+    if (!canHrOrAdmin(req.user) && String(employee_id) !== String(req.user.id)) {
       return res.status(403).json({ error: 'You can only upload your own documents' });
     }
-    if (!req.file) return res.status(400).json({ error: 'File is required' });
 
     await ensureBucket();
-    const file_path = `hr/employees/${safeSeg(department)}/${safeSeg(designation)}/${safeSeg(employee_name)}/${uid()}_${safeSeg(req.file.originalname)}`;
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(file_path, req.file.buffer, {
-      contentType: req.file.mimetype || 'application/octet-stream',
-      upsert: true,
-    });
-    if (upErr) throw upErr;
-    const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(file_path);
+    let file_path = String(body.file_path || '').replace(/^\/+/, '');
+    let file_url = String(body.file_url || '').trim();
+    let file_name = String(body.file_name || req.file?.originalname || 'document').trim();
+
+    if (req.file) {
+      file_path = `hr/employees/${safeSeg(department)}/${safeSeg(designation)}/${safeSeg(employee_name)}/${uid()}_${safeSeg(req.file.originalname)}`;
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(file_path, req.file.buffer, {
+        contentType: req.file.mimetype || 'application/octet-stream',
+        upsert: true,
+      });
+      if (upErr) throw upErr;
+      const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(file_path);
+      file_url = urlData.publicUrl;
+      file_name = req.file.originalname;
+    } else if (file_path && file_url) {
+      if (!file_path.startsWith('hr/employees/')) {
+        return res.status(400).json({ error: 'Invalid document path' });
+      }
+    } else {
+      return res.status(400).json({ error: 'File is required' });
+    }
 
     const row = {
       id: uid(),
@@ -978,8 +1101,8 @@ router.post('/documents', upload.single('file'), async (req, res) => {
       doc_type,
       title,
       file_path,
-      file_url: urlData.publicUrl,
-      file_name: req.file.originalname,
+      file_url,
+      file_name,
       uploaded_by: req.user.id,
       uploaded_by_name: req.user.full_name || req.user.username,
       created_at: new Date().toISOString(),

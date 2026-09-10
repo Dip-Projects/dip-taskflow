@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { uploadPublicHrFiles } from '../../lib/publicHrUpload';
 import './publicForms.css';
 
 const EDU_ROWS = ['10th', '12th / Diploma', 'Graduation', 'Post Graduation', 'Other'];
@@ -74,25 +75,23 @@ export default function CandidateApplyPage() {
     if (!files.cv?.length) return setError('Updated CV is required');
     if (!form.declaration) return setError('Please confirm the declaration');
 
-    const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => {
-      if (k === 'declaration') fd.append(k, v ? 'true' : 'false');
-      else fd.append(k, v == null ? '' : String(v));
-    });
-    fd.append('sources', JSON.stringify(sources));
-    fd.append('education', JSON.stringify(education));
-    Object.entries(files).forEach(([k, fileList]) => {
-      if (!fileList?.length) return;
-      if (k === 'education_certs') {
-        [...fileList].forEach((f) => fd.append('education_certs', f));
-      } else {
-        fd.append(k, fileList[0]);
-      }
-    });
-
     setBusy(true);
     try {
-      const res = await fetch('/api/hr/public/apply', { method: 'POST', body: fd });
+      const folder = `hr/applications/${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const documents = await uploadPublicHrFiles(files, folder);
+      if (!documents.cv) throw new Error('Updated CV is required');
+
+      const res = await fetch('/api/hr/public/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          declaration: !!form.declaration,
+          sources,
+          education,
+          documents,
+        }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Submit failed');
       setDone(true);

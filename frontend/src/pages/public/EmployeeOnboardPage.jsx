@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { uploadPublicHrFiles } from '../../lib/publicHrUpload';
 import './publicForms.css';
 
 export default function EmployeeOnboardPage() {
@@ -84,22 +85,14 @@ export default function EmployeeOnboardPage() {
     if (phone.length < 10) return setError('Valid contact number is required');
     if (aadhaar.length < 12) return setError('Valid Aadhaar (12 digits) is required');
 
-    const fd = new FormData();
-    Object.entries(form).forEach(([k, v]) => fd.append(k, v == null ? '' : String(v)));
-    Object.entries(files).forEach(([k, fileList]) => {
-      if (!fileList?.length) return;
-      if (k === 'education_certs') {
-        [...fileList].forEach((f) => fd.append('education_certs', f));
-      } else {
-        fd.append(k, fileList[0]);
-      }
-    });
-
     setBusy(true);
     try {
+      const folder = `hr/joining/${encodeURIComponent(token).slice(0, 40)}`;
+      const documents = await uploadPublicHrFiles(files, folder);
       const res = await fetch(`/api/hr/public/onboard/${encodeURIComponent(token)}`, {
         method: 'POST',
-        body: fd,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, documents }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Submit failed');

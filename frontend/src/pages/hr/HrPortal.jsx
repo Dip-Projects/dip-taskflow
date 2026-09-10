@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { api } from '../../lib/api';
+import { uploadViaApi } from '../../lib/ensureBucket';
 import { generateExpCertificatePdf } from './letters/generateExpCertPdf';
 import {
   OFFER_TEMPLATES,
@@ -9,6 +10,16 @@ import {
 import { generateSalarySlipPdf, amountInWords } from './payroll/generateSalarySlipPdf';
 import { generateJoiningFormPdf } from './generateJoiningFormPdf';
 import './HrPortal.css';
+
+function safePathSeg(s) {
+  return (
+    String(s || 'unknown')
+      .trim()
+      .replace(/[^\w\s.-]/g, '')
+      .replace(/\s+/g, '_')
+      .slice(0, 80) || 'unknown'
+  );
+}
 
 function publicOrigin() {
   if (typeof window === 'undefined') return '';
@@ -517,11 +528,22 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
             {qrModal.qr ? (
               <img src={qrModal.qr} alt="QR" style={{ width: 220, height: 220, display: 'block', margin: '0 auto' }} />
             ) : null}
-            <p style={{ wordBreak: 'break-all', fontSize: '0.8rem' }}>{qrModal.url}</p>
+            <p style={{ wordBreak: 'break-all', fontSize: '0.8rem' }}>
+              <a href={qrModal.url} target="_blank" rel="noreferrer">{qrModal.url}</a>
+            </p>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <a
+                className="hr-btn"
+                href={qrModal.url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ textDecoration: 'none' }}
+              >
+                Open form
+              </a>
               <button
                 type="button"
-                className="hr-btn"
+                className="hr-btn ghost"
                 onClick={() => {
                   navigator.clipboard?.writeText(qrModal.url);
                   alert('Link copied');
@@ -1366,7 +1388,7 @@ function DocumentsView({ employees, user }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const emp = employees.find((e) => e.id === form.employee_id);
+  const emp = employees.find((e) => String(e.id) === String(form.employee_id));
 
   const upload = async (e) => {
     e.preventDefault();
@@ -1376,22 +1398,31 @@ function DocumentsView({ employees, user }) {
     }
     setBusy(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('employee_id', emp.id);
-      fd.append('employee_name', emp.full_name || '');
-      fd.append('department', emp.department || 'General');
-      fd.append('designation', emp.designation || 'Staff');
-      fd.append('doc_type', form.doc_type);
-      fd.append('title', form.title || file.name);
-      const token = localStorage.getItem('tf_token');
-      const res = await fetch('/api/hr/documents', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
+      const department = emp.department || 'General';
+      const designation = emp.designation || 'Staff';
+      const employee_name = emp.full_name || 'Employee';
+      const file_path = `hr/employees/${safePathSeg(department)}/${safePathSeg(designation)}/${safePathSeg(employee_name)}/${Date.now()}_${safePathSeg(file.name)}`;
+      // Signed URL / storage proxy — avoids Vercel ~4.5 MB body limit on /api/hr/documents
+      const file_url = await uploadViaApi({
+        path: file_path,
+        blob: file,
+        contentType: file.type || 'application/octet-stream',
+        bucket: 'documents',
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      await api('/hr/documents', {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: emp.id,
+          employee_name,
+          department,
+          designation,
+          doc_type: form.doc_type,
+          title: form.title || file.name,
+          file_path,
+          file_url,
+          file_name: file.name,
+        }),
+      });
       setFile(null);
       setForm({ employee_id: '', doc_type: 'Insurance', title: '' });
       await load();
