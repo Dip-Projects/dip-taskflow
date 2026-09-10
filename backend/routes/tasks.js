@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis, requireCanAddTask } = require('../middleware/auth');
-const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours } = require('../lib/workingHours');
+const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours, endOfIstCalendarDay } = require('../lib/workingHours');
 const {
   workTimerAnchor,
   workTimerBudgetHours,
@@ -1841,19 +1841,19 @@ const FMS_STEPS = [
   {
     key: 'accept',
     label: 'Start / Accept',
-    what: 'Start / accept the assigned task',
+    what: 'Accept the assigned task the same day',
     who: 'Assignee (PERSON)',
     how: 'In TaskFlow',
-    why: 'Work starts only after the person accepts',
+    why: 'Delay only if not accepted on the assign day (IST)',
     when: '1',
   },
   {
     key: 'submit',
     label: 'Send for verification',
-    what: 'Send completed work for checking',
+    what: 'Send completed work within lead time',
     who: 'Assignee (PERSON)',
     how: 'In TaskFlow',
-    why: 'Verifier cannot check until it is sent',
+    why: 'Delay if not sent for verification inside lead time',
     when: '2',
   },
   {
@@ -1862,7 +1862,7 @@ const FMS_STEPS = [
     what: 'Verify, send correction, or request update',
     who: 'Verifier',
     how: 'In TaskFlow',
-    why: 'Close the task or send it back — Done only after Verify click; 2h SLA from Start Verification',
+    why: 'Delay if not decided within 2 working hours of Start Verification',
     when: '3',
   },
 ];
@@ -1934,6 +1934,56 @@ function fmsStep(planned, actual, isApplicable) {
   };
 }
 
+/**
+ * Accept SLA = same IST calendar day as assign.
+ * Delay / Overdue only if accept happens after that day (or still missing after EOD).
+ */
+function fmsAcceptStep(t) {
+  const assigned = t.assigned_at || t.created_at;
+  if (!assigned) return { planned: null, actual: null, status: 'Pending', delayHrs: null };
+  const deadline = endOfIstCalendarDay(assigned);
+  const step = fmsStep(deadline.toISOString(), t.accepted_at || null, true);
+  if (step.status === 'Done' && step.delayHrs != null && step.delayHrs <= 0) {
+    step.delayHrs = 0; // same-day accept → on time (not "+0.6h delayed")
+  }
+  return step;
+}
+
+/**
+ * Send-for-verification SLA = lead time from assign (working hours).
+ * Prefer assigned_deadline_at, else assigned + hours_to_complete, else target_date.
+ */
+function fmsSubmitStep(t) {
+  const assigned = t.assigned_at || t.created_at;
+  const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at || null;
+  let planned = null;
+  if (t.assigned_deadline_at) {
+    planned = new Date(t.assigned_deadline_at);
+  } else {
+    const lead = Number(t.hours_to_complete || t.original_hours_to_complete || 0);
+    if (assigned && lead > 0) planned = addWorkingHours(assigned, lead);
+    else if (t.target_date) planned = new Date(t.target_date);
+  }
+  if (!planned) return fmsStep(null, sentAt, true);
+
+  const step = fmsStep(planned.toISOString(), sentAt, true);
+  if (planned && sentAt) {
+    const late = elapsedWorkingHours(planned, sentAt);
+    const early = elapsedWorkingHours(sentAt, planned);
+    if (new Date(sentAt) > planned) {
+      step.delayHrs = Math.round(late * 10) / 10;
+      step.status = 'Delayed';
+    } else {
+      step.delayHrs = -Math.round(early * 10) / 10;
+      step.status = 'Done';
+    }
+  } else if (!sentAt && planned < new Date()) {
+    step.delayHrs = Math.round(elapsedWorkingHours(planned, new Date()) * 10) / 10;
+    step.status = 'Overdue';
+  }
+  return step;
+}
+
 const FMS_VERIFICATION_SLA_HOURS = 2;
 
 /** Verification FMS: planned = Start Verification + 2 working hours; actual = Verify/Correction/Updation only. */
@@ -1965,6 +2015,9 @@ function fmsVerifyStep(t) {
       step.delayHrs = -Math.round(early * 10) / 10;
       step.status = 'Done';
     }
+  } else if (verifyPlanned && !verifyActual && verifyPlanned < new Date()) {
+    step.delayHrs = Math.round(elapsedWorkingHours(verifyPlanned, new Date()) * 10) / 10;
+    step.status = 'Overdue';
   }
   return {
     ...step,
@@ -1982,7 +2035,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       sent_for_verification_at, verification_started_at, verified_at, rejected_at,
       verification_status, verification_decided_at, first_verified_at,
       first_sent_for_verification_at, first_verification_started_at,
-      hours_to_complete, target_date,
+      hours_to_complete, original_hours_to_complete, target_date, assigned_deadline_at,
       extra_hours, extra_days, correction_extensions,
       project:projects ( id, name ),
       task_type:task_types ( id, name ),
@@ -2029,13 +2082,12 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
       .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
       .map((t) => {
         const assigned = t.assigned_at || t.created_at;
-        const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
         const pid = t.project?.id || 'none';
         seqByProject[pid] = (seqByProject[pid] || 0) + 1;
 
         const steps = {
-          accept: fmsStep(assigned, t.accepted_at, true),
-          submit: fmsStep(t.target_date, sentAt, true),
+          accept: fmsAcceptStep(t),
+          submit: fmsSubmitStep(t),
           verify: fmsVerifyStep(t),
         };
 

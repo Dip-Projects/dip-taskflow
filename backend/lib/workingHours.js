@@ -24,6 +24,13 @@ function fromIst(ist) {
   return new Date(ist.getTime() - IST_OFFSET_MS);
 }
 
+/** End of the IST calendar day (23:59:59.999 IST) for "same-day" SLAs. */
+function endOfIstCalendarDay(date) {
+  const ist = toIst(date);
+  ist.setUTCHours(23, 59, 59, 999);
+  return fromIst(ist);
+}
+
 /** Same IST day, at the given IST hour and minute. */
 function atIst(ist, h, m) {
   const d = new Date(ist);
@@ -130,4 +137,5 @@ module.exports = {
   snapToWorkingMoment,
   fmtEmployeeDueLabel,
   elapsedWorkingHours,
+  endOfIstCalendarDay,
 };
