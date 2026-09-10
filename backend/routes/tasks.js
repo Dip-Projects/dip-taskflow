@@ -1902,6 +1902,15 @@ function fmsJobCode(name) {
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
 }
 
+/** MDO Office work stays on MDO portal — keep it out of the office FMS sheet. */
+function isMdoOfficeWorkTask(t) {
+  const dept = String(t.department?.name || '').toLowerCase().trim();
+  const type = String(t.task_type?.name || '').toLowerCase().trim();
+  if (dept === 'mdo office' || /\bmdo\b/.test(dept)) return true;
+  if (/\bmdo\b/.test(type)) return true;
+  return false;
+}
+
 function fmsStep(planned, actual, isApplicable) {
   if (!isApplicable) return { planned: null, actual: null, status: 'NA', delayHrs: null };
   const p = planned ? new Date(planned) : null;
@@ -2014,6 +2023,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
 
     const seqByProject = {};
     const rows = (tasks || [])
+      .filter((t) => !isMdoOfficeWorkTask(t))
       .filter((t) => stamps(t).some(inRange))
       .filter((t) => !project || String(t.project?.id) === String(project))
       .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
