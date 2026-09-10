@@ -1076,11 +1076,9 @@ router.patch('/:id/approve', requireAdminOrHr, async (req, res) => {
     if (existing.status !== 'Pending') {
       return res.status(400).json({ error: 'This request has already been decided' });
     }
-    if (existing.buddy_id && existing.buddy_status === 'Pending') {
-      return res.status(400).json({
-        error: 'Buddy has not responded yet. Wait for Yes/No before approving.',
-      });
-    }
+    // Head/admin may approve even if buddy has not answered yet.
+    // Task transfer still runs only when buddy_status === 'Accepted'
+    // (here on approve, or later when buddy says Yes on an already-approved leave).
 
     const coverNeeded = !!(existing.buddy_id && existing.buddy_status === 'Declined');
     const updatePayload = {
