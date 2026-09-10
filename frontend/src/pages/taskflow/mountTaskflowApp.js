@@ -1324,7 +1324,12 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
   
-    if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis)) {
+    const isMdoHead =
+      isMdoOfficeUser() &&
+      (!!state.user.is_head ||
+        /\bhead\b/i.test(String(state.user.designation || '')) ||
+        String(state.user.role || '').toLowerCase() === 'head');
+    if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis || isMdoHead)) {
       appendCollapsibleNav(
         'Verification',
         [makeNavButton('verifications', '🔎 Verification requests')],
@@ -2762,7 +2767,7 @@ export async function mountTaskflowApp(opts = {}) {
   
     leavesWrap.innerHTML = '<div class="empty-state">Loading…</div>';
     verifWrap.innerHTML = '<div class="empty-state">Loading…</div>';
-    if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
+    if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     ticketsWrap.innerHTML = '<div class="empty-state">Loading…</div>';
   
     try {
@@ -3203,6 +3208,12 @@ export async function mountTaskflowApp(opts = {}) {
         <span class="task-meta-due-label">Due</span>
         <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : plannedDateCellHtml(task)}</div>
       </div>
+      ${verificationMode ? `<div class="assigned-line">Sent for verification: <strong>${escapeHtml(
+        (task.sent_for_verification_at || task.first_sent_for_verification_at)
+          ? fmtSheetDateTime(task.sent_for_verification_at || task.first_sent_for_verification_at)
+          : '—'
+      )}</strong></div>` : ''}
+      ${verificationMode ? `<div class="assigned-line">Pending with: <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>` : ''}
       <div class="task-meta task-meta-files">
         ${task.attachment_url ? `<a class="attachment-link" href="${task.attachment_url}" target="_blank" rel="noopener">📎 Attachment</a>` : ''}
         ${task.voice_note_url ? `<a class="attachment-link" href="${task.voice_note_url}" target="_blank" rel="noopener">🎤 Voice note</a>` : ''}
@@ -3637,7 +3648,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadVerifications(opts = {}) {
     if (!opts.quiet) {
       if (els.verificationsTableBody) {
-        els.verificationsTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
+        els.verificationsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
       }
       if (els.verificationsList) {
     els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -3936,7 +3947,7 @@ export async function mountTaskflowApp(opts = {}) {
   
   function renderVerificationsTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -3954,10 +3965,22 @@ export async function mountTaskflowApp(opts = {}) {
       // Task Type
       const tdTaskType = document.createElement('td');
       tdTaskType.textContent = task.task_type?.name ?? '—';
+
+      // Description / task details
+      const tdDesc = document.createElement('td');
+      tdDesc.style.maxWidth = '280px';
+      tdDesc.style.whiteSpace = 'normal';
+      tdDesc.style.wordBreak = 'break-word';
+      tdDesc.textContent = task.description || '—';
+      if (task.description) tdDesc.title = task.description;
   
       // Submitted By (person who did the task and sent for verification)
       const tdSubmittedBy = document.createElement('td');
       tdSubmittedBy.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
+
+      // Pending with — who currently holds verification
+      const tdPendingWith = document.createElement('td');
+      tdPendingWith.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier?.full_name ?? '—')}</strong>`;
   
       // Attachments
       const tdAttach = document.createElement('td');
@@ -3971,10 +3994,14 @@ export async function mountTaskflowApp(opts = {}) {
       }
       tdAttach.innerHTML = links.length ? links.join(' ') : `<span class="media-none">—</span>`;
   
-      // Submission date
+      // Sent for verification date/time (when employee clicked Send for verification)
       const tdDate = document.createElement('td');
       tdDate.style.whiteSpace = 'nowrap';
-      tdDate.textContent = fmtDate(task.verification_requested_at ?? task.updated_at ?? task.created_at);
+      const sentAt =
+        task.sent_for_verification_at ||
+        task.first_sent_for_verification_at ||
+        null;
+      tdDate.textContent = sentAt ? fmtSheetDateTime(sentAt) : '—';
   
       // Actions — Verify / Correction / Updation, shown directly (no gate)
       const tdActions = document.createElement('td');
@@ -3999,7 +4026,7 @@ export async function mountTaskflowApp(opts = {}) {
         });
         tdActions.appendChild(startBtn);
       }
-      tr.append(tdSr, tdProject, tdTaskType, tdSubmittedBy, tdAttach, tdDate, tdActions);
+      tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdAttach, tdDate, tdActions);
       tbody.appendChild(tr);
     });
   }

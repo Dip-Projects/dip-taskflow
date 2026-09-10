@@ -631,25 +631,40 @@ router.get('/my', async (req, res) => {
 router.get('/verifications', async (req, res) => {
   try {
     await resolveTaskSelect();
-    let query = supabase
-      .from('tasks')
-      .select(TASK_SELECT)
-      .eq('verification_status', 'Pending Verification')
-      .order('target_date', { ascending: true });
 
-    // MDO OFFICE admins have global oversight — they see every pending
-    // verification request, not just ones where they were specifically
-    // picked as the verifier. A department-level admin (e.g. Engg. Division
-    // head) only sees requests from within their own department. Everyone
-    // else (non-admin) only sees the ones routed to them personally.
-    if (req.user.role === 'admin' && req.user.department === 'MDO OFFICE') {
-      // no filter — sees everything
-    } else if (req.user.role === 'admin') {
-      query = query.eq('department_id', req.user.department_id);
-    } else {
-      query = query.eq('verifier_id', req.user.id);
+    const dept = String(req.user.department || '').toLowerCase().trim();
+    const isMdo = dept === 'mdo office' || /\bmdo\b/.test(dept);
+    const isMdoOversight =
+      isMdo &&
+      (req.user.role === 'admin' ||
+        !!req.user.is_head ||
+        /\bhead\b/i.test(String(req.user.designation || '')));
+
+    const applyScope = (q) => {
+      if (isMdoOversight) return q;
+      if (req.user.role === 'admin') return q.eq('department_id', req.user.department_id);
+      return q.eq('verifier_id', req.user.id);
+    };
+
+    let query = applyScope(
+      supabase
+        .from('tasks')
+        .select(TASK_SELECT)
+        .eq('verification_status', 'Pending Verification')
+        .order('sent_for_verification_at', { ascending: false })
+    );
+    let { data, error } = await query;
+
+    // Older DBs may lack sent_for_verification_at — fall back to target_date sort
+    if (error && /sent_for_verification_at|column|schema cache/i.test(error.message || '')) {
+      ({ data, error } = await applyScope(
+        supabase
+          .from('tasks')
+          .select(TASK_SELECT)
+          .eq('verification_status', 'Pending Verification')
+          .order('target_date', { ascending: true })
+      ));
     }
-    const { data, error } = await query;
     if (error) throw error;
     res.json(data);
   } catch (err) {

@@ -361,9 +361,11 @@ export default function TaskflowDom() {
                         <th className="col-tasksr">Task Sr No</th>
                         <th className="col-vproject">Project</th>
                         <th className="col-vtasktype">Task Type</th>
+                        <th className="col-vdesc">Task / Description</th>
                         <th className="col-vsubmitted">Submitted By</th>
+                        <th className="col-vpending">Pending with</th>
                         <th className="col-vattach">Attachments</th>
-                        <th className="col-vdate">Submission Date</th>
+                        <th className="col-vdate">Sent for verification</th>
                         <th className="col-vactions">Actions</th>
                       </tr>
                     </thead>
@@ -824,9 +826,11 @@ export default function TaskflowDom() {
                     <th className="col-tasksr">Task Sr No</th>
                     <th className="col-vproject">Project</th>
                     <th className="col-vtasktype">Task Type</th>
+                    <th className="col-vdesc">Task / Description</th>
                     <th className="col-vsubmitted">Submitted By</th>
+                    <th className="col-vpending">Pending with</th>
                     <th className="col-vattach">Attachments</th>
-                    <th className="col-vdate">Submission Date</th>
+                    <th className="col-vdate">Sent for verification</th>
                     <th className="col-vactions">Actions</th>
                   </tr>
                 </thead>
