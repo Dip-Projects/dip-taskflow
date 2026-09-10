@@ -1844,7 +1844,7 @@ const FMS_STEPS = [
     what: 'Accept the assigned task the same day',
     who: 'Assignee (PERSON)',
     how: 'In TaskFlow',
-    why: 'Delay only if not accepted on the assign day (IST)',
+    why: 'Same-day accept = on time; accept after assign day = Delayed',
     when: '1',
   },
   {
@@ -1936,15 +1936,25 @@ function fmsStep(planned, actual, isApplicable) {
 
 /**
  * Accept SLA = same IST calendar day as assign.
- * Delay / Overdue only if accept happens after that day (or still missing after EOD).
+ * Same-day accept → Done / on time. Accept after that day → Delayed.
+ * Still not accepted → Pending only (no Overdue).
  */
 function fmsAcceptStep(t) {
   const assigned = t.assigned_at || t.created_at;
   if (!assigned) return { planned: null, actual: null, status: 'Pending', delayHrs: null };
   const deadline = endOfIstCalendarDay(assigned);
-  const step = fmsStep(deadline.toISOString(), t.accepted_at || null, true);
+  const accepted = t.accepted_at || null;
+  if (!accepted) {
+    return {
+      planned: deadline.toISOString(),
+      actual: null,
+      status: 'Pending',
+      delayHrs: null,
+    };
+  }
+  const step = fmsStep(deadline.toISOString(), accepted, true);
   if (step.status === 'Done' && step.delayHrs != null && step.delayHrs <= 0) {
-    step.delayHrs = 0; // same-day accept → on time (not "+0.6h delayed")
+    step.delayHrs = 0; // same-day accept → on time
   }
   return step;
 }
