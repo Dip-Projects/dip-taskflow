@@ -2155,6 +2155,49 @@ export default function TaskflowDom() {
     </div>
   </div>
 
+  {/* Admin approve reschedule — hours summary + employee date vs own date/time */}
+  <div id="reschedApproveModal" className="modal-backdrop" hidden={true}>
+    <div className="modal" style={{maxWidth: 520}}>
+      <div className="modal-header">
+        <h3>Approve reschedule</h3>
+        <button type="button" className="modal-close" id="closeReschedApproveModal">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p className="form-note" style={{margin: '0 0 12px'}} id="reschedApproveTaskLabel"></p>
+        <div id="reschedApproveHoursBox" style={{background:'#F7F3EC',borderRadius:8,padding:'12px 14px',marginBottom:14,fontSize:13,lineHeight:1.55}}>
+          <div><strong>Assigned hours:</strong> <span id="reschedApproveAssigned">—</span></div>
+          <div><strong>Hours done:</strong> <span id="reschedApproveDone">—</span></div>
+          <div><strong>Hours remaining:</strong> <span id="reschedApproveRemaining">—</span></div>
+          <div style={{marginTop:6}}><strong>Employee requested date:</strong> <span id="reschedApproveRequested">—</span></div>
+        </div>
+        <p style={{margin:'0 0 10px',fontSize:13}}>
+          Approve the employee&apos;s requested date, or set your own date &amp; time (consider remaining hours)?
+        </p>
+        <div className="field">
+          <label>
+            <input type="radio" name="reschedApproveChoice" id="reschedApproveUseEmp" value="emp" defaultChecked />
+            {' '}Yes — use employee requested date
+          </label>
+        </div>
+        <div className="field">
+          <label>
+            <input type="radio" name="reschedApproveChoice" id="reschedApproveUseAdmin" value="admin" />
+            {' '}No — I will set date &amp; time
+          </label>
+        </div>
+        <div className="field" id="reschedApproveCustomWrap" hidden={true}>
+          <label htmlFor="reschedApproveDatetime">Your deadline (date &amp; time) <span className="req">*</span></label>
+          <input id="reschedApproveDatetime" type="datetime-local" />
+        </div>
+        <p id="reschedApproveFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelReschedApproveModal">Cancel</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="confirmReschedApproveBtn">Confirm approve</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   {/* SET EXTENDED TIME (Overdue view only — does not change target_date) */}
   <div id="overdueExtendModal" className="modal-backdrop" hidden={true}>
     <div className="modal">

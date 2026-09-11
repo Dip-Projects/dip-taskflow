@@ -161,6 +161,9 @@ function assignedWorkDeadline(t) {
 function employeeWorkDueDate(t) {
   if (needsReaccept(t)) return null;
   if (!t?.accepted_at) return null;
+  // Prefer stored work_due_at (accept / resume / reschedule-approve set this).
+  const stored = toDate(t.work_due_at);
+  if (stored) return stored;
   const anchor = workTimerAnchor(t);
   const hours = workTimerBudgetHours(t);
   if (!anchor || !hours || hours <= 0) return null;

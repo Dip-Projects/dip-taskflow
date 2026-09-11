@@ -721,6 +721,10 @@ export async function mountTaskflowApp(opts = {}) {
   function employeeWorkDueDate(task) {
     if (needsReaccept(task)) return null;
     if (!task?.accepted_at) return null;
+    if (task.work_due_at) {
+      const stored = parseLocalDate(task.work_due_at);
+      if (stored && !Number.isNaN(stored.getTime())) return stored;
+    }
     const anchor = workTimerAnchor(task);
     const hours = workTimerBudgetHours(task);
     if (!anchor || !hours || hours <= 0) return null;
@@ -3766,8 +3770,8 @@ export async function mountTaskflowApp(opts = {}) {
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       if (isAdmin && task.reschedule_status === 'Pending') {
-        tdActions.appendChild(makeActionBtn('action-complete', '✅ Approve', () => decideRescheduleRequest(task.id, 'approve')));
-        tdActions.appendChild(makeActionBtn('action-reject', '❌ Reject', () => decideRescheduleRequest(task.id, 'reject')));
+        tdActions.appendChild(makeActionBtn('action-complete', '✅ Approve', () => decideRescheduleRequest(task.id, 'approve', task)));
+        tdActions.appendChild(makeActionBtn('action-reject', '❌ Reject', () => decideRescheduleRequest(task.id, 'reject', task)));
       } else {
         tdActions.textContent = '—';
       }
@@ -3809,28 +3813,129 @@ export async function mountTaskflowApp(opts = {}) {
         </div>` : ''}
       `;
       if (isAdmin && task.reschedule_status === 'Pending') {
-        card.querySelector('.resched-approve-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'approve'));
-        card.querySelector('.resched-reject-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'reject'));
+        card.querySelector('.resched-approve-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'approve', task));
+        card.querySelector('.resched-reject-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'reject', task));
       }
       wrap.appendChild(card);
     });
   }
   
-  async function decideRescheduleRequest(taskId, decision) {
-    let reason = '';
+  async function decideRescheduleRequest(taskId, decision, taskHint) {
     if (decision === 'reject') {
-      reason = prompt('Reason for rejecting this reschedule request (optional):') || '';
+      const reason = prompt('Reason for rejecting this reschedule request (optional):') || '';
+      try {
+        await api(`/tasks/${taskId}/reschedule-request/reject`, {
+          method: 'PATCH', body: { reason }
+        });
+        showToast('Reschedule rejected', 'success');
+        loadRescheduleRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+      return;
     }
+    openReschedApproveModal(taskHint || { id: taskId });
+  }
+
+  let _reschedApproveTask = null;
+
+  function reschedHoursSummary(task) {
+    const assigned = assignedHoursOf(task);
+    const budget = workTimerBudgetHours(task) || assigned || 0;
+    let done = 0;
+    let remaining = budget;
+    if (task?.is_on_hold) {
+      remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : budget) || 0;
+      done = Math.max(0, Math.round(((assigned || 0) - remaining) * 100) / 100);
+    } else if (task?.accepted_at) {
+      const anchor = workTimerAnchor(task);
+      if (anchor) {
+        done = Math.max(0, Math.round(elapsedWorkingHoursBetween(anchor, new Date()) * 100) / 100);
+        remaining = Math.max(0, Math.round((budget - done) * 100) / 100);
+      }
+    }
+    return { assigned, done, remaining };
+  }
+
+  function fmtHrsLabel(h) {
+    if (h == null || Number.isNaN(Number(h))) return '—';
+    const n = Number(h);
+    if (n < 1) return `${Math.round(n * 60)}m`;
+    const hrs = Math.floor(n);
+    const mins = Math.round((n - hrs) * 60);
+    return mins ? `${hrs}h ${mins}m` : `${hrs}h`;
+  }
+
+  function openReschedApproveModal(task) {
+    _reschedApproveTask = task;
+    const modal = document.getElementById('reschedApproveModal');
+    const msg = document.getElementById('reschedApproveFormMsg');
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
+    const sum = reschedHoursSummary(task);
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('reschedApproveTaskLabel', `${task.assigned_to_user?.full_name || 'Employee'} — ${task.description || 'Task'}`);
+    set('reschedApproveAssigned', fmtHrsLabel(sum.assigned));
+    set('reschedApproveDone', fmtHrsLabel(sum.done));
+    set('reschedApproveRemaining', fmtHrsLabel(sum.remaining));
+    set('reschedApproveRequested', fmtDateOnly(task.reschedule_requested_date) || '—');
+    const useEmp = document.getElementById('reschedApproveUseEmp');
+    const useAdmin = document.getElementById('reschedApproveUseAdmin');
+    const wrap = document.getElementById('reschedApproveCustomWrap');
+    const dt = document.getElementById('reschedApproveDatetime');
+    if (useEmp) useEmp.checked = true;
+    if (useAdmin) useAdmin.checked = false;
+    if (wrap) wrap.hidden = true;
+    if (dt) {
+      const req = String(task.reschedule_requested_date || '').slice(0, 10);
+      dt.value = req ? `${req}T18:30` : '';
+    }
+    if (modal) modal.hidden = false;
+  }
+
+  function closeReschedApproveModal() {
+    const modal = document.getElementById('reschedApproveModal');
+    if (modal) modal.hidden = true;
+    _reschedApproveTask = null;
+  }
+
+  async function confirmReschedApprove() {
+    const task = _reschedApproveTask;
+    if (!task?.id) return;
+    const msg = document.getElementById('reschedApproveFormMsg');
+    const useAdmin = document.getElementById('reschedApproveUseAdmin')?.checked;
+    const dt = document.getElementById('reschedApproveDatetime')?.value;
+    if (useAdmin && !dt) {
+      if (msg) { msg.hidden = false; msg.textContent = 'Please pick date and time for the new deadline.'; }
+      return;
+    }
+    const body = useAdmin
+      ? { use_employee_date: false, target_date: new Date(dt).toISOString() }
+      : { use_employee_date: true };
     try {
-      await api(`/tasks/${taskId}/reschedule-request/${decision}`, {
-        method: 'PATCH', body: decision === 'reject' ? { reason } : {}
-      });
-      showToast(decision === 'approve' ? 'Reschedule approved ✅' : 'Reschedule rejected', 'success');
+      await api(`/tasks/${task.id}/reschedule-request/approve`, { method: 'PATCH', body });
+      closeReschedApproveModal();
+      showToast('Reschedule approved — deadline updated (no re-accept) ✅', 'success');
       loadRescheduleRequests();
       refreshNavBadges();
-    } catch (err) { showToast(err.message, 'error'); }
+    } catch (err) {
+      if (msg) { msg.hidden = false; msg.textContent = err.message; }
+      else showToast(err.message, 'error');
+    }
   }
-  
+
+  __tfReadyFns.push(() => {
+    document.getElementById('closeReschedApproveModal')?.addEventListener('click', closeReschedApproveModal);
+    document.getElementById('cancelReschedApproveModal')?.addEventListener('click', closeReschedApproveModal);
+    document.getElementById('confirmReschedApproveBtn')?.addEventListener('click', () => confirmReschedApprove());
+    document.getElementById('reschedApproveUseEmp')?.addEventListener('change', () => {
+      const wrap = document.getElementById('reschedApproveCustomWrap');
+      if (wrap) wrap.hidden = true;
+    });
+    document.getElementById('reschedApproveUseAdmin')?.addEventListener('change', () => {
+      const wrap = document.getElementById('reschedApproveCustomWrap');
+      if (wrap) wrap.hidden = false;
+    });
+  });
+
   // ─── Corrections view (employee) ──────────────────────────────────────────────
   async function loadCorrections() {
     if (els.correctionsTableBody) {

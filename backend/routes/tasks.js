@@ -1495,12 +1495,12 @@ router.get('/reschedule-requests', async (req, res) => {
   }
 });
 
-// Admin: approve — moves the plan to the date the employee asked for and stops
-// the work timer. The employee has to Accept again, and that Accept restarts the
-// full assigned hours from scratch. The original plan date is left untouched.
+// Admin: approve — only moves the deadline (employee requested date or admin's
+// chosen date/time). Keeps the timer running with remaining hours — NO re-accept.
 router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    const { use_employee_date, target_date } = req.body || {};
     const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
     if (existing.reschedule_status !== 'Pending') {
@@ -1508,14 +1508,51 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
     }
 
     const at = nowIso();
-    const approvedDate = existing.reschedule_requested_date;
-    const lockedHours =
-      existing.original_hours_to_complete != null
-        ? existing.original_hours_to_complete
-        : existing.hours_to_complete;
+    const useEmp =
+      use_employee_date === undefined || use_employee_date === null
+        ? true
+        : !!use_employee_date;
 
-    const data = await updateTaskTolerant(id, {
-      // Current plan moves; original_target_date keeps what the admin first set.
+    let approvedDate = useEmp
+      ? existing.reschedule_requested_date
+      : target_date || existing.reschedule_requested_date;
+
+    if (!approvedDate) {
+      return res.status(400).json({ error: 'Please pick a deadline date' });
+    }
+
+    // Date-only → end of office day (18:30 IST) so Due has a real time.
+    {
+      const s = String(approvedDate);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        approvedDate = `${s}T18:30:00+05:30`;
+      } else if (/^\d{4}-\d{2}-\d{2}T00:00(:00)?/.test(s) && !/18:30/.test(s)) {
+        approvedDate = `${s.slice(0, 10)}T18:30:00+05:30`;
+      }
+    }
+
+    const assignedHrs =
+      existing.original_hours_to_complete != null
+        ? Number(existing.original_hours_to_complete)
+        : Number(existing.hours_to_complete) || 0;
+    const budget = workTimerBudgetHours(existing) || assignedHrs;
+    const anchor = existing.accepted_at
+      ? (existing.is_on_hold
+          ? existing.resumed_at || existing.accepted_at
+          : existing.resumed_at || existing.accepted_at)
+      : null;
+    let doneHrs = 0;
+    let remHrs = budget;
+    if (existing.is_on_hold) {
+      remHrs = Number(existing.hold_remaining_hours != null ? existing.hold_remaining_hours : budget) || 0;
+      doneHrs = Math.max(0, Math.round((assignedHrs - remHrs) * 100) / 100);
+    } else if (anchor) {
+      doneHrs = Math.max(0, Math.round(elapsedWorkingHours(new Date(anchor), new Date()) * 100) / 100);
+      remHrs = Math.max(0, Math.round((budget - doneHrs) * 100) / 100);
+    }
+
+    const keepAccepted = !!existing.accepted_at;
+    const updates = {
       target_date: approvedDate,
       original_target_date: existing.original_target_date || existing.target_date,
       reschedule_approved_target_date: approvedDate,
@@ -1524,30 +1561,54 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       reschedule_status: 'Approved',
       reschedule_decided_by: req.user.id,
       reschedule_decided_at: at,
-      // Timer stops until the employee accepts the new date.
-      status: 'Pending',
-      reaccept_required: true,
-      reaccept_reason: 'Reschedule approved — accept again to start the hours',
-      accepted_at: null,
-      resumed_at: null,
-      is_on_hold: false,
-      hold_remaining_hours: null,
-      work_due_at: null,
+      // Deadline only — employee keeps working, no re-accept.
+      reaccept_required: false,
+      reaccept_reason: null,
       overdue_since_at: null,
       accept_reminder_sent_at: null,
-      // Full assigned hours are given back for the new cycle.
-      hours_to_complete: lockedHours,
-      original_hours_to_complete: lockedHours,
+      work_due_at: approvedDate,
       task_events: withTaskEvent(existing, 'reschedule_approved', req.user.id, {
         from_target_date: existing.target_date || null,
         to_target_date: approvedDate || null,
         original_target_date: existing.original_target_date || existing.target_date || null,
-        hours: lockedHours != null ? Number(lockedHours) : null,
-        timer: 'reset_pending_accept',
+        use_employee_date: useEmp,
+        assigned_hours: assignedHrs,
+        hours_done: doneHrs,
+        hours_remaining: remHrs,
+        timer: 'deadline_only_no_reaccept',
       }),
-    }, TASK_SELECT);
+    };
 
-    res.json(data);
+    if (keepAccepted) {
+      // Preserve acceptance; keep remaining hours on the live budget.
+      updates.status = existing.is_on_hold ? existing.status : (existing.status === 'Pending' ? 'In Progress' : existing.status);
+      if (existing.status === 'Pending' && existing.accepted_at) updates.status = 'In Progress';
+      updates.hours_to_complete = remHrs > 0 ? remHrs : existing.hours_to_complete;
+      if (existing.original_hours_to_complete == null && assignedHrs > 0) {
+        updates.original_hours_to_complete = assignedHrs;
+      }
+      if (existing.is_on_hold) {
+        updates.hold_remaining_hours = remHrs;
+      } else if (existing.resumed_at != null || existing.hold_remaining_hours != null) {
+        updates.hold_remaining_hours = remHrs;
+      }
+    } else {
+      // Not accepted yet — just move the plan date; still no re-accept flag.
+      updates.status = existing.status || 'Pending';
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+
+    res.json({
+      ...data,
+      _reschedule_summary: {
+        assigned_hours: assignedHrs,
+        hours_done: doneHrs,
+        hours_remaining: remHrs,
+        deadline: approvedDate,
+        use_employee_date: useEmp,
+      },
+    });
   } catch (err) {
     console.error('Approve reschedule error:', err.message);
     res.status(500).json({ error: err.message || 'Could not approve reschedule request' });
