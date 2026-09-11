@@ -148,6 +148,7 @@ create table if not exists recurring_task_instances (
   due_date date not null,
   status text not null default 'Pending' check (status in ('Pending', 'Completed')),
   completed_at timestamptz,
+  photo_url text,
   created_at timestamptz not null default now(),
   unique (recurring_task_id, due_date)
 );

@@ -7141,87 +7141,110 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   // Shared "Done" flow for a recurring task instance, used by both the table
-  // and card views. If the task has no checkpoints, completes immediately.
-  // If it has checkpoints, opens a modal to tick them off, then Submit saves
-  // and closes it. On completion the task drops out of the active list —
-  // renderEmployeeRecurringList/-Table already do this automatically once the
-  // refreshed data shows status: 'Completed'.
+  // and card views. Always opens a modal: tick checkpoints (if any) + optional
+  // photo, then Submit. Photo is never required.
   async function openRecurringDoneFlow(task, inst, checkpoints, refresh = refreshMainRecurringView) {
     if (!inst) return;
-  
-    if (checkpoints.length === 0) {
-      try {
-        const updated = await api(`/recurring-tasks/instances/${inst.id}/complete`, { method: 'POST' });
-        await refresh();
-        if (updated.status === 'Completed') showToast('Task marked as done ✅', 'success');
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-      return;
-    }
-  
+
     const completedIds = (inst.recurring_task_checkpoint_completions || []).map(c => c.checkpoint_id);
     const modal = document.getElementById('checkpointModal');
     const titleEl = document.getElementById('checkpointModalTitle');
     const listEl = document.getElementById('checkpointModalList');
     const msgEl = document.getElementById('checkpointModalMsg');
     const submitBtn = document.getElementById('submitCheckpointModal');
-  
-    titleEl.textContent = task.description || 'Checkpoints';
+    const photoInput = document.getElementById('checkpointModalPhoto');
+
+    titleEl.textContent = task.description || 'Mark done';
     msgEl.hidden = true;
-    listEl.innerHTML = `<div class="checkpoint-list">` + checkpoints.map(cp => {
-      const done = completedIds.includes(cp.id);
-      return `
-        <label class="checkpoint-item ${done ? 'cp-done' : ''}" data-cp="${cp.id}">
-          <input type="checkbox" class="cp-checkbox" ${done ? 'checked' : ''} />
-          <span>${escapeHtml(cp.label)}</span>
-        </label>`;
-    }).join('') + `</div>`;
-  
-    listEl.querySelectorAll('.cp-checkbox').forEach(cb => {
-      cb.addEventListener('change', (e) => {
-        e.target.closest('label').classList.toggle('cp-done', cb.checked);
+    if (photoInput) photoInput.value = '';
+
+    if (checkpoints.length === 0) {
+      listEl.innerHTML = `<p class="form-note">Mark this due date as done. You can attach a photo if you want.</p>`;
+    } else {
+      listEl.innerHTML = `<div class="checkpoint-list">` + checkpoints.map(cp => {
+        const done = completedIds.includes(cp.id);
+        return `
+          <label class="checkpoint-item ${done ? 'cp-done' : ''}" data-cp="${cp.id}">
+            <input type="checkbox" class="cp-checkbox" ${done ? 'checked' : ''} />
+            <span>${escapeHtml(cp.label)}</span>
+          </label>`;
+      }).join('') + `</div>
+        <p class="form-note" style="margin-top:8px">Tick every checkpoint, then submit. Photo is optional.</p>`;
+
+      listEl.querySelectorAll('.cp-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          e.target.closest('label').classList.toggle('cp-done', cb.checked);
+        });
       });
-    });
-  
+    }
+
     submitBtn.disabled = false;
-    submitBtn.textContent = 'Submit';
-  
+    submitBtn.textContent = checkpoints.length ? 'Submit' : 'Mark done';
+
     function close() {
       modal.hidden = true;
       submitBtn.removeEventListener('click', onSubmit);
-      document.getElementById('cancelCheckpointModal').removeEventListener('click', close);
-      document.getElementById('closeCheckpointModal').removeEventListener('click', close);
+      document.getElementById('cancelCheckpointModal')?.removeEventListener('click', close);
+      document.getElementById('closeCheckpointModal')?.removeEventListener('click', close);
     }
-  
+
     async function onSubmit() {
-      const checkedIds = [...listEl.querySelectorAll('.cp-checkbox:checked')]
-        .map(cb => cb.closest('label').dataset.cp);
+      msgEl.hidden = true;
+      const checkedIds = checkpoints.length
+        ? [...listEl.querySelectorAll('.cp-checkbox:checked')].map(cb => cb.closest('label').dataset.cp)
+        : [];
+
+      if (checkpoints.length && checkedIds.length !== checkpoints.length) {
+        msgEl.textContent = 'Tick every checkpoint to mark this done.';
+        msgEl.hidden = false;
+        return;
+      }
+
+      const photoFile = photoInput?.files?.[0] || null;
+      const formData = new FormData();
+      if (photoFile) formData.append('photo', photoFile);
+
       submitBtn.disabled = true;
       try {
-        const updated = await api(
-          `/recurring-tasks/instances/${inst.id}/submit`,
-          { method: 'POST', body: { checkpoint_ids: checkedIds } }
-        );
+        let updated;
+        if (checkpoints.length === 0) {
+          updated = await api(`/recurring-tasks/instances/${inst.id}/complete`, {
+            method: 'POST',
+            body: formData,
+            isForm: true,
+          });
+        } else {
+          formData.append('checkpoint_ids', JSON.stringify(checkedIds));
+          updated = await api(`/recurring-tasks/instances/${inst.id}/submit`, {
+            method: 'POST',
+            body: formData,
+            isForm: true,
+          });
+        }
         close();
         await refresh();
         if (updated.status === 'Completed') {
-          showToast('All checkpoints done — task completed! ✅', 'success');
+          showToast(
+            photoFile ? 'Done — photo saved ✅' : 'Task marked as done ✅',
+            'success'
+          );
         } else {
           showToast('Checkpoints saved', 'success');
         }
+        refreshNavBadges();
       } catch (err) {
+        msgEl.textContent = err.message;
+        msgEl.hidden = false;
         submitBtn.disabled = false;
-        showToast(err.message, 'error');
       }
     }
-  
+
     submitBtn.addEventListener('click', onSubmit);
     document.getElementById('cancelCheckpointModal')?.addEventListener('click', close);
     document.getElementById('closeCheckpointModal')?.addEventListener('click', close);
-  
     modal.hidden = false;
   }
+
   function renderEmployeeRecurringList(tasks, wrap = recEls.empList(), refreshFn = refreshMainRecurringView) {
     if (!tasks.length) {
       wrap.innerHTML = `<div class="empty-state">No recurring tasks assigned to you</div>`;

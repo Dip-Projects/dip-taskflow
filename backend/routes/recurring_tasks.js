@@ -1,9 +1,44 @@
 const express = require('express');
+const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
+
+const BUCKET = 'task-files';
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+async function uploadRecurringPhoto(file) {
+  if (!file) return null;
+  const safeName = String(file.originalname || 'photo.jpg').replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const path = `recurring-photos/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
+    contentType: file.mimetype || 'image/jpeg',
+    upsert: false,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+function parseCheckpointIds(body) {
+  if (!body) return [];
+  let raw = body.checkpoint_ids;
+  if (raw == null) return [];
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch (_) {
+      raw = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.map(String);
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -94,12 +129,25 @@ function getFireDates(task, today) {
 async function getOrCreateInstances(recurringTaskId, dueDates) {
   if (!dueDates.length) return [];
   const dueDateStrs = dueDates.map(d => d.toISOString().slice(0, 10));
+  const selectWithPhoto = 'id, due_date, status, completed_at, photo_url, recurring_task_checkpoint_completions ( checkpoint_id )';
+  const selectNoPhoto = 'id, due_date, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )';
 
-  const { data: existing, error } = await supabase
+  let { data: existing, error } = await supabase
     .from('recurring_task_instances')
-    .select('id, due_date, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )')
+    .select(selectWithPhoto)
     .eq('recurring_task_id', recurringTaskId)
     .in('due_date', dueDateStrs);
+  let instanceSelect = selectWithPhoto;
+  if (error && /photo_url|schema cache|column/i.test(error.message || '')) {
+    instanceSelect = selectNoPhoto;
+    const retry = await supabase
+      .from('recurring_task_instances')
+      .select(selectNoPhoto)
+      .eq('recurring_task_id', recurringTaskId)
+      .in('due_date', dueDateStrs);
+    existing = retry.data;
+    error = retry.error;
+  }
   if (error) throw error;
 
   const byDate = {};
@@ -111,7 +159,7 @@ async function getOrCreateInstances(recurringTaskId, dueDates) {
     const { data: created, error: createErr } = await supabase
       .from('recurring_task_instances')
       .insert(rows)
-      .select('id, due_date, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )');
+      .select(instanceSelect);
     if (createErr) throw createErr;
     (created || []).forEach(i => { byDate[i.due_date] = i; });
   }
@@ -397,7 +445,8 @@ router.delete('/:id', requireAdmin, async (req, res) => {
 
 // ─── Employee: mark an instance done directly (only for tasks with no checkpoints) ──
 // POST /recurring-tasks/instances/:instanceId/complete
-router.post('/instances/:instanceId/complete', async (req, res) => {
+// multipart optional field: "photo"
+router.post('/instances/:instanceId/complete', upload.single('photo'), async (req, res) => {
   try {
     const { instanceId } = req.params;
 
@@ -431,12 +480,31 @@ router.post('/instances/:instanceId/complete', async (req, res) => {
       return res.status(400).json({ error: 'This task has checkpoints — tick them to complete it' });
     }
 
-    const { data: updated, error: updateErr } = await supabase
+    const photo_url = await uploadRecurringPhoto(req.file);
+    const patch = { status: 'Completed', completed_at: new Date().toISOString() };
+    if (photo_url) patch.photo_url = photo_url;
+
+    let { data: updated, error: updateErr } = await supabase
       .from('recurring_task_instances')
-      .update({ status: 'Completed', completed_at: new Date().toISOString() })
+      .update(patch)
       .eq('id', instanceId)
-      .select('id, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )')
+      .select('id, status, completed_at, photo_url, recurring_task_checkpoint_completions ( checkpoint_id )')
       .single();
+
+    // Older DBs without photo_url column — still complete the instance.
+    if (updateErr && /photo_url|schema cache|column/i.test(updateErr.message || '')) {
+      const retry = await supabase
+        .from('recurring_task_instances')
+        .update({ status: 'Completed', completed_at: patch.completed_at })
+        .eq('id', instanceId)
+        .select('id, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )')
+        .single();
+      updated = retry.data;
+      updateErr = retry.error;
+      if (!updateErr && photo_url) {
+        console.warn('recurring photo_url column missing — run backend/sql/add_recurring_instance_photo.sql');
+      }
+    }
     if (updateErr) throw updateErr;
 
     res.json(updated);
@@ -490,14 +558,14 @@ router.post('/instances/:instanceId/not-applicable', async (req, res) => {
 
 // ─── Employee: submit checked checkpoints for an instance, all at once ─────
 // POST /recurring-tasks/instances/:instanceId/submit
-// Body: { checkpoint_ids: [ ...ids that should be marked done ] }
+// JSON or multipart: checkpoint_ids + optional photo
 // Replaces the full completion set for this instance with exactly the ids
 // sent, then recalculates status (Completed only if every checkpoint for
 // the task is included).
-router.post('/instances/:instanceId/submit', async (req, res) => {
+router.post('/instances/:instanceId/submit', upload.single('photo'), async (req, res) => {
   try {
     const { instanceId } = req.params;
-    const { checkpoint_ids = [] } = req.body || {};
+    const checkpoint_ids = parseCheckpointIds(req.body);
 
     const { data: inst, error: instErr } = await supabase
       .from('recurring_task_instances')
@@ -541,13 +609,34 @@ router.post('/instances/:instanceId/submit', async (req, res) => {
 
     const allDone = allCheckpoints.length > 0 && submittedIds.length === allCheckpoints.length;
     const newStatus = allDone ? 'Completed' : 'Pending';
+    const photo_url = allDone ? await uploadRecurringPhoto(req.file) : null;
 
-    const { data: updated, error: updateErr } = await supabase
+    const patch = {
+      status: newStatus,
+      completed_at: allDone ? new Date().toISOString() : null,
+    };
+    if (photo_url) patch.photo_url = photo_url;
+
+    let { data: updated, error: updateErr } = await supabase
       .from('recurring_task_instances')
-      .update({ status: newStatus, completed_at: allDone ? new Date().toISOString() : null })
+      .update(patch)
       .eq('id', instanceId)
-      .select('id, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )')
+      .select('id, status, completed_at, photo_url, recurring_task_checkpoint_completions ( checkpoint_id )')
       .single();
+
+    if (updateErr && /photo_url|schema cache|column/i.test(updateErr.message || '')) {
+      const retry = await supabase
+        .from('recurring_task_instances')
+        .update({ status: patch.status, completed_at: patch.completed_at })
+        .eq('id', instanceId)
+        .select('id, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )')
+        .single();
+      updated = retry.data;
+      updateErr = retry.error;
+      if (!updateErr && photo_url) {
+        console.warn('recurring photo_url column missing — run backend/sql/add_recurring_instance_photo.sql');
+      }
+    }
     if (updateErr) throw updateErr;
 
     res.json(updated);

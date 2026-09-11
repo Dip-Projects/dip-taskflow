@@ -2026,15 +2026,20 @@ export default function TaskflowDom() {
     </div>
   </div>
 
-  {/* Recurring Task Checkpoint Modal (employee: tick checkpoints, then Submit) */}
+  {/* Recurring Task Done Modal (checkpoints if any + optional photo) */}
   <div id="checkpointModal" className="modal-backdrop" hidden={true}>
     <div className="modal">
       <div className="modal-header">
-        <h3 id="checkpointModalTitle">Checkpoints</h3>
+        <h3 id="checkpointModalTitle">Mark done</h3>
         <button className="modal-close" id="closeCheckpointModal">&times;</button>
       </div>
       <div className="modal-body">
         <div id="checkpointModalList"></div>
+        <div className="field" style={{marginTop: 12}}>
+          <label htmlFor="checkpointModalPhoto">Photo <span className="optional">(optional)</span></label>
+          <input id="checkpointModalPhoto" type="file" accept="image/*" capture="environment" />
+          <p className="form-note">You can finish without a photo.</p>
+        </div>
         <p id="checkpointModalMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelCheckpointModal">Cancel</button>
