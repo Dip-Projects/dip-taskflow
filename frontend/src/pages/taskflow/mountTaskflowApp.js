@@ -1397,6 +1397,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
       if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
       appendCollapsibleNav(
@@ -1458,7 +1459,7 @@ export async function mountTaskflowApp(opts = {}) {
     employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
-    'time-dashboard': 'administration', 'delay-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
+    'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
     'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
@@ -1755,6 +1756,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'mis-report')    loadMisReport();
     if (viewKey === 'time-dashboard') loadTimeDashboard();
     if (viewKey === 'delay-report')   loadDelayReport();
+    if (viewKey === 'emp-report')     loadEmpReport();
     if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
     if (viewKey === 'fms')           loadFms();
     if (viewKey === 'ai-bot')        loadAiBot();
@@ -8725,6 +8727,126 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  // ─── Emp Report (custom date range + status + early/delay d h m) ───────────
+  let _erLast = null;
+  let _erEmpFilled = false;
+
+  function erDefaultDates() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const from = `${y}-${pad(m + 1)}-01`;
+    const to = `${y}-${pad(m + 1)}-${pad(now.getDate())}`;
+    const fromEl = document.getElementById('erFrom');
+    const toEl = document.getElementById('erTo');
+    if (fromEl && !fromEl.value) fromEl.value = from;
+    if (toEl && !toEl.value) toEl.value = to;
+  }
+
+  async function fillEmpReportEmployees() {
+    const sel = document.getElementById('erEmployee');
+    if (!sel || _erEmpFilled) return;
+    try {
+      const list = await api('/delay-report/employees');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All employees</option>' +
+        (list || []).map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.full_name)}</option>`).join('');
+      if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+      _erEmpFilled = true;
+    } catch (_) { /* ignore */ }
+  }
+
+  function renderEmpReportTable(data) {
+    const rows = data.rows || [];
+    const showEmp = !document.getElementById('erEmployee')?.value;
+    const s = data.summary || {};
+    const headEmp = showEmp ? '<th>Employee</th>' : '';
+    const colSpan = showEmp ? 12 : 11;
+    const body = rows.map((r, i) => {
+      const statusClass =
+        r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
+      const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
+      const planNote = r.reschedule_count > 0
+        ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
+        : '';
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}">
+        <td class="dr-c">${r.sr ?? '—'}</td>
+        ${empTd}
+        <td>${escapeHtml(r.project)}${planNote}</td>
+        <td>${escapeHtml(r.assigned_label)}</td>
+        <td>${escapeHtml(r.accepted_label)}</td>
+        <td class="dr-c">${escapeHtml(r.hours_label)}</td>
+        <td class="dr-hold">${escapeHtml(r.hold_resume_label || '—')}</td>
+        <td class="dr-c">${escapeHtml(r.total_hold_label || '—')}</td>
+        <td>${escapeHtml(r.deadline_label)}</td>
+        <td>${escapeHtml(r.submitted_label || '—')}</td>
+        <td class="${statusClass}">${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.timing_label || '—')}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
+
+    return `<div class="dr-report" id="erReport">
+      <h1 class="dr-title">Emp Report</h1>
+      <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+        · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+        · <span class="dr-ontime">${s.on_time || 0} on time</span>
+        · ${s.na || 0} N/A</p>
+      <div class="dr-table-wrap">
+        <table class="dr-table">
+          <thead><tr>
+            <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
+            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+            <th>Total Hold</th><th>Due</th><th>Submitted</th><th>Status</th>
+            <th>Early / Delay (d h m)</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  async function loadEmpReport() {
+    const body = document.getElementById('erBody');
+    if (!body) return;
+    erDefaultDates();
+    await fillEmpReportEmployees();
+    const from = document.getElementById('erFrom')?.value || '';
+    const to = document.getElementById('erTo')?.value || '';
+    const emp = document.getElementById('erEmployee')?.value || '';
+    if (!from || !to) {
+      body.innerHTML = '<div class="empty-state">Select From and To dates</div>';
+      return;
+    }
+    body.innerHTML = '<div class="empty-state">Loading Emp Report…</div>';
+    try {
+      const qs = new URLSearchParams({ from, to });
+      if (emp) qs.set('employee_id', emp);
+      const data = await api(`/delay-report/emp?${qs}`);
+      _erLast = data;
+      body.innerHTML = renderEmpReportTable(data);
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function printEmpReportPdf() {
+    const report = document.getElementById('erReport');
+    if (!report) return showToast('Generate the report first', 'error');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((el) => el.outerHTML).join('\n');
+    win.document.write(`<!DOCTYPE html><html><head><title>Emp Report</title>${styles}
+      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
+      @page{size:A4 landscape;margin:10mm}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
+      </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
+      </body></html>`);
+    win.document.close();
+  }
+
   async function loadMdoDelayReport() {
     const body = document.getElementById('mdoDrBody');
     if (!body) return;
@@ -8790,6 +8912,11 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('drRange')?.addEventListener('change', () => loadDelayReport());
   document.getElementById('drEmployee')?.addEventListener('change', () => loadDelayReport());
   document.getElementById('drPdfBtn')?.addEventListener('click', () => printDelayReportPdf());
+  document.getElementById('erGenBtn')?.addEventListener('click', () => loadEmpReport());
+  document.getElementById('erEmployee')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erFrom')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erTo')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erPdfBtn')?.addEventListener('click', () => printEmpReportPdf());
   document.getElementById('drWaBtn')?.addEventListener('click', async () => {
     if (!confirm('Send last-week Task Delay Report on WhatsApp to each employee + their head now?')) return;
     try {

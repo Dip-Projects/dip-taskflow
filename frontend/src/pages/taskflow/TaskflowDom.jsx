@@ -1428,6 +1428,35 @@ export default function TaskflowDom() {
           <div id="drBody"></div>
         </section>
 
+        {/* EMP REPORT — work timeline + status + early/delay (d h m), custom date range */}
+        <section id="view-emp-report" className="view" hidden={true}>
+          <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">Emp Report</h2>
+              <p className="view-sub">Assigned → accept → due → submit. Status + early/delay in office days, hours, minutes. Filter by employee and date range.</p>
+            </div>
+            <div className="mis-toolbar">
+              <label className="mis-field">
+                <span>From</span>
+                <input type="date" id="erFrom" />
+              </label>
+              <label className="mis-field">
+                <span>To</span>
+                <input type="date" id="erTo" />
+              </label>
+              <label className="mis-field">
+                <span>Employee</span>
+                <select id="erEmployee">
+                  <option value="">All employees</option>
+                </select>
+              </label>
+              <button type="button" id="erGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+              <button type="button" id="erPdfBtn" className="ghost-btn">⬇️ PDF</button>
+            </div>
+          </div>
+          <div id="erBody"></div>
+        </section>
+
         {/* MDO TASK DELAY REPORT — Chirag Shah only */}
         <section id="view-mdo-delay-report" className="view" hidden={true}>
           <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>

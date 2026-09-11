@@ -5,7 +5,9 @@ const { sendWhatsAppTemplate } = require('../lib/whatsapp');
 const { buildSrMap } = require('../lib/workVerificationDashboard');
 const {
   buildDelayReportRows,
+  buildEmpReportRows,
   delayReportHtml,
+  empReportHtml,
   delayReportTextSummary,
 } = require('../lib/delayReport');
 const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
@@ -185,6 +187,51 @@ router.get('/employees', requireAuth, requireAdminOrMis, async (req, res) => {
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load employees' });
+  }
+});
+
+/**
+ * Emp Report — same work columns as delay sheet + Status + Early/Delay (Xd Xh Xm).
+ * Filters: employee_id, from + to (date range). Defaults to current month if dates missing.
+ */
+router.get('/emp', requireAuth, requireAdminOrMis, async (req, res) => {
+  try {
+    const { from, to, employee_id: employeeId } = req.query;
+    const range = from && to ? 'custom' : 'month';
+    const { startDate, endDate } = parseRange(range, from, to);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid from/to date' });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ error: 'From date must be on or before To date' });
+    }
+    const tasks = await loadTasksForDelayReport({
+      startDate,
+      endDate,
+      employeeId: employeeId || null,
+    });
+    const srMap = buildSrMap(tasks);
+    const rows = buildEmpReportRows(tasks, { srMap });
+    res.json({
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+      employee_id: employeeId || null,
+      rows,
+      summary: {
+        total: rows.length,
+        delayed: rows.filter((r) => r.status === 'Delayed').length,
+        on_time: rows.filter((r) => r.status === 'On Time').length,
+        na: rows.filter((r) => r.status === 'N/A').length,
+      },
+      html: empReportHtml(rows, {
+        title: 'Emp Report',
+        subtitle: `${String(startDate.toISOString()).slice(0, 10)} → ${String(endDate.toISOString()).slice(0, 10)}`,
+        showEmployee: !employeeId,
+      }),
+    });
+  } catch (err) {
+    console.error('Emp report error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not build emp report' });
   }
 });
 

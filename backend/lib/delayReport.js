@@ -358,9 +358,97 @@ function delayReportTextSummary(rows, employeeName) {
   return lines.join('\n');
 }
 
+/**
+ * Emp Report — same work timeline as delay report, with explicit
+ * "Delayed by / Early by Xd Xh Xm" (office hours).
+ */
+function buildEmpReportRows(tasks, opts = {}) {
+  return buildDelayReportRows(tasks, opts).map((r) => {
+    let timingLabel = '—';
+    const raw = String(r.delay_label || '').trim();
+    if (r.status === 'Delayed') {
+      const dur = raw.replace(/\s*early$/i, '').trim();
+      timingLabel = dur && dur !== 'Within deadline' ? `Delayed by ${dur}` : 'Delayed';
+    } else if (r.status === 'On Time') {
+      const earlyMatch = raw.match(/^(.+?)\s+early$/i);
+      if (earlyMatch) timingLabel = `Early by ${earlyMatch[1]}`;
+      else if (/^on time$/i.test(raw) || /^within deadline$/i.test(raw)) timingLabel = 'On time';
+      else timingLabel = raw || 'On time';
+    } else {
+      timingLabel = raw || 'N/A';
+    }
+    return {
+      sr: r.sr,
+      employee_id: r.employee_id,
+      employee: r.employee,
+      project: r.project,
+      assigned_label: r.assigned_label,
+      accepted_label: r.accepted_label,
+      hours_label: r.hours_label,
+      hold_resume_label: r.hold_resume_label,
+      total_hold_label: r.total_hold_label,
+      deadline_label: r.deadline_label,
+      submitted_label: r.submitted_label,
+      status: r.status,
+      timing_label: timingLabel,
+      delay_label: r.delay_label,
+      reschedule_count: r.reschedule_count,
+    };
+  });
+}
+
+function empReportHtml(rows, { title = 'Emp Report', subtitle = '', showEmployee = true } = {}) {
+  const headExtra = showEmployee ? '<th>Employee</th>' : '';
+  const body = (rows || []).map((r, i) => {
+    const bg = i % 2 === 0 ? '#F7F3EC' : '#FFFFFF';
+    const statusColor =
+      r.status === 'Delayed' ? '#C2410C' : r.status === 'On Time' ? '#15803D' : '#6B7280';
+    const empCell = showEmployee ? `<td>${esc(r.employee)}</td>` : '';
+    return `<tr style="background:${bg}">
+      <td style="text-align:center">${r.sr ?? '—'}</td>
+      ${empCell}
+      <td>${esc(r.project)}</td>
+      <td>${esc(r.assigned_label)}</td>
+      <td>${esc(r.accepted_label)}</td>
+      <td style="text-align:center">${esc(r.hours_label)}</td>
+      <td style="font-size:11px">${esc(r.hold_resume_label)}</td>
+      <td style="text-align:center">${esc(r.total_hold_label ?? '—')}</td>
+      <td>${esc(r.deadline_label)}</td>
+      <td>${esc(r.submitted_label || '—')}</td>
+      <td style="color:${statusColor};font-weight:700">${esc(r.status)}</td>
+      <td>${esc(r.timing_label)}</td>
+    </tr>`;
+  }).join('');
+  const colCount = showEmployee ? 12 : 11;
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/><title>${esc(title)}</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111;margin:24px}
+  h1{text-align:center;font-size:22px;margin:0 0 6px}
+  .sub{text-align:center;color:#666;font-size:12px;margin:0 0 16px}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{background:#1F2937;color:#fff;padding:8px 6px;text-align:left;font-weight:700}
+  td{padding:7px 6px;border-bottom:1px solid #E5E7EB;vertical-align:top}
+</style></head><body>
+  <h1>${esc(title)}</h1>
+  ${subtitle ? `<p class="sub">${esc(subtitle)}</p>` : ''}
+  <table>
+    <thead><tr>
+      <th>SR</th>${headExtra}<th>Project</th><th>Timestamp (Assigned)</th>
+      <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+      <th>Total Hold</th><th>Due</th><th>Submitted</th><th>Status</th>
+      <th>Early / Delay (d h m)</th>
+    </tr></thead>
+    <tbody>${body || `<tr><td colspan="${colCount}" style="text-align:center;padding:20px;color:#888">No tasks</td></tr>`}</tbody>
+  </table>
+</body></html>`;
+}
+
 module.exports = {
   buildDelayReportRows,
+  buildEmpReportRows,
   delayReportHtml,
+  empReportHtml,
   delayReportTextSummary,
   fmtDelayStamp,
   formatDurationMs,
