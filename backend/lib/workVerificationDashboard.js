@@ -3,10 +3,22 @@
  * (matches Work-Verification-Dashboard-with-Time-Analysis.pdf sections).
  */
 
+const { elapsedWorkingHours } = require('./workingHours');
+
 function hrsBetween(a, b) {
   if (!a || !b) return null;
   const h = (new Date(b) - new Date(a)) / 36e5;
   if (Number.isNaN(h) || h < 0) return null;
+  return Math.round(h * 10) / 10;
+}
+
+/** Office working hours between two stamps (9:30–18:30, lunch, Sun off). */
+function officeHrsBetween(a, b) {
+  if (!a || !b) return null;
+  const start = new Date(a);
+  const end = new Date(b);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return null;
+  const h = elapsedWorkingHours(start, end);
   return Math.round(h * 10) / 10;
 }
 
@@ -264,7 +276,7 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
     items: correctionItems,
   };
 
-  // —— 5a · Task Completion Time (assigned → submitted) ——
+  // —— 5a · Task Completion Time (assigned → submitted) — office working hours ——
   const completionRows = withSr
     .filter((t) => (t.assigned_at || t.created_at) && t.sent_for_verification_at)
     .map((t) => {
@@ -277,7 +289,8 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
         task_type: typeName(t),
         assigned_at: assigned,
         submitted_at: submitted,
-        hours: hrsBetween(assigned, submitted),
+        hours: officeHrsBetween(assigned, submitted),
+        calendar_hours: hrsBetween(assigned, submitted),
       };
     })
     .filter((r) => r.hours != null)
@@ -300,44 +313,59 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
     rows: completionRows,
   };
 
-  // —— 5b · Verification Turnaround (accept → verified), whole days ——
+  // —— 5b · Verification Turnaround (Start Verification → Verified) — office hours ——
   const turnRows = withSr
     .filter((t) => t.verification_started_at && t.verified_at && isVerified(t))
     .map((t) => {
-      const days = daysBetweenDates(t.verification_started_at, t.verified_at);
+      const started = t.verification_started_at;
+      const verified = t.verified_at;
+      const hours = officeHrsBetween(started, verified);
+      const days = daysBetweenDates(started, verified);
       return {
         sr: t.sr,
         employee: empName(t),
         verifier: verName(t) || '—',
         project: projName(t),
-        accepted_at: t.verification_started_at,
-        verified_at: t.verified_at,
+        started_at: started,
+        accepted_at: started, // legacy key used by older UI
+        verified_at: verified,
+        sent_for_verification_at: t.sent_for_verification_at || null,
+        hours,
         days,
       };
     })
-    .filter((r) => r.days != null)
+    .filter((r) => r.hours != null)
     .sort((a, b) => new Date(a.verified_at) - new Date(b.verified_at));
 
-  const turnDays = turnRows.map((r) => r.days);
+  const turnHrs = turnRows.map((r) => r.hours);
   const sameDay = turnRows.filter((r) => r.days === 0).length;
   const byVerTurn = {};
   turnRows.forEach((r) => {
     if (!byVerTurn[r.verifier]) byVerTurn[r.verifier] = [];
-    byVerTurn[r.verifier].push(r.days);
+    byVerTurn[r.verifier].push({ hours: r.hours, days: r.days });
   });
   const verify_turnaround = {
     measured: turnRows.length,
     same_day: sameDay,
-    avg_days: avg(turnDays),
-    slowest_days: turnDays.length ? Math.max(...turnDays) : null,
+    avg_hrs: avg(turnHrs),
+    avg_days: avg(turnRows.map((r) => r.days)),
+    fastest_hrs: turnHrs.length ? Math.min(...turnHrs) : null,
+    slowest_hrs: turnHrs.length ? Math.max(...turnHrs) : null,
+    slowest_days: turnRows.length ? Math.max(...turnRows.map((r) => r.days)) : null,
     by_verifier: Object.entries(byVerTurn)
-      .map(([name, days]) => ({
-        name,
-        tasks: days.length,
-        same_day: days.filter((d) => d === 0).length,
-        avg_days: avg(days),
-        slowest_days: days.length ? Math.max(...days) : null,
-      }))
+      .map(([name, rows]) => {
+        const hours = rows.map((r) => r.hours);
+        const days = rows.map((r) => r.days);
+        return {
+          name,
+          tasks: rows.length,
+          same_day: days.filter((d) => d === 0).length,
+          avg_hrs: avg(hours),
+          avg_days: avg(days),
+          slowest_hrs: hours.length ? Math.max(...hours) : null,
+          slowest_days: days.length ? Math.max(...days) : null,
+        };
+      })
       .sort((a, b) => b.tasks - a.tasks),
     rows: turnRows,
   };

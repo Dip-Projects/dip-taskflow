@@ -8166,10 +8166,17 @@ export async function mountTaskflowApp(opts = {}) {
     if (Number.isNaN(n)) return '—';
     const sign = n < 0 ? '-' : '';
     const abs = Math.abs(n);
-    const d = Math.floor(abs / 24);
-    const hrs = Math.round((abs - d * 24) * 10) / 10;
-    if (d >= 1) return hrs ? `${sign}${d}d ${hrs}h` : `${sign}${d}d`;
-    return `${sign}${abs}h`;
+    // Office-hours display: 8h work day (not 24h clock)
+    if (abs > 0 && abs < 1 / 60) return `${sign}<1m`;
+    if (abs < 1) {
+      const mins = Math.max(1, Math.round(abs * 60));
+      return `${sign}${mins}m`;
+    }
+    const workDay = 8;
+    const d = Math.floor(abs / workDay);
+    const rem = Math.round((abs - d * workDay) * 10) / 10;
+    if (d >= 1) return rem ? `${sign}${d}d ${rem}h` : `${sign}${d}d`;
+    return `${sign}${Math.round(abs * 10) / 10}h`;
   }
 
   function fmtDays(d) {
@@ -8455,17 +8462,17 @@ export async function mountTaskflowApp(opts = {}) {
       <td>${escapeHtml((v.name || '').toUpperCase())}</td>
       <td>${v.tasks}</td>
       <td>${v.same_day}/${v.tasks}</td>
-      <td>${v.avg_days != null ? `${v.avg_days} days` : '—'}</td>
-      <td>${fmtDays(v.slowest_days)}</td>
+      <td>${fmtHrs(v.avg_hrs != null ? v.avg_hrs : v.avg_days)}</td>
+      <td>${fmtHrs(v.slowest_hrs != null ? v.slowest_hrs : v.slowest_days)}</td>
     </tr>`).join('');
     const vtRows = (vt.rows || []).map((r) => `<tr>
       <td>${r.sr ?? '—'}</td>
       <td>${escapeHtml(r.employee)}</td>
       <td>${escapeHtml(r.verifier)}</td>
       <td>${escapeHtml(r.project)}</td>
-      <td>${escapeHtml(fmtWvdDateTime(r.accepted_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.started_at || r.accepted_at))}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.verified_at))}</td>
-      <td>${fmtDays(r.days)}</td>
+      <td>${fmtHrs(r.hours != null ? r.hours : r.days)}</td>
     </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No verification turnaround data</td></tr>`;
 
     return `<article class="wvd" id="wvdReport">
@@ -8513,11 +8520,11 @@ export async function mountTaskflowApp(opts = {}) {
       <section class="wvd-sec">
         <h2>5 · Time Analysis <small>how long employees take to finish work, and how long verification takes</small></h2>
 
-        <h3>5a · Task Completion Time <em>task assigned (time stamp) → submitted for verification</em></h3>
-        <p class="wvd-help">How this is measured: for each task, the time stamp when it was assigned is matched to the submission date when the finished work was sent for verification. Where no matching assignment could be found, the task is left out of this section.</p>
+        <h3>5a · Task Completion Time <em>task assigned → submitted for verification</em></h3>
+        <p class="wvd-help">How this is measured: assigned time stamp → sent for verification. <strong>Time Taken uses office hours</strong> (9:30–18:30, lunch 1–2, Sunday off) — not full clock hours.</p>
         <div class="wvd-stats wvd-stats-4">
           <div class="wvd-stat wvd-stat-bad"><strong>${ct.matched || 0}</strong><span>TASKS MATCHED</span></div>
-          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(ct.avg_hrs)}</strong><span>AVERAGE TIME</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(ct.avg_hrs)}</strong><span>AVERAGE (OFFICE HRS)</span></div>
           <div class="wvd-stat wvd-stat-ok"><strong>${fmtHrs(ct.fastest_hrs)}</strong><span>FASTEST</span></div>
           <div class="wvd-stat wvd-stat-bad"><strong>${fmtHrs(ct.slowest_hrs)}</strong><span>SLOWEST</span></div>
         </div>
@@ -8525,18 +8532,18 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
             <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK TYPE</th>
-            <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN</th>
+            <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${ctRows}</tbody>
         </table></div>
 
-        <h3>5b · Verification Turnaround Time <em>verifier accepted → marked verified</em></h3>
-        <p class="wvd-help">How this is measured: the gap between the date a verifier accepted a task for review and the date it was marked Verified. Shown in whole days.</p>
+        <h3>5b · Verification Turnaround Time <em>Start Verification → marked Verified</em></h3>
+        <p class="wvd-help">How this is measured: when the verifier clicked <strong>Start Verification</strong> → when they marked <strong>Verified</strong>. Duration uses <strong>office hours</strong> (not whole calendar days).</p>
         <div class="wvd-stats wvd-stats-4">
           <div class="wvd-stat wvd-stat-bad"><strong>${vt.measured || 0}</strong><span>TASKS MEASURED</span></div>
           <div class="wvd-stat wvd-stat-ok"><strong>${vt.same_day || 0}/${vt.measured || 0}</strong><span>VERIFIED SAME DAY</span></div>
-          <div class="wvd-stat wvd-stat-info"><strong>${vt.avg_days != null ? `${vt.avg_days}d` : '—'}</strong><span>AVERAGE TURNAROUND</span></div>
-          <div class="wvd-stat wvd-stat-bad"><strong>${vt.slowest_days != null ? `${vt.slowest_days}d` : '—'}</strong><span>SLOWEST</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(vt.avg_hrs != null ? vt.avg_hrs : vt.avg_days)}</strong><span>AVERAGE TURNAROUND</span></div>
+          <div class="wvd-stat wvd-stat-bad"><strong>${fmtHrs(vt.slowest_hrs != null ? vt.slowest_hrs : vt.slowest_days)}</strong><span>SLOWEST</span></div>
         </div>
         ${vtSumRows ? `<div class="wvd-table-wrap"><table class="wvd-matrix">
           <thead><tr><th>VERIFIER</th><th>TASKS</th><th>SAME-DAY</th><th>AVG TURNAROUND</th><th>SLOWEST</th></tr></thead>
@@ -8545,7 +8552,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
             <th>SR</th><th>SUBMITTED BY</th><th>VERIFIER</th><th>PROJECT</th>
-            <th>VERIFICATION ACCEPTED</th><th>VERIFIED</th><th>DAYS TAKEN</th>
+            <th>START VERIFICATION</th><th>VERIFIED</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${vtRows}</tbody>
         </table></div>
