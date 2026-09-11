@@ -8451,8 +8451,8 @@ export async function mountTaskflowApp(opts = {}) {
       <td>${escapeHtml(r.employee)}</td>
       <td>${escapeHtml(r.verifier)}</td>
       <td>${escapeHtml(r.project)}</td>
-      <td>${escapeHtml(fmtWvdDate(r.accepted_at))}</td>
-      <td>${escapeHtml(fmtWvdDate(r.verified_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.accepted_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.verified_at))}</td>
       <td>${fmtDays(r.days)}</td>
     </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No verification turnaround data</td></tr>`;
 
