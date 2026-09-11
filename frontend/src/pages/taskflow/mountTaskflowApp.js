@@ -4879,10 +4879,143 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
-  function openLeaveModal() {
+  let _leaveBalanceCache = null;
+  let _leaveDeficitResolver = null;
+
+  function leaveRequestDays(payload) {
+    if (payload?.is_half_day) return 0.5;
+    const a = String(payload?.from_date || '').slice(0, 10);
+    const b = String(payload?.to_date || payload?.from_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+    const t0 = Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10));
+    const t1 = Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10));
+    if (t1 < t0) return null;
+    return Math.round((t1 - t0) / 86400000) + 1;
+  }
+
+  function fmtLeaveBalNum(v) {
+    if (v == null || Number.isNaN(Number(v))) return '—';
+    const n = Number(v);
+    if (n > 0) return `+${n}`;
+    return String(n);
+  }
+
+  function updateLeaveFormBalancePreview() {
+    const availEl = document.getElementById('leaveFormBalAvail');
+    const reqEl = document.getElementById('leaveFormBalReq');
+    const afterEl = document.getElementById('leaveFormBalAfter');
+    const warnEl = document.getElementById('leaveFormBalWarn');
+    if (!availEl || !reqEl || !afterEl) return;
+    const bal = _leaveBalanceCache;
+    const payload = {
+      from_date: els.leaveFrom?.value,
+      to_date: els.leaveTo?.value,
+      is_half_day: !!els.leaveHalfDay?.checked,
+    };
+    const req = leaveRequestDays(payload);
+    const avail = bal?.available;
+    availEl.textContent = fmtLeaveBalNum(avail);
+    availEl.style.color = avail < 0 ? '#C2410C' : avail === 0 ? '#6B7280' : '#15803D';
+    reqEl.textContent = req == null ? '—' : `${req} day(s)`;
+    if (avail == null || req == null) {
+      afterEl.textContent = '—';
+      afterEl.style.color = '#6B7280';
+      if (warnEl) { warnEl.hidden = true; warnEl.textContent = ''; }
+      return;
+    }
+    const after = Math.round((Number(avail) - Number(req)) * 10) / 10;
+    afterEl.textContent = fmtLeaveBalNum(after);
+    afterEl.style.color = after < 0 ? '#C2410C' : after === 0 ? '#6B7280' : '#15803D';
+    const needsWarn = avail < req || avail < 0 || after < 0;
+    if (warnEl) {
+      if (needsWarn) {
+        warnEl.hidden = false;
+        warnEl.textContent = after < 0 || avail < 0
+          ? `Balance will be in minus (${fmtLeaveBalNum(after)}). Submit pe Yes/No confirm aayega.`
+          : `Not enough balance for this request. Submit pe Yes/No confirm aayega.`;
+      } else {
+        warnEl.hidden = true;
+        warnEl.textContent = '';
+      }
+    }
+  }
+
+  function showLeaveDeficitModalEl(modal) {
+    if (!modal) return;
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    modal.removeAttribute('hidden');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '5100';
+  }
+
+  function hideLeaveDeficitModalEl(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.display = 'none';
+    modal.setAttribute('hidden', '');
+  }
+
+  function closeLeaveDeficitModal(answer) {
+    hideLeaveDeficitModalEl(document.getElementById('leaveDeficitModal'));
+    const resolve = _leaveDeficitResolver;
+    _leaveDeficitResolver = null;
+    if (resolve) resolve(!!answer);
+  }
+
+  function askLeaveDeficitConfirm({ message, available, requested, after }) {
+    return new Promise((resolve) => {
+      _leaveDeficitResolver = resolve;
+      const modal = document.getElementById('leaveDeficitModal');
+      const msg = document.getElementById('leaveDeficitMsg');
+      const stats = document.getElementById('leaveDeficitStats');
+      if (msg) {
+        msg.textContent = message || (
+          available < 0
+            ? `Your leave balance is already in minus (${fmtLeaveBalNum(available)}). Still want to apply?`
+            : 'Not enough leave balance. Still want to apply?'
+        );
+      }
+      if (stats) {
+        stats.innerHTML = `
+          <div><strong>Available now:</strong> <span style="color:${available < 0 ? '#C2410C' : '#15803D'}">${fmtLeaveBalNum(available)}</span></div>
+          <div><strong>This request:</strong> ${requested != null ? `${requested} day(s)` : '—'}</div>
+          <div><strong>After apply:</strong> <span style="color:${after < 0 ? '#C2410C' : '#15803D'}">${fmtLeaveBalNum(after)}</span>${after < 0 ? ' <em>(minus)</em>' : ''}</div>
+        `;
+      }
+      if (!modal) {
+        const ok = confirm(`${message || 'Not enough leave balance. Apply anyway?'}\n\nOK = Yes · Cancel = No`);
+        resolve(!!ok);
+        return;
+      }
+      showLeaveDeficitModalEl(modal);
+    });
+  }
+
+  function showLeaveApplyResultBanner(bal) {
+    const el = document.getElementById('leaveApplyResultBanner');
+    if (!el || !bal) return;
+    const used = bal.total_used_approved ?? 0;
+    const pending = bal.total_used_pending ?? 0;
+    const rem = bal.available;
+    el.hidden = false;
+    el.classList.toggle('is-minus', rem < 0);
+    el.innerHTML = `Leave applied ✅ · <strong>Used</strong> ${used}${pending ? ` · <strong>Pending</strong> ${pending}` : ''} · <strong>Remaining</strong> <span style="font-size:15px">${fmtLeaveBalNum(rem)}</span>${rem < 0 ? ' (in minus)' : ''}`;
+  }
+
+  async function openLeaveModal() {
     els.leaveFormMsg.hidden = true;
     els.leaveForm.reset();
     fillLeaveBuddySelect();
+    try {
+      _leaveBalanceCache = await api('/leaves/balance');
+      renderLeaveBalance(_leaveBalanceCache);
+    } catch (_) {
+      _leaveBalanceCache = null;
+    }
+    updateLeaveFormBalancePreview();
     els.leaveModal.hidden = false;
   }
   els.openApplyLeave?.addEventListener('click', openLeaveModal);
@@ -4894,6 +5027,10 @@ export async function mountTaskflowApp(opts = {}) {
     showToast('Leave submitted — you can still cover tasks later via buddy approval', 'success');
   });
   els.submitLeaveTaskActions?.addEventListener('click', submitLeaveTaskActions);
+  ['leave-from', 'leave-to', 'leave-halfday'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', updateLeaveFormBalancePreview);
+    document.getElementById(id)?.addEventListener('input', updateLeaveFormBalancePreview);
+  });
   els.leaveForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.leaveFormMsg.hidden = true;
     const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
@@ -4910,6 +5047,31 @@ export async function mountTaskflowApp(opts = {}) {
       buddy_id: buddyId,
     };
     try {
+      const req = leaveRequestDays(payload);
+      let bal = _leaveBalanceCache;
+      if (!bal) {
+        try { bal = await api('/leaves/balance'); _leaveBalanceCache = bal; } catch (_) { /* ignore */ }
+      }
+      if (bal && req != null) {
+        const after = Math.round((Number(bal.available) - Number(req)) * 10) / 10;
+        if (bal.available < req || bal.in_deficit || after < 0) {
+          const ok = await askLeaveDeficitConfirm({
+            message: bal.available < 0 || bal.in_deficit
+              ? `Your leave balance is ${fmtLeaveBalNum(bal.available)} (in minus). Still want to apply for ${req} day(s)?`
+              : `You have ${fmtLeaveBalNum(bal.available)} leave day(s) left but this request is ${req} day(s). Still want to apply?`,
+            available: bal.available,
+            requested: req,
+            after,
+          });
+          if (!ok) {
+            els.leaveFormMsg.textContent = 'Leave not submitted — not enough balance';
+            els.leaveFormMsg.hidden = false;
+            return;
+          }
+          await submitOfficeLeave(payload, true);
+          return;
+        }
+      }
       await submitOfficeLeave(payload, false);
     } catch (err) {
       els.leaveFormMsg.textContent = err.message;
@@ -4926,15 +5088,15 @@ export async function mountTaskflowApp(opts = {}) {
       els.leaveModal.hidden = true;
 
       let bal = null;
-      try { bal = await api('/leaves/balance'); } catch (_) { /* ignore */ }
-      if (bal) renderLeaveBalance(bal);
-      if (state.activeView === 'applyleave') {
-        // Refresh leave history table/cards (balance already rendered above)
-        try {
-          const leaves = await api('/leaves/my');
-          renderMyLeavesList(leaves);
-        } catch (_) { /* ignore */ }
+      try { bal = await api('/leaves/balance'); _leaveBalanceCache = bal; } catch (_) { /* ignore */ }
+      if (bal) {
+        renderLeaveBalance(bal);
+        showLeaveApplyResultBanner(bal);
       }
+      try {
+        const leaves = await api('/leaves/my');
+        renderMyLeavesList(leaves);
+      } catch (_) { /* ignore */ }
       if (state.activeView === 'buddyrequests') loadBuddyRequests();
       refreshNavBadges();
 
@@ -4959,29 +5121,34 @@ export async function mountTaskflowApp(opts = {}) {
       if (err.status === 409 || err.data?.error === 'insufficient_leave_balance' || /insufficient_leave_balance|Still want to apply|in minus/i.test(err.message || '')) {
         const d = err.data || {};
         const avail = d.balance?.available;
-        const reqDays = d.requested_days;
-        const inMinus = (avail != null && avail < 0) || !!d.balance?.in_deficit;
-        const msg =
-          d.message ||
-          err.message ||
-          (inMinus
-            ? `Your leave balance is already in minus (${avail}). Still want to apply?`
-            : 'Not enough leave balance. Still want to apply?');
-        const detail = [
-          msg,
-          avail != null ? `Available now: ${avail}` : '',
-          reqDays != null ? `This request: ${reqDays} day(s)` : '',
-          d.balance_after != null ? `After apply: ${d.balance_after}${d.balance_after < 0 ? ' (minus)' : ''}` : '',
-          '',
-          'OK = Yes, apply anyway · Cancel = No',
-        ].filter(Boolean).join('\n');
-        const ok = confirm(detail);
+        const reqDays = d.requested_days ?? leaveRequestDays(payload);
+        const after = d.balance_after != null
+          ? d.balance_after
+          : (avail != null && reqDays != null ? Math.round((avail - reqDays) * 10) / 10 : null);
+        const ok = await askLeaveDeficitConfirm({
+          message: d.message || err.message,
+          available: avail,
+          requested: reqDays,
+          after,
+        });
         if (ok) return submitOfficeLeave(payload, true);
         throw new Error('Leave not submitted — not enough balance');
       }
       throw err;
     }
   }
+
+  __tfReadyFns.push(() => {
+    const bindOnce = (id, evt, fn) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.tfLeaveDefBound === '1') return;
+      el.dataset.tfLeaveDefBound = '1';
+      el.addEventListener(evt, fn);
+    };
+    bindOnce('closeLeaveDeficitModal', 'click', () => closeLeaveDeficitModal(false));
+    bindOnce('leaveDeficitNoBtn', 'click', () => closeLeaveDeficitModal(false));
+    bindOnce('leaveDeficitYesBtn', 'click', () => closeLeaveDeficitModal(true));
+  });
 
   function attachBuddyRespondButtons(container, leave) {
     if (!container) return;
@@ -5065,7 +5232,9 @@ export async function mountTaskflowApp(opts = {}) {
   }
   
   async function loadMyLeaves() {
-    els.myLeavesList.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
+    const hist = document.getElementById('myLeavesHistory');
+    if (hist) hist.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
+    if (els.myLeavesList) els.myLeavesList.innerHTML = '';
     if (els.myLeavesTableBody) {
       els.myLeavesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Loading your leave requests…</td></tr>';
     }
@@ -5085,6 +5254,7 @@ export async function mountTaskflowApp(opts = {}) {
     const availEl = document.getElementById('leaveBalAvailable');
     const list = document.getElementById('leaveBalanceMonthList');
     if (!list) return;
+    _leaveBalanceCache = bal || _leaveBalanceCache;
     if (!bal) {
       if (fyEl) fyEl.textContent = 'Leave balance';
       if (subEl) subEl.textContent = 'Could not load balance';
@@ -5103,17 +5273,15 @@ export async function mountTaskflowApp(opts = {}) {
     }
     const rows = bal.monthly || [];
     list.innerHTML = rows.map((m) => {
-      const dim = m.is_future ? 'opacity:0.5' : '';
+      const cls = ['leave-bal-month-row', m.is_current ? 'is-current' : '', m.is_future ? 'is-future' : ''].filter(Boolean).join(' ');
       const balColor = m.balance_after < 0 ? '#C2410C' : m.balance_after === 0 ? '#6B7280' : '#15803D';
-      const border = m.is_current ? '2px solid #1F2937' : '1px solid #E5E7EB';
       const balTxt = `${m.balance_after > 0 ? '+' : ''}${m.balance_after}`;
-      // Month stacked vertically; Accrued/Used/Pending/Balance in one horizontal row
-      return `<div style="${dim};border:${border};border-radius:8px;padding:10px 12px;background:${m.is_current ? '#F7F3EC' : '#fff'}">
-        <div style="font-weight:700;font-size:14px;margin-bottom:8px">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:baseline;font-size:12px;color:#4B5563">
-          <span>Accrued <strong style="color:#111">${m.accrued ? `+${m.accrued}` : '—'}</strong></span>
-          <span>Used <strong style="color:#111">${m.used_approved ? m.used_approved : '—'}</strong></span>
-          <span>Pending <strong style="color:#111">${m.used_pending ? m.used_pending : '—'}</strong></span>
+      return `<div class="${cls}">
+        <div class="leave-bal-month-title">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</div>
+        <div class="leave-bal-month-metrics">
+          <span>Accrued <strong>${m.accrued ? `+${m.accrued}` : '—'}</strong></span>
+          <span>Used <strong>${m.used_approved ? m.used_approved : '—'}</strong></span>
+          <span>Pending <strong>${m.used_pending ? m.used_pending : '—'}</strong></span>
           <span>Balance <strong style="color:${balColor}">${balTxt}</strong></span>
         </div>
       </div>`;
@@ -5205,85 +5373,80 @@ export async function mountTaskflowApp(opts = {}) {
     return leave.is_half_day ? `${range} (Half day)` : range;
   }
   
+  function leaveMonthKey(leave) {
+    const s = String(leave?.from_date || leave?.created_at || '').slice(0, 7);
+    return /^\d{4}-\d{2}$/.test(s) ? s : 'unknown';
+  }
+
+  function leaveMonthTitle(key) {
+    if (!/^\d{4}-\d{2}$/.test(key)) return 'Other';
+    const [y, m] = key.split('-').map(Number);
+    const d = new Date(y, m - 1, 1);
+    return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+
   function renderMyLeavesList(leaves) {
+    const hist = document.getElementById('myLeavesHistory');
     if (!leaves.length) {
-      if (els.myLeavesList) {
-      els.myLeavesList.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
-      }
-      if (els.myLeavesTableBody) {
-        els.myLeavesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">No leave requests yet</td></tr>`;
-      }
+      if (hist) hist.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
+      if (els.myLeavesList) els.myLeavesList.innerHTML = '';
+      if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
       return;
     }
+
+    // Group by month (vertical months); each leave row horizontal
+    const groups = new Map();
+    leaves.forEach((leave) => {
+      const key = leaveMonthKey(leave);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(leave);
+    });
+    const keys = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+
+    if (hist) {
+      hist.innerHTML = '';
+      keys.forEach((key) => {
+        const monthEl = document.createElement('div');
+        monthEl.className = 'leave-hist-month';
+        monthEl.innerHTML = `<div class="leave-hist-month-title">${escapeHtml(leaveMonthTitle(key))}</div>`;
+        groups.get(key).forEach((leave) => {
+          const row = document.createElement('div');
+          row.className = 'leave-hist-row';
+          row.innerHTML = `
+            <span class="leave-hist-cell"><strong>${escapeHtml(leaveDateRangeLabel(leave))}</strong></span>
+            <span class="leave-hist-cell reason">${escapeHtml(leave.reason || '—')}</span>
+            <span class="leave-hist-cell">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></span>
+            <span class="leave-hist-cell"><span class="pill ${leavePillClass(leave.status)}">${escapeHtml(leave.status)}</span></span>
+            <span class="leave-hist-cell">${escapeHtml(fmtDate(leave.created_at))}</span>
+            <span class="leave-hist-cell row-actions"></span>
+          `;
+          const actions = row.querySelector('.row-actions');
+          if (leave.status === 'Pending' && actions) {
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'action-btn action-reject';
+            cancelBtn.textContent = '✕ Cancel';
+            cancelBtn.addEventListener('click', async (ev) => {
+              ev.stopPropagation();
+              if (!confirm('Cancel this leave request?')) return;
+              try {
+                await api(`/leaves/${leave.id}`, { method: 'DELETE' });
+                showToast('Leave request cancelled', 'success');
+                loadMyLeaves();
+              } catch (err) { showToast(err.message, 'error'); }
+            });
+            actions.appendChild(cancelBtn);
+          } else if (actions) {
+            actions.textContent = '—';
+          }
+          monthEl.appendChild(row);
+        });
+        hist.appendChild(monthEl);
+      });
+    }
+
+    // Keep legacy hidden containers in sync (mount refs / fallback)
     if (els.myLeavesList) els.myLeavesList.innerHTML = '';
     if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
-
-    leaves.forEach((leave, idx) => {
-      const card = document.createElement('div');
-      card.className = 'ticket-card';
-      card.innerHTML = `
-        <div class="ticket-top">
-          <span class="pill ${leavePillClass(leave.status)}">${leave.status}</span>
-          <div class="row-actions"></div>
-        </div>
-        <div class="ticket-desc"><strong>${escapeHtml(leaveDateRangeLabel(leave))}</strong></div>
-        <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
-        <div class="ticket-meta">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></div>
-        ${leave.decision_note ? `<div class="ticket-meta">Admin's note: ${escapeHtml(leave.decision_note)}</div>` : ''}
-        <div class="ticket-meta">
-          Applied ${fmtDate(leave.created_at)}
-          ${leave.decided_at ? ` · Decided by <strong>${escapeHtml(leave.decided_by_user?.full_name ?? '—')}</strong> on ${fmtDate(leave.decided_at)}` : ''}
-        </div>
-      `;
-      if (leave.status === 'Pending') {
-        const actionsCell = card.querySelector('.row-actions');
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'action-btn action-reject';
-        cancelBtn.textContent = '✕ Cancel';
-        cancelBtn.addEventListener('click', async () => {
-          if (!confirm('Cancel this leave request?')) return;
-          try {
-            await api(`/leaves/${leave.id}`, { method: 'DELETE' });
-            showToast('Leave request cancelled', 'success'); loadMyLeaves();
-          } catch (err) { showToast(err.message, 'error'); }
-        });
-        actionsCell.appendChild(cancelBtn);
-      }
-      els.myLeavesList?.appendChild(card);
-
-      if (els.myLeavesTableBody) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="col-sr">${idx + 1}</td>
-          <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
-          <td>
-            <div class="cell-primary">${escapeHtml(leave.reason)}</div>
-            ${leave.decision_note ? `<div class="cell-muted">Note: ${escapeHtml(leave.decision_note)}</div>` : ''}
-          </td>
-          <td>${escapeHtml(buddyStatusLabel(leave))}</td>
-          <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
-          <td>${fmtDate(leave.created_at)}</td>
-          <td class="col-actions"><div class="row-actions"></div></td>
-        `;
-        const rowActions = tr.querySelector('.row-actions');
-        if (leave.status === 'Pending') {
-          const cancelBtn = document.createElement('button');
-          cancelBtn.className = 'action-btn action-reject';
-          cancelBtn.textContent = '✕ Cancel';
-          cancelBtn.addEventListener('click', async () => {
-            if (!confirm('Cancel this leave request?')) return;
-            try {
-              await api(`/leaves/${leave.id}`, { method: 'DELETE' });
-              showToast('Leave request cancelled', 'success'); loadMyLeaves();
-            } catch (err) { showToast(err.message, 'error'); }
-          });
-          rowActions.appendChild(cancelBtn);
-        } else {
-          rowActions.textContent = '—';
-        }
-        els.myLeavesTableBody.appendChild(tr);
-      }
-    });
   }
   
   // ─── Leave: approvals (admin) ──────────────────────────────────────────────────

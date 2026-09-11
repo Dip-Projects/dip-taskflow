@@ -967,39 +967,32 @@ export default function TaskflowDom() {
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
           </div>
 
-          <div id="leaveBalanceCard" className="table-card" style={{marginTop: 12, padding: '14px 16px'}}>
-            <div style={{display:'flex',flexWrap:'wrap',gap:12,alignItems:'baseline',justifyContent:'space-between'}}>
+          <div id="leaveBalanceCard" className="table-card leave-bal-card" style={{marginTop: 12, padding: '14px 16px'}}>
+            <div className="leave-bal-head">
               <div>
                 <div style={{fontWeight:700,fontSize:15}} id="leaveBalFyLabel">Leave balance</div>
                 <div style={{fontSize:12,color:'#6B7280',marginTop:2}} id="leaveBalSub">Loading…</div>
               </div>
-              <div style={{textAlign:'right'}}>
+              <div className="leave-bal-avail-wrap">
                 <div style={{fontSize:12,color:'#6B7280'}}>Available now</div>
                 <div id="leaveBalAvailable" style={{fontSize:22,fontWeight:800}}>—</div>
               </div>
             </div>
-            <div id="leaveBalanceMonthList" style={{marginTop:12,display:'flex',flexDirection:'column',gap:8}}></div>
+            <div id="leaveApplyResultBanner" className="leave-apply-result" hidden={true}></div>
+            <div id="leaveBalanceMonthList" className="leave-bal-month-list"></div>
           </div>
 
-          <div className="table-card view-desktop-only" style={{marginTop: 12}}>
-            <div className="table-scroll">
-              <table className="data-table" style={{minWidth: 820}}>
-                <thead>
-                  <tr>
-                    <th className="col-sr">Sr</th>
-                    <th>Dates</th>
-                    <th>Reason</th>
-                    <th>Buddy</th>
-                    <th className="col-status">Status</th>
-                    <th>Applied</th>
-                    <th className="col-actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="myLeavesTableBody"></tbody>
-              </table>
+          <div className="table-card" style={{marginTop: 12, padding: '14px 16px'}}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>Leave history</div>
+            <div id="myLeavesHistory" className="leave-hist-months">
+              <div className="empty-state">Loading your leave requests…</div>
             </div>
+            {/* Kept for legacy mount refs; filled but visually replaced by month groups */}
+            <div className="table-scroll view-desktop-only" style={{display:'none'}} aria-hidden="true">
+              <table className="data-table"><tbody id="myLeavesTableBody"></tbody></table>
+            </div>
+            <div id="myLeavesList" className="ticket-list" style={{display:'none'}} aria-hidden="true"></div>
           </div>
-          <div id="myLeavesList" className="ticket-list view-mobile-only" style={{marginTop: 20}}></div>
         </section>
 
         {/* BUDDY REQUESTS (sidebar) */}
@@ -1956,6 +1949,12 @@ export default function TaskflowDom() {
         <button className="modal-close" id="closeLeaveModal">&times;</button>
       </div>
       <form id="leaveForm" className="modal-body">
+        <div id="leaveFormBalancePreview" className="leave-form-bal-preview">
+          <div><strong>Available:</strong> <span id="leaveFormBalAvail">—</span></div>
+          <div><strong>This request:</strong> <span id="leaveFormBalReq">—</span></div>
+          <div><strong>After apply:</strong> <span id="leaveFormBalAfter">—</span></div>
+          <p id="leaveFormBalWarn" className="leave-form-bal-warn" hidden={true}></p>
+        </div>
         <div className="field-grid">
           <div className="field">
             <label htmlFor="leave-from">From date <span className="req">*</span></label>
@@ -1992,6 +1991,25 @@ export default function TaskflowDom() {
           <button type="submit" className="primary-btn primary-btn-inline">Submit request</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  {/* Leave balance short / minus — Yes or No */}
+  <div id="leaveDeficitModal" className="modal-backdrop leave-deficit-modal" aria-hidden="true">
+    <div className="modal" style={{maxWidth: 440}}>
+      <div className="modal-header">
+        <h3>Leave balance check</h3>
+        <button type="button" className="modal-close" id="closeLeaveDeficitModal">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p id="leaveDeficitMsg" style={{margin:'0 0 12px',fontSize:14,lineHeight:1.5}}></p>
+        <div id="leaveDeficitStats" className="leave-deficit-stats"></div>
+        <p style={{margin:'12px 0 0',fontSize:13,color:'#4B5563'}}>Apply anyway? Balance can go in minus.</p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="leaveDeficitNoBtn">No</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="leaveDeficitYesBtn">Yes, apply</button>
+        </div>
+      </div>
     </div>
   </div>
 
