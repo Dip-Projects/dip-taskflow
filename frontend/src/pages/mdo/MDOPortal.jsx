@@ -2099,8 +2099,10 @@ function canSeeMdoTaskDelayReport(user) {
   if (user.is_mis_executive) return true;
   const role = String(user.tf_role || user.role || "").toLowerCase().trim();
   if (role === "admin") return true;
-  const blob = `${user.name || ""} ${user.user_name || ""} ${user.department || ""} ${user.designation || ""} ${user.role || ""}`.toLowerCase();
-  if (blob.includes("chirag") && blob.includes("shah")) return true;
+  const uname = String(user.user_name || user.username || "").toLowerCase().trim();
+  if (uname === "chirag.s" || uname.startsWith("chirag")) return true;
+  const blob = `${user.name || ""} ${uname} ${user.department || ""} ${user.designation || ""} ${user.role || ""}`.toLowerCase();
+  if (blob.includes("chirag")) return true;
   if (/\bmis\b/.test(blob)) return true;
   return false;
 }
