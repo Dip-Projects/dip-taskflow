@@ -3,6 +3,8 @@ import Navbar from "../../components/Navbar";
 import { supabase, fromMaybe } from "../../lib/supabase";
 import { api } from "../../lib/api";
 import "../site/SitePortal.css";
+import "../site/SiteMyTasks.css";
+import { WeeklyPlanAttachmentPreview } from "../../components/WeeklyPlanAttachmentPreview";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -413,6 +415,20 @@ const Ico = {
       <polyline points="14 2 14 8 20 8" />
     </svg>
   ),
+  weeklyPlan: (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#16a34a"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="2" />
+      <path d="M7 12h2l2-4 2 8 2-4h2" />
+    </svg>
+  ),
   excel: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f766e" strokeWidth="2" strokeLinecap="round">
       <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -469,6 +485,12 @@ apply: (
     <path d="M5 21c0-3.5 3-6 7-6s7 2.5 7 6" />
     <path d="M18 10l2 2 3-3" />
   </svg>
+  ),
+  taskReport: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c2410c" strokeWidth="2" strokeLinecap="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
   ),
   check: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1887,6 +1909,159 @@ function DprSheetReport({ sites }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+function WeeklyPlanReportMdo({ user, sites }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [engineerKey, setEngineerKey] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api("/ea-meeting/my");
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const weekly = items
+        .filter((row) => row?.plan_submitted_at && row?.source === "ea_meeting")
+        .map((row) => ({
+          id: row.ea_id || String(row.id || "").replace(/^ea:/, ""),
+          week: row.meeting_week_start || row.target_date || "—",
+          week_start: row.meeting_week_start || null,
+          week_end: row.meeting_week_end || row.target_date || null,
+          employee_name: row.employee_name || row.employee_username || "—",
+          employee_username: row.employee_username || "—",
+          employee_role: row.employee_role || row.priority || "—",
+          site: row.employee_site_name || user?.site_name || "—",
+          submitted_at: row.plan_submitted_at,
+          file_1_name: row.attachment_1_name || "File 1",
+          file_1_url: row.attachment_1_url || "",
+          file_2_name: row.attachment_2_name || "File 2",
+          file_2_url: row.attachment_2_url || "",
+        }))
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+      setRows(weekly);
+    } catch (err) {
+      setError(err.message || "Could not load weekly plan submissions.");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const engineerOptions = useMemo(() => {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const name = String(row.employee_name || "").trim();
+      const username = String(row.employee_username || "").trim();
+      const key = normKey(username) || normKey(name);
+      if (!key) return;
+      if (!map.has(key)) map.set(key, { key, name: name || username, username });
+    });
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
+  const selectedRows = useMemo(() => {
+    if (!engineerKey) return [];
+    return rows.filter((row) => {
+      const key = normKey(engineerKey);
+      return normKey(row.employee_username) === key || normKey(row.employee_name) === key;
+    });
+  }, [engineerKey, rows]);
+
+  const fmt = (ts) => {
+    if (!ts) return "—";
+    try {
+      return new Date(ts).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  return (
+    <div className="smt-page smt-page--wide">
+      <div className="smt-head">
+        <div>
+          <h1 className="smt-title">Weekly Plan</h1>
+          <p className="smt-sub">Select an engineer to load the submitted weekly sheet.</p>
+        </div>
+        <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="fgroup" style={{ maxWidth: 360, marginBottom: 18 }}>
+        <label className="flabel">Engineer</label>
+        <select className="finput" value={engineerKey} onChange={(e) => setEngineerKey(e.target.value)}>
+          <option value="">Select engineer</option>
+          {engineerOptions.map((eng) => (
+            <option key={eng.key} value={eng.key}>{eng.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {error ? <div className="smt-error">{error}</div> : null}
+
+      {loading ? (
+        <div className="smt-empty">Loading weekly plan submissions…</div>
+      ) : !engineerKey ? (
+        <div className="smt-empty">Select an engineer from the filter to load the weekly plan sheet.</div>
+      ) : selectedRows.length === 0 ? (
+        <div className="smt-empty">No submitted weekly plans found for this engineer.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", minWidth: 0 }}>
+          {selectedRows.map((r) => (
+            <div key={r.id} className="smt-excel-card">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>Week: <strong>{r.week}</strong></div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{r.employee_name}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{r.employee_role} · {r.site}</div>
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Submitted {fmt(r.submitted_at)}</div>
+              </div>
+
+              {r.file_1_url ? (
+                <WeeklyPlanAttachmentPreview
+                  eaId={r.id}
+                  sourceFile="attachment_1"
+                  fileUrl={r.file_1_url}
+                  fileName={r.file_1_name}
+                  weekStart={r.week_start}
+                  weekEnd={r.week_end}
+                />
+              ) : null}
+              {r.file_2_url ? (
+                <div style={{ marginTop: 16 }}>
+                  <WeeklyPlanAttachmentPreview
+                    eaId={r.id}
+                    sourceFile="attachment_2"
+                    fileUrl={r.file_2_url}
+                    fileName={r.file_2_name}
+                    weekStart={r.week_start}
+                    weekEnd={r.week_end}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // MAIN MDO PORTAL
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1895,6 +2070,8 @@ const NAV = [
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
+  { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
+  { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_mis" },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
   { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
@@ -1907,12 +2084,26 @@ const NAV_COLORS = {
   "attendance-log": "#2563eb",
   "engineer-excel": "#0f766e",
   dpr: "#16a34a",
+  "weekly-plan": "#0f766e",
+  "task-delay": "#c2410c",
   "apply-leave": "#7c3aed",
   "my-leave": "#7c3aed",
   "proxy-request": "#eb2727",
   "add-drawings": "#d97706",
   "all-drawings": "#d97706",
 };
+
+/** Chirag Shah (admin) + MIS Executive only — MDO task accept/done delay sheet. */
+function canSeeMdoTaskDelayReport(user) {
+  if (!user) return false;
+  if (user.is_mis_executive) return true;
+  const role = String(user.tf_role || user.role || "").toLowerCase().trim();
+  if (role === "admin") return true;
+  const blob = `${user.name || ""} ${user.user_name || ""} ${user.department || ""} ${user.designation || ""} ${user.role || ""}`.toLowerCase();
+  if (blob.includes("chirag") && blob.includes("shah")) return true;
+  if (/\bmis\b/.test(blob)) return true;
+  return false;
+}
 
 const LEAVE_TYPES = [
   "Casual Leave", "Sick Leave", "Earned Leave",
@@ -2458,6 +2649,119 @@ const fmtD = (d) =>
         year: "numeric",
       })
     : "—";
+
+function MdoTaskDelayReport() {
+  const [range, setRange] = useState("month");
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [data, setData] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await api(`/mdo/task-report?range=${encodeURIComponent(range)}`);
+      setData(res);
+    } catch (e) {
+      setErr(e.message || "Could not load report");
+      setData(null);
+    }
+    setLoading(false);
+  }, [range]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const rows = data?.rows || [];
+  const s = data?.summary || {};
+
+  return (
+    <div>
+      <div className="info-banner" style={{ marginBottom: 16 }}>
+        MDO Office Work tasks — accept time, mark-done time, and whether the employee was delayed.
+        Visible only to Chirag Shah and MIS Executive.
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>
+          Range{" "}
+          <select value={range} onChange={(e) => setRange(e.target.value)} style={{ marginLeft: 6, padding: "6px 10px" }}>
+            <option value="day">Today</option>
+            <option value="week">This week</option>
+            <option value="last-week">Last week</option>
+            <option value="month">This month</option>
+            <option value="last-month">Last month</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" className="btn btn-pri" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+      {err && (
+        <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>
+          {err}
+        </div>
+      )}
+      {!err && !loading && (
+        <p style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 12 }}>
+          {s.total || 0} tasks · <strong style={{ color: "#c2410c" }}>{s.delayed || 0} delayed</strong>
+          {" · "}
+          <strong style={{ color: "#15803d" }}>{s.on_time || 0} on time</strong>
+          {" · "}
+          {s.pending || 0} not done yet
+        </p>
+      )}
+      {loading ? (
+        <Loading />
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#1f2937", color: "#fff", textAlign: "left" }}>
+                <th style={{ padding: "10px 8px" }}>SR</th>
+                <th style={{ padding: "10px 8px" }}>Employee</th>
+                <th style={{ padding: "10px 8px" }}>Task description</th>
+                <th style={{ padding: "10px 8px" }}>Task type</th>
+                <th style={{ padding: "10px 8px" }}>Accepted</th>
+                <th style={{ padding: "10px 8px" }}>Marked done</th>
+                <th style={{ padding: "10px 8px" }}>Due</th>
+                <th style={{ padding: "10px 8px" }}>Delay?</th>
+                <th style={{ padding: "10px 8px" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: 24, textAlign: "center", color: "#888" }}>
+                    No MDO Office Work tasks in this range
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #e5e7eb", background: r.delay ? "#fff7ed" : undefined }}>
+                    <td style={{ padding: "10px 8px", textAlign: "center" }}>{r.sr}</td>
+                    <td style={{ padding: "10px 8px", fontWeight: 600 }}>{r.employee}</td>
+                    <td style={{ padding: "10px 8px", maxWidth: 280 }}>{r.description}</td>
+                    <td style={{ padding: "10px 8px" }}>{r.task_type}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.accepted_label}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.done_label}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.due_label}</td>
+                    <td style={{ padding: "10px 8px", fontWeight: 700, color: r.delay ? "#c2410c" : "#15803d" }}>
+                      {r.delay ? `Yes — ${r.delay_label}` : r.delay_label}
+                    </td>
+                    <td style={{ padding: "10px 8px" }}>{r.status}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function MDOPortal({ onLogout }) {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("attendance");
@@ -2528,7 +2832,9 @@ const handleDrawingSubmit = async () => {
       name: parsed.name || parsed.full_name,
       department: parsed.department || "",
       role: parsed.designation || parsed.role || "Process Controller",
+      tf_role: parsed.role || "",
       designation: parsed.designation || parsed.role || "",
+      is_mis_executive: !!parsed.is_mis_executive,
       site_name: parsed.site_name || "",
       site_names: parsed.site_names || null,
     };
@@ -2538,7 +2844,7 @@ const handleDrawingSubmit = async () => {
     let data = null;
     if (uname) {
       const { data: fromUsers } = await fromMaybe("users", (q) =>
-        q.select("site_name, site_names, department, designation, full_name, role").eq("username", uname).maybeSingle()
+        q.select("site_name, site_names, department, designation, full_name, role, is_mis_executive").eq("username", uname).maybeSingle()
       );
       const urow = fromUsers && !Array.isArray(fromUsers) ? fromUsers : (fromUsers || [])[0];
       if (urow) {
@@ -2547,6 +2853,8 @@ const handleDrawingSubmit = async () => {
           site_names: urow.site_names,
           department: urow.department,
           role: urow.designation || urow.role || shaped.role,
+          tf_role: urow.role || shaped.tf_role,
+          is_mis_executive: !!urow.is_mis_executive,
           name: urow.full_name,
         };
       }
@@ -2577,6 +2885,8 @@ const handleDrawingSubmit = async () => {
       ...shaped,
       name: data?.name || shaped.name,
       role: data?.role || shaped.role,
+      tf_role: data?.tf_role || shaped.tf_role,
+      is_mis_executive: data?.is_mis_executive != null ? !!data.is_mis_executive : shaped.is_mis_executive,
       site_name: site_names[0] || shaped.site_name,
       site_names,
       department: data?.department ?? shaped.department,
@@ -2624,6 +2934,16 @@ useEffect(() => {
   const sites = ownSites.length ? ownSites : allSites;
 
   const activeItem = NAV.find((n) => n.key === activeTab);
+  const visibleNav = useMemo(
+    () => NAV.filter((n) => n.restricted !== "chirag_mis" || canSeeMdoTaskDelayReport(user)),
+    [user]
+  );
+
+  useEffect(() => {
+    if (activeTab === "task-delay" && !canSeeMdoTaskDelayReport(user)) {
+      setActiveTab("attendance");
+    }
+  }, [activeTab, user]);
 
   return (
     <div>
@@ -2648,7 +2968,7 @@ useEffect(() => {
             flexDirection: "column",
           }}  
         >
-          {NAV.map((n) => {
+          {visibleNav.map((n) => {
             const color = NAV_COLORS[n.key] || "#2563eb";
             const highlighted = activeTab === n.key || hoveredNavKey === n.key;
             return (
@@ -2699,6 +3019,10 @@ useEffect(() => {
               <EngineerExcelReport sites={sites} />
             ) : activeTab === "dpr" ? (
               <DprSheetReport sites={sites} />
+            ) : activeTab === "weekly-plan" ? (
+              <WeeklyPlanReportMdo user={user} sites={sites} />
+            ) : activeTab === "task-delay" ? (
+              <MdoTaskDelayReport />
             ) : activeTab === "add-drawings" ? (
               <AddDrawings
                 sites={allSites}
