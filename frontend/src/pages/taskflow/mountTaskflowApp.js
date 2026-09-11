@@ -3852,19 +3852,25 @@ export async function mountTaskflowApp(opts = {}) {
   function reschedHoursSummary(task) {
     try {
       const assigned = assignedHoursOf(task);
-      const budget = workTimerBudgetHours(task) || assigned || 0;
-      let done = 0;
-      let remaining = budget;
-      if (task?.is_on_hold) {
-        remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : budget) || 0;
-        done = Math.max(0, Math.round(((assigned || 0) - remaining) * 100) / 100);
-      } else if (task?.accepted_at) {
-        const anchor = workTimerAnchor(task);
-        if (anchor) {
-          done = Math.max(0, Math.round(elapsedWorkingHoursBetween(anchor, new Date()) * 100) / 100);
-          remaining = Math.max(0, Math.round((budget - done) * 100) / 100);
-        }
+      const assignedN = Number(assigned) || 0;
+      if (!task?.accepted_at) {
+        return { assigned, done: 0, remaining: assignedN };
       }
+      if (task.is_on_hold) {
+        const remaining = Math.max(
+          0,
+          Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : assignedN) || 0
+        );
+        const done = Math.max(0, Math.round((assignedN - remaining) * 100) / 100);
+        return { assigned, done, remaining };
+      }
+      // Office-hours worked since accept, minus recorded hold pauses
+      let done = elapsedWorkingHoursBetween(task.accepted_at, new Date());
+      const holdSec = Number(task.total_hold_seconds) || 0;
+      if (holdSec > 0) done = Math.max(0, done - holdSec / 3600);
+      done = Math.max(0, Math.round(done * 100) / 100);
+      if (done > assignedN) done = assignedN;
+      const remaining = Math.max(0, Math.round((assignedN - done) * 100) / 100);
       return { assigned, done, remaining };
     } catch (_) {
       return { assigned: null, done: null, remaining: null };

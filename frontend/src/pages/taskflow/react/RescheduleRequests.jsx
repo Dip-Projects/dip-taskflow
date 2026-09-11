@@ -13,12 +13,17 @@ function fmtHrs(h) {
 
 function hoursSummary(task) {
   const assigned = Number(task?.original_hours_to_complete ?? task?.hours_to_complete) || 0;
-  let done = 0;
-  let remaining = Number(task?.hours_to_complete) || assigned;
+  if (!task?.accepted_at) return { assigned, done: 0, remaining: assigned };
   if (task?.is_on_hold) {
-    remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : remaining) || 0;
-    done = Math.max(0, Math.round((assigned - remaining) * 100) / 100);
+    const remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : assigned) || 0;
+    const done = Math.max(0, Math.round((assigned - remaining) * 100) / 100);
+    return { assigned, done, remaining };
   }
+  // Fallback without full office-hours engine: prefer assigned − remaining budget if present
+  const budget = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : task.hours_to_complete) || assigned;
+  // Without client-side office clock, show budget as remaining and done = assigned − remaining
+  const remaining = Math.max(0, budget);
+  const done = Math.max(0, Math.round((assigned - remaining) * 100) / 100);
   return { assigned, done, remaining };
 }
 

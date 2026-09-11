@@ -1535,20 +1535,19 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       existing.original_hours_to_complete != null
         ? Number(existing.original_hours_to_complete)
         : Number(existing.hours_to_complete) || 0;
-    const budget = workTimerBudgetHours(existing) || assignedHrs;
-    const anchor = existing.accepted_at
-      ? (existing.is_on_hold
-          ? existing.resumed_at || existing.accepted_at
-          : existing.resumed_at || existing.accepted_at)
-      : null;
     let doneHrs = 0;
-    let remHrs = budget;
+    let remHrs = assignedHrs;
     if (existing.is_on_hold) {
-      remHrs = Number(existing.hold_remaining_hours != null ? existing.hold_remaining_hours : budget) || 0;
+      remHrs = Number(existing.hold_remaining_hours != null ? existing.hold_remaining_hours : assignedHrs) || 0;
       doneHrs = Math.max(0, Math.round((assignedHrs - remHrs) * 100) / 100);
-    } else if (anchor) {
-      doneHrs = Math.max(0, Math.round(elapsedWorkingHours(new Date(anchor), new Date()) * 100) / 100);
-      remHrs = Math.max(0, Math.round((budget - doneHrs) * 100) / 100);
+    } else if (existing.accepted_at) {
+      // Office hours since accept, minus recorded hold pauses — vs original assigned
+      let worked = elapsedWorkingHours(new Date(existing.accepted_at), new Date());
+      const holdSec = Number(existing.total_hold_seconds) || 0;
+      if (holdSec > 0) worked = Math.max(0, worked - holdSec / 3600);
+      doneHrs = Math.max(0, Math.round(worked * 100) / 100);
+      if (doneHrs > assignedHrs) doneHrs = assignedHrs;
+      remHrs = Math.max(0, Math.round((assignedHrs - doneHrs) * 100) / 100);
     }
 
     const keepAccepted = !!existing.accepted_at;
@@ -1580,7 +1579,8 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
     };
 
     if (keepAccepted) {
-      // Preserve acceptance; keep remaining hours on the live budget.
+      // Preserve acceptance; keep remaining hours on a fresh timer segment from now
+      // so later elapsed is not double-counted against a reduced budget.
       updates.status = existing.is_on_hold ? existing.status : (existing.status === 'Pending' ? 'In Progress' : existing.status);
       if (existing.status === 'Pending' && existing.accepted_at) updates.status = 'In Progress';
       updates.hours_to_complete = remHrs > 0 ? remHrs : existing.hours_to_complete;
@@ -1589,7 +1589,8 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       }
       if (existing.is_on_hold) {
         updates.hold_remaining_hours = remHrs;
-      } else if (existing.resumed_at != null || existing.hold_remaining_hours != null) {
+      } else {
+        updates.resumed_at = at;
         updates.hold_remaining_hours = remHrs;
       }
     } else {
