@@ -13,6 +13,7 @@ const {
   sendWhatsAppTemplate,
 } = require('../lib/whatsapp');
 const { notifyAssigneeOpenTasksList } = require('../lib/taskListDigest');
+const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
 const router = express.Router();
 router.use(requireAuth);
 
@@ -1697,15 +1698,17 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
       const d = new Date(iso);
       return d >= startDate && d <= endDate;
     };
-    const ranged = (tasks || []).filter(
-      (t) =>
-        inRange(t.created_at) ||
-        inRange(t.assigned_at) ||
-        inRange(t.accepted_at) ||
-        inRange(t.sent_for_verification_at) ||
-        inRange(t.verified_at) ||
-        inRange(t.rejected_at)
-    );
+    const ranged = (tasks || [])
+      .filter((t) => !isMdoOfficeWorkTask(t))
+      .filter(
+        (t) =>
+          inRange(t.created_at) ||
+          inRange(t.assigned_at) ||
+          inRange(t.accepted_at) ||
+          inRange(t.sent_for_verification_at) ||
+          inRange(t.verified_at) ||
+          inRange(t.rejected_at)
+      );
 
     // Helper: diff in hours between two timestamps
     function hrsBetween(a, b) {
@@ -1915,15 +1918,6 @@ function fmsJobCode(name) {
   if (!words.length) return 'JB';
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
-}
-
-/** MDO Office work stays on MDO portal — keep it out of the office FMS sheet. */
-function isMdoOfficeWorkTask(t) {
-  const dept = String(t.department?.name || '').toLowerCase().trim();
-  const type = String(t.task_type?.name || '').toLowerCase().trim();
-  if (dept === 'mdo office' || /\bmdo\b/.test(dept)) return true;
-  if (/\bmdo\b/.test(type)) return true;
-  return false;
 }
 
 function fmsStep(planned, actual, isApplicable) {

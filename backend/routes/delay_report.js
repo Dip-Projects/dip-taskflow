@@ -8,6 +8,7 @@ const {
   delayReportHtml,
   delayReportTextSummary,
 } = require('../lib/delayReport');
+const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
 
 const router = express.Router();
 
@@ -52,6 +53,8 @@ const DELAY_TASK_SELECT = `
   target_date, original_target_date, reschedule_approved_target_date,
   reschedule_status, reschedule_count, reaccept_required,
   project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
 `;
 
@@ -63,6 +66,8 @@ const DELAY_TASK_SELECT_PRE_PLAN = `
   is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
   target_date, reschedule_status,
   project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
 `;
 
@@ -71,6 +76,8 @@ const DELAY_TASK_SELECT_FALLBACK = `
   created_at, assigned_at, accepted_at, sent_for_verification_at,
   verification_status, assigned_to,
   project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
 `;
 
@@ -111,6 +118,7 @@ async function loadTasksForDelayReport({ startDate, endDate, employeeId }) {
   };
 
   return (data || []).filter((t) => {
+    if (isMdoOfficeWorkTask(t)) return false;
     const role = String(t.assigned_to_user?.role || '').toLowerCase();
     const dept = String(t.assigned_to_user?.department || '').toLowerCase();
     if (role === 'client' || dept === 'client') return false;
