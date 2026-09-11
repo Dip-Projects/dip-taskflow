@@ -2039,6 +2039,11 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
 
 export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [tab, setTab] = useState('dashboard');
+  const isAdminUser = String(user?.role || '').toLowerCase() === 'admin';
+  const navItems = useMemo(
+    () => NAV.filter((n) => n.key !== 'recruitment' || isAdminUser),
+    [isAdminUser]
+  );
   const [employees, setEmployees] = useState([]);
   const [empLoading, setEmpLoading] = useState(true);
   const [empError, setEmpError] = useState('');
@@ -2051,6 +2056,10 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [attendanceToday, setAttendanceToday] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
   const [alerts, setAlerts] = useState({ birthdays: [], insuranceDue: [] });
+
+  useEffect(() => {
+    if (tab === 'recruitment' && !isAdminUser) setTab('dashboard');
+  }, [tab, isAdminUser]);
 
   const loadEmployees = useCallback(async () => {
     setEmpLoading(true);
@@ -2084,13 +2093,17 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   }, []);
 
   const loadRecruitments = useCallback(async () => {
+    if (String(user?.role || '').toLowerCase() !== 'admin') {
+      setRecruitments([]);
+      return;
+    }
     try {
       const data = await api('/hr/recruitments');
       setRecruitments(data.recruitments || []);
     } catch {
       setRecruitments([]);
     }
-  }, []);
+  }, [user?.role]);
 
   const loadAlerts = useCallback(async () => {
     try {
@@ -2130,14 +2143,17 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     })();
   }, [loadEmployees, loadLeaves, loadRecruitments, loadAlerts]);
 
-  const title = useMemo(() => NAV.find((n) => n.key === tab)?.label || 'HR', [tab]);
+  const title = useMemo(
+    () => navItems.find((n) => n.key === tab)?.label || NAV.find((n) => n.key === tab)?.label || 'HR',
+    [tab, navItems]
+  );
 
   return (
     <div className="hr-shell">
       <aside className="hr-side">
         <div className="hr-brand">DIP HRMS</div>
         <p className="hr-brand-sub">HR · {user?.full_name || 'User'}</p>
-        {NAV.map((n) => (
+        {navItems.map((n) => (
           <button
             key={n.key}
             type="button"
@@ -2163,7 +2179,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             employees={employees}
             leaves={leaves}
             attendanceToday={attendanceToday}
-            candidates={recruitments}
+            candidates={isAdminUser ? recruitments : []}
             alerts={alerts}
             onSendWa={sendWaReminders}
           />
@@ -2184,7 +2200,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
         {tab === 'leaves' && (
           <LeavesView leaves={leaves} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
         )}
-        {tab === 'recruitment' && (
+        {tab === 'recruitment' && isAdminUser && (
           <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
         )}
         {tab === 'insurance' && <InsuranceView employees={employees} />}

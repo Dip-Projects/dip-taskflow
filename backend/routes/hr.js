@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const crypto = require('crypto');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdminOrHr, isHrUser } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireAdminOrHr, isHrUser } = require('../middleware/auth');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -812,12 +812,14 @@ router.get('/attendance', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Heads + HR + admin: list (heads see own submissions; HR/admin see all) */
+/** Heads see own submissions; only admin sees full recruitment pipeline (HR portal). */
 router.get('/recruitments', async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
-    if (canHrOrAdmin(req.user)) return res.json({ recruitments: list });
-    if (!isHead(req.user)) return res.status(403).json({ error: 'Only Head or HR can view recruitments' });
+    if (req.user?.role === 'admin') return res.json({ recruitments: list });
+    if (!isHead(req.user)) {
+      return res.status(403).json({ error: 'Only admin can view all recruitments' });
+    }
     const uid = String(req.user.id || '');
     const mine = list.filter((r) => String(r.submitted_by || '') === uid);
     res.json({ recruitments: mine });
@@ -955,8 +957,8 @@ router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
   }
 });
 
-/** HR updates pipeline status / interview — status changes are logged */
-router.patch('/recruitments/:id', requireAdminOrHr, async (req, res) => {
+/** Admin updates pipeline status / interview — status changes are logged */
+router.patch('/recruitments/:id', requireAdmin, async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
     const idx = list.findIndex((r) => r.id === req.params.id);
