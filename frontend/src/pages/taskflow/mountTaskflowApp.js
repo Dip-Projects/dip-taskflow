@@ -5002,13 +5002,13 @@ export async function mountTaskflowApp(opts = {}) {
     const fyEl = document.getElementById('leaveBalFyLabel');
     const subEl = document.getElementById('leaveBalSub');
     const availEl = document.getElementById('leaveBalAvailable');
-    const tbody = document.getElementById('leaveBalanceTableBody');
-    if (!tbody) return;
+    const list = document.getElementById('leaveBalanceMonthList');
+    if (!list) return;
     if (!bal) {
       if (fyEl) fyEl.textContent = 'Leave balance';
       if (subEl) subEl.textContent = 'Could not load balance';
       if (availEl) availEl.textContent = '—';
-      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Balance unavailable</td></tr>';
+      list.innerHTML = '<div class="empty-state">Balance unavailable</div>';
       return;
     }
     if (fyEl) fyEl.textContent = `Leave balance · ${bal.fy_label || ''}`;
@@ -5021,18 +5021,24 @@ export async function mountTaskflowApp(opts = {}) {
       availEl.style.color = v < 0 ? '#C2410C' : v === 0 ? '#6B7280' : '#15803D';
     }
     const rows = bal.monthly || [];
-    tbody.innerHTML = rows.map((m) => {
-      const dim = m.is_future ? 'opacity:0.45' : '';
-      const balColor = m.balance_after < 0 ? 'color:#C2410C;font-weight:700' : m.balance_after === 0 ? '' : 'color:#15803D;font-weight:600';
-      const cur = m.is_current ? ' font-weight:700' : '';
-      return `<tr style="${dim}">
-        <td style="${cur}">${escapeHtml(m.short || m.label)}${m.is_current ? ' · now' : ''}</td>
-        <td>${m.accrued ? `+${m.accrued}` : '—'}</td>
-        <td>${m.used_approved ? m.used_approved : '—'}</td>
-        <td>${m.used_pending ? m.used_pending : '—'}</td>
-        <td style="${balColor}">${m.balance_after > 0 ? '+' : ''}${m.balance_after}</td>
-      </tr>`;
-    }).join('') || '<tr><td colspan="5" class="empty-state">No months</td></tr>';
+    list.innerHTML = rows.map((m) => {
+      const dim = m.is_future ? 'opacity:0.5' : '';
+      const balColor = m.balance_after < 0 ? '#C2410C' : m.balance_after === 0 ? '#6B7280' : '#15803D';
+      const border = m.is_current ? '2px solid #1F2937' : '1px solid #E5E7EB';
+      const balTxt = `${m.balance_after > 0 ? '+' : ''}${m.balance_after}`;
+      return `<div style="${dim};border:${border};border-radius:8px;padding:10px 12px;background:${m.is_current ? '#F7F3EC' : '#fff'}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
+          <strong style="font-size:14px">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</strong>
+          <span style="font-weight:800;color:${balColor};font-size:15px">${balTxt}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:#4B5563;line-height:1.45">
+          <div>Accrued: <strong>${m.accrued ? `+${m.accrued}` : '—'}</strong></div>
+          <div>Used: <strong>${m.used_approved ? m.used_approved : '—'}</strong></div>
+          <div>Pending: <strong>${m.used_pending ? m.used_pending : '—'}</strong></div>
+          <div>Balance after month: <strong style="color:${balColor}">${balTxt}</strong></div>
+        </div>
+      </div>`;
+    }).join('') || '<div class="empty-state">No months</div>';
   }
 
   async function loadHrRecruitmentMine() {

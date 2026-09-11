@@ -978,22 +978,7 @@ export default function TaskflowDom() {
                 <div id="leaveBalAvailable" style={{fontSize:22,fontWeight:800}}>—</div>
               </div>
             </div>
-            <div className="table-scroll" style={{marginTop:12}}>
-              <table className="data-table" style={{minWidth: 640}}>
-                <thead>
-                  <tr>
-                    <th>Month</th>
-                    <th>Accrued</th>
-                    <th>Used</th>
-                    <th>Pending</th>
-                    <th>Balance after</th>
-                  </tr>
-                </thead>
-                <tbody id="leaveBalanceTableBody">
-                  <tr><td colSpan={5} className="empty-state">Loading balance…</td></tr>
-                </tbody>
-              </table>
-            </div>
+            <div id="leaveBalanceMonthList" style={{marginTop:12,display:'flex',flexDirection:'column',gap:8}}></div>
           </div>
 
           <div className="table-card view-desktop-only" style={{marginTop: 12}}>
