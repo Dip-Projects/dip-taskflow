@@ -3956,35 +3956,38 @@ export async function mountTaskflowApp(opts = {}) {
   
       // Task Sr No
       const tdSr = document.createElement('td');
+      tdSr.className = 'col-tasksr';
       tdSr.textContent = index + 1;
   
       // Project
       const tdProject = document.createElement('td');
+      tdProject.className = 'col-vproject';
       tdProject.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.project?.name ?? '—')}</strong>`;
   
       // Task Type
       const tdTaskType = document.createElement('td');
+      tdTaskType.className = 'col-vtasktype';
       tdTaskType.textContent = task.task_type?.name ?? '—';
 
       // Description / task details
       const tdDesc = document.createElement('td');
-      tdDesc.style.maxWidth = '280px';
-      tdDesc.style.whiteSpace = 'normal';
-      tdDesc.style.wordBreak = 'break-word';
+      tdDesc.className = 'col-vdesc';
       tdDesc.textContent = task.description || '—';
       if (task.description) tdDesc.title = task.description;
   
       // Submitted By (person who did the task and sent for verification)
       const tdSubmittedBy = document.createElement('td');
+      tdSubmittedBy.className = 'col-vsubmitted';
       tdSubmittedBy.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
 
       // Pending with — who currently holds verification
       const tdPendingWith = document.createElement('td');
+      tdPendingWith.className = 'col-vpending';
       tdPendingWith.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier?.full_name ?? '—')}</strong>`;
   
       // Attachments
       const tdAttach = document.createElement('td');
-      tdAttach.style.textAlign = 'center';
+      tdAttach.className = 'col-vattach';
       const links = [];
       if (task.attachment_url) {
         links.push(`<a href="${task.attachment_url}" target="_blank" rel="noopener" class="media-link" title="View attachment">📎</a>`);
@@ -3996,7 +3999,7 @@ export async function mountTaskflowApp(opts = {}) {
   
       // Sent for verification date/time (when employee clicked Send for verification)
       const tdDate = document.createElement('td');
-      tdDate.style.whiteSpace = 'nowrap';
+      tdDate.className = 'col-vdate';
       const sentAt =
         task.sent_for_verification_at ||
         task.first_sent_for_verification_at ||
@@ -4005,7 +4008,7 @@ export async function mountTaskflowApp(opts = {}) {
   
       // Actions — Verify / Correction / Updation, shown directly (no gate)
       const tdActions = document.createElement('td');
-      tdActions.className = 'row-actions';
+      tdActions.className = 'col-vactions row-actions';
   
       function showVerifyActions() {
         tdActions.innerHTML = '';

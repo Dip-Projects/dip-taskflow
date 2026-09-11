@@ -717,15 +717,33 @@ body.sidebar-open { overflow: hidden; }
 #overdueTasksTable th:nth-child(9),
 #overdueTasksTable td:nth-child(9) { width: 13%; }
 
-/* Verification requests table columns */
-.col-reqid     { width: 8%; }
-.col-tasksr    { width: 6%; }
-.col-vproject  { width: 18%; }
-.col-vtasktype { width: 14%; }
-.col-vsubmitted{ width: 16%; }
-.col-vattach   { width: 10%; text-align: center; }
-.col-vdate     { width: 14%; }
-.col-vactions  { width: 14%; }
+/* Verification requests table columns (9 cols — keep readable, scroll if needed) */
+#view-verifications .data-table,
+#otherPendingVerificationsWrap .data-table {
+  min-width: 1180px;
+  table-layout: fixed;
+}
+#view-verifications .data-table th,
+#otherPendingVerificationsWrap .data-table th {
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+#view-verifications .data-table td,
+#otherPendingVerificationsWrap .data-table td {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+.col-reqid      { width: 8%; }
+.col-tasksr     { width: 5%; white-space: nowrap; }
+.col-vproject   { width: 10%; }
+.col-vtasktype  { width: 10%; }
+.col-vdesc      { width: 18%; }
+.col-vsubmitted { width: 12%; }
+.col-vpending   { width: 12%; }
+.col-vattach    { width: 7%; text-align: center; }
+.col-vdate      { width: 12%; white-space: nowrap; }
+.col-vactions   { width: 14%; }
 
 .sr-number {
   display: inline-flex; align-items: center; justify-content: center;
