@@ -8217,18 +8217,25 @@ export async function mountTaskflowApp(opts = {}) {
     if (!dash?.completion_time?.rows?.length && !dash?.by_employee?.length) {
       return showToast('Nothing to export yet', 'error');
     }
-    const head = ['SR', 'Employee', 'Project', 'Task type', 'Assigned', 'Submitted', 'Hours', 'Verifier', 'Verified', 'Verify days'];
+    const head = ['SR', 'Employee', 'Project', 'Task type', 'Assigned', 'Submitted', 'Office hours', 'Verifier', 'Start verification', 'Verified', 'Verify office hours'];
     const lines = [head.join(',')];
     const bySr = {};
     (dash.completion_time?.rows || []).forEach((r) => { bySr[r.sr] = { ...r }; });
     (dash.verify_turnaround?.rows || []).forEach((r) => {
-      bySr[r.sr] = { ...(bySr[r.sr] || {}), verifier: r.verifier, verified_at: r.verified_at, days: r.days };
+      bySr[r.sr] = {
+        ...(bySr[r.sr] || {}),
+        verifier: r.verifier,
+        started_at: r.started_at || r.accepted_at,
+        verified_at: r.verified_at,
+        verify_hours: r.hours,
+        days: r.days,
+      };
     });
     Object.values(bySr).forEach((r) => {
       lines.push([
         r.sr ?? '', r.employee || '', r.project || '', r.task_type || '',
         r.assigned_at || '', r.submitted_at || '', r.hours ?? '',
-        r.verifier || '', r.verified_at || '', r.days ?? '',
+        r.verifier || '', r.started_at || '', r.verified_at || '', r.verify_hours ?? r.days ?? '',
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
