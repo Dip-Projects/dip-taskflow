@@ -1171,6 +1171,14 @@ body.sidebar-open { overflow: hidden; }
   backdrop-filter: blur(4px);
 }
 .modal-backdrop[hidden] { display: none; }
+/* Reschedule approve: class-driven open (escapes React hidden + overflow clip) */
+.resched-approve-modal {
+  display: none !important;
+  z-index: 5000;
+}
+.resched-approve-modal.is-open {
+  display: flex !important;
+}
 .modal {
   background: var(--surface); border-radius: var(--r-xl);
   width: 100%; max-width: 460px;

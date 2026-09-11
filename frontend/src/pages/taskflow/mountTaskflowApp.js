@@ -3838,27 +3838,37 @@ export async function mountTaskflowApp(opts = {}) {
       } catch (err) { showToast(err.message, 'error'); }
       return;
     }
-    openReschedApproveModal(taskHint || { id: taskId });
+    // Always open hours + date popup — never silent-approve.
+    try {
+      await openReschedApproveModal(taskHint || { id: taskId });
+    } catch (err) {
+      console.error('[reschedApprove]', err);
+      showToast(err.message || 'Could not open approve popup', 'error');
+    }
   }
 
   let _reschedApproveTask = null;
 
   function reschedHoursSummary(task) {
-    const assigned = assignedHoursOf(task);
-    const budget = workTimerBudgetHours(task) || assigned || 0;
-    let done = 0;
-    let remaining = budget;
-    if (task?.is_on_hold) {
-      remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : budget) || 0;
-      done = Math.max(0, Math.round(((assigned || 0) - remaining) * 100) / 100);
-    } else if (task?.accepted_at) {
-      const anchor = workTimerAnchor(task);
-      if (anchor) {
-        done = Math.max(0, Math.round(elapsedWorkingHoursBetween(anchor, new Date()) * 100) / 100);
-        remaining = Math.max(0, Math.round((budget - done) * 100) / 100);
+    try {
+      const assigned = assignedHoursOf(task);
+      const budget = workTimerBudgetHours(task) || assigned || 0;
+      let done = 0;
+      let remaining = budget;
+      if (task?.is_on_hold) {
+        remaining = Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : budget) || 0;
+        done = Math.max(0, Math.round(((assigned || 0) - remaining) * 100) / 100);
+      } else if (task?.accepted_at) {
+        const anchor = workTimerAnchor(task);
+        if (anchor) {
+          done = Math.max(0, Math.round(elapsedWorkingHoursBetween(anchor, new Date()) * 100) / 100);
+          remaining = Math.max(0, Math.round((budget - done) * 100) / 100);
+        }
       }
+      return { assigned, done, remaining };
+    } catch (_) {
+      return { assigned: null, done: null, remaining: null };
     }
-    return { assigned, done, remaining };
   }
 
   function fmtHrsLabel(h) {
@@ -3870,35 +3880,70 @@ export async function mountTaskflowApp(opts = {}) {
     return mins ? `${hrs}h ${mins}m` : `${hrs}h`;
   }
 
-  function openReschedApproveModal(task) {
+  function showReschedApproveModalEl(modal) {
+    if (!modal) return;
+    // Escape .tf-legacy-frame overflow so fixed overlay always covers the screen
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    modal.removeAttribute('hidden');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '5000';
+  }
+
+  function hideReschedApproveModalEl(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.display = 'none';
+    modal.setAttribute('hidden', '');
+  }
+
+  async function openReschedApproveModal(taskIn) {
+    let task = taskIn || {};
+    // Prefer list payload; optional enrich if hours missing (no dedicated GET /tasks/:id)
+    if (task.id && task.hours_to_complete == null && task.original_hours_to_complete == null) {
+      try {
+        const list = await api('/tasks/reschedule-requests?status=Pending').catch(() => []);
+        const hit = (Array.isArray(list) ? list : []).find((t) => String(t.id) === String(task.id));
+        if (hit) task = { ...task, ...hit };
+      } catch (_) { /* use hint */ }
+    }
     _reschedApproveTask = task;
     const modal = document.getElementById('reschedApproveModal');
+    if (!modal) {
+      showToast('Approve popup missing — hard refresh (Ctrl+Shift+R) and try again', 'error');
+      return;
+    }
     const msg = document.getElementById('reschedApproveFormMsg');
-    if (msg) { msg.hidden = true; msg.textContent = ''; }
+    if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
     const sum = reschedHoursSummary(task);
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     set('reschedApproveTaskLabel', `${task.assigned_to_user?.full_name || 'Employee'} — ${task.description || 'Task'}`);
     set('reschedApproveAssigned', fmtHrsLabel(sum.assigned));
     set('reschedApproveDone', fmtHrsLabel(sum.done));
     set('reschedApproveRemaining', fmtHrsLabel(sum.remaining));
-    set('reschedApproveRequested', fmtDateOnly(task.reschedule_requested_date) || '—');
+    let reqLabel = '—';
+    try { reqLabel = fmtDateOnly(task.reschedule_requested_date) || '—'; } catch (_) { /* ignore */ }
+    set('reschedApproveRequested', reqLabel);
     const useEmp = document.getElementById('reschedApproveUseEmp');
     const useAdmin = document.getElementById('reschedApproveUseAdmin');
     const wrap = document.getElementById('reschedApproveCustomWrap');
     const dt = document.getElementById('reschedApproveDatetime');
     if (useEmp) useEmp.checked = true;
     if (useAdmin) useAdmin.checked = false;
-    if (wrap) wrap.hidden = true;
+    if (wrap) wrap.style.display = 'none';
     if (dt) {
       const req = String(task.reschedule_requested_date || '').slice(0, 10);
       dt.value = req ? `${req}T18:30` : '';
     }
-    if (modal) modal.hidden = false;
+    showReschedApproveModalEl(modal);
   }
 
   function closeReschedApproveModal() {
-    const modal = document.getElementById('reschedApproveModal');
-    if (modal) modal.hidden = true;
+    hideReschedApproveModalEl(document.getElementById('reschedApproveModal'));
     _reschedApproveTask = null;
   }
 
@@ -3909,7 +3954,7 @@ export async function mountTaskflowApp(opts = {}) {
     const useAdmin = document.getElementById('reschedApproveUseAdmin')?.checked;
     const dt = document.getElementById('reschedApproveDatetime')?.value;
     if (useAdmin && !dt) {
-      if (msg) { msg.hidden = false; msg.textContent = 'Please pick date and time for the new deadline.'; }
+      if (msg) { msg.style.display = ''; msg.textContent = 'Please pick date and time for the new deadline.'; }
       return;
     }
     const body = useAdmin
@@ -3922,22 +3967,28 @@ export async function mountTaskflowApp(opts = {}) {
       loadRescheduleRequests();
       refreshNavBadges();
     } catch (err) {
-      if (msg) { msg.hidden = false; msg.textContent = err.message; }
+      if (msg) { msg.style.display = ''; msg.textContent = err.message; }
       else showToast(err.message, 'error');
     }
   }
 
   __tfReadyFns.push(() => {
-    document.getElementById('closeReschedApproveModal')?.addEventListener('click', closeReschedApproveModal);
-    document.getElementById('cancelReschedApproveModal')?.addEventListener('click', closeReschedApproveModal);
-    document.getElementById('confirmReschedApproveBtn')?.addEventListener('click', () => confirmReschedApprove());
-    document.getElementById('reschedApproveUseEmp')?.addEventListener('change', () => {
+    const bindOnce = (id, evt, fn) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.tfBound === '1') return;
+      el.dataset.tfBound = '1';
+      el.addEventListener(evt, fn);
+    };
+    bindOnce('closeReschedApproveModal', 'click', closeReschedApproveModal);
+    bindOnce('cancelReschedApproveModal', 'click', closeReschedApproveModal);
+    bindOnce('confirmReschedApproveBtn', 'click', () => { confirmReschedApprove(); });
+    bindOnce('reschedApproveUseEmp', 'change', () => {
       const wrap = document.getElementById('reschedApproveCustomWrap');
-      if (wrap) wrap.hidden = true;
+      if (wrap) wrap.style.display = 'none';
     });
-    document.getElementById('reschedApproveUseAdmin')?.addEventListener('change', () => {
+    bindOnce('reschedApproveUseAdmin', 'change', () => {
       const wrap = document.getElementById('reschedApproveCustomWrap');
-      if (wrap) wrap.hidden = false;
+      if (wrap) wrap.style.display = '';
     });
   });
 
@@ -4873,28 +4924,58 @@ export async function mountTaskflowApp(opts = {}) {
         body: { ...payload, acknowledge_negative: !!acknowledgeNegative },
       });
       els.leaveModal.hidden = true;
-      if (state.activeView === 'applyleave') loadMyLeaves();
+
+      let bal = null;
+      try { bal = await api('/leaves/balance'); } catch (_) { /* ignore */ }
+      if (bal) renderLeaveBalance(bal);
+      if (state.activeView === 'applyleave') {
+        // Refresh leave history table/cards (balance already rendered above)
+        try {
+          const leaves = await api('/leaves/my');
+          renderMyLeavesList(leaves);
+        } catch (_) { /* ignore */ }
+      }
       if (state.activeView === 'buddyrequests') loadBuddyRequests();
       refreshNavBadges();
+
+      const used = bal?.total_used_approved;
+      const pending = bal?.total_used_pending;
+      const rem = bal?.available;
+      const balLine = bal
+        ? ` · Used ${used ?? '—'} · Remaining ${rem == null ? '—' : rem}${pending ? ` · Pending ${pending}` : ''}${rem < 0 ? ' (in minus)' : ''}`
+        : '';
 
       let openedPlan = false;
       if (isOfficeLeaveEmployee()) {
         openedPlan = await openLeaveTaskActionsModal(created);
       }
       if (!openedPlan) {
-        showToast('Leave request submitted — waiting for buddy Yes/No ✅', 'success');
+        showToast(`Leave request submitted — waiting for buddy Yes/No ✅${balLine}`, 'success');
       } else {
-        showToast('Leave submitted — choose what to do with your open tasks', 'success');
+        showToast(`Leave submitted — choose open-task actions.${balLine}`, 'success');
       }
       return created;
     } catch (err) {
-      if (err.status === 409 || /insufficient_leave_balance|Still want to apply/i.test(err.message || '')) {
-        // Try to read structured body if api threw with details
+      if (err.status === 409 || err.data?.error === 'insufficient_leave_balance' || /insufficient_leave_balance|Still want to apply|in minus/i.test(err.message || '')) {
+        const d = err.data || {};
+        const avail = d.balance?.available;
+        const reqDays = d.requested_days;
+        const inMinus = (avail != null && avail < 0) || !!d.balance?.in_deficit;
         const msg =
-          err.data?.message ||
+          d.message ||
           err.message ||
-          'No leave balance. Still want to apply for leave?';
-        const ok = confirm(`${msg}\n\nClick OK to apply anyway, or Cancel to go back.`);
+          (inMinus
+            ? `Your leave balance is already in minus (${avail}). Still want to apply?`
+            : 'Not enough leave balance. Still want to apply?');
+        const detail = [
+          msg,
+          avail != null ? `Available now: ${avail}` : '',
+          reqDays != null ? `This request: ${reqDays} day(s)` : '',
+          d.balance_after != null ? `After apply: ${d.balance_after}${d.balance_after < 0 ? ' (minus)' : ''}` : '',
+          '',
+          'OK = Yes, apply anyway · Cancel = No',
+        ].filter(Boolean).join('\n');
+        const ok = confirm(detail);
         if (ok) return submitOfficeLeave(payload, true);
         throw new Error('Leave not submitted — not enough balance');
       }
@@ -5026,16 +5107,14 @@ export async function mountTaskflowApp(opts = {}) {
       const balColor = m.balance_after < 0 ? '#C2410C' : m.balance_after === 0 ? '#6B7280' : '#15803D';
       const border = m.is_current ? '2px solid #1F2937' : '1px solid #E5E7EB';
       const balTxt = `${m.balance_after > 0 ? '+' : ''}${m.balance_after}`;
+      // Month stacked vertically; Accrued/Used/Pending/Balance in one horizontal row
       return `<div style="${dim};border:${border};border-radius:8px;padding:10px 12px;background:${m.is_current ? '#F7F3EC' : '#fff'}">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
-          <strong style="font-size:14px">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</strong>
-          <span style="font-weight:800;color:${balColor};font-size:15px">${balTxt}</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:#4B5563;line-height:1.45">
-          <div>Accrued: <strong>${m.accrued ? `+${m.accrued}` : '—'}</strong></div>
-          <div>Used: <strong>${m.used_approved ? m.used_approved : '—'}</strong></div>
-          <div>Pending: <strong>${m.used_pending ? m.used_pending : '—'}</strong></div>
-          <div>Balance after month: <strong style="color:${balColor}">${balTxt}</strong></div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px 16px;align-items:baseline;font-size:12px;color:#4B5563">
+          <span>Accrued <strong style="color:#111">${m.accrued ? `+${m.accrued}` : '—'}</strong></span>
+          <span>Used <strong style="color:#111">${m.used_approved ? m.used_approved : '—'}</strong></span>
+          <span>Pending <strong style="color:#111">${m.used_pending ? m.used_pending : '—'}</strong></span>
+          <span>Balance <strong style="color:${balColor}">${balTxt}</strong></span>
         </div>
       </div>`;
     }).join('') || '<div class="empty-state">No months</div>';

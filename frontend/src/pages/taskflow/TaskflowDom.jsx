@@ -2169,8 +2169,9 @@ export default function TaskflowDom() {
     </div>
   </div>
 
-  {/* Admin approve reschedule — hours summary + employee date vs own date/time */}
-  <div id="reschedApproveModal" className="modal-backdrop" hidden={true}>
+  {/* Admin approve reschedule — hours summary + employee date vs own date/time.
+      Use class is-open (not React hidden) so mountTaskflowApp can show it reliably. */}
+  <div id="reschedApproveModal" className="modal-backdrop resched-approve-modal" aria-hidden="true">
     <div className="modal" style={{maxWidth: 520}}>
       <div className="modal-header">
         <h3>Approve reschedule</h3>
@@ -2199,11 +2200,11 @@ export default function TaskflowDom() {
             {' '}No — I will set date &amp; time
           </label>
         </div>
-        <div className="field" id="reschedApproveCustomWrap" hidden={true}>
+        <div className="field" id="reschedApproveCustomWrap" style={{display: 'none'}}>
           <label htmlFor="reschedApproveDatetime">Your deadline (date &amp; time) <span className="req">*</span></label>
           <input id="reschedApproveDatetime" type="datetime-local" />
         </div>
-        <p id="reschedApproveFormMsg" className="form-error" hidden={true}></p>
+        <p id="reschedApproveFormMsg" className="form-error" style={{display: 'none'}}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelReschedApproveModal">Cancel</button>
           <button type="button" className="primary-btn primary-btn-inline" id="confirmReschedApproveBtn">Confirm approve</button>
