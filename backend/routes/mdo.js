@@ -3,7 +3,7 @@
  */
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdminOrMis } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
 const {
   employeeWorkDueDate,
@@ -99,8 +99,9 @@ const SELECT_MIN = `
 /**
  * GET /mdo/task-report?range=month
  * MDO Office Work tasks: description, accept time, done time, delay yes/no.
+ * Chirag Shah (admin) only.
  */
-router.get('/task-report', requireAdminOrMis, async (req, res) => {
+router.get('/task-report', requireAdmin, async (req, res) => {
   try {
     const { range, from, to } = req.query;
     const { startDate, endDate } = parseRange(range, from, to);

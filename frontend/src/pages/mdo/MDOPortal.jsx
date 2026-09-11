@@ -2071,7 +2071,7 @@ const NAV = [
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
   { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
-  { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_mis" },
+  { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_only" },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
   { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
@@ -2093,17 +2093,17 @@ const NAV_COLORS = {
   "all-drawings": "#d97706",
 };
 
-/** Chirag Shah (admin) + MIS Executive only — MDO task accept/done delay sheet. */
+/** Only Chirag Shah — MDO Task Delay Report sidebar item. */
 function canSeeMdoTaskDelayReport(user) {
   if (!user) return false;
-  if (user.is_mis_executive) return true;
-  const role = String(user.tf_role || user.role || "").toLowerCase().trim();
-  if (role === "admin") return true;
   const uname = String(user.user_name || user.username || "").toLowerCase().trim();
-  if (uname === "chirag.s" || uname.startsWith("chirag")) return true;
-  const blob = `${user.name || ""} ${uname} ${user.department || ""} ${user.designation || ""} ${user.role || ""}`.toLowerCase();
-  if (blob.includes("chirag")) return true;
-  if (/\bmis\b/.test(blob)) return true;
+  const name = String(user.name || user.full_name || "").toLowerCase().trim();
+  const role = String(user.tf_role || user.app_role || user.role || "").toLowerCase().trim();
+  // Explicit Chirag logins
+  if (uname === "chirag.s" || uname === "chirag" || uname.startsWith("chirag.")) return true;
+  if (name.includes("chirag") && (name.includes("shah") || uname.includes("chirag"))) return true;
+  // Admin role from TaskFlow JWT /auth/me (Chirag)
+  if (role === "admin") return true;
   return false;
 }
 
@@ -2682,7 +2682,7 @@ function MdoTaskDelayReport() {
     <div>
       <div className="info-banner" style={{ marginBottom: 16 }}>
         MDO Office Work tasks — accept time, mark-done time, and whether the employee was delayed.
-        Visible only to Chirag Shah and MIS Executive.
+        Visible only to Chirag Shah.
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>
@@ -2827,14 +2827,38 @@ const handleDrawingSubmit = async () => {
         if (stored) parsed = JSON.parse(stored);
       } catch { /* ignore */ }
     }
+
+    // Authoritative TaskFlow profile (role + username) — needed for Chirag-only nav
+    let me = null;
+    try {
+      me = await api("/auth/me");
+    } catch { /* ignore — may be site-only session */ }
+    if (me) {
+      parsed = {
+        ...(parsed || {}),
+        id: me.id || parsed?.id,
+        username: me.username || parsed?.username || parsed?.user_name,
+        user_name: me.username || parsed?.user_name || parsed?.username,
+        full_name: me.full_name || parsed?.full_name || parsed?.name,
+        name: me.full_name || parsed?.name || parsed?.full_name,
+        role: me.role || parsed?.role,
+        department: me.department || parsed?.department || "",
+        designation: me.designation || parsed?.designation || "",
+        is_mis_executive: !!me.is_mis_executive,
+        site_name: me.site_name || parsed?.site_name || "",
+        site_names: me.site_names || parsed?.site_names || null,
+      };
+    }
     if (!parsed) return;
     const shaped = {
       id: parsed.id,
       user_name: parsed.user_name || parsed.username,
+      username: parsed.username || parsed.user_name,
       name: parsed.name || parsed.full_name,
       department: parsed.department || "",
       role: parsed.designation || parsed.role || "Process Controller",
       tf_role: parsed.role || "",
+      app_role: parsed.role || "",
       designation: parsed.designation || parsed.role || "",
       is_mis_executive: !!parsed.is_mis_executive,
       site_name: parsed.site_name || "",
@@ -2888,6 +2912,9 @@ const handleDrawingSubmit = async () => {
       name: data?.name || shaped.name,
       role: data?.role || shaped.role,
       tf_role: data?.tf_role || shaped.tf_role,
+      app_role: data?.tf_role || shaped.app_role || shaped.tf_role,
+      username: shaped.username || shaped.user_name,
+      user_name: shaped.user_name || shaped.username,
       is_mis_executive: data?.is_mis_executive != null ? !!data.is_mis_executive : shaped.is_mis_executive,
       site_name: site_names[0] || shaped.site_name,
       site_names,
@@ -2937,7 +2964,7 @@ useEffect(() => {
 
   const activeItem = NAV.find((n) => n.key === activeTab);
   const visibleNav = useMemo(
-    () => NAV.filter((n) => n.restricted !== "chirag_mis" || canSeeMdoTaskDelayReport(user)),
+    () => NAV.filter((n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)),
     [user]
   );
 
