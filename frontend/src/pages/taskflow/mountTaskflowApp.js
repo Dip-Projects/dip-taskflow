@@ -363,7 +363,12 @@ export async function mountTaskflowApp(opts = {}) {
       logout();
       throw new Error('Session expired, please log in again');
     }
-    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Something went wrong');
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
     return data;
   }
   function fillSelect(select, items, { placeholder, valueKey = 'id', labelKey = 'name', extraOption } = {}) {
@@ -4846,16 +4851,26 @@ export async function mountTaskflowApp(opts = {}) {
       els.leaveFormMsg.hidden = false;
       return;
     }
+    const payload = {
+      from_date: els.leaveFrom.value,
+      to_date: els.leaveTo.value,
+      is_half_day: els.leaveHalfDay.checked,
+      reason: els.leaveReason.value.trim(),
+      buddy_id: buddyId,
+    };
+    try {
+      await submitOfficeLeave(payload, false);
+    } catch (err) {
+      els.leaveFormMsg.textContent = err.message;
+      els.leaveFormMsg.hidden = false;
+    }
+  });
+
+  async function submitOfficeLeave(payload, acknowledgeNegative) {
     try {
       const created = await api('/leaves', {
         method: 'POST',
-        body: {
-          from_date: els.leaveFrom.value,
-          to_date: els.leaveTo.value,
-          is_half_day: els.leaveHalfDay.checked,
-          reason: els.leaveReason.value.trim(),
-          buddy_id: buddyId,
-        }
+        body: { ...payload, acknowledge_negative: !!acknowledgeNegative },
       });
       els.leaveModal.hidden = true;
       if (state.activeView === 'applyleave') loadMyLeaves();
@@ -4871,8 +4886,21 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         showToast('Leave submitted — choose what to do with your open tasks', 'success');
       }
-    } catch (err) { els.leaveFormMsg.textContent = err.message; els.leaveFormMsg.hidden = false; }
-  });
+      return created;
+    } catch (err) {
+      if (err.status === 409 || /insufficient_leave_balance|Still want to apply/i.test(err.message || '')) {
+        // Try to read structured body if api threw with details
+        const msg =
+          err.data?.message ||
+          err.message ||
+          'No leave balance. Still want to apply for leave?';
+        const ok = confirm(`${msg}\n\nClick OK to apply anyway, or Cancel to go back.`);
+        if (ok) return submitOfficeLeave(payload, true);
+        throw new Error('Leave not submitted — not enough balance');
+      }
+      throw err;
+    }
+  }
 
   function attachBuddyRespondButtons(container, leave) {
     if (!container) return;
@@ -4961,9 +4989,50 @@ export async function mountTaskflowApp(opts = {}) {
       els.myLeavesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Loading your leave requests…</td></tr>';
     }
     try {
-      const leaves = await api('/leaves/my');
+      const [leaves, balance] = await Promise.all([
+        api('/leaves/my'),
+        api('/leaves/balance').catch(() => null),
+      ]);
+      renderLeaveBalance(balance);
       renderMyLeavesList(leaves);
     } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function renderLeaveBalance(bal) {
+    const fyEl = document.getElementById('leaveBalFyLabel');
+    const subEl = document.getElementById('leaveBalSub');
+    const availEl = document.getElementById('leaveBalAvailable');
+    const tbody = document.getElementById('leaveBalanceTableBody');
+    if (!tbody) return;
+    if (!bal) {
+      if (fyEl) fyEl.textContent = 'Leave balance';
+      if (subEl) subEl.textContent = 'Could not load balance';
+      if (availEl) availEl.textContent = '—';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Balance unavailable</td></tr>';
+      return;
+    }
+    if (fyEl) fyEl.textContent = `Leave balance · ${bal.fy_label || ''}`;
+    if (subEl) {
+      subEl.textContent = `+${bal.monthly_accrual || 1}/month · Apr–Mar · Accrued ${bal.total_accrued ?? '—'} · Used ${bal.total_used_approved ?? '—'}${bal.total_used_pending ? ` · Pending ${bal.total_used_pending}` : ''}`;
+    }
+    if (availEl) {
+      const v = bal.available;
+      availEl.textContent = v == null ? '—' : (v > 0 ? `+${v}` : String(v));
+      availEl.style.color = v < 0 ? '#C2410C' : v === 0 ? '#6B7280' : '#15803D';
+    }
+    const rows = bal.monthly || [];
+    tbody.innerHTML = rows.map((m) => {
+      const dim = m.is_future ? 'opacity:0.45' : '';
+      const balColor = m.balance_after < 0 ? 'color:#C2410C;font-weight:700' : m.balance_after === 0 ? '' : 'color:#15803D;font-weight:600';
+      const cur = m.is_current ? ' font-weight:700' : '';
+      return `<tr style="${dim}">
+        <td style="${cur}">${escapeHtml(m.short || m.label)}${m.is_current ? ' · now' : ''}</td>
+        <td>${m.accrued ? `+${m.accrued}` : '—'}</td>
+        <td>${m.used_approved ? m.used_approved : '—'}</td>
+        <td>${m.used_pending ? m.used_pending : '—'}</td>
+        <td style="${balColor}">${m.balance_after > 0 ? '+' : ''}${m.balance_after}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty-state">No months</td></tr>';
   }
 
   async function loadHrRecruitmentMine() {

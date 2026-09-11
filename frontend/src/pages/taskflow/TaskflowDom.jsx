@@ -962,9 +962,38 @@ export default function TaskflowDom() {
           <div className="view-header-row">
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">🌴 Apply Leave</h2>
-              <p className="view-sub">Submit a leave request, pick a buddy in the form, and track approval status.</p>
+              <p className="view-sub">Submit a leave request, pick a buddy in the form, and track approval status. Balance: 1 leave / month (Apr–Mar FY), unused months carry forward.</p>
             </div>
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
+          </div>
+
+          <div id="leaveBalanceCard" className="table-card" style={{marginTop: 12, padding: '14px 16px'}}>
+            <div style={{display:'flex',flexWrap:'wrap',gap:12,alignItems:'baseline',justifyContent:'space-between'}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:15}} id="leaveBalFyLabel">Leave balance</div>
+                <div style={{fontSize:12,color:'#6B7280',marginTop:2}} id="leaveBalSub">Loading…</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:12,color:'#6B7280'}}>Available now</div>
+                <div id="leaveBalAvailable" style={{fontSize:22,fontWeight:800}}>—</div>
+              </div>
+            </div>
+            <div className="table-scroll" style={{marginTop:12}}>
+              <table className="data-table" style={{minWidth: 640}}>
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Accrued</th>
+                    <th>Used</th>
+                    <th>Pending</th>
+                    <th>Balance after</th>
+                  </tr>
+                </thead>
+                <tbody id="leaveBalanceTableBody">
+                  <tr><td colSpan={5} className="empty-state">Loading balance…</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="table-card view-desktop-only" style={{marginTop: 12}}>

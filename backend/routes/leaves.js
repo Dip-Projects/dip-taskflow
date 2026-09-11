@@ -5,6 +5,10 @@ const { sendWhatsAppTemplate, normalizeWhatsAppNumber } = require('../lib/whatsa
 const { findBeenaOrPcUsers } = require('../lib/taskListDigest');
 const { elapsedWorkingHours } = require('../lib/workingHours');
 const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
+const {
+  buildOfficeLeaveBalance,
+  leaveDayCount,
+} = require('../lib/officeLeaveBalance');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -403,6 +407,22 @@ router.get('/buddies', async (req, res) => {
 });
 
 /**
+ * Office / MDO leave balance — FY April→March, +1 leave/month, carry within FY.
+ */
+router.get('/balance', async (req, res) => {
+  try {
+    const data = await selectLeaves((q) =>
+      q.eq('user_id', req.user.id).order('from_date', { ascending: true })
+    );
+    const balance = buildOfficeLeaveBalance(data || []);
+    res.json(balance);
+  } catch (err) {
+    console.error('Leave balance error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not load leave balance' });
+  }
+});
+
+/**
  * Site leave apply → WhatsApp to level approver + site head + Beena + Chirag.
  * Called from Site portal after site_leaves insert (best-effort).
  */
@@ -500,7 +520,7 @@ router.post('/wa-demo', requireAdmin, async (req, res) => {
 // ----------------------------- apply for leave -----------------------------
 router.post('/', async (req, res) => {
   try {
-    const { from_date, to_date, is_half_day, reason, buddy_id } = req.body || {};
+    const { from_date, to_date, is_half_day, reason, buddy_id, acknowledge_negative } = req.body || {};
 
     if (!from_date || !to_date) {
       return res.status(400).json({ error: 'Please select both from and to dates' });
@@ -516,6 +536,28 @@ router.post('/', async (req, res) => {
     }
     if (String(buddy_id) === String(req.user.id)) {
       return res.status(400).json({ error: 'You cannot select yourself as buddy' });
+    }
+
+    const requestedDays = leaveDayCount({ from_date, to_date, is_half_day: !!is_half_day });
+    try {
+      const existing = await selectLeaves((q) => q.eq('user_id', req.user.id));
+      const bal = buildOfficeLeaveBalance(existing || []);
+      const after = Math.round((bal.available - requestedDays) * 10) / 10;
+      if ((bal.available < requestedDays || bal.in_deficit) && !acknowledge_negative) {
+        return res.status(409).json({
+          error: 'insufficient_leave_balance',
+          message:
+            bal.in_deficit || bal.available < 0
+              ? `Your leave balance is ${bal.available} (in minus). Still want to apply for ${requestedDays} day(s)?`
+              : `You have ${bal.available} leave day(s) left but this request is ${requestedDays} day(s). Still want to apply?`,
+          balance: bal,
+          requested_days: requestedDays,
+          balance_after: after,
+          needs_confirm: true,
+        });
+      }
+    } catch (balErr) {
+      console.warn('Leave balance check skip:', balErr.message);
     }
 
     let buddy = null;
