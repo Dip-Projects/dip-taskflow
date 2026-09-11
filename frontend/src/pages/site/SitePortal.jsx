@@ -14,6 +14,8 @@ import MatRequirement from "./MatRequirement.jsx";
 import SiteTeamChat from "./SiteTeamChat.jsx";
 import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
+import "./SiteMyTasks.css";
+import { WeeklyPlanAttachmentPreview } from '../../components/WeeklyPlanAttachmentPreview';
 import "./SitePortal.css";
 import {
   computeMonthlyLeaveBalance,
@@ -562,6 +564,8 @@ function buildNav(user, visMap) {
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
+    // Top-level so Weekly Plan is visible without expanding Reports
+    { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -1395,6 +1399,22 @@ const submit = async () => {
       setErr(error.message);
       return;
     }
+    try {
+      await api("/leaves/site-notify", {
+        method: "POST",
+        body: JSON.stringify({
+          applicant_name: user.name || user.user_name,
+          from_date: form.from_date,
+          to_date: form.to_date,
+          reason: form.reason || form.leave_type || "Leave",
+          site_name: site,
+          level_approver_username: c.levelApprover?.username || null,
+          head_approver_username: c.headApprover?.username || null,
+        }),
+      });
+    } catch (waErr) {
+      console.warn("Site leave WhatsApp skip:", waErr?.message || waErr);
+    }
     setBalanceRefresh((p) => p + 1);
     setSubmitted(true);
   };
@@ -1685,6 +1705,128 @@ function WeeklyReport() {
   );
 }
 // Merge a new rejection entry into the existing rejection_reason array (max 2: one per slot)
+function WeeklyPlanReport({ user }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api("/ea-meeting/my");
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const weekly = items
+        .filter((row) => row?.plan_submitted_at && row?.source === "ea_meeting")
+        .map((row) => ({
+          id: row.ea_id || String(row.id || "").replace(/^ea:/, ""),
+          week: row.meeting_week_start || row.target_date || "—",
+          week_start: row.meeting_week_start || null,
+          week_end: row.meeting_week_end || row.target_date || null,
+          employee_name: row.employee_name || row.employee_username || "—",
+          employee_username: row.employee_username || "—",
+          employee_role: row.employee_role || row.priority || "—",
+          site: row.employee_site_name || user?.site_name || "—",
+          submitted_at: row.plan_submitted_at,
+          file_1_name: row.attachment_1_name || "File 1",
+          file_1_url: row.attachment_1_url || "",
+          file_2_name: row.attachment_2_name || "File 2",
+          file_2_url: row.attachment_2_url || "",
+        }))
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+      setRows(weekly);
+    } catch (err) {
+      setError(err.message || "Could not load weekly plan submissions.");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const fmt = (ts) => {
+    if (!ts) return "—";
+    try {
+      return new Date(ts).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  return (
+    <div className="smt-page smt-page--wide">
+      <div className="smt-head">
+        <div>
+          <h1 className="smt-title">Weekly Plan</h1>
+          <p className="smt-sub">
+            Submitted weekly EA plan files for your site and your own uploads. Click a Pending cell to mark the task completed.
+          </p>
+        </div>
+        <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {error ? <div className="smt-error">{error}</div> : null}
+
+      {loading ? (
+        <div className="smt-empty">Loading weekly plan submissions…</div>
+      ) : rows.length === 0 ? (
+        <div className="smt-empty">No submitted weekly plans yet for this site.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", minWidth: 0 }}>
+          {rows.map((r) => (
+            <div key={r.id} className="smt-excel-card">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>Week: <strong>{r.week}</strong></div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{r.employee_name}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{r.employee_role} · {r.site}</div>
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Submitted {fmt(r.submitted_at)}</div>
+              </div>
+
+              {r.file_1_url ? (
+                <WeeklyPlanAttachmentPreview
+                  eaId={r.id}
+                  sourceFile="attachment_1"
+                  fileUrl={r.file_1_url}
+                  fileName={r.file_1_name}
+                  weekStart={r.week_start}
+                  weekEnd={r.week_end}
+                />
+              ) : null}
+
+              {r.file_2_url ? (
+                <div style={{ marginTop: 16 }}>
+                  <WeeklyPlanAttachmentPreview
+                    eaId={r.id}
+                    sourceFile="attachment_2"
+                    fileUrl={r.file_2_url}
+                    fileName={r.file_2_name}
+                    weekStart={r.week_start}
+                    weekEnd={r.week_end}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function mergeRejectionReason(existing, slot, by, reason) {
   const arr = Array.isArray(existing) ? existing.filter(r => r.slot !== slot) : [];
   arr.push({ slot, by, reason, at: new Date().toISOString() });
@@ -1708,6 +1850,7 @@ const NAV_COLORS = {
   "wpr-generator": "#db2777",
   "site-report": "#db2777",
   "my-reports": "#16a34a",
+  "weekly-plan": "#16a34a",
   "monthly-report": "#7c3aed",
   "manpower-reports": "#16a34a",
   "report-submissions": "#0891b2",
@@ -2154,6 +2297,8 @@ useEffect(() => {
       //   );
       case "my-reports":
         return <MyReports user={user} />;
+      case "weekly-plan":
+        return <WeeklyPlanReport user={user} />;
       case "manpower-reports":
         return <ManpowerReport user={user} />;
       case "profile":

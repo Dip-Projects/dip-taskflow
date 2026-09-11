@@ -1,7 +1,8 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdminOrHr } = require('../middleware/auth');
-const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const { requireAuth, requireAdminOrHr, requireAdmin } = require('../middleware/auth');
+const { sendWhatsAppTemplate, normalizeWhatsAppNumber } = require('../lib/whatsapp');
+const { findBeenaOrPcUsers } = require('../lib/taskListDigest');
 const { elapsedWorkingHours } = require('../lib/workingHours');
 const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
 
@@ -64,8 +65,9 @@ async function chiragWhatsAppNumber() {
     .select('whatsapp_number, full_name')
     .eq('is_active', true)
     .ilike('full_name', '%chirag%');
-  const hit = (named || []).find((u) => u.whatsapp_number);
-  return hit?.whatsapp_number || null;
+  const hit = (named || []).find((u) => u.whatsapp_number && /shah/i.test(u.full_name || ''));
+  const any = (named || []).find((u) => u.whatsapp_number);
+  return hit?.whatsapp_number || any?.whatsapp_number || null;
 }
 
 /** Run a leaves select with buddy columns; fall back if SQL not migrated yet. */
@@ -81,12 +83,85 @@ async function selectLeaves(applyFilters) {
   return withBuddyDefaults(basic.data);
 }
 
-async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
-  const numbers = new Set();
+/** Beena Parmar (PC) WhatsApp numbers — reuse digest finder. */
+async function beenaWhatsAppNumbers() {
+  try {
+    const users = await findBeenaOrPcUsers();
+    return (users || [])
+      .map((u) => u.whatsapp_number)
+      .filter(Boolean);
+  } catch (err) {
+    console.warn('Leave WA: Beena lookup failed', err.message);
+    return [];
+  }
+}
+
+/**
+ * Deduped set of WhatsApp numbers for leave alerts.
+ * Always: Chirag + Beena. Plus reporting head / site uppers when provided.
+ */
+async function collectLeaveStakeholderNumbers(extraNumbers = []) {
+  const byNorm = new Map();
+  const add = (raw, label) => {
+    const n = normalizeWhatsAppNumber(raw);
+    if (!n) return;
+    if (!byNorm.has(n)) byNorm.set(n, { raw, label, normalized: n });
+  };
 
   const chiragWa = await chiragWhatsAppNumber();
-  if (chiragWa) numbers.add(chiragWa);
+  if (chiragWa) add(chiragWa, 'Chirag');
   else console.warn('Leave WA: Chirag has no whatsapp_number');
+
+  for (const wa of await beenaWhatsAppNumbers()) add(wa, 'Beena');
+
+  for (const item of extraNumbers || []) {
+    if (!item) continue;
+    if (typeof item === 'string') add(item, 'extra');
+    else add(item.number || item.whatsapp_number, item.label || 'extra');
+  }
+
+  return [...byNorm.values()];
+}
+
+async function sendLeaveApplicationWa(recipients, { applicantName, from_date, to_date, reason }) {
+  const params = [
+    applicantName || 'Employee',
+    String(from_date || '—').slice(0, 10),
+    String(to_date || '—').slice(0, 10),
+    String(reason || '—').slice(0, 500),
+  ];
+  const results = [];
+  for (const r of recipients) {
+    const sent = await sendWhatsAppTemplate(r.raw || r.normalized, 'leave_application_notification', params);
+    results.push({ to: r.normalized, label: r.label, ok: !!sent?.ok, reason: sent?.reason || null });
+  }
+  return results;
+}
+
+async function whatsappForUsername(username) {
+  if (!username) return null;
+  const { data } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name, username')
+    .eq('username', username)
+    .maybeSingle();
+  if (data?.whatsapp_number) {
+    return { number: data.whatsapp_number, label: data.full_name || username, username: data.username };
+  }
+  const { data: loose } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name, username')
+    .ilike('username', username)
+    .limit(1)
+    .maybeSingle();
+  if (loose?.whatsapp_number) {
+    return { number: loose.whatsapp_number, label: loose.full_name || username, username: loose.username };
+  }
+  return null;
+}
+
+async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
+  const extras = [];
 
   const { data: applicant } = await supabase
     .from('users')
@@ -100,61 +175,52 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
       .select('whatsapp_number, full_name')
       .eq('id', applicant.reporting_head_id)
       .maybeSingle();
-    if (head?.whatsapp_number) numbers.add(head.whatsapp_number);
+    if (head?.whatsapp_number) extras.push({ number: head.whatsapp_number, label: head.full_name || 'Reporting head' });
     else console.warn('Leave WA: reporting head has no whatsapp_number', applicant.reporting_head_id);
   } else {
     console.warn('Leave WA: applicant has no reporting_head_id', applicantId);
   }
 
-  if (!numbers.size) {
+  const recipients = await collectLeaveStakeholderNumbers(extras);
+  if (!recipients.length) {
     console.warn('Leave WA: nobody to notify (no numbers)');
-    return;
+    return [];
   }
 
-  await Promise.all(
-    [...numbers].map((num) =>
-      sendWhatsAppTemplate(num, 'leave_application_notification', [
-        applicantName,
-        String(from_date || '—').slice(0, 10),
-        String(to_date || '—').slice(0, 10),
-        String(reason || '—').slice(0, 500),
-      ])
-    )
-  );
+  return sendLeaveApplicationWa(recipients, {
+    applicantName: applicantName || applicant?.full_name || 'Employee',
+    from_date,
+    to_date,
+    reason,
+  });
 }
 
-/** WhatsApp Chirag + reporting head (deduped). Reuses leave_application_notification. */
+/** WhatsApp Chirag + Beena + reporting head (deduped). */
 async function notifyHeadAndChirag(applicantId, reasonText, from_date, to_date) {
   const { data: applicant } = await supabase
     .from('users')
     .select('full_name, reporting_head_id')
     .eq('id', applicantId)
     .maybeSingle();
-  if (!applicant) return;
+  if (!applicant) return [];
 
-  const numbers = new Set();
-  const chiragWa = await chiragWhatsAppNumber();
-  if (chiragWa) numbers.add(chiragWa);
-
+  const extras = [];
   if (applicant.reporting_head_id) {
     const { data: head } = await supabase
       .from('users')
-      .select('whatsapp_number')
+      .select('whatsapp_number, full_name')
       .eq('id', applicant.reporting_head_id)
       .maybeSingle();
-    if (head?.whatsapp_number) numbers.add(head.whatsapp_number);
+    if (head?.whatsapp_number) extras.push({ number: head.whatsapp_number, label: head.full_name || 'Reporting head' });
   }
 
-  await Promise.all(
-    [...numbers].map((num) =>
-      sendWhatsAppTemplate(num, 'leave_application_notification', [
-        applicant.full_name || 'Employee',
-        String(from_date || '—').slice(0, 10),
-        String(to_date || '—').slice(0, 10),
-        String(reasonText || '—').slice(0, 500),
-      ])
-    )
-  );
+  const recipients = await collectLeaveStakeholderNumbers(extras);
+  return sendLeaveApplicationWa(recipients, {
+    applicantName: applicant.full_name || 'Employee',
+    from_date,
+    to_date,
+    reason: reasonText,
+  });
 }
 
 function todayYmd() {
@@ -333,6 +399,101 @@ router.get('/buddies', async (req, res) => {
   } catch (err) {
     console.error('Buddy list error:', err.message);
     res.status(500).json({ error: 'Could not load buddy list' });
+  }
+});
+
+/**
+ * Site leave apply → WhatsApp to level approver + site head + Beena + Chirag.
+ * Called from Site portal after site_leaves insert (best-effort).
+ */
+router.post('/site-notify', async (req, res) => {
+  try {
+    const {
+      applicant_name,
+      from_date,
+      to_date,
+      reason,
+      site_name,
+      level_approver_username,
+      head_approver_username,
+    } = req.body || {};
+
+    if (!from_date || !to_date) {
+      return res.status(400).json({ error: 'from_date and to_date required' });
+    }
+
+    const extras = [];
+    const level = await whatsappForUsername(level_approver_username);
+    if (level) extras.push({ number: level.number, label: `Level: ${level.label}` });
+    else if (level_approver_username) {
+      console.warn('Site leave WA: level approver has no whatsapp', level_approver_username);
+    }
+
+    const head = await whatsappForUsername(head_approver_username);
+    if (head) extras.push({ number: head.number, label: `Head: ${head.label}` });
+    else if (head_approver_username) {
+      console.warn('Site leave WA: head approver has no whatsapp', head_approver_username);
+    }
+
+    const name =
+      applicant_name ||
+      req.user.full_name ||
+      req.user.username ||
+      'Site employee';
+    const siteBit = site_name ? ` [Site: ${site_name}]` : '';
+    const reasonText = `${String(reason || 'Leave').slice(0, 400)}${siteBit}`;
+
+    const recipients = await collectLeaveStakeholderNumbers(extras);
+    const results = await sendLeaveApplicationWa(recipients, {
+      applicantName: name,
+      from_date,
+      to_date,
+      reason: reasonText,
+    });
+
+    res.json({
+      ok: results.some((r) => r.ok),
+      sent: results.filter((r) => r.ok).length,
+      recipients: results,
+    });
+  } catch (err) {
+    console.error('Site leave WA error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send site leave WhatsApp' });
+  }
+});
+
+/**
+ * Admin demo: send leave_application_notification to Chirag + Beena (deduped).
+ * Does not create a leave row.
+ */
+router.post('/wa-demo', requireAdmin, async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const applicantName = req.body?.applicant_name || 'DEMO — TaskFlow Leave WA';
+    const reason =
+      req.body?.reason ||
+      'DEMO: Office/MDO leave alert test (Chirag + Beena). Safe to ignore.';
+    const from_date = req.body?.from_date || today;
+    const to_date = req.body?.to_date || today;
+
+    const recipients = await collectLeaveStakeholderNumbers([]);
+    const results = await sendLeaveApplicationWa(recipients, {
+      applicantName,
+      from_date,
+      to_date,
+      reason,
+    });
+
+    res.json({
+      ok: results.some((r) => r.ok),
+      template: 'leave_application_notification',
+      recipients: results,
+      note:
+        'Deduped by phone. If Chirag & Beena share one number in DB, Meta gets one message only.',
+    });
+  } catch (err) {
+    console.error('Leave WA demo error:', err.message);
+    res.status(500).json({ error: err.message || 'Demo WhatsApp failed' });
   }
 });
 
