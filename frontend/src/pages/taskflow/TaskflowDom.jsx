@@ -1428,6 +1428,31 @@ export default function TaskflowDom() {
           <div id="drBody"></div>
         </section>
 
+        {/* MDO TASK DELAY REPORT — Chirag Shah only */}
+        <section id="view-mdo-delay-report" className="view" hidden={true}>
+          <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">MDO Task Delay Report</h2>
+              <p className="view-sub">MDO Office Work tasks — description, accept time, mark-done time, and delay. Chirag Shah only.</p>
+            </div>
+            <div className="mis-toolbar">
+              <label className="mis-field">
+                <span>Range</span>
+                <select id="mdoDrRange">
+                  <option value="month">This month</option>
+                  <option value="week">This week</option>
+                  <option value="day">Today</option>
+                  <option value="last-week">Last week</option>
+                  <option value="last-month">Last month</option>
+                  <option value="all">All time</option>
+                </select>
+              </label>
+              <button type="button" id="mdoDrGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+            </div>
+          </div>
+          <div id="mdoDrBody"></div>
+        </section>
+
         {/* FMS STEP TRACKER */}
         <section id="view-fms" className="view" hidden={true}>
           <div className="view-heading">

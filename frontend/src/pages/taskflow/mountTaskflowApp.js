@@ -1300,6 +1300,13 @@ export async function mountTaskflowApp(opts = {}) {
   function buildNav() {
     const isAdmin = state.user.role === 'admin';
     const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
+    const isChirag =
+      isAdmin
+      || (() => {
+        const uname = String(state.user?.username || '').toLowerCase().trim();
+        const name = String(state.user?.full_name || '').toLowerCase().trim();
+        return uname === 'chirag.s' || uname.startsWith('chirag') || name.includes('chirag');
+      })();
     const canAddSite = isAdmin || !!state.user.can_add_site;
     const canAddEmployee = isAdmin || !!state.user.can_add_employee;
     const canAddTask = isAdmin || !!state.user.can_add_task;
@@ -1372,7 +1379,8 @@ export async function mountTaskflowApp(opts = {}) {
       || visOk('mis-report') && (isAdmin || isMis)
       || visOk('time-dashboard') && (isAdmin || isMis)
       || visOk('delay-report') && (isAdmin || isMis)
-      || visOk('fms') && (isAdmin || isMis);
+      || visOk('fms') && (isAdmin || isMis)
+      || isChirag;
 
     if (showAdminBlock) {
       const adminBtns = [];
@@ -1389,6 +1397,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
+      if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
       appendCollapsibleNav(
         isMis && !isAdmin ? 'MIS' : 'Administration',
@@ -1449,7 +1458,7 @@ export async function mountTaskflowApp(opts = {}) {
     employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
-    'time-dashboard': 'administration', 'delay-report': 'administration', fms: 'administration',
+    'time-dashboard': 'administration', 'delay-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
     'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
@@ -1746,6 +1755,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'mis-report')    loadMisReport();
     if (viewKey === 'time-dashboard') loadTimeDashboard();
     if (viewKey === 'delay-report')   loadDelayReport();
+    if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
     if (viewKey === 'fms')           loadFms();
     if (viewKey === 'ai-bot')        loadAiBot();
     if (viewKey === 'team-chat')     loadTeamChat();
@@ -8177,9 +8187,10 @@ export async function mountTaskflowApp(opts = {}) {
     if (Number.isNaN(d.getTime())) return '—';
     const mon = d.toLocaleString('en-GB', { month: 'short' });
     const day = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
-    return `${day} ${mon}, ${hh}:${mm}`;
+    return `${day} ${mon} ${yyyy}, ${hh}:${mm}`;
   }
 
   function fmtWvdDate(iso) {
@@ -8188,7 +8199,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (Number.isNaN(d.getTime())) return '—';
     const mon = d.toLocaleString('en-GB', { month: 'short' });
     const day = String(d.getDate()).padStart(2, '0');
-    return `${day} ${mon}`;
+    const yyyy = d.getFullYear();
+    return `${day} ${mon} ${yyyy}`;
   }
 
   let _tdLastData = null;
@@ -8686,6 +8698,50 @@ export async function mountTaskflowApp(opts = {}) {
       body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
   }
+
+  async function loadMdoDelayReport() {
+    const body = document.getElementById('mdoDrBody');
+    if (!body) return;
+    const range = document.getElementById('mdoDrRange')?.value || 'month';
+    body.innerHTML = '<div class="empty-state">Loading MDO Task Delay Report…</div>';
+    try {
+      const data = await api(`/mdo/task-report?range=${encodeURIComponent(range)}`);
+      const rows = data.rows || [];
+      const s = data.summary || {};
+      const tableRows = rows.map((r, i) => `
+        <tr class="${i % 2 === 0 ? 'dr-alt' : ''} ${r.delay ? 'dr-delayed-row' : ''}">
+          <td class="dr-c">${r.sr ?? '—'}</td>
+          <td>${escapeHtml(r.employee)}</td>
+          <td>${escapeHtml(r.description)}</td>
+          <td>${escapeHtml(r.task_type)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.accepted_label)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.done_label)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.due_label)}</td>
+          <td class="${r.delay ? 'dr-delayed' : 'dr-ontime'}">${escapeHtml(r.delay ? `Yes — ${r.delay_label}` : r.delay_label)}</td>
+          <td>${escapeHtml(r.status)}</td>
+        </tr>`).join('')
+        || `<tr><td colspan="9" class="empty-state">No MDO Office Work tasks in this range</td></tr>`;
+      body.innerHTML = `<div class="dr-report">
+        <h1 class="dr-title">MDO Task Delay Report</h1>
+        <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+          · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+          · <span class="dr-ontime">${s.on_time || 0} on time</span>
+          · ${s.pending || 0} not done</p>
+        <div class="dr-table-wrap"><table class="dr-table">
+          <thead><tr>
+            <th>SR</th><th>Employee</th><th>Task description</th><th>Task type</th>
+            <th>Accepted</th><th>Marked done</th><th>Due</th><th>Delay?</th><th>Status</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table></div>
+      </div>`;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('mdoDrGenBtn')?.addEventListener('click', () => loadMdoDelayReport());
+  document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
 
   function printDelayReportPdf() {
     const report = document.getElementById('drReport');
