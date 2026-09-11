@@ -3720,6 +3720,8 @@ body.sidebar-open { overflow: hidden; }
   color: #111827;
 }
 .dr-table td.dr-hold { font-size: 11px; max-width: 220px; line-height: 1.35; color: #4B5563; }
+.dr-table td.dr-desc { max-width: 240px; font-size: 12px; line-height: 1.35; color: #374151; white-space: normal; word-break: break-word; }
+.wvd-matrix td.wvd-desc { max-width: 240px; font-size: 12px; line-height: 1.35; white-space: normal; word-break: break-word; }
 .dr-table tr.dr-alt td { background: #F7F3EC; }
 .dr-plan-note { font-size: 10px; color: #C47F00; font-weight: 700; margin-top: 2px; }
 .dr-c { text-align: center !important; }

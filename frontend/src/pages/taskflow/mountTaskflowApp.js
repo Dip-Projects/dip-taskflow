@@ -8219,7 +8219,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!dash?.completion_time?.rows?.length && !dash?.by_employee?.length) {
       return showToast('Nothing to export yet', 'error');
     }
-    const head = ['SR', 'Employee', 'Project', 'Task type', 'Assigned', 'Submitted', 'Office hours', 'Verifier', 'Start verification', 'Verified', 'Verify office hours'];
+    const head = ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours', 'Verifier', 'Start verification', 'Verified', 'Verify office hours'];
     const lines = [head.join(',')];
     const bySr = {};
     (dash.completion_time?.rows || []).forEach((r) => { bySr[r.sr] = { ...r }; });
@@ -8231,11 +8231,12 @@ export async function mountTaskflowApp(opts = {}) {
         verified_at: r.verified_at,
         verify_hours: r.hours,
         days: r.days,
+        description: r.description || bySr[r.sr]?.description,
       };
     });
     Object.values(bySr).forEach((r) => {
       lines.push([
-        r.sr ?? '', r.employee || '', r.project || '', r.task_type || '',
+        r.sr ?? '', r.employee || '', r.project || '', r.description || '', r.task_type || '',
         r.assigned_at || '', r.submitted_at || '', r.hours ?? '',
         r.verifier || '', r.started_at || '', r.verified_at || '', r.verify_hours ?? r.days ?? '',
       ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -8459,11 +8460,12 @@ export async function mountTaskflowApp(opts = {}) {
       <td>${r.sr ?? '—'}</td>
       <td>${escapeHtml(r.employee)}</td>
       <td>${escapeHtml(r.project)}</td>
+      <td class="wvd-desc">${escapeHtml(r.description || '—')}</td>
       <td>${escapeHtml(r.task_type)}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.assigned_at))}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.submitted_at))}</td>
       <td>${fmtHrs(r.hours)}</td>
-    </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No matched assignment → submission pairs</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No matched assignment → submission pairs</td></tr>`;
 
     // 5b · Verify turnaround
     const vt = dash.verify_turnaround || {};
@@ -8479,10 +8481,11 @@ export async function mountTaskflowApp(opts = {}) {
       <td>${escapeHtml(r.employee)}</td>
       <td>${escapeHtml(r.verifier)}</td>
       <td>${escapeHtml(r.project)}</td>
+      <td class="wvd-desc">${escapeHtml(r.description || '—')}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.started_at || r.accepted_at))}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.verified_at))}</td>
       <td>${fmtHrs(r.hours != null ? r.hours : r.days)}</td>
-    </tr>`).join('') || `<tr><td colspan="7" class="empty-state">No verification turnaround data</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No verification turnaround data</td></tr>`;
 
     return `<article class="wvd" id="wvdReport">
       <header class="wvd-header">
@@ -8540,7 +8543,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="wvd-bars">${bars}</div>
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
-            <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK TYPE</th>
+            <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK DESCRIPTION</th><th>TASK TYPE</th>
             <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${ctRows}</tbody>
@@ -8560,7 +8563,7 @@ export async function mountTaskflowApp(opts = {}) {
         </table></div>` : ''}
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
-            <th>SR</th><th>SUBMITTED BY</th><th>VERIFIER</th><th>PROJECT</th>
+            <th>SR</th><th>SUBMITTED BY</th><th>VERIFIER</th><th>PROJECT</th><th>TASK DESCRIPTION</th>
             <th>START VERIFICATION</th><th>VERIFIED</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${vtRows}</tbody>
@@ -8640,7 +8643,7 @@ export async function mountTaskflowApp(opts = {}) {
     const showEmp = !document.getElementById('drEmployee')?.value;
     const s = data.summary || {};
     const headEmp = showEmp ? '<th>Employee</th>' : '';
-    const colSpan = showEmp ? 16 : 15;
+    const colSpan = showEmp ? 17 : 16;
     const body = rows.map((r, i) => {
       const statusClass =
         r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
@@ -8658,6 +8661,7 @@ export async function mountTaskflowApp(opts = {}) {
         <td class="dr-c">${r.sr ?? '—'}</td>
         ${empTd}
         <td>${escapeHtml(r.project)}${planNote}</td>
+        <td class="dr-desc">${escapeHtml(r.description || '—')}</td>
         <td>${escapeHtml(r.assigned_label)}</td>
         <td>${escapeHtml(r.accepted_label)}</td>
         <td class="dr-c">${escapeHtml(r.hours_label)}</td>
@@ -8684,7 +8688,7 @@ export async function mountTaskflowApp(opts = {}) {
       <div class="dr-table-wrap">
         <table class="dr-table">
           <thead><tr>
-            <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
+            <th>SR</th>${headEmp}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
             <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
             <th>Total Hold</th><th>Due</th>
             <th>Sent for verification</th><th>Work status</th><th>Work delay</th>
@@ -8762,7 +8766,7 @@ export async function mountTaskflowApp(opts = {}) {
     const showEmp = !document.getElementById('erEmployee')?.value;
     const s = data.summary || {};
     const headEmp = showEmp ? '<th>Employee</th>' : '';
-    const colSpan = showEmp ? 12 : 11;
+    const colSpan = showEmp ? 13 : 12;
     const body = rows.map((r, i) => {
       const statusClass =
         r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
@@ -8774,6 +8778,7 @@ export async function mountTaskflowApp(opts = {}) {
         <td class="dr-c">${r.sr ?? '—'}</td>
         ${empTd}
         <td>${escapeHtml(r.project)}${planNote}</td>
+        <td class="dr-desc">${escapeHtml(r.description || '—')}</td>
         <td>${escapeHtml(r.assigned_label)}</td>
         <td>${escapeHtml(r.accepted_label)}</td>
         <td class="dr-c">${escapeHtml(r.hours_label)}</td>
@@ -8795,7 +8800,7 @@ export async function mountTaskflowApp(opts = {}) {
       <div class="dr-table-wrap">
         <table class="dr-table">
           <thead><tr>
-            <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
+            <th>SR</th>${headEmp}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
             <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
             <th>Total Hold</th><th>Due</th><th>Submitted</th><th>Status</th>
             <th>Early / Delay (d h m)</th>

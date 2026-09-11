@@ -286,6 +286,7 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
         sr: t.sr,
         employee: empName(t),
         project: projName(t),
+        description: String(t.description || '').trim() || '—',
         task_type: typeName(t),
         assigned_at: assigned,
         submitted_at: submitted,
@@ -326,6 +327,7 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
         employee: empName(t),
         verifier: verName(t) || '—',
         project: projName(t),
+        description: String(t.description || '').trim() || '—',
         started_at: started,
         accepted_at: started, // legacy key used by older UI
         verified_at: verified,

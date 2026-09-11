@@ -235,6 +235,7 @@ function buildDelayReportRows(tasks, opts = {}) {
         id: t.id,
         sr: srMap[t.id] || null,
         project: t.project?.name || '—',
+        description: String(t.description || '').trim() || '—',
         employee_id: t.assigned_to_user?.id || t.assigned_to || null,
         employee: t.assigned_to_user?.full_name || '—',
         assigned_at: assignedAt,
@@ -290,6 +291,7 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
       <td style="text-align:center">${r.sr ?? '—'}</td>
       ${empCell}
       <td>${esc(r.project)}</td>
+      <td style="max-width:220px">${esc(r.description || '—')}</td>
       <td>${esc(r.assigned_label)}</td>
       <td>${esc(r.accepted_label)}</td>
       <td style="text-align:center">${esc(r.hours_label)}</td>
@@ -306,7 +308,7 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
     </tr>`;
   }).join('');
 
-  const colCount = showEmployee ? 16 : 15;
+  const colCount = showEmployee ? 17 : 16;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${esc(title)}</title>
 <style>
@@ -321,7 +323,7 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
   ${subtitle ? `<p class="sub">${esc(subtitle)}</p>` : ''}
   <table>
     <thead><tr>
-      <th>SR</th>${headExtra}<th>Project</th><th>Timestamp (Assigned)</th>
+      <th>SR</th>${headExtra}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
       <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
       <th>Total Hold</th><th>Due</th>
       <th>Sent for verification</th><th>Work status</th><th>Work delay</th>
@@ -382,6 +384,7 @@ function buildEmpReportRows(tasks, opts = {}) {
       employee_id: r.employee_id,
       employee: r.employee,
       project: r.project,
+      description: r.description,
       assigned_label: r.assigned_label,
       accepted_label: r.accepted_label,
       hours_label: r.hours_label,
@@ -408,6 +411,7 @@ function empReportHtml(rows, { title = 'Emp Report', subtitle = '', showEmployee
       <td style="text-align:center">${r.sr ?? '—'}</td>
       ${empCell}
       <td>${esc(r.project)}</td>
+      <td style="max-width:220px">${esc(r.description || '—')}</td>
       <td>${esc(r.assigned_label)}</td>
       <td>${esc(r.accepted_label)}</td>
       <td style="text-align:center">${esc(r.hours_label)}</td>
@@ -419,7 +423,7 @@ function empReportHtml(rows, { title = 'Emp Report', subtitle = '', showEmployee
       <td>${esc(r.timing_label)}</td>
     </tr>`;
   }).join('');
-  const colCount = showEmployee ? 12 : 11;
+  const colCount = showEmployee ? 13 : 12;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${esc(title)}</title>
 <style>
@@ -434,7 +438,7 @@ function empReportHtml(rows, { title = 'Emp Report', subtitle = '', showEmployee
   ${subtitle ? `<p class="sub">${esc(subtitle)}</p>` : ''}
   <table>
     <thead><tr>
-      <th>SR</th>${headExtra}<th>Project</th><th>Timestamp (Assigned)</th>
+      <th>SR</th>${headExtra}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
       <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
       <th>Total Hold</th><th>Due</th><th>Submitted</th><th>Status</th>
       <th>Early / Delay (d h m)</th>
