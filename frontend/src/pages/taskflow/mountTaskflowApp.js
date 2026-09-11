@@ -8638,10 +8638,16 @@ export async function mountTaskflowApp(opts = {}) {
     const showEmp = !document.getElementById('drEmployee')?.value;
     const s = data.summary || {};
     const headEmp = showEmp ? '<th>Employee</th>' : '';
-    const colSpan = showEmp ? 12 : 11;
+    const colSpan = showEmp ? 16 : 15;
     const body = rows.map((r, i) => {
       const statusClass =
         r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
+      const vStatusClass =
+        r.verify_status === 'Delayed' || r.verify_status === 'Overdue'
+          ? 'dr-delayed'
+          : r.verify_status === 'On Time'
+            ? 'dr-ontime'
+            : 'dr-na';
       const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
       const planNote = r.reschedule_count > 0
         ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
@@ -8659,6 +8665,10 @@ export async function mountTaskflowApp(opts = {}) {
         <td>${escapeHtml(r.submitted_label)}</td>
         <td class="${statusClass}">${escapeHtml(r.status)}</td>
         <td>${escapeHtml(r.delay_label)}</td>
+        <td>${escapeHtml(r.verify_started_label || '—')}</td>
+        <td>${escapeHtml(r.verified_label || '—')}</td>
+        <td class="${vStatusClass}">${escapeHtml(r.verify_status || '—')}</td>
+        <td>${escapeHtml(r.verify_delay_label || '—')}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
 
@@ -8667,14 +8677,16 @@ export async function mountTaskflowApp(opts = {}) {
       <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
         · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
         · <span class="dr-ontime">${s.on_time || 0} on time</span>
-        · ${s.na || 0} N/A</p>
+        · ${s.na || 0} N/A
+        · Verify delayed: <span class="dr-delayed">${rows.filter((r) => r.verify_status === 'Delayed' || r.verify_status === 'Overdue').length}</span></p>
       <div class="dr-table-wrap">
         <table class="dr-table">
           <thead><tr>
             <th>SR</th>${headEmp}<th>Project</th><th>Timestamp (Assigned)</th>
             <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
             <th>Total Hold</th><th>Due</th>
-            <th>Submitted</th><th>Status</th><th>Delay</th>
+            <th>Sent for verification</th><th>Work status</th><th>Work delay</th>
+            <th>Start Verification</th><th>Verified</th><th>Verify status</th><th>Verify delay</th>
           </tr></thead>
           <tbody>${body}</tbody>
         </table>

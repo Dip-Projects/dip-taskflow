@@ -19,6 +19,7 @@ const {
   activePlanDate,
   originalPlanDate,
   fmtDuration,
+  verificationWorkDueDate,
 } = require('./taskOverdue');
 
 function fmtDelayStamp(iso) {
@@ -105,6 +106,8 @@ function buildDelayReportRows(tasks, opts = {}) {
       const assignedAt = t.assigned_at || t.created_at || null;
       const acceptedAt = t.accepted_at || null;
       const submittedAt = t.sent_for_verification_at || null;
+      const verifyStartedAt = t.verification_started_at || t.first_verification_started_at || null;
+      const verifiedAt = t.verified_at || t.first_verified_at || null;
       const displayHrs = assignedHours(t);
       const dueHrs = timerHours(t);
 
@@ -174,6 +177,60 @@ function buildDelayReportRows(tasks, opts = {}) {
         delayLabel = 'No hours set';
       }
 
+      // —— Verification trail (Start Verification → Verified), 2 office-hour SLA ——
+      let verifyStartedLabel = 'Not started';
+      let verifiedLabel = 'Not verified';
+      let verifyDueLabel = '—';
+      let verifyStatus = 'N/A';
+      let verifyDelayLabel = '—';
+
+      if (!submittedAt) {
+        verifyStartedLabel = '—';
+        verifiedLabel = '—';
+        verifyDelayLabel = 'Not sent for verification';
+      } else if (!verifyStartedAt) {
+        verifyStartedLabel = 'Pending Start Verification';
+        verifyDelayLabel = 'Verifier has not started';
+        verifyStatus = 'Pending';
+      } else {
+        verifyStartedLabel = fmtDelayStamp(verifyStartedAt) || '—';
+        const vDue = verificationWorkDueDate({ verification_started_at: verifyStartedAt });
+        if (vDue) verifyDueLabel = fmtDelayStamp(vDue) || '—';
+
+        if (verifiedAt) {
+          verifiedLabel = fmtDelayStamp(verifiedAt) || '—';
+          if (vDue) {
+            const doneAt = new Date(verifiedAt);
+            const delayHrs = elapsedWorkingHours(vDue, doneAt);
+            const earlyHrs = elapsedWorkingHours(doneAt, vDue);
+            if (doneAt - vDue > 60 * 1000) {
+              verifyStatus = 'Delayed';
+              verifyDelayLabel = formatWorkingDuration(delayHrs);
+            } else {
+              verifyStatus = 'On Time';
+              verifyDelayLabel = earlyHrs < 1 / 60 ? 'on time' : `${formatWorkingDuration(earlyHrs)} early`;
+            }
+          } else {
+            verifyStatus = 'Done';
+            verifyDelayLabel = 'Verified';
+          }
+        } else {
+          verifiedLabel = 'Pending verify';
+          if (vDue) {
+            if (now - vDue > 60 * 1000) {
+              verifyStatus = 'Overdue';
+              verifyDelayLabel = formatWorkingDuration(elapsedWorkingHours(vDue, now));
+            } else {
+              verifyStatus = 'In progress';
+              verifyDelayLabel = 'Within 2h SLA';
+            }
+          } else {
+            verifyStatus = 'In progress';
+            verifyDelayLabel = 'Started';
+          }
+        }
+      }
+
       return {
         id: t.id,
         sr: srMap[t.id] || null,
@@ -204,6 +261,13 @@ function buildDelayReportRows(tasks, opts = {}) {
         status,
         delay_label: delayLabel,
         delay_ms: delayMs,
+        verify_started_at: verifyStartedAt,
+        verify_started_label: verifyStartedLabel,
+        verified_at: verifiedAt,
+        verified_label: verifiedLabel,
+        verify_due_label: verifyDueLabel,
+        verify_status: verifyStatus,
+        verify_delay_label: verifyDelayLabel,
       };
     })
     .sort((a, b) => (a.sr || 0) - (b.sr || 0));
@@ -215,6 +279,12 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
     const bg = i % 2 === 0 ? '#F7F3EC' : '#FFFFFF';
     const statusColor =
       r.status === 'Delayed' ? '#C2410C' : r.status === 'On Time' ? '#15803D' : '#6B7280';
+    const vStatusColor =
+      r.verify_status === 'Delayed' || r.verify_status === 'Overdue'
+        ? '#C2410C'
+        : r.verify_status === 'On Time'
+          ? '#15803D'
+          : '#6B7280';
     const empCell = showEmployee ? `<td>${esc(r.employee)}</td>` : '';
     return `<tr style="background:${bg}">
       <td style="text-align:center">${r.sr ?? '—'}</td>
@@ -229,20 +299,23 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
       <td>${esc(r.submitted_label)}</td>
       <td style="color:${statusColor};font-weight:700">${esc(r.status)}</td>
       <td>${esc(r.delay_label)}</td>
+      <td>${esc(r.verify_started_label || '—')}</td>
+      <td>${esc(r.verified_label || '—')}</td>
+      <td style="color:${vStatusColor};font-weight:700">${esc(r.verify_status || '—')}</td>
+      <td>${esc(r.verify_delay_label || '—')}</td>
     </tr>`;
   }).join('');
 
-  const colCount = showEmployee ? 12 : 11;
+  const colCount = showEmployee ? 16 : 15;
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${esc(title)}</title>
 <style>
   body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#111;margin:24px}
   h1{text-align:center;font-size:22px;margin:0 0 6px}
   .sub{text-align:center;color:#666;font-size:12px;margin:0 0 16px}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th{background:#1F2937;color:#fff;padding:9px 8px;text-align:left;font-weight:700}
-  th:first-child,th:nth-child(${showEmployee ? 6 : 5}){text-align:center}
-  td{padding:8px;border-bottom:1px solid #E5E7EB;vertical-align:top}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{background:#1F2937;color:#fff;padding:8px 6px;text-align:left;font-weight:700}
+  td{padding:7px 6px;border-bottom:1px solid #E5E7EB;vertical-align:top}
 </style></head><body>
   <h1>${esc(title)}</h1>
   ${subtitle ? `<p class="sub">${esc(subtitle)}</p>` : ''}
@@ -251,7 +324,8 @@ function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', sho
       <th>SR</th>${headExtra}<th>Project</th><th>Timestamp (Assigned)</th>
       <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
       <th>Total Hold</th><th>Due</th>
-      <th>Submitted</th><th>Status</th><th>Delay</th>
+      <th>Sent for verification</th><th>Work status</th><th>Work delay</th>
+      <th>Start Verification</th><th>Verified</th><th>Verify status</th><th>Verify delay</th>
     </tr></thead>
     <tbody>${body || `<tr><td colspan="${colCount}" style="text-align:center;padding:20px;color:#888">No tasks</td></tr>`}</tbody>
   </table>

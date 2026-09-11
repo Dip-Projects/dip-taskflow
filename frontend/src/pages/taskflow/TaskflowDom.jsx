@@ -1401,7 +1401,7 @@ export default function TaskflowDom() {
           <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">Task Delay Report</h2>
-              <p className="view-sub">Employee-wise assigned → accept → deadline → submit. Deadline uses office hours (9:30–6:30, lunch 1–2, Mon–Sat). Monday WhatsApp → each emp + their head.</p>
+              <p className="view-sub">Employee-wise assigned → accept → deadline → submit → Start Verification → verified. Work + verify delays use office hours (9:30–6:30, lunch 1–2, Mon–Sat; verify SLA = 2h).</p>
             </div>
             <div className="mis-toolbar">
               <label className="mis-field">
