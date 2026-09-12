@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { createClient } from '@supabase/supabase-js';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -10,6 +10,38 @@ function safeSeg(s) {
       .replace(/_+/g, '_')
       .slice(0, 80) || 'file'
   );
+}
+
+function readPublicConfig() {
+  const runtime =
+    typeof window !== 'undefined' && window.__TF_CONFIG__
+      ? window.__TF_CONFIG__
+      : null;
+  return {
+    url:
+      runtime?.supabaseUrl ||
+      import.meta.env.VITE_SUPABASE_URL ||
+      '',
+    anonKey:
+      runtime?.supabaseAnonKey ||
+      import.meta.env.VITE_SUPABASE_ANON_KEY ||
+      '',
+  };
+}
+
+/** Fresh anon client — never reuse a logged-in / expired browser session. */
+function publicStorageClient() {
+  const { url, anonKey } = readPublicConfig();
+  if (!url || !anonKey || anonKey === 'placeholder') {
+    throw new Error('Upload config missing — refresh page and try again');
+  }
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
 /** Browser to Supabase signed upload for public apply / onboard (no JWT). */
@@ -24,13 +56,20 @@ export async function uploadPublicHrFile(file, folder) {
   const data = await prep.json().catch(() => ({}));
   if (!prep.ok) throw new Error(data.error || `Upload prepare failed (${prep.status})`);
 
-  const { error } = await supabase.storage
+  const client = publicStorageClient();
+  const { error } = await client.storage
     .from(data.bucket || 'documents')
     .uploadToSignedUrl(data.path || path, data.token, file, {
       contentType: file.type || 'application/octet-stream',
       upsert: true,
     });
-  if (error) throw new Error(error.message || 'File upload failed');
+  if (error) {
+    const msg = String(error.message || '');
+    if (/jwt|session|expir|unauthorized|401/i.test(msg)) {
+      throw new Error('Upload failed — refresh the form link and try again (no login needed).');
+    }
+    throw new Error(msg || 'File upload failed');
+  }
 
   return {
     path: data.path || path,

@@ -4,7 +4,8 @@ import { uploadPublicHrFiles } from '../../lib/publicHrUpload';
 import './publicForms.css';
 
 export default function EmployeeOnboardPage() {
-  const { token } = useParams();
+  const { token: rawToken } = useParams();
+  const token = String(rawToken || '').trim().replace(/[^a-f0-9]/gi, '');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -43,10 +44,23 @@ export default function EmployeeOnboardPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (!token) {
+        setError('Invalid joining link. Ask HR for a fresh QR / link.');
+        setLoading(false);
+        return;
+      }
       try {
         const res = await fetch(`/api/hr/public/onboard/${encodeURIComponent(token)}`);
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || 'Invalid link');
+        if (!res.ok) {
+          const msg = data.error || 'Invalid link';
+          if (/expired|invalid/i.test(msg)) {
+            throw new Error(
+              'This joining link is invalid or was replaced. Ask HR to open the employee QR again and share the new link.'
+            );
+          }
+          throw new Error(msg);
+        }
         if (cancelled) return;
         if (data.already_submitted) {
           setAlready(true);
@@ -95,7 +109,15 @@ export default function EmployeeOnboardPage() {
         body: JSON.stringify({ ...form, documents }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Submit failed');
+      if (!res.ok) {
+        const msg = data.error || 'Submit failed';
+        if (/expired|invalid|session/i.test(msg)) {
+          throw new Error(
+            'Link expired while submitting. Ask HR to reopen the QR and fill the form again (login not required).'
+          );
+        }
+        throw new Error(msg);
+      }
       setDone(true);
     } catch (err) {
       setError(err.message || 'Could not submit');
@@ -131,6 +153,9 @@ export default function EmployeeOnboardPage() {
       <div className="pf-page">
         <div className="pf-card">
           <div className="pf-error">{error}</div>
+          <p className="pf-sub" style={{ marginTop: 12 }}>
+            No login needed. Use the latest QR / link from HR on your phone browser.
+          </p>
         </div>
       </div>
     );
@@ -152,9 +177,13 @@ export default function EmployeeOnboardPage() {
         <div className="pf-grid">
           <label className="pf-field full">
             Employee name <span className="pf-req">*</span>
-            <input value={form.employee_name} onChange={(e) => set('employee_name', e.target.value)} />
+            <input
+              autoComplete="name"
+              value={form.employee_name}
+              onChange={(e) => set('employee_name', e.target.value)}
+            />
           </label>
-          <label className="pf-field">
+          <label className="pf-field full">
             Department
             <select value={form.department} onChange={(e) => set('department', e.target.value)}>
               <option value="">Select department…</option>
@@ -170,18 +199,30 @@ export default function EmployeeOnboardPage() {
           <label className="pf-field">
             Contact number <span className="pf-req">*</span>
             <input
+              type="tel"
               inputMode="numeric"
+              autoComplete="tel"
               value={form.contact_number}
               onChange={(e) => set('contact_number', e.target.value)}
             />
           </label>
           <label className="pf-field">
             Email ID
-            <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+            <input
+              type="email"
+              autoComplete="email"
+              value={form.email}
+              onChange={(e) => set('email', e.target.value)}
+            />
           </label>
           <label className="pf-field">
             Aadhaar ID <span className="pf-req">*</span>
-            <input inputMode="numeric" value={form.aadhaar} onChange={(e) => set('aadhaar', e.target.value)} />
+            <input
+              type="text"
+              inputMode="numeric"
+              value={form.aadhaar}
+              onChange={(e) => set('aadhaar', e.target.value)}
+            />
           </label>
           <label className="pf-field">
             PAN No.
@@ -228,7 +269,12 @@ export default function EmployeeOnboardPage() {
           </label>
           <label className="pf-field">
             Contact number
-            <input value={form.emergency_contact} onChange={(e) => set('emergency_contact', e.target.value)} />
+            <input
+              type="tel"
+              inputMode="numeric"
+              value={form.emergency_contact}
+              onChange={(e) => set('emergency_contact', e.target.value)}
+            />
           </label>
           <label className="pf-field">
             Relationship
@@ -249,11 +295,12 @@ export default function EmployeeOnboardPage() {
             ['bank_details', 'Bank details'],
             ['salary_slip', 'Salary slip'],
           ].map(([key, label]) => (
-            <label key={key} className="pf-field">
+            <label key={key} className="pf-field full">
               {label}
               <input
                 type="file"
                 accept="image/*,.pdf,application/pdf"
+                capture={key === 'photo' ? 'environment' : undefined}
                 onChange={(e) => setFiles((f) => ({ ...f, [key]: e.target.files }))}
               />
             </label>

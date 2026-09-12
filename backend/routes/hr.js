@@ -175,13 +175,15 @@ function isClientStaff(row) {
 }
 
 async function findOnboardTarget(token) {
+  const clean = String(token || '').trim().replace(/[^a-f0-9]/gi, '');
+  if (!clean || clean.length < 16) return null;
   const staff = await readJson(HR_STAFF_PATH, []);
-  const hrIdx = staff.findIndex((r) => r.onboard_token === token);
+  const hrIdx = staff.findIndex((r) => String(r.onboard_token || '').trim() === clean);
   if (hrIdx >= 0) {
     return { kind: 'hr_only', staff, hrIdx, profiles: null, profileIdx: -1 };
   }
   const profiles = await readJson(PROFILES_PATH, []);
-  const profileIdx = profiles.findIndex((r) => r.onboard_token === token);
+  const profileIdx = profiles.findIndex((r) => String(r.onboard_token || '').trim() === clean);
   if (profileIdx >= 0) {
     return { kind: 'system', staff: null, hrIdx: -1, profiles, profileIdx };
   }
@@ -1581,12 +1583,15 @@ router.delete('/staff/:id', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Create / regenerate joining-form QR token (system users + HR-only) */
+/** Create / regenerate joining-form QR token (system users + HR-only).
+ * Reuses existing token by default so previous QR / copied links keep working.
+ * Pass { force_new: true } to mint a fresh token (invalidates old links).
+ */
 router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
   try {
     const id = req.params.id;
     const source = String(req.body?.source || '').toLowerCase();
-    const token = makeToken();
+    const forceNew = !!(req.body?.force_new || req.body?.regenerate);
     const now = new Date().toISOString();
     const reset = !!req.body?.reset_submit;
 
@@ -1594,7 +1599,12 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
     const list = await readJson(HR_STAFF_PATH, []);
     const hrIdx = list.findIndex((r) => r.id === id);
     if (hrIdx >= 0 && source !== 'system') {
-      list[hrIdx].onboard_token = token;
+      let token = String(list[hrIdx].onboard_token || '').trim();
+      const reused = !!token && !forceNew;
+      if (!token || forceNew) {
+        token = makeToken();
+        list[hrIdx].onboard_token = token;
+      }
       if (reset) {
         list[hrIdx].joining_form_submitted_at = null;
         list[hrIdx].joining_form_id = null;
@@ -1605,6 +1615,7 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
         ok: true,
         staff: { ...list[hrIdx], source: 'hr_only' },
         onboard_path: `/onboard/${token}`,
+        reused,
       });
     }
 
@@ -1621,7 +1632,12 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
     }
     if (!user) {
       if (hrIdx >= 0) {
-        list[hrIdx].onboard_token = token;
+        let token = String(list[hrIdx].onboard_token || '').trim();
+        const reused = !!token && !forceNew;
+        if (!token || forceNew) {
+          token = makeToken();
+          list[hrIdx].onboard_token = token;
+        }
         if (reset) {
           list[hrIdx].joining_form_submitted_at = null;
           list[hrIdx].joining_form_id = null;
@@ -1632,6 +1648,7 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
           ok: true,
           staff: { ...list[hrIdx], source: 'hr_only' },
           onboard_path: `/onboard/${token}`,
+          reused,
         });
       }
       return res.status(404).json({ error: 'Employee not found' });
@@ -1653,6 +1670,9 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
       );
     }
     const prev = pIdx >= 0 ? profiles[pIdx] : null;
+    let token = String(prev?.onboard_token || '').trim();
+    const reused = !!token && !forceNew;
+    if (!token || forceNew) token = makeToken();
     const prof = {
       id: prev?.id || uid(),
       employee_id: user.id,
@@ -1682,6 +1702,7 @@ router.post('/staff/:id/onboard-token', requireAdminOrHr, async (req, res) => {
         joining_form_submitted_at: prof.joining_form_submitted_at,
       },
       onboard_path: `/onboard/${token}`,
+      reused,
     });
   } catch (err) {
     console.error('onboard-token:', err.message);

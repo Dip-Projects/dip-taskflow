@@ -23,6 +23,13 @@ function safePathSeg(s) {
 
 function publicOrigin() {
   if (typeof window === 'undefined') return '';
+  const host = window.location.hostname || '';
+  // Preview / localhost QRs break on employee phones — always use production for shared links
+  if (host.includes('localhost') || host.includes('127.0.0.1') || /\.vercel\.app$/i.test(host)) {
+    if (host !== 'dip-taskflow.vercel.app') {
+      return 'https://dip-taskflow.vercel.app';
+    }
+  }
   return window.location.origin;
 }
 
