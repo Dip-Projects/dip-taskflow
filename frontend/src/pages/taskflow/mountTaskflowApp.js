@@ -2722,23 +2722,38 @@ export async function mountTaskflowApp(opts = {}) {
       els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true }))
     );
     if (!visibleTasks.length) {
-      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No delegated tasks</td></tr>`;
-      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No delegated tasks</div>`;
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks</div>`;
+    }
+  }
+
+  function updateMyRecurringBadge() {
+    const badge = document.getElementById('myRecurringBadge');
+    if (!badge) return;
+    const n = (Array.isArray(officeMyRecurringTasks) ? officeMyRecurringTasks : []).filter((t) => {
+      const st = t.instance?.status;
+      return st !== 'Completed' && st !== 'NotApplicable';
+    }).length;
+    if (n > 0) {
+      badge.hidden = false;
+      badge.textContent = String(n);
+    } else {
+      badge.hidden = true;
+      badge.textContent = '0';
     }
   }
 
   async function paintMyRecurringInMyTasks() {
-    const block = document.getElementById('myTasksRecurringBlock');
     const tbody = document.getElementById('myTasksRecurringTableBody');
     const list = document.getElementById('myTasksRecurringList');
-    if (!block || !tbody) return;
+    if (!tbody) return;
 
     const refresh = async () => {
       try {
         const refreshed = await api('/recurring-tasks/my');
         officeMyRecurringTasks = Array.isArray(refreshed) ? refreshed : [];
         paintMyRecurringInMyTasks();
-        paintOfficeMyTasks();
+        updateMyRecurringBadge();
         refreshNavBadges();
       } catch (err) {
         showToast(err.message, 'error');
@@ -2746,29 +2761,17 @@ export async function mountTaskflowApp(opts = {}) {
     };
 
     const tasks = Array.isArray(officeMyRecurringTasks) ? officeMyRecurringTasks : [];
-    // Hide completed/NA past days already filtered by API; still show today's completed briefly
-    const actionable = tasks.filter((t) => {
-      const st = t.instance?.status;
-      return st !== 'Completed' && st !== 'NotApplicable';
-    });
-
-    if (!actionable.length && !tasks.length) {
-      block.hidden = true;
-      tbody.innerHTML = '';
-      if (list) list.innerHTML = '';
-      return;
-    }
-
-    block.hidden = false;
-    // Show pending/overdue (+ today completed if API sent them)
     const showRows = tasks.filter((t) => {
       const st = t.instance?.status;
       if (st === 'Completed' || st === 'NotApplicable') return !!t.is_today;
       return true;
     });
 
+    updateMyRecurringBadge();
+
     if (!showRows.length) {
-      block.hidden = true;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No recurring tasks assigned to you</td></tr>`;
+      if (list) list.innerHTML = `<div class="empty-state">No recurring tasks assigned to you</div>`;
       return;
     }
 
@@ -2785,12 +2788,12 @@ export async function mountTaskflowApp(opts = {}) {
 
     const isAdmin = state.user.role === 'admin';
     const tabBar = document.getElementById('myTasksTabBar');
-    if (tabBar) tabBar.hidden = !isAdmin;
+    const otherBtn = document.getElementById('otherPendingTabBtn');
+    if (tabBar) tabBar.hidden = false;
+    if (otherBtn) otherBtn.hidden = !isAdmin;
 
-    const recBlock = document.getElementById('myTasksRecurringBlock');
     const recBody = document.getElementById('myTasksRecurringTableBody');
     if (recBody) recBody.innerHTML = `<tr><td colspan="4" class="empty-state">Loading recurring…</td></tr>`;
-    if (recBlock) recBlock.hidden = false;
 
     try {
       const [allTasks, recurring] = await Promise.all([
@@ -2803,7 +2806,6 @@ export async function mountTaskflowApp(opts = {}) {
       paintMyRecurringInMyTasks();
     } catch (err) {
       showToast(err.message, 'error');
-      if (recBlock) recBlock.hidden = true;
     }
   }
 
@@ -2811,7 +2813,7 @@ export async function mountTaskflowApp(opts = {}) {
     // Open/Done day-list UI removed — keep stub ids harmless if referenced
   });
 
-  // ─── "My Tasks" tabs (admin only): My Task ↔ Other Pending Work ───────────
+  // ─── "My Tasks" tabs: My Task | My Recurring Task | Other Pending (admin) ───
   __tfReadyFns.push(() => {
     document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2819,9 +2821,12 @@ export async function mountTaskflowApp(opts = {}) {
         btn.classList.add('active');
         const tab = btn.dataset.mytab;
         const myPanel = document.getElementById('myTaskTabPanel');
+        const recPanel = document.getElementById('myRecurringTabPanel');
         const otherPanel = document.getElementById('otherPendingTabPanel');
         if (myPanel) myPanel.hidden = tab !== 'mytask';
+        if (recPanel) recPanel.hidden = tab !== 'recurring';
         if (otherPanel) otherPanel.hidden = tab !== 'other';
+        if (tab === 'recurring') paintMyRecurringInMyTasks();
         if (tab === 'other') loadOtherPendingWork();
       });
     });

@@ -289,7 +289,7 @@ export default function TaskflowDom() {
         <section id="view-my" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">My tasks</h2>
-            <p className="view-sub">Delegated tasks assigned to you, plus your own recurring tasks (Done / Not Applicable).</p>
+            <p className="view-sub">Your delegated work and recurring tasks — switch tabs below.</p>
           </div>
 
           <div className="smt-day-row" id="officeMyTasksDayRow" hidden style={{display: 'none'}}></div>
@@ -300,7 +300,11 @@ export default function TaskflowDom() {
 
           <div className="my-tasks-tabs" id="myTasksTabBar" hidden={true}>
             <button type="button" className="my-tasks-tab-btn active" data-mytab="mytask">My Task</button>
-            <button type="button" className="my-tasks-tab-btn" data-mytab="other">
+            <button type="button" className="my-tasks-tab-btn" data-mytab="recurring" id="myRecurringTabBtn">
+              My Recurring Task
+              <span className="my-tasks-tab-badge" id="myRecurringBadge" hidden={true}>0</span>
+            </button>
+            <button type="button" className="my-tasks-tab-btn" data-mytab="other" id="otherPendingTabBtn">
               Other Pending Work
               <span className="my-tasks-tab-badge" id="otherPendingBadge" hidden={true}>0</span>
             </button>
@@ -327,32 +331,28 @@ export default function TaskflowDom() {
               </div>
             </div>
             <div id="myTasksList" className="task-list view-mobile-only"></div>
+          </div>
 
-            {/* Own recurring instances (admin + employee) — Done / Not Applicable */}
-            <div id="myTasksRecurringBlock" className="leave-panel" hidden={true} style={{marginTop: 16}}>
-              <div className="leave-panel-head">
-                <div>
-                  <h3 className="leave-panel-title">My recurring tasks</h3>
-                  <p className="leave-panel-sub">Due today / overdue — mark Done or Not Applicable like other employees</p>
-                </div>
+          <div id="myRecurringTabPanel" hidden={true}>
+            <p className="view-sub" style={{marginTop: 0, marginBottom: 12}}>
+              Your assigned recurring tasks — mark <strong>Done</strong> or <strong>Not Applicable</strong> for each due date.
+            </p>
+            <div className="table-card view-desktop-only">
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Task</th>
+                      <th>Frequency</th>
+                      <th>Due date</th>
+                      <th>Status / Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="myTasksRecurringTableBody"></tbody>
+                </table>
               </div>
-              <div className="table-card view-desktop-only" style={{marginTop: 0, border: 'none', boxShadow: 'none', padding: 0}}>
-                <div className="table-scroll">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Task</th>
-                        <th>Frequency</th>
-                        <th>Due date</th>
-                        <th>Status / Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody id="myTasksRecurringTableBody"></tbody>
-                  </table>
-                </div>
-              </div>
-              <div id="myTasksRecurringList" className="view-mobile-only" style={{marginTop: 8}}></div>
             </div>
+            <div id="myTasksRecurringList" className="view-mobile-only" style={{marginTop: 8}}></div>
           </div>
 
           {/* Other Pending Work — read-only summary of things awaiting the
