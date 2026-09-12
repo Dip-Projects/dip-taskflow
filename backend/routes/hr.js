@@ -516,7 +516,51 @@ router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
     const list = await readJson(RECRUIT_PATH, []);
     list.unshift(row);
     await writeJson(RECRUIT_PATH, list);
-    res.status(201).json({ ok: true, id: row.id, message: 'Application submitted successfully' });
+
+    // Mirror all apply-form docs into HR Documents vault:
+    // Recruitment → Role → Candidate name
+    const now = row.created_at;
+    const roleLabel = application.position_applied || 'Applicant';
+    const docMeta = await readJson(DOCS_META_PATH, []);
+    const docEntries = [];
+    const pushDoc = (docType, file) => {
+      if (!file?.url) return;
+      docEntries.push({
+        id: uid(),
+        employee_id: row.id,
+        employee_name: name,
+        department: 'Recruitment',
+        designation: roleLabel,
+        doc_type: docType,
+        title: file.name || docType,
+        category: docType,
+        file_name: file.name,
+        file_path: file.path,
+        file_url: file.url,
+        uploaded_by: null,
+        uploaded_by_name: 'Recruitment QR apply',
+        source: 'recruitment_apply',
+        recruitment_id: row.id,
+        created_at: now,
+      });
+    };
+    pushDoc('CV', docs.cv);
+    pushDoc('Aadhaar', docs.aadhaar_file);
+    pushDoc('PAN', docs.pan_file);
+    pushDoc('Photo', docs.photo);
+    pushDoc('Bank details', docs.bank_details);
+    pushDoc('Salary slip', docs.salary_slip);
+    (docs.education_certs || []).forEach((f) => pushDoc('Education certificate', f));
+    if (docEntries.length) {
+      await writeJson(DOCS_META_PATH, [...docEntries, ...docMeta]);
+    }
+
+    res.status(201).json({
+      ok: true,
+      id: row.id,
+      message: 'Application submitted successfully',
+      documents_saved: docEntries.length,
+    });
   } catch (err) {
     console.error('public apply:', err.message);
     res.status(500).json({ error: err.message || 'Could not submit application' });

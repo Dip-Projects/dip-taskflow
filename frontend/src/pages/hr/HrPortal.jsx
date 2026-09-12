@@ -789,6 +789,7 @@ function lastStatusChange(row) {
 
 function RecruitmentView({ apiCandidates, onReload, busySet }) {
   const [busy, setBusy] = useState(false);
+  const [subTab, setSubTab] = useState('requirements'); // requirements | candidates
   const [applyQr, setApplyQr] = useState(null);
   const [detail, setDetail] = useState(null);
   const [historyRow, setHistoryRow] = useState(null);
@@ -828,212 +829,288 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
     }
   };
 
+  const appDocs = (c) => {
+    const d = c?.application?.documents || {};
+    const links = [];
+    if (d.cv?.url) links.push({ label: 'CV', url: d.cv.url });
+    if (d.aadhaar_file?.url) links.push({ label: 'Aadhaar', url: d.aadhaar_file.url });
+    if (d.pan_file?.url) links.push({ label: 'PAN', url: d.pan_file.url });
+    if (d.photo?.url) links.push({ label: 'Photo', url: d.photo.url });
+    if (d.bank_details?.url) links.push({ label: 'Bank', url: d.bank_details.url });
+    if (d.salary_slip?.url) links.push({ label: 'Salary slip', url: d.salary_slip.url });
+    (d.education_certs || []).forEach((f, i) => {
+      if (f?.url) links.push({ label: `Education ${i + 1}`, url: f.url });
+    });
+    if (!links.length && c?.cv_url) links.push({ label: 'CV', url: c.cv_url });
+    return links;
+  };
+
   return (
     <div className="hr-panel">
       <p className="hr-sub" style={{ marginTop: 0 }}>
-        Office se <strong>hiring requirement</strong> aati hai (designation / experience / openings).
-        Candidate name–mobile apply QR se aata hai. Status change history <strong>History</strong> pe dikhegi.
+        Office hiring requirements aur candidate applications alag tabs me.
+        Apply form ke saare documents <strong>Documents</strong> section me
+        Recruitment → Role → Candidate folder structure me save hote hain.
       </p>
 
-      <div className="hr-toolbar">
-        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy}>Refresh</button>
+      <div className="hr-tabs" role="tablist" aria-label="Recruitment sections">
+        <button
+          type="button"
+          className={`hr-tab${subTab === 'requirements' ? ' on' : ''}`}
+          onClick={() => setSubTab('requirements')}
+        >
+          Hiring requirements
+          <span className="hr-badge" style={{ marginLeft: 8 }}>{requirements.length}</span>
+        </button>
+        <button
+          type="button"
+          className={`hr-tab${subTab === 'candidates' ? ' on' : ''}`}
+          onClick={() => setSubTab('candidates')}
+        >
+          Candidates
+          <span className="hr-badge" style={{ marginLeft: 8 }}>{candidates.length}</span>
+        </button>
+        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy} style={{ marginLeft: 'auto' }}>
+          Refresh
+        </button>
       </div>
 
-      <h3 style={{ margin: '8px 0 10px', fontSize: '0.95rem' }}>Hiring requirements (from Office)</h3>
-      <div className="hr-table-wrap" style={{ marginBottom: 20 }}>
-        <table className="hr-table">
-          <thead>
-            <tr>
-              <th>Designation</th>
-              <th>Experience</th>
-              <th>Openings</th>
-              <th>Dept / Location</th>
-              <th>Urgency</th>
-              <th>From</th>
-              <th>Skills / notes</th>
-              <th>Status</th>
-              <th>History</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!requirements.length ? (
-              <tr><td colSpan={9} className="hr-empty">No hiring requirements yet.</td></tr>
-            ) : (
-              requirements.map((c) => {
-                const last = lastStatusChange(c);
-                return (
-                  <tr key={c.id}>
-                    <td>{c.designation || c.role_applied || '—'}</td>
-                    <td>{c.experience_required || '—'}</td>
-                    <td>{c.openings != null ? c.openings : '—'}</td>
-                    <td>{[c.department, c.location].filter(Boolean).join(' · ') || '—'}</td>
-                    <td>{c.urgency || 'Normal'}</td>
-                    <td>{c.submitted_by_name || '—'}</td>
-                    <td style={{ maxWidth: 220, fontSize: '0.78rem' }}>
-                      {[c.skills, c.notes].filter(Boolean).join(' — ') || '—'}
-                    </td>
-                    <td>
-                      <select
-                        value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
-                        disabled={busy}
-                        onChange={(e) => update(c.id, { status: e.target.value })}
-                      >
-                        {!statuses.includes(c.status) && c.status ? (
-                          <option value={c.status}>{c.status}</option>
-                        ) : null}
-                        {statuses.map((s) => <option key={s}>{s}</option>)}
-                      </select>
-                      {last ? (
-                        <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
-                          {last.from ? `${last.from} → ` : ''}{last.to}
-                          <br />
-                          {formatStatusAt(last.at)}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>
-                      <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
-                        History
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="hr-apply-qr" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16, padding: 12, border: '1px solid var(--hr-line, #e2d5c6)', borderRadius: 10 }}>
-        {applyQr?.qr ? (
-          <img src={applyQr.qr} alt="Apply QR" width={140} height={140} />
-        ) : (
-          <div style={{ width: 140, height: 140, background: '#f5f0eb' }} />
-        )}
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Candidate application QR / link</div>
-          <div style={{ fontSize: '0.82rem', wordBreak: 'break-all', marginBottom: 8 }}>{applyUrl}</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="hr-btn"
-              onClick={() => {
-                navigator.clipboard?.writeText(applyUrl);
-                alert('Apply link copied');
-              }}
-            >
-              Copy link
-            </button>
-            <a className="hr-btn ghost" href={applyUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-              Open form
-            </a>
+      {subTab === 'requirements' && (
+        <>
+          <h3 style={{ margin: '4px 0 10px', fontSize: '1.05rem' }}>Hiring requirements (from Office)</h3>
+          <p className="hr-sub">
+            Designation / experience / openings Office se aate hain. Status update yahin se karo — History me timeline rahegi.
+          </p>
+          <div className="hr-table-wrap">
+            <table className="hr-table">
+              <thead>
+                <tr>
+                  <th>Designation</th>
+                  <th>Experience</th>
+                  <th>Openings</th>
+                  <th>Dept / Location</th>
+                  <th>Urgency</th>
+                  <th>From</th>
+                  <th>Skills / notes</th>
+                  <th>Status</th>
+                  <th>History</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!requirements.length ? (
+                  <tr><td colSpan={9} className="hr-empty">No hiring requirements yet.</td></tr>
+                ) : (
+                  requirements.map((c) => {
+                    const last = lastStatusChange(c);
+                    return (
+                      <tr key={c.id}>
+                        <td>{c.designation || c.role_applied || '—'}</td>
+                        <td>{c.experience_required || '—'}</td>
+                        <td>{c.openings != null ? c.openings : '—'}</td>
+                        <td>{[c.department, c.location].filter(Boolean).join(' · ') || '—'}</td>
+                        <td>{c.urgency || 'Normal'}</td>
+                        <td>{c.submitted_by_name || '—'}</td>
+                        <td style={{ maxWidth: 220, fontSize: '0.78rem' }}>
+                          {[c.skills, c.notes].filter(Boolean).join(' — ') || '—'}
+                        </td>
+                        <td>
+                          <select
+                            value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
+                            disabled={busy}
+                            onChange={(e) => update(c.id, { status: e.target.value })}
+                          >
+                            {!statuses.includes(c.status) && c.status ? (
+                              <option value={c.status}>{c.status}</option>
+                            ) : null}
+                            {statuses.map((s) => <option key={s}>{s}</option>)}
+                          </select>
+                          {last ? (
+                            <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
+                              {last.from ? `${last.from} → ` : ''}{last.to}
+                              <br />
+                              {formatStatusAt(last.at)}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
+                            History
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
-      <h3 style={{ margin: '8px 0 10px', fontSize: '0.95rem' }}>Candidates (apply / walk-in)</h3>
-      <p className="hr-sub">
-        Pipeline: Request → Post Create → Post Live → Shortlist → Interview Lined Up → Interview Done → Offer → Approved / Hired / Rejected.
-      </p>
-      <div className="hr-table-wrap">
-        <table className="hr-table">
-          <thead>
-            <tr>
-              <th>Candidate</th>
-              <th>Role</th>
-              <th>Contact</th>
-              <th>From</th>
-              <th>Form / CV</th>
-              <th>Interview</th>
-              <th>Status</th>
-              <th>Notes</th>
-              <th>History</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!candidates.length ? (
-              <tr><td colSpan={9} className="hr-empty">No candidate applications yet.</td></tr>
+      {subTab === 'candidates' && (
+        <>
+          <div
+            className="hr-apply-qr"
+            style={{
+              display: 'flex',
+              gap: 16,
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              marginBottom: 18,
+              padding: 14,
+              border: '1px solid var(--hr-line, #e2d5c6)',
+              borderRadius: 12,
+              background: '#fffaf5',
+            }}
+          >
+            {applyQr?.qr ? (
+              <img src={applyQr.qr} alt="Apply QR" width={140} height={140} />
             ) : (
-              candidates.map((c) => {
-                const last = lastStatusChange(c);
-                return (
-                  <tr key={c.id}>
-                    <td>
-                      {c.candidate_name}
-                      {c.aadhaar ? <div style={{ fontSize: '0.72rem', opacity: 0.65 }}>Aadhaar: {c.aadhaar}</div> : null}
-                    </td>
-                    <td>{c.role_applied || c.application?.position_applied || '—'}</td>
-                    <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
-                    <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {c.application ? (
-                          <button type="button" className="hr-btn ghost" onClick={() => setDetail(c)}>View form</button>
-                        ) : null}
-                        {c.cv_url ? (
-                          <a href={c.cv_url} target="_blank" rel="noreferrer">CV</a>
-                        ) : !c.application ? '—' : null}
-                      </div>
-                    </td>
-                    <td>
-                      <input
-                        type="datetime-local"
-                        value={c.interview_at ? String(c.interview_at).slice(0, 16) : ''}
-                        disabled={busy}
-                        onChange={(e) => update(c.id, {
-                          interview_at: e.target.value ? new Date(e.target.value).toISOString() : null,
-                          status: e.target.value ? 'Interview Lined Up' : c.status,
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
-                        disabled={busy}
-                        onChange={(e) => update(c.id, { status: e.target.value })}
-                      >
-                        {!statuses.includes(c.status) && c.status ? (
-                          <option value={c.status}>{c.status}</option>
-                        ) : null}
-                        {statuses.map((s) => <option key={s}>{s}</option>)}
-                      </select>
-                      {last ? (
-                        <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
-                          {last.from ? `${last.from} → ` : ''}{last.to}
-                          <br />
-                          {formatStatusAt(last.at)}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>
-                      <input
-                        defaultValue={c.interview_notes || c.notes || ''}
-                        placeholder="Interview / process notes"
-                        disabled={busy}
-                        onBlur={(e) => {
-                          if (e.target.value !== (c.interview_notes || c.notes || '')) {
-                            update(c.id, { interview_notes: e.target.value });
-                          }
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
-                        History
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
+              <div style={{ width: 140, height: 140, background: '#f5f0eb', borderRadius: 8 }} />
             )}
-          </tbody>
-        </table>
-      </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: '1rem' }}>Candidate application QR / link</div>
+              <p className="hr-sub" style={{ margin: '0 0 8px' }}>
+                Candidate form fill kare → CV / Aadhaar / PAN / Photo Documents me save ho jayenge.
+              </p>
+              <div style={{ fontSize: '0.82rem', wordBreak: 'break-all', marginBottom: 8 }}>{applyUrl}</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="hr-btn"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(applyUrl);
+                    alert('Apply link copied');
+                  }}
+                >
+                  Copy link
+                </button>
+                <a className="hr-btn ghost" href={applyUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  Open form
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <h3 style={{ margin: '4px 0 8px', fontSize: '1.05rem' }}>Candidates (apply / walk-in)</h3>
+          <p className="hr-sub">
+            Pipeline: Request → Post Create → Post Live → Shortlist → Interview Lined Up → Interview Done → Offer → Approved / Hired / Rejected.
+          </p>
+          <div className="hr-table-wrap">
+            <table className="hr-table">
+              <thead>
+                <tr>
+                  <th>Candidate</th>
+                  <th>Role</th>
+                  <th>Contact</th>
+                  <th>From</th>
+                  <th>Form / docs</th>
+                  <th>Interview</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                  <th>History</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!candidates.length ? (
+                  <tr><td colSpan={9} className="hr-empty">No candidate applications yet.</td></tr>
+                ) : (
+                  candidates.map((c) => {
+                    const last = lastStatusChange(c);
+                    const docs = appDocs(c);
+                    return (
+                      <tr key={c.id}>
+                        <td>
+                          {c.candidate_name}
+                          {c.aadhaar ? <div style={{ fontSize: '0.72rem', opacity: 0.65 }}>Aadhaar: {c.aadhaar}</div> : null}
+                        </td>
+                        <td>{c.role_applied || c.application?.position_applied || '—'}</td>
+                        <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
+                        <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {c.application ? (
+                              <button type="button" className="hr-btn ghost" onClick={() => setDetail(c)}>View form</button>
+                            ) : null}
+                            {docs.map((d) => (
+                              <a key={`${d.label}-${d.url}`} href={d.url} target="_blank" rel="noreferrer">{d.label}</a>
+                            ))}
+                            {!c.application && !docs.length ? '—' : null}
+                          </div>
+                        </td>
+                        <td>
+                          <input
+                            type="datetime-local"
+                            value={c.interview_at ? String(c.interview_at).slice(0, 16) : ''}
+                            disabled={busy}
+                            onChange={(e) => update(c.id, {
+                              interview_at: e.target.value ? new Date(e.target.value).toISOString() : null,
+                              status: e.target.value ? 'Interview Lined Up' : c.status,
+                            })}
+                          />
+                        </td>
+                        <td>
+                          <select
+                            value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
+                            disabled={busy}
+                            onChange={(e) => update(c.id, { status: e.target.value })}
+                          >
+                            {!statuses.includes(c.status) && c.status ? (
+                              <option value={c.status}>{c.status}</option>
+                            ) : null}
+                            {statuses.map((s) => <option key={s}>{s}</option>)}
+                          </select>
+                          {last ? (
+                            <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
+                              {last.from ? `${last.from} → ` : ''}{last.to}
+                              <br />
+                              {formatStatusAt(last.at)}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <input
+                            defaultValue={c.interview_notes || c.notes || ''}
+                            placeholder="Interview / process notes"
+                            disabled={busy}
+                            onBlur={(e) => {
+                              if (e.target.value !== (c.interview_notes || c.notes || '')) {
+                                update(c.id, { interview_notes: e.target.value });
+                              }
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
+                            History
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {detail ? (
         <div className="hr-modal-backdrop" onClick={() => setDetail(null)} role="presentation">
           <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" style={{ maxWidth: 560, maxHeight: '85vh', overflow: 'auto' }}>
             <h3 style={{ marginTop: 0 }}>{detail.candidate_name}</h3>
+            {appDocs(detail).length ? (
+              <div style={{ marginBottom: 12 }}>
+                <strong style={{ fontSize: '0.85rem' }}>Documents</strong>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {appDocs(detail).map((d) => (
+                    <li key={`${d.label}-${d.url}`}>
+                      <a href={d.url} target="_blank" rel="noreferrer">{d.label}</a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.78rem', background: '#f7f1ea', padding: 10, borderRadius: 8 }}>
               {JSON.stringify(detail.application || detail, null, 2)}
             </pre>
@@ -1449,7 +1526,11 @@ function DocumentsView({ employees, user }) {
     <>
       <div className="hr-panel">
         <h3 style={{ marginTop: 0 }}>Upload / register document</h3>
-        <p className="hr-sub">Stored as folders: Department → Designation → files. QR joining form uploads bhi yahin aate hain.</p>
+        <p className="hr-sub">
+          Stored as folders: Department → Designation → files.
+          QR joining form aur Recruitment apply form ke documents bhi yahin aate hain
+          (Recruitment → Role → Candidate).
+        </p>
         <form className="hr-form" onSubmit={upload}>
           <label>Employee
             <select value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })} required>
