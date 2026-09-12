@@ -2040,9 +2040,18 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
 export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [tab, setTab] = useState('dashboard');
   const isAdminUser = String(user?.role || '').toLowerCase() === 'admin';
+  const isHrUser = (() => {
+    const role = String(user?.role || '').toLowerCase().trim();
+    if (role === 'hr' || role === 'admin') return true;
+    const blob = [user?.role, user?.designation, user?.department]
+      .map((s) => String(s || '').toLowerCase())
+      .join(' ');
+    return /\bhr\b|human\s*resource/.test(blob);
+  })();
+  const canManageRecruitment = isAdminUser || isHrUser;
   const navItems = useMemo(
-    () => NAV.filter((n) => n.key !== 'recruitment' || isAdminUser),
-    [isAdminUser]
+    () => NAV.filter((n) => n.key !== 'recruitment' || canManageRecruitment),
+    [canManageRecruitment]
   );
   const [employees, setEmployees] = useState([]);
   const [empLoading, setEmpLoading] = useState(true);
@@ -2058,8 +2067,8 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [alerts, setAlerts] = useState({ birthdays: [], insuranceDue: [] });
 
   useEffect(() => {
-    if (tab === 'recruitment' && !isAdminUser) setTab('dashboard');
-  }, [tab, isAdminUser]);
+    if (tab === 'recruitment' && !canManageRecruitment) setTab('dashboard');
+  }, [tab, canManageRecruitment]);
 
   const loadEmployees = useCallback(async () => {
     setEmpLoading(true);
@@ -2093,7 +2102,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   }, []);
 
   const loadRecruitments = useCallback(async () => {
-    if (String(user?.role || '').toLowerCase() !== 'admin') {
+    if (!canManageRecruitment) {
       setRecruitments([]);
       return;
     }
@@ -2103,7 +2112,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     } catch {
       setRecruitments([]);
     }
-  }, [user?.role]);
+  }, [canManageRecruitment]);
 
   const loadAlerts = useCallback(async () => {
     try {
@@ -2179,7 +2188,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             employees={employees}
             leaves={leaves}
             attendanceToday={attendanceToday}
-            candidates={isAdminUser ? recruitments : []}
+            candidates={canManageRecruitment ? recruitments : []}
             alerts={alerts}
             onSendWa={sendWaReminders}
           />
@@ -2200,7 +2209,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
         {tab === 'leaves' && (
           <LeavesView leaves={leaves} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
         )}
-        {tab === 'recruitment' && isAdminUser && (
+        {tab === 'recruitment' && canManageRecruitment && (
           <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
         )}
         {tab === 'insurance' && <InsuranceView employees={employees} />}

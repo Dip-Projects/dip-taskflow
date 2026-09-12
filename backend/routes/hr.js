@@ -812,13 +812,13 @@ router.get('/attendance', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Heads see own submissions; only admin sees full recruitment pipeline (HR portal). */
+/** Heads see own submissions; admin + HR see full recruitment pipeline. */
 router.get('/recruitments', async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
-    if (req.user?.role === 'admin') return res.json({ recruitments: list });
+    if (canHrOrAdmin(req.user)) return res.json({ recruitments: list });
     if (!isHead(req.user)) {
-      return res.status(403).json({ error: 'Only admin can view all recruitments' });
+      return res.status(403).json({ error: 'Only admin or HR can view all recruitments' });
     }
     const uid = String(req.user.id || '');
     const mine = list.filter((r) => String(r.submitted_by || '') === uid);
@@ -957,8 +957,8 @@ router.post('/recruitments', parseRecruitmentBody, async (req, res) => {
   }
 });
 
-/** Admin updates pipeline status / interview — status changes are logged */
-router.patch('/recruitments/:id', requireAdmin, async (req, res) => {
+/** Admin / HR updates pipeline status / interview — status changes are logged */
+router.patch('/recruitments/:id', requireAdminOrHr, async (req, res) => {
   try {
     const list = await readJson(RECRUIT_PATH, []);
     const idx = list.findIndex((r) => r.id === req.params.id);
