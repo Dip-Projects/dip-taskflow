@@ -518,35 +518,84 @@ if (!isMdoOffice && !project_id) {
         data.checkpoints = [];
       }
 
-      // One WhatsApp list of ALL open tasks (not a separate Done msg per task)
+      // Reliable assign ping: template to assignee (not interactive list — needs 24h window).
+      // Also CC Chirag so admin sees assign alerts on their phone.
       const { data: assigneeUser } = await supabase
         .from('users')
         .select('whatsapp_number, full_name')
         .eq('id', assigned_to)
         .maybeSingle();
 
+      const dueLabel = data.target_date
+        ? String(data.target_date).slice(0, 16)
+        : new Date().toISOString().slice(0, 10);
+      const projectName = data.project?.name || 'DIP Projects';
+      const desc = (data.description || 'New task').slice(0, 200);
+
       let waAssign = null;
       if (assigneeUser?.whatsapp_number) {
         try {
-          waAssign = await notifyAssigneeOpenTasksList(
-            assigned_to,
+          waAssign = await sendWhatsAppTemplate(
             assigneeUser.whatsapp_number,
-            assigneeUser.full_name || 'Team member'
+            process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+            [
+              assigneeUser.full_name || 'Team member',
+              desc,
+              projectName,
+              dueLabel,
+              'Open',
+            ]
           );
           console.log(
             'Task assign WA:',
             assigneeUser.full_name,
-            waAssign?.ok ? `ok via ${waAssign.via || 'list'}` : waAssign?.reason || 'fail'
+            assigneeUser.whatsapp_number,
+            waAssign?.ok ? 'ok' : waAssign?.reason || 'fail'
           );
         } catch (waErr) {
-          console.warn('WhatsApp list digest skip:', waErr.message);
+          console.warn('WhatsApp assign skip:', waErr.message);
           waAssign = { ok: false, reason: waErr.message };
         }
       } else {
         console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
         waAssign = { ok: false, reason: 'no_number' };
       }
-      res.status(201).json({ ...data, _whatsapp: waAssign });
+
+      let waChirag = null;
+      try {
+        const { data: chirag } = await supabase
+          .from('users')
+          .select('whatsapp_number, full_name')
+          .eq('username', 'chirag.s')
+          .maybeSingle();
+        const chiragWa = chirag?.whatsapp_number;
+        const sameAsAssignee =
+          chiragWa &&
+          assigneeUser?.whatsapp_number &&
+          String(chiragWa).replace(/\D/g, '').slice(-10) ===
+            String(assigneeUser.whatsapp_number).replace(/\D/g, '').slice(-10);
+        if (chiragWa && !sameAsAssignee) {
+          waChirag = await sendWhatsAppTemplate(
+            chiragWa,
+            process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+            [
+              chirag.full_name || 'Chirag',
+              `Assigned to ${assigneeUser?.full_name || 'employee'}: ${desc}`.slice(0, 200),
+              projectName,
+              dueLabel,
+              'Assigned',
+            ]
+          );
+          console.log('Task assign WA Chirag CC:', waChirag?.ok ? 'ok' : waChirag?.reason || 'fail');
+        }
+      } catch (ccErr) {
+        console.warn('Task assign Chirag CC skip:', ccErr.message);
+      }
+
+      res.status(201).json({
+        ...data,
+        _whatsapp: { assignee: waAssign, chirag: waChirag },
+      });
     } catch (err) {
       console.error('Create task error:', err.message);
       res.status(500).json({ error: err.message || 'Could not create task' });

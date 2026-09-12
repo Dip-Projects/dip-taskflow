@@ -143,23 +143,9 @@ async function sendLeaveApplicationWa(recipients, { applicantName, from_date, to
 }
 
 /**
- * Buddy cover ping. Preferred template leave_buddy_request is not on Meta WABA
- * yet — fall back to leave_application_notification so the buddy still gets WA.
+ * Buddy cover ping. Meta has no leave_buddy_request template — use leave alert.
  */
 async function sendLeaveBuddyRequestWa(toNumber, { buddyName, applicantName, from_date, to_date, reason }) {
-  const preferred = await sendWhatsAppTemplate(toNumber, 'leave_buddy_request', [
-    buddyName || 'Colleague',
-    applicantName || 'Employee',
-    String(from_date || '—').slice(0, 10),
-    String(to_date || '—').slice(0, 10),
-    String(reason || '—').slice(0, 400),
-  ]);
-  if (preferred?.ok) return preferred;
-
-  console.warn(
-    'Leave buddy template missing/failed; falling back to leave_application_notification:',
-    preferred?.reason || preferred?.data?.error?.message || 'unknown'
-  );
   return sendWhatsAppTemplate(toNumber, 'leave_application_notification', [
     `${applicantName || 'Employee'} (cover request for ${buddyName || 'you'})`,
     String(from_date || '—').slice(0, 10),
