@@ -11,6 +11,7 @@ const {
 } = require('../lib/taskOverdue');
 const {
   sendWhatsAppTemplate,
+  sendVerificationAlertTemplate,
 } = require('../lib/whatsapp');
 const { notifyAssigneeOpenTasksList } = require('../lib/taskListDigest');
 const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
@@ -1198,11 +1199,11 @@ router.patch(
 
       let waVerify = null;
       if (verifierUser?.whatsapp_number) {
-        waVerify = await notifyWa(verifierUser.whatsapp_number, 'task_verification_request', [
-          verifierUser.full_name || 'Verifier',
-          (data.description || 'Task').slice(0, 200),
-          data.project?.name || '—',
-        ]);
+        waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
+          verifierName: verifierUser.full_name || 'Verifier',
+          taskDescription: data.description || 'Task',
+          projectName: data.project?.name || '—',
+        });
         console.log(
           'Verification WA:',
           verifierUser.full_name,

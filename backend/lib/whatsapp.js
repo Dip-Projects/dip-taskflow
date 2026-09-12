@@ -75,6 +75,42 @@ async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = []) {
 }
 
 /**
+ * Leave / verification templates were created as MARKETING on Meta — WhatsApp
+ * often hides or drops those. Prefer UTILITY task_notification_v2 for delivery.
+ * Body: {{1}} name, {{2}} detail, {{3}} project, {{4}} date, {{5}} status
+ */
+async function sendLeaveAlertTemplate(toNumber, { applicantName, from_date, to_date, reason }) {
+  const from = String(from_date || '—').slice(0, 10);
+  const to = String(to_date || '—').slice(0, 10);
+  const dates = from === to ? from : `${from} to ${to}`;
+  return sendWhatsAppTemplate(
+    toNumber,
+    process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+    [
+      applicantName || 'Employee',
+      `Leave request: ${String(reason || '—').slice(0, 160)}`,
+      'DIP Leave',
+      dates,
+      'Pending',
+    ]
+  );
+}
+
+async function sendVerificationAlertTemplate(toNumber, { verifierName, taskDescription, projectName }) {
+  return sendWhatsAppTemplate(
+    toNumber,
+    process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+    [
+      verifierName || 'Verifier',
+      `Please verify: ${String(taskDescription || 'Task').slice(0, 160)}`,
+      projectName || 'DIP Projects',
+      new Date().toISOString().slice(0, 10),
+      'Pending Verification',
+    ]
+  );
+}
+
+/**
  * Template with Quick Reply buttons. Payload is set at send time so Done can
  * carry tf_done_<taskId>. Requires an approved Meta template with QUICK_REPLY.
  */
@@ -297,4 +333,6 @@ module.exports = {
   sendWhatsAppText,
   notifyTaskAssignedWithDone,
   normalizeWhatsAppNumber,
+  sendLeaveAlertTemplate,
+  sendVerificationAlertTemplate,
 };

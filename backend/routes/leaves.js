@@ -1,7 +1,7 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdminOrHr, requireAdmin } = require('../middleware/auth');
-const { sendWhatsAppTemplate, normalizeWhatsAppNumber } = require('../lib/whatsapp');
+const { sendWhatsAppTemplate, normalizeWhatsAppNumber, sendLeaveAlertTemplate } = require('../lib/whatsapp');
 const { findBeenaOrPcUsers } = require('../lib/taskListDigest');
 const { elapsedWorkingHours } = require('../lib/workingHours');
 const { workTimerAnchor, workTimerBudgetHours } = require('../lib/taskOverdue');
@@ -128,30 +128,29 @@ async function collectLeaveStakeholderNumbers(extraNumbers = []) {
 }
 
 async function sendLeaveApplicationWa(recipients, { applicantName, from_date, to_date, reason }) {
-  const params = [
-    applicantName || 'Employee',
-    String(from_date || '—').slice(0, 10),
-    String(to_date || '—').slice(0, 10),
-    String(reason || '—').slice(0, 500),
-  ];
   const results = [];
   for (const r of recipients) {
-    const sent = await sendWhatsAppTemplate(r.raw || r.normalized, 'leave_application_notification', params);
+    const sent = await sendLeaveAlertTemplate(r.raw || r.normalized, {
+      applicantName,
+      from_date,
+      to_date,
+      reason,
+    });
     results.push({ to: r.normalized, label: r.label, ok: !!sent?.ok, reason: sent?.reason || null });
   }
   return results;
 }
 
 /**
- * Buddy cover ping. Meta has no leave_buddy_request template — use leave alert.
+ * Buddy cover ping via UTILITY leave alert (marketing leave template does not deliver reliably).
  */
 async function sendLeaveBuddyRequestWa(toNumber, { buddyName, applicantName, from_date, to_date, reason }) {
-  return sendWhatsAppTemplate(toNumber, 'leave_application_notification', [
-    `${applicantName || 'Employee'} (cover request for ${buddyName || 'you'})`,
-    String(from_date || '—').slice(0, 10),
-    String(to_date || '—').slice(0, 10),
-    `Buddy cover please: ${String(reason || '—').slice(0, 400)}`,
-  ]);
+  return sendLeaveAlertTemplate(toNumber, {
+    applicantName: `${applicantName || 'Employee'} (cover for ${buddyName || 'you'})`,
+    from_date,
+    to_date,
+    reason: `Buddy cover please: ${String(reason || '—').slice(0, 160)}`,
+  });
 }
 
 async function whatsappForUsername(username) {
@@ -518,7 +517,7 @@ router.post('/wa-demo', requireAdmin, async (req, res) => {
 
     res.json({
       ok: results.some((r) => r.ok),
-      template: 'leave_application_notification',
+      template: 'task_notification_v2',
       recipients: results,
       note:
         'Deduped by phone. If Chirag & Beena share one number in DB, Meta gets one message only.',
@@ -593,7 +592,7 @@ router.post('/mdo-notify', async (req, res) => {
 
     res.json({
       ok,
-      template: 'leave_application_notification',
+      template: 'task_notification_v2',
       recipients: stakeholderResults,
       proxy: proxyResult,
     });
@@ -1161,21 +1160,12 @@ router.patch('/:id/buddy-respond', async (req, res) => {
         .eq('id', existing.user_id)
         .maybeSingle();
       if (applicant?.whatsapp_number) {
-        const preferred = await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_buddy_response', [
-          applicant.full_name,
-          req.user.full_name,
-          accept ? 'accepted' : 'declined',
-          existing.from_date,
-          existing.to_date,
-        ]);
-        if (!preferred?.ok) {
-          await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_application_notification', [
-            applicant.full_name || 'Employee',
-            String(existing.from_date || '—').slice(0, 10),
-            String(existing.to_date || '—').slice(0, 10),
-            `Buddy ${req.user.full_name || 'colleague'} ${accept ? 'accepted' : 'declined'} your cover request`,
-          ]);
-        }
+        await sendLeaveAlertTemplate(applicant.whatsapp_number, {
+          applicantName: applicant.full_name || 'Employee',
+          from_date: existing.from_date,
+          to_date: existing.to_date,
+          reason: `Buddy ${req.user.full_name || 'colleague'} ${accept ? 'accepted' : 'declined'} your cover request`,
+        });
       }
     } catch (buddyWaErr) {
       console.warn('Leave WA (applicant buddy response) skip:', buddyWaErr.message);
