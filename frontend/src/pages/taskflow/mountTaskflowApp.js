@@ -3537,10 +3537,18 @@ export async function mountTaskflowApp(opts = {}) {
       formData.append('verifier_id', els.verifyPerson.value);
       const files = els.verifyFiles ? [...els.verifyFiles.files].slice(0, 3) : [];
       files.forEach((f) => formData.append('verification_files', f));
-      await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
+      const sent = await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
         method: 'PATCH', body: formData, isForm: true
       });
-      showToast('Sent for verification ✅', 'success');
+      const wa = sent?._whatsapp;
+      if (wa?.ok) {
+        showToast(`Sent for verification ✅ WhatsApp → ${wa.to || 'verifier'}`, 'success');
+      } else {
+        showToast(
+          `Sent for verification ✅ but WhatsApp failed (${wa?.reason || 'no number / Meta error'})`,
+          'error'
+        );
+      }
       if (els.verifyModal) els.verifyModal.hidden = true;
       reloadCurrentTaskView();
     } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
@@ -4205,10 +4213,18 @@ export async function mountTaskflowApp(opts = {}) {
       formData.append('verifier_id', state.pendingVerifierId);
       const files = [...els.resendFiles.files].slice(0, 3);
       files.forEach((f) => formData.append('verification_files', f));
-      await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
+      const sent = await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
         method: 'PATCH', body: formData, isForm: true
       });
-      showToast('Resent for verification ✅', 'success');
+      const wa = sent?._whatsapp;
+      if (wa?.ok) {
+        showToast(`Resent for verification ✅ WhatsApp → ${wa.to || 'verifier'}`, 'success');
+      } else {
+        showToast(
+          `Resent ✅ but WhatsApp failed (${wa?.reason || 'no number / Meta error'})`,
+          'error'
+        );
+      }
       els.resendVerifyModal.hidden = true;
       loadCorrections();
     } catch (err) { els.resendVerifyFormMsg.textContent = err.message; els.resendVerifyFormMsg.hidden = false; }
@@ -5208,7 +5224,17 @@ export async function mountTaskflowApp(opts = {}) {
         openedPlan = await openLeaveTaskActionsModal(created);
       }
       if (!openedPlan) {
-        showToast(`Leave request submitted — waiting for buddy Yes/No ✅${balLine}`, 'success');
+        const wa = created?._whatsapp;
+        const waOk = wa?.ok;
+        const waBits = (wa?.stakeholders || [])
+          .map((r) => `${r.label}:${r.ok ? 'ok' : (r.reason || 'fail')}`)
+          .join(', ');
+        showToast(
+          waOk
+            ? `Leave submitted ✅ WhatsApp: ${waBits || 'sent'}${balLine}`
+            : `Leave submitted ✅ but WhatsApp may have failed (${waBits || wa?.buddy?.reason || 'check numbers'})${balLine}`,
+          waOk ? 'success' : 'error'
+        );
       } else {
         showToast(`Leave submitted — choose open-task actions.${balLine}`, 'success');
       }
