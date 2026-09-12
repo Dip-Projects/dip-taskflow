@@ -962,32 +962,64 @@ export default function TaskflowDom() {
           <div className="view-header-row">
             <div className="view-heading" style={{marginBottom: 0}}>
               <h2 className="view-title">🌴 Apply Leave</h2>
-              <p className="view-sub">Submit a leave request, pick a buddy in the form, and track approval status. Balance: 1 leave / month (Apr–Mar FY), unused months carry forward.</p>
+              <p className="view-sub">1 leave / month (Apr–Mar). Unused months carry forward. Apply below and track status in history.</p>
             </div>
             <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
           </div>
 
-          <div id="leaveBalanceCard" className="table-card leave-bal-card" style={{marginTop: 12, padding: '14px 16px'}}>
-            <div className="leave-bal-head">
+          <div id="leaveBalanceCard" className="leave-panel">
+            <div className="leave-panel-head">
               <div>
-                <div style={{fontWeight:700,fontSize:15}} id="leaveBalFyLabel">Leave balance</div>
-                <div style={{fontSize:12,color:'#6B7280',marginTop:2}} id="leaveBalSub">Loading…</div>
+                <h3 className="leave-panel-title" id="leaveBalFyLabel">Leave balance</h3>
+                <p className="leave-panel-sub" id="leaveBalSub">Loading…</p>
               </div>
-              <div className="leave-bal-avail-wrap">
-                <div style={{fontSize:12,color:'#6B7280'}}>Available now</div>
-                <div id="leaveBalAvailable" style={{fontSize:22,fontWeight:800}}>—</div>
+            </div>
+            <div id="leaveBalSummary" className="leave-stat-row">
+              <div className="leave-stat">
+                <span className="leave-stat-lbl">Accrued</span>
+                <strong id="leaveBalAccrued" className="leave-stat-val">—</strong>
+              </div>
+              <div className="leave-stat">
+                <span className="leave-stat-lbl">Used</span>
+                <strong id="leaveBalUsed" className="leave-stat-val">—</strong>
+              </div>
+              <div className="leave-stat">
+                <span className="leave-stat-lbl">Pending</span>
+                <strong id="leaveBalPending" className="leave-stat-val">—</strong>
+              </div>
+              <div className="leave-stat leave-stat-avail">
+                <span className="leave-stat-lbl">Available</span>
+                <strong id="leaveBalAvailable" className="leave-stat-val">—</strong>
               </div>
             </div>
             <div id="leaveApplyResultBanner" className="leave-apply-result" hidden={true}></div>
-            <div id="leaveBalanceMonthList" className="leave-bal-month-list"></div>
+            <div className="leave-month-wrap">
+              <div className="leave-month-caption">Month-wise (Apr → Mar)</div>
+              <div className="leave-month-table-scroll">
+                <table className="leave-month-table" aria-label="Monthly leave balance">
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Accrued</th>
+                      <th>Used</th>
+                      <th>Pending</th>
+                      <th>Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody id="leaveBalanceMonthList"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
-          <div className="table-card" style={{marginTop: 12, padding: '14px 16px'}}>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>Leave history</div>
+          <div className="leave-panel leave-hist-panel">
+            <div className="leave-panel-head">
+              <h3 className="leave-panel-title">Leave history</h3>
+              <p className="leave-panel-sub">Your requests, grouped by month</p>
+            </div>
             <div id="myLeavesHistory" className="leave-hist-months">
               <div className="empty-state">Loading your leave requests…</div>
             </div>
-            {/* Kept for legacy mount refs; filled but visually replaced by month groups */}
             <div className="table-scroll view-desktop-only" style={{display:'none'}} aria-hidden="true">
               <table className="data-table"><tbody id="myLeavesTableBody"></tbody></table>
             </div>

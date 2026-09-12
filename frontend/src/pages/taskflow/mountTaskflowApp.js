@@ -5258,40 +5258,60 @@ export async function mountTaskflowApp(opts = {}) {
     const fyEl = document.getElementById('leaveBalFyLabel');
     const subEl = document.getElementById('leaveBalSub');
     const availEl = document.getElementById('leaveBalAvailable');
+    const accruedEl = document.getElementById('leaveBalAccrued');
+    const usedEl = document.getElementById('leaveBalUsed');
+    const pendingEl = document.getElementById('leaveBalPending');
     const list = document.getElementById('leaveBalanceMonthList');
     if (!list) return;
     _leaveBalanceCache = bal || _leaveBalanceCache;
+
+    const setStat = (el, v, { signed = false } = {}) => {
+      if (!el) return;
+      if (v == null || Number.isNaN(Number(v))) {
+        el.textContent = '—';
+        el.classList.remove('is-minus', 'is-zero', 'is-ok');
+        return;
+      }
+      const n = Number(v);
+      el.textContent = signed && n > 0 ? `+${n}` : String(n);
+      el.classList.toggle('is-minus', n < 0);
+      el.classList.toggle('is-zero', n === 0);
+      el.classList.toggle('is-ok', n > 0);
+    };
+
     if (!bal) {
       if (fyEl) fyEl.textContent = 'Leave balance';
       if (subEl) subEl.textContent = 'Could not load balance';
-      if (availEl) availEl.textContent = '—';
-      list.innerHTML = '<div class="empty-state">Balance unavailable</div>';
+      setStat(availEl, null);
+      setStat(accruedEl, null);
+      setStat(usedEl, null);
+      setStat(pendingEl, null);
+      list.innerHTML = '<tr><td colspan="5" class="empty-state">Balance unavailable</td></tr>';
       return;
     }
     if (fyEl) fyEl.textContent = `Leave balance · ${bal.fy_label || ''}`;
     if (subEl) {
-      subEl.textContent = `+${bal.monthly_accrual || 1}/month · Apr–Mar · Accrued ${bal.total_accrued ?? '—'} · Used ${bal.total_used_approved ?? '—'}${bal.total_used_pending ? ` · Pending ${bal.total_used_pending}` : ''}`;
+      subEl.textContent = `+${bal.monthly_accrual || 1} leave / month · financial year April → March · unused months carry forward`;
     }
-    if (availEl) {
-      const v = bal.available;
-      availEl.textContent = v == null ? '—' : (v > 0 ? `+${v}` : String(v));
-      availEl.style.color = v < 0 ? '#C2410C' : v === 0 ? '#6B7280' : '#15803D';
-    }
+    setStat(accruedEl, bal.total_accrued, { signed: true });
+    setStat(usedEl, bal.total_used_approved);
+    setStat(pendingEl, bal.total_used_pending);
+    setStat(availEl, bal.available, { signed: true });
+
     const rows = bal.monthly || [];
     list.innerHTML = rows.map((m) => {
-      const cls = ['leave-bal-month-row', m.is_current ? 'is-current' : '', m.is_future ? 'is-future' : ''].filter(Boolean).join(' ');
-      const balColor = m.balance_after < 0 ? '#C2410C' : m.balance_after === 0 ? '#6B7280' : '#15803D';
+      const cls = [m.is_current ? 'is-current' : '', m.is_future ? 'is-future' : ''].filter(Boolean).join(' ');
+      const balCls = m.balance_after < 0 ? 'is-minus' : m.balance_after > 0 ? 'is-ok' : '';
       const balTxt = `${m.balance_after > 0 ? '+' : ''}${m.balance_after}`;
-      return `<div class="${cls}">
-        <div class="leave-bal-month-title">${escapeHtml(m.label || m.short)}${m.is_current ? ' · now' : ''}</div>
-        <div class="leave-bal-month-metrics">
-          <span>Accrued <strong>${m.accrued ? `+${m.accrued}` : '—'}</strong></span>
-          <span>Used <strong>${m.used_approved ? m.used_approved : '—'}</strong></span>
-          <span>Pending <strong>${m.used_pending ? m.used_pending : '—'}</strong></span>
-          <span>Balance <strong style="color:${balColor}">${balTxt}</strong></span>
-        </div>
-      </div>`;
-    }).join('') || '<div class="empty-state">No months</div>';
+      const monthLabel = `${escapeHtml(m.short || m.label || '')}${m.is_current ? ' · now' : ''}`;
+      return `<tr class="${cls}">
+        <td>${monthLabel}</td>
+        <td class="lb-num">${m.accrued ? `+${m.accrued}` : '—'}</td>
+        <td class="lb-num">${m.used_approved ? m.used_approved : '—'}</td>
+        <td class="lb-num">${m.used_pending ? m.used_pending : '—'}</td>
+        <td class="lb-num lb-bal ${balCls}">${balTxt}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty-state">No months</td></tr>';
   }
 
   async function loadHrRecruitmentMine() {
@@ -5400,7 +5420,6 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
 
-    // Group by month (vertical months); each leave row horizontal
     const groups = new Map();
     leaves.forEach((leave) => {
       const key = leaveMonthKey(leave);
@@ -5412,21 +5431,27 @@ export async function mountTaskflowApp(opts = {}) {
     if (hist) {
       hist.innerHTML = '';
       keys.forEach((key) => {
-        const monthEl = document.createElement('div');
-        monthEl.className = 'leave-hist-month';
-        monthEl.innerHTML = `<div class="leave-hist-month-title">${escapeHtml(leaveMonthTitle(key))}</div>`;
+        const block = document.createElement('div');
+        block.className = 'leave-hist-month-block';
+        block.innerHTML = `<div class="leave-hist-month-label">${escapeHtml(leaveMonthTitle(key))}</div>`;
+
         groups.get(key).forEach((leave) => {
-          const row = document.createElement('div');
-          row.className = 'leave-hist-row';
-          row.innerHTML = `
-            <span class="leave-hist-cell"><strong>${escapeHtml(leaveDateRangeLabel(leave))}</strong></span>
-            <span class="leave-hist-cell reason">${escapeHtml(leave.reason || '—')}</span>
-            <span class="leave-hist-cell">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></span>
-            <span class="leave-hist-cell"><span class="pill ${leavePillClass(leave.status)}">${escapeHtml(leave.status)}</span></span>
-            <span class="leave-hist-cell">${escapeHtml(fmtDate(leave.created_at))}</span>
-            <span class="leave-hist-cell row-actions"></span>
+          const card = document.createElement('div');
+          card.className = 'leave-hist-card';
+          card.innerHTML = `
+            <div class="leave-hist-card-top">
+              <div class="leave-hist-dates">${escapeHtml(leaveDateRangeLabel(leave))}</div>
+              <span class="pill ${leavePillClass(leave.status)}">${escapeHtml(leave.status)}</span>
+            </div>
+            <p class="leave-hist-reason">${escapeHtml(leave.reason || '—')}</p>
+            <div class="leave-hist-meta">
+              <span>Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></span>
+              <span>Applied: <strong>${escapeHtml(fmtDate(leave.created_at))}</strong></span>
+              ${leave.decision_note ? `<span>Note: <strong>${escapeHtml(leave.decision_note)}</strong></span>` : ''}
+            </div>
+            <div class="leave-hist-actions"></div>
           `;
-          const actions = row.querySelector('.row-actions');
+          const actions = card.querySelector('.leave-hist-actions');
           if (leave.status === 'Pending' && actions) {
             const cancelBtn = document.createElement('button');
             cancelBtn.className = 'action-btn action-reject';
@@ -5441,16 +5466,13 @@ export async function mountTaskflowApp(opts = {}) {
               } catch (err) { showToast(err.message, 'error'); }
             });
             actions.appendChild(cancelBtn);
-          } else if (actions) {
-            actions.textContent = '—';
           }
-          monthEl.appendChild(row);
+          block.appendChild(card);
         });
-        hist.appendChild(monthEl);
+        hist.appendChild(block);
       });
     }
 
-    // Keep legacy hidden containers in sync (mount refs / fallback)
     if (els.myLeavesList) els.myLeavesList.innerHTML = '';
     if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
   }
