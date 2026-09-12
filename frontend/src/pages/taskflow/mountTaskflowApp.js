@@ -3542,7 +3542,8 @@ export async function mountTaskflowApp(opts = {}) {
       });
       const wa = sent?._whatsapp;
       if (wa?.ok) {
-        showToast(`Sent for verification ✅ WhatsApp → ${wa.to || 'verifier'}`, 'success');
+        const who = (wa.recipients || []).filter((r) => r.ok).map((r) => r.label || r.to).join(', ');
+        showToast(`Sent for verification ✅ WhatsApp → ${who || wa.to || 'verifier'}`, 'success');
       } else {
         showToast(
           `Sent for verification ✅ but WhatsApp failed (${wa?.reason || 'no number / Meta error'})`,
