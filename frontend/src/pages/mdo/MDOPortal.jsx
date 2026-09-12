@@ -2411,6 +2411,24 @@ const submit = async () => {
 
   setBusy(false);
   if (error) { setErr(error.message); return; }
+
+  // MDO insert is client-side — fire WhatsApp to Chirag + Beena + head + proxy
+  try {
+    await api("/leaves/mdo-notify", {
+      method: "POST",
+      body: JSON.stringify({
+        applicant_name: user.name || user.user_name,
+        from_date: form.from_date,
+        to_date: form.to_date,
+        reason: form.reason || form.leave_type || "Leave",
+        proxy_username: form.proxy_user_name || null,
+        proxy_name: proxyUser?.name || form.proxy_user_name || null,
+      }),
+    });
+  } catch (waErr) {
+    console.warn("MDO leave WhatsApp skip:", waErr?.message || waErr);
+  }
+
   setSubmitted(true);
 };
   if (submitted)

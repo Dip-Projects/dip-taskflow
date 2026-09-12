@@ -517,6 +517,80 @@ router.post('/wa-demo', requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * MDO (and similar) leave is inserted client-side into Supabase — this endpoint
+ * sends the same Chirag + Beena + reporting-head WhatsApp as Office apply.
+ * Also pings the proxy (buddy) when a username is provided.
+ */
+router.post('/mdo-notify', async (req, res) => {
+  try {
+    const {
+      applicant_name,
+      from_date,
+      to_date,
+      reason,
+      proxy_username,
+      proxy_name,
+    } = req.body || {};
+
+    if (!from_date || !to_date) {
+      return res.status(400).json({ error: 'from_date and to_date required' });
+    }
+
+    const applicantName = applicant_name || req.user.full_name || req.user.username || 'Employee';
+    const reasonText = String(reason || 'Leave').trim() || 'Leave';
+
+    let stakeholderResults = [];
+    try {
+      stakeholderResults = await notifyLeaveStakeholders({
+        applicantName,
+        from_date,
+        to_date,
+        reason: reasonText,
+        applicantId: req.user.id,
+      });
+    } catch (waErr) {
+      console.warn('MDO leave WA (stakeholders) skip:', waErr.message);
+    }
+
+    let proxyResult = null;
+    if (proxy_username) {
+      try {
+        const proxy = await whatsappForUsername(proxy_username);
+        if (proxy?.number) {
+          const sent = await sendWhatsAppTemplate(proxy.number, 'leave_buddy_request', [
+            proxy_name || proxy.label || proxy_username,
+            applicantName,
+            String(from_date).slice(0, 10),
+            String(to_date).slice(0, 10),
+            reasonText,
+          ]);
+          proxyResult = { to: proxy.number, label: proxy.label, ok: !!sent?.ok, reason: sent?.reason || null };
+        } else {
+          console.warn('MDO leave WA: proxy has no whatsapp', proxy_username);
+          proxyResult = { label: proxy_username, ok: false, reason: 'no_number' };
+        }
+      } catch (proxyErr) {
+        console.warn('MDO leave WA (proxy) skip:', proxyErr.message);
+        proxyResult = { ok: false, reason: proxyErr.message };
+      }
+    }
+
+    const ok =
+      (stakeholderResults || []).some((r) => r.ok) || !!(proxyResult && proxyResult.ok);
+
+    res.json({
+      ok,
+      template: 'leave_application_notification',
+      recipients: stakeholderResults,
+      proxy: proxyResult,
+    });
+  } catch (err) {
+    console.error('MDO leave WA error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send MDO leave WhatsApp' });
+  }
+});
+
 // ----------------------------- apply for leave -----------------------------
 router.post('/', async (req, res) => {
   try {
@@ -633,26 +707,33 @@ router.post('/', async (req, res) => {
 if (error) throw error;
 
     try {
-      await notifyLeaveStakeholders({
+      const waResults = await notifyLeaveStakeholders({
         applicantName: req.user.full_name,
         from_date,
         to_date,
         reason: reason.trim(),
         applicantId: req.user.id,
       });
+      console.log(
+        'Leave WA stakeholders:',
+        (waResults || []).map((r) => `${r.label}:${r.ok ? 'ok' : r.reason || 'fail'}`).join(', ') || 'none'
+      );
     } catch (waErr) {
       console.warn('Leave WA (head/Chirag) skip:', waErr.message);
     }
 
     try {
       if (buddy.whatsapp_number) {
-        await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
+        const buddySent = await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
           buddy.full_name,
-        req.user.full_name,
-        from_date,
-        to_date,
+          req.user.full_name,
+          from_date,
+          to_date,
           reason.trim(),
         ]);
+        console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
+      } else {
+        console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
       }
     } catch (buddyWaErr) {
       console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
