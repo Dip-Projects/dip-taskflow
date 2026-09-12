@@ -570,7 +570,7 @@ if (!isMdoOffice && !project_id) {
               desc,
               projectName,
               dueLabel,
-              'Open',
+              data.priority || priority || 'Medium',
             ]
           );
           console.log(
