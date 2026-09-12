@@ -5699,8 +5699,10 @@ export async function mountTaskflowApp(opts = {}) {
               if (res.cover_needed) {
                 showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
                 checkLeaveCoverAlerts();
+              } else if (n) {
+                showToast(`Leave approved — ${n} task(s) moved to buddy ✅`, 'success');
               } else {
-                showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+                showToast('Leave approved ✅ (tasks move only after buddy Accepts)', 'success');
               }
               loadLeaveApprovals();
             } catch (err) { showToast(err.message, 'error'); }
