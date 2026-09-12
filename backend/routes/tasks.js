@@ -27,6 +27,33 @@ async function notifyWa(toNumber, templateName, bodyParams) {
   }
 }
 
+async function userWaByUsername(username) {
+  if (!username) return null;
+  const { data } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name, username')
+    .eq('username', username)
+    .maybeSingle();
+  if (!data?.whatsapp_number) return null;
+  return data;
+}
+
+/** Deduped WhatsApp sends by normalized number. */
+async function notifyWaMany(recipients, templateName, bodyParams) {
+  const seen = new Set();
+  const results = [];
+  for (const r of recipients || []) {
+    const raw = r?.whatsapp_number || r?.number || r;
+    const label = r?.full_name || r?.label || '';
+    const key = String(raw || '').replace(/\D/g, '');
+    if (!key || seen.has(key.slice(-10))) continue;
+    seen.add(key.slice(-10));
+    const sent = await notifyWa(raw, templateName, bodyParams);
+    results.push({ ok: !!sent?.ok, to: sent?.to || raw, label, reason: sent?.reason || null });
+  }
+  return results;
+}
+
 function applyDeadlineChange(existing, body, note) {
   let target_date = existing.target_date;
   let hours_to_complete = existing.hours_to_complete != null ? Number(existing.hours_to_complete) : null;
@@ -519,8 +546,7 @@ if (!isMdoOffice && !project_id) {
         data.checkpoints = [];
       }
 
-      // Reliable assign ping: template to assignee (not interactive list — needs 24h window).
-      // Also CC Chirag so admin sees assign alerts on their phone.
+      // Reliable assign ping: template to assignee only
       const { data: assigneeUser } = await supabase
         .from('users')
         .select('whatsapp_number, full_name')
@@ -562,40 +588,9 @@ if (!isMdoOffice && !project_id) {
         waAssign = { ok: false, reason: 'no_number' };
       }
 
-      let waChirag = null;
-      try {
-        const { data: chirag } = await supabase
-          .from('users')
-          .select('whatsapp_number, full_name')
-          .eq('username', 'chirag.s')
-          .maybeSingle();
-        const chiragWa = chirag?.whatsapp_number;
-        const sameAsAssignee =
-          chiragWa &&
-          assigneeUser?.whatsapp_number &&
-          String(chiragWa).replace(/\D/g, '').slice(-10) ===
-            String(assigneeUser.whatsapp_number).replace(/\D/g, '').slice(-10);
-        if (chiragWa && !sameAsAssignee) {
-          waChirag = await sendWhatsAppTemplate(
-            chiragWa,
-            process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
-            [
-              chirag.full_name || 'Chirag',
-              `Assigned to ${assigneeUser?.full_name || 'employee'}: ${desc}`.slice(0, 200),
-              projectName,
-              dueLabel,
-              'Assigned',
-            ]
-          );
-          console.log('Task assign WA Chirag CC:', waChirag?.ok ? 'ok' : waChirag?.reason || 'fail');
-        }
-      } catch (ccErr) {
-        console.warn('Task assign Chirag CC skip:', ccErr.message);
-      }
-
       res.status(201).json({
         ...data,
-        _whatsapp: { assignee: waAssign, chirag: waChirag },
+        _whatsapp: { assignee: waAssign },
       });
     } catch (err) {
       console.error('Create task error:', err.message);
@@ -1193,17 +1188,19 @@ router.patch(
 
       const { data: verifierUser } = await supabase
         .from('users')
-        .select('whatsapp_number, full_name')
+        .select('whatsapp_number, full_name, id')
         .eq('id', verifier_id)
         .maybeSingle();
 
       let waVerify = null;
+      const waVerifyAll = [];
       if (verifierUser?.whatsapp_number) {
         waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
           verifierName: verifierUser.full_name || 'Verifier',
           taskDescription: data.description || 'Task',
           projectName: data.project?.name || '—',
         });
+        waVerifyAll.push({ label: verifierUser.full_name, ok: !!waVerify?.ok, to: waVerify?.to });
         console.log(
           'Verification WA:',
           verifierUser.full_name,
@@ -1212,6 +1209,27 @@ router.patch(
       } else {
         console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
         waVerify = { ok: false, reason: 'no_number' };
+        waVerifyAll.push({ label: 'verifier', ok: false, reason: 'no_number' });
+      }
+
+      // Always CC Chirag (unless he is already the verifier)
+      try {
+        const chirag = await userWaByUsername('chirag.s');
+        const same =
+          chirag?.whatsapp_number &&
+          verifierUser?.whatsapp_number &&
+          String(chirag.whatsapp_number).replace(/\D/g, '').slice(-10) ===
+            String(verifierUser.whatsapp_number).replace(/\D/g, '').slice(-10);
+        if (chirag?.whatsapp_number && !same) {
+          const waChirag = await sendVerificationAlertTemplate(chirag.whatsapp_number, {
+            verifierName: chirag.full_name || 'Chirag',
+            taskDescription: `Verify by ${verifierUser?.full_name || 'verifier'}: ${data.description || 'Task'}`,
+            projectName: data.project?.name || '—',
+          });
+          waVerifyAll.push({ label: 'Chirag', ok: !!waChirag?.ok, to: waChirag?.to });
+        }
+      } catch (ccErr) {
+        console.warn('Verification WA Chirag CC skip:', ccErr.message);
       }
 
       try {
@@ -1227,7 +1245,7 @@ router.patch(
         console.warn('Verifier bot notify skip:', botErr.message);
       }
 
-      res.json({ ...data, _whatsapp: waVerify });
+      res.json({ ...data, _whatsapp: { ok: waVerifyAll.some((r) => r.ok), recipients: waVerifyAll } });
     } catch (err) {
       console.error('Send for verification error:', err.message);
       res.status(500).json({ error: err.message || 'Could not send for verification' });
@@ -1525,15 +1543,16 @@ router.post('/:id/reschedule-request', async (req, res) => {
 
     if (error) throw error;
 
-    // Alert Chirag that a reschedule request needs approval
+    // Reschedule REQUEST → Kishan + Chirag only
     try {
-      const { data: chirag } = await supabase
-        .from('users')
-        .select('whatsapp_number')
-        .eq('username', 'chirag.s')
-        .maybeSingle();
-      if (chirag?.whatsapp_number) {
-        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+      const [kishan, chirag] = await Promise.all([
+        userWaByUsername('kishan.k'),
+        userWaByUsername('chirag.s'),
+      ]);
+      await notifyWaMany(
+        [kishan, chirag].filter(Boolean),
+        'task_reschedule',
+        [
           data.description || 'Task',
           data.project?.name || '—',
           req.user.full_name || 'Employee',
@@ -1542,10 +1561,8 @@ router.post('/:id/reschedule-request', async (req, res) => {
             : 'REQUEST: employee asked to move deadline',
           data.target_date || '—',
           requested_date,
-        ]);
-      } else {
-        console.warn('Reschedule request WA: Chirag has no whatsapp_number');
-      }
+        ]
+      );
     } catch (waErr) {
       console.warn('Reschedule request WA skip:', waErr.message);
     }
@@ -1691,51 +1708,29 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
 
-    // WhatsApp: Chirag + assignee (approve path previously sent nothing)
+    // Approve detail → Chirag only (who asked, why, who approved, old→new date)
     try {
-      const { data: chirag } = await supabase
-        .from('users')
-        .select('whatsapp_number')
-        .eq('username', 'chirag.s')
-        .maybeSingle();
+      const chirag = await userWaByUsername('chirag.s');
+      const assigneeName =
+        data.assigned_to_user?.full_name ||
+        existing.assigned_to_user?.full_name ||
+        'Employee';
       if (chirag?.whatsapp_number) {
         await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
           data.description || 'Task',
           data.project?.name || '—',
-          req.user.full_name || 'Admin',
-          existing.reschedule_reason
-            ? `APPROVED: ${existing.reschedule_reason}`
-            : 'APPROVED: deadline moved',
+          assigneeName,
+          `APPROVED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why: ${
+            existing.reschedule_reason && String(existing.reschedule_reason).trim()
+              ? existing.reschedule_reason.trim()
+              : '—'
+          }`.slice(0, 500),
           existing.target_date || '—',
           approvedDate,
         ]);
       }
     } catch (waErr) {
       console.warn('Approve reschedule WA (Chirag) skip:', waErr.message);
-    }
-
-    try {
-      if (data.assigned_to) {
-        const { data: assignee } = await supabase
-          .from('users')
-          .select('whatsapp_number, full_name')
-          .eq('id', data.assigned_to)
-          .maybeSingle();
-        if (assignee?.whatsapp_number) {
-          await notifyWa(assignee.whatsapp_number, 'task_reschedule', [
-            data.description || 'Task',
-            data.project?.name || '—',
-            req.user.full_name || 'Admin',
-            'Your reschedule request was approved',
-            existing.target_date || '—',
-            approvedDate,
-          ]);
-        } else {
-          console.warn('Approve reschedule WA: assignee has no whatsapp_number', data.assigned_to);
-        }
-      }
-    } catch (waErr) {
-      console.warn('Approve reschedule WA (assignee) skip:', waErr.message);
     }
 
     res.json({
@@ -1760,9 +1755,7 @@ router.patch('/:id/reschedule-request/reject', requireAdmin, async (req, res) =>
     const { id } = req.params;
     const { reason } = req.body || {};
 
-    const { data: existing, error: fetchErr } = await supabase
-      .from('tasks').select('id, reschedule_status').eq('id', id).maybeSingle();
-    if (fetchErr) throw fetchErr;
+    const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
     if (existing.reschedule_status !== 'Pending') {
       return res.status(400).json({ error: 'This request has already been decided' });
@@ -1781,6 +1774,32 @@ router.patch('/:id/reschedule-request/reject', requireAdmin, async (req, res) =>
       .single();
 
     if (error) throw error;
+
+    // Reject detail → Chirag only
+    try {
+      const chirag = await userWaByUsername('chirag.s');
+      const assigneeName =
+        data.assigned_to_user?.full_name ||
+        existing.assigned_to_user?.full_name ||
+        'Employee';
+      if (chirag?.whatsapp_number) {
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          assigneeName,
+          `REJECTED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why asked: ${
+            existing.reschedule_reason && String(existing.reschedule_reason).trim()
+              ? existing.reschedule_reason.trim()
+              : '—'
+          }. Reject note: ${reason && reason.trim() ? reason.trim() : '—'}`.slice(0, 500),
+          existing.target_date || '—',
+          existing.reschedule_requested_date || '—',
+        ]);
+      }
+    } catch (waErr) {
+      console.warn('Reject reschedule WA (Chirag) skip:', waErr.message);
+    }
+
     res.json(data);
   } catch (err) {
     console.error('Reject reschedule error:', err.message);

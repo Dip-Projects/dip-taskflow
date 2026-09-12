@@ -74,6 +74,23 @@ async function chiragWhatsAppNumber() {
   return hit?.whatsapp_number || any?.whatsapp_number || null;
 }
 
+async function kishanWhatsAppNumber() {
+  const { data: byUser } = await supabase
+    .from('users')
+    .select('whatsapp_number')
+    .eq('username', 'kishan.k')
+    .maybeSingle();
+  if (byUser?.whatsapp_number) return byUser.whatsapp_number;
+  const { data: named } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name')
+    .eq('is_active', true)
+    .ilike('full_name', '%kishan%');
+  const hit = (named || []).find((u) => u.whatsapp_number && /kalsariya/i.test(u.full_name || ''));
+  const any = (named || []).find((u) => u.whatsapp_number);
+  return hit?.whatsapp_number || any?.whatsapp_number || null;
+}
+
 /** Run a leaves select with buddy columns; fall back if SQL not migrated yet. */
 async function selectLeaves(applyFilters) {
   const full = await applyFilters(supabase.from('leaves').select(LEAVE_SELECT));
@@ -101,10 +118,12 @@ async function beenaWhatsAppNumbers() {
 }
 
 /**
- * Deduped set of WhatsApp numbers for leave alerts.
- * Always: Chirag + Beena. Plus reporting head / site uppers when provided.
+ * Build leave WA recipients by portal:
+ * - office: Kishan + Beena + Chirag
+ * - mdo: Beena + Chirag
+ * - site: Chirag + extras (site head / uppers) — no Beena
  */
-async function collectLeaveStakeholderNumbers(extraNumbers = []) {
+async function collectLeaveRecipients(mode, extraNumbers = []) {
   const byNorm = new Map();
   const add = (raw, label) => {
     const n = normalizeWhatsAppNumber(raw);
@@ -116,7 +135,14 @@ async function collectLeaveStakeholderNumbers(extraNumbers = []) {
   if (chiragWa) add(chiragWa, 'Chirag');
   else console.warn('Leave WA: Chirag has no whatsapp_number');
 
-  for (const wa of await beenaWhatsAppNumbers()) add(wa, 'Beena');
+  if (mode === 'office' || mode === 'mdo') {
+    for (const wa of await beenaWhatsAppNumbers()) add(wa, 'Beena');
+  }
+  if (mode === 'office') {
+    const kishanWa = await kishanWhatsAppNumber();
+    if (kishanWa) add(kishanWa, 'Kishan');
+    else console.warn('Leave WA: Kishan has no whatsapp_number');
+  }
 
   for (const item of extraNumbers || []) {
     if (!item) continue;
@@ -125,6 +151,11 @@ async function collectLeaveStakeholderNumbers(extraNumbers = []) {
   }
 
   return [...byNorm.values()];
+}
+
+/** @deprecated alias — office-style Chirag+Beena (+extras) */
+async function collectLeaveStakeholderNumbers(extraNumbers = []) {
+  return collectLeaveRecipients('office', extraNumbers);
 }
 
 async function sendLeaveApplicationWa(recipients, { applicantName, from_date, to_date, reason }) {
@@ -175,33 +206,19 @@ async function whatsappForUsername(username) {
   return null;
 }
 
-async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
-  const extras = [];
-
+/** Office leave: Kishan + Beena + Chirag only */
+async function notifyOfficeLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
   const { data: applicant } = await supabase
     .from('users')
-    .select('reporting_head_id, full_name')
+    .select('full_name')
     .eq('id', applicantId)
     .maybeSingle();
 
-  if (applicant?.reporting_head_id) {
-    const { data: head } = await supabase
-      .from('users')
-      .select('whatsapp_number, full_name')
-      .eq('id', applicant.reporting_head_id)
-      .maybeSingle();
-    if (head?.whatsapp_number) extras.push({ number: head.whatsapp_number, label: head.full_name || 'Reporting head' });
-    else console.warn('Leave WA: reporting head has no whatsapp_number', applicant.reporting_head_id);
-  } else {
-    console.warn('Leave WA: applicant has no reporting_head_id', applicantId);
-  }
-
-  const recipients = await collectLeaveStakeholderNumbers(extras);
+  const recipients = await collectLeaveRecipients('office', []);
   if (!recipients.length) {
-    console.warn('Leave WA: nobody to notify (no numbers)');
+    console.warn('Office leave WA: nobody to notify');
     return [];
   }
-
   return sendLeaveApplicationWa(recipients, {
     applicantName: applicantName || applicant?.full_name || 'Employee',
     from_date,
@@ -210,26 +227,42 @@ async function notifyLeaveStakeholders({ applicantName, from_date, to_date, reas
   });
 }
 
-/** WhatsApp Chirag + Beena + reporting head (deduped). */
+/** MDO leave: Beena + Chirag only */
+async function notifyMdoLeaveStakeholders({ applicantName, from_date, to_date, reason, applicantId }) {
+  const { data: applicant } = await supabase
+    .from('users')
+    .select('full_name')
+    .eq('id', applicantId)
+    .maybeSingle();
+
+  const recipients = await collectLeaveRecipients('mdo', []);
+  if (!recipients.length) {
+    console.warn('MDO leave WA: nobody to notify');
+    return [];
+  }
+  return sendLeaveApplicationWa(recipients, {
+    applicantName: applicantName || applicant?.full_name || 'Employee',
+    from_date,
+    to_date,
+    reason,
+  });
+}
+
+/** @deprecated — prefer notifyOfficeLeaveStakeholders / notifyMdoLeaveStakeholders */
+async function notifyLeaveStakeholders(opts) {
+  return notifyOfficeLeaveStakeholders(opts);
+}
+
+/** WhatsApp Chirag + Beena (MDO-style) for buddy/cover follow-ups. */
 async function notifyHeadAndChirag(applicantId, reasonText, from_date, to_date) {
   const { data: applicant } = await supabase
     .from('users')
-    .select('full_name, reporting_head_id')
+    .select('full_name')
     .eq('id', applicantId)
     .maybeSingle();
   if (!applicant) return [];
 
-  const extras = [];
-  if (applicant.reporting_head_id) {
-    const { data: head } = await supabase
-      .from('users')
-      .select('whatsapp_number, full_name')
-      .eq('id', applicant.reporting_head_id)
-      .maybeSingle();
-    if (head?.whatsapp_number) extras.push({ number: head.whatsapp_number, label: head.full_name || 'Reporting head' });
-  }
-
-  const recipients = await collectLeaveStakeholderNumbers(extras);
+  const recipients = await collectLeaveRecipients('mdo', []);
   return sendLeaveApplicationWa(recipients, {
     applicantName: applicant.full_name || 'Employee',
     from_date,
@@ -448,7 +481,7 @@ router.get('/balance', async (req, res) => {
 });
 
 /**
- * Site leave apply → WhatsApp to level approver + site head + Beena + Chirag.
+ * Site leave apply → WhatsApp to site uppers (level/head) + Chirag only.
  * Called from Site portal after site_leaves insert (best-effort).
  */
 router.post('/site-notify', async (req, res) => {
@@ -488,7 +521,7 @@ router.post('/site-notify', async (req, res) => {
     const siteBit = site_name ? ` [Site: ${site_name}]` : '';
     const reasonText = `${String(reason || 'Leave').slice(0, 400)}${siteBit}`;
 
-    const recipients = await collectLeaveStakeholderNumbers(extras);
+    const recipients = await collectLeaveRecipients('site', extras);
     const results = await sendLeaveApplicationWa(recipients, {
       applicantName: name,
       from_date,
@@ -521,7 +554,7 @@ router.post('/wa-demo', requireAdmin, async (req, res) => {
     const from_date = req.body?.from_date || today;
     const to_date = req.body?.to_date || today;
 
-    const recipients = await collectLeaveStakeholderNumbers([]);
+    const recipients = await collectLeaveRecipients('office', []);
     const results = await sendLeaveApplicationWa(recipients, {
       applicantName,
       from_date,
@@ -533,8 +566,7 @@ router.post('/wa-demo', requireAdmin, async (req, res) => {
       ok: results.some((r) => r.ok),
       template: 'task_notification_v2',
       recipients: results,
-      note:
-        'Deduped by phone. If Chirag & Beena share one number in DB, Meta gets one message only.',
+      note: 'Office demo: Kishan + Beena + Chirag (deduped).',
     });
   } catch (err) {
     console.error('Leave WA demo error:', err.message);
@@ -567,7 +599,7 @@ router.post('/mdo-notify', async (req, res) => {
 
     let stakeholderResults = [];
     try {
-      stakeholderResults = await notifyLeaveStakeholders({
+      stakeholderResults = await notifyMdoLeaveStakeholders({
         applicantName,
         from_date,
         to_date,
@@ -734,7 +766,7 @@ if (error) throw error;
     let waStakeholders = [];
     let waBuddy = null;
     try {
-      waStakeholders = await notifyLeaveStakeholders({
+      waStakeholders = await notifyOfficeLeaveStakeholders({
         applicantName: req.user.full_name,
         from_date,
         to_date,
