@@ -290,12 +290,11 @@ async function setCoverNeeded(leaveId, needed) {
 }
 
 async function transferTasksToBuddy(leave) {
+  // Gate = buddy Accept only. Leave Approved alone must never move tasks.
   if (!leave?.buddy_id || leave.buddy_status !== 'Accepted') {
     return { transferred: 0 };
   }
-  // Only move tasks after leave is Approved — never on buddy Yes alone,
-  // and never if leave was Rejected / Cancelled.
-  if (String(leave.status || '') !== 'Approved') {
+  if (leave.status === 'Rejected' || leave.status === 'Cancelled') {
     return { transferred: 0 };
   }
   const tasks = await fetchLeaveWindowTasks(leave);
@@ -374,10 +373,10 @@ async function revertTasksFromBuddy(leave, opts = {}) {
   return { reverted };
 }
 
-/** Undo early buddy assigns until leave is Approved AND buddy Accepted. */
+/** Undo early buddy assigns until buddy has Accepted. */
 async function revertPrematureBuddyTransfers(leave) {
   if (!leave?.id) return { reverted: 0 };
-  if (leave.buddy_status === 'Accepted' && String(leave.status || '') === 'Approved') {
+  if (leave.buddy_status === 'Accepted') {
     return { reverted: 0 };
   }
   return revertTasksFromBuddy(leave, { onlyIfOnBuddy: true });
@@ -894,25 +893,14 @@ router.post('/:id/task-actions', async (req, res) => {
             results.push({ task_id: taskId, action, ok: false, error: 'No buddy on this leave' });
             continue;
           }
-          // Never move to buddy until they Accept AND leave is Approved.
-          // Premature assign was putting all tasks on buddy while request still Pending.
+          // Never move to buddy until they Accept (leave approve alone is not enough).
           if (leave.buddy_status !== 'Accepted') {
             results.push({
               task_id: taskId,
               action,
               ok: true,
               queued: true,
-              message: 'Kept with you — moves to buddy only after they Accept (and leave is approved)',
-            });
-            continue;
-          }
-          if (String(leave.status || '') !== 'Approved') {
-            results.push({
-              task_id: taskId,
-              action,
-              ok: true,
-              queued: true,
-              message: 'Buddy accepted — tasks move when leave is approved',
+              message: 'Kept with you — moves to buddy only after they Accept',
             });
             continue;
           }
@@ -1164,27 +1152,25 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     let tasksMoved = 0;
     const acceptDay = todayYmd();
     if (accept) {
-      // Only transfer if leave is already Approved. If leave is still Pending,
-      // buddy Yes is recorded and tasks move later on admin leave approve.
-      if (String(existing.status || '') === 'Approved') {
-        const transfer = await transferTasksToBuddy({
-          ...existing,
-          buddy_id: req.user.id,
-          buddy_status: 'Accepted',
-          status: 'Approved',
-        });
-        tasksMoved = transfer.transferred || 0;
-        if (tasksMoved > 0) {
-          try {
-            await notifyHeadAndChirag(
-              existing.user_id,
-              `${tasksMoved} task(s) moved to buddy ${req.user.full_name}. Target dates stay as they were.`,
-              existing.from_date,
-              existing.to_date
-            );
-          } catch (waErr) {
-            console.warn('Leave WA (accept) skip:', waErr.message);
-          }
+      // Buddy Accept is the only gate — move leave-window tasks now
+      // (even if leave is still Pending). Leave approve without Accept never moves.
+      const transfer = await transferTasksToBuddy({
+        ...existing,
+        buddy_id: req.user.id,
+        buddy_status: 'Accepted',
+        status: existing.status,
+      });
+      tasksMoved = transfer.transferred || 0;
+      if (tasksMoved > 0) {
+        try {
+          await notifyHeadAndChirag(
+            existing.user_id,
+            `${tasksMoved} task(s) moved to buddy ${req.user.full_name}. Target dates stay as they were.`,
+            existing.from_date,
+            existing.to_date
+          );
+        } catch (waErr) {
+          console.warn('Leave WA (accept) skip:', waErr.message);
         }
       }
     } else {
@@ -1227,8 +1213,6 @@ router.patch('/:id/buddy-respond', async (req, res) => {
       tasks_moved: tasksMoved,
       cover_needed: !accept && String(existing.status || '') === 'Approved',
       accept_date: accept ? acceptDay : null,
-      transfer_pending_leave_approval:
-        accept && String(existing.status || '') !== 'Approved',
     });
   } catch (err) {
     console.error('Buddy respond error:', err.message);
@@ -1440,8 +1424,7 @@ router.patch('/:id/approve', requireAdminOrHr, async (req, res) => {
       return res.status(400).json({ error: 'This request has already been decided' });
     }
     // Head/admin may approve even if buddy has not answered yet.
-    // Task transfer still runs only when buddy_status === 'Accepted'
-    // (here on approve, or later when buddy says Yes on an already-approved leave).
+    // Tasks move ONLY when buddy_status === 'Accepted' — never on approve alone.
 
     const coverNeeded = !!(existing.buddy_id && existing.buddy_status === 'Declined');
     const updatePayload = {

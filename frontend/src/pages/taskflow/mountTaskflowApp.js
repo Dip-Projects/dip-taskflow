@@ -4908,7 +4908,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="leave-task-action-opts">
           <label class="leave-task-opt">
             <input type="radio" name="leave-act-${t.id}" value="buddy" checked />
-            Plan for buddy (${escapeHtml(_leaveTaskPlanBuddyName)}) — moves only after they Accept + leave approved
+            Plan for buddy (${escapeHtml(_leaveTaskPlanBuddyName)}) — moves only after buddy Accepts
           </label>
           <label class="leave-task-opt">
             <input type="radio" name="leave-act-${t.id}" value="hold" />
@@ -4978,7 +4978,7 @@ export async function mountTaskflowApp(opts = {}) {
         );
       } else if (queued) {
         showToast(
-          `Task plans saved ✅ ${queued} stay with you until buddy Accepts and leave is approved`,
+          `Task plans saved ✅ ${queued} stay with you until buddy Accepts`,
           'success'
         );
       } else {
@@ -5656,8 +5656,10 @@ export async function mountTaskflowApp(opts = {}) {
             if (res.cover_needed) {
               showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
               checkLeaveCoverAlerts();
+            } else if (n) {
+              showToast(`Leave approved — ${n} task(s) moved to buddy ✅`, 'success');
             } else {
-              showToast(n ? `Leave approved — ${n} task(s) moved to buddy ✅` : 'Leave approved ✅', 'success');
+              showToast('Leave approved ✅ (tasks move only after buddy Accepts)', 'success');
             }
             loadLeaveApprovals();
           } catch (err) { showToast(err.message, 'error'); }
