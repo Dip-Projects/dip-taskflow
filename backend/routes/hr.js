@@ -1069,9 +1069,11 @@ router.get('/documents/tree', requireAdminOrHr, async (req, res) => {
     list.forEach((d) => {
       const dept = d.department || 'General';
       const desig = d.designation || 'Staff';
+      const person = d.employee_name || 'Unknown';
       if (!tree[dept]) tree[dept] = {};
-      if (!tree[dept][desig]) tree[dept][desig] = [];
-      tree[dept][desig].push(d);
+      if (!tree[dept][desig]) tree[dept][desig] = {};
+      if (!tree[dept][desig][person]) tree[dept][desig][person] = [];
+      tree[dept][desig][person].push(d);
     });
     res.json({ tree });
   } catch (err) {

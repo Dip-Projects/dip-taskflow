@@ -1451,6 +1451,7 @@ function DocumentsView({ employees, user }) {
   const [file, setFile] = useState(null);
   const [openDept, setOpenDept] = useState('');
   const [openDesig, setOpenDesig] = useState('');
+  const [openPerson, setOpenPerson] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -1564,33 +1565,53 @@ function DocumentsView({ employees, user }) {
               <button type="button" className="hr-tab on" style={{ marginBottom: 6 }} onClick={() => setOpenDept(openDept === dept ? '' : dept)}>
                 📁 {dept}
               </button>
-              {openDept === dept && Object.keys(tree[dept] || {}).sort().map((desig) => (
-                <div key={desig} style={{ marginLeft: 16, marginBottom: 8 }}>
-                  <button type="button" className="hr-tab" onClick={() => setOpenDesig(openDesig === `${dept}/${desig}` ? '' : `${dept}/${desig}`)}>
-                    📂 {desig} ({(tree[dept][desig] || []).length})
-                  </button>
-                  {openDesig === `${dept}/${desig}` && (
-                    <div className="hr-table-wrap" style={{ marginTop: 8 }}>
-                      <table className="hr-table">
-                        <thead>
-                          <tr><th>Employee</th><th>Type</th><th>Title</th><th>File</th><th></th></tr>
-                        </thead>
-                        <tbody>
-                          {(tree[dept][desig] || []).map((d) => (
-                            <tr key={d.id}>
-                              <td>{d.employee_name}</td>
-                              <td><span className="hr-badge">{d.doc_type || d.category || 'Other'}</span></td>
-                              <td>{d.title || d.file_name || '—'}</td>
-                              <td>{d.file_url ? <a href={d.file_url} target="_blank" rel="noreferrer">{d.file_name || 'Open'}</a> : '—'}</td>
-                              <td><button type="button" className="hr-btn ghost" onClick={() => remove(d.id)}>Delete</button></td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              ))}
+              {openDept === dept && Object.keys(tree[dept] || {}).sort().map((desig) => {
+                const people = tree[dept][desig] || {};
+                const personKeys = Object.keys(people).sort();
+                const fileCount = personKeys.reduce((n, p) => n + (people[p]?.length || 0), 0);
+                const desigKey = `${dept}/${desig}`;
+                return (
+                  <div key={desig} style={{ marginLeft: 16, marginBottom: 8 }}>
+                    <button type="button" className="hr-tab" onClick={() => setOpenDesig(openDesig === desigKey ? '' : desigKey)}>
+                      📂 {desig} ({fileCount})
+                    </button>
+                    {openDesig === desigKey && personKeys.map((person) => {
+                      const personKey = `${desigKey}/${person}`;
+                      const files = people[person] || [];
+                      return (
+                        <div key={person} style={{ marginLeft: 16, marginTop: 6, marginBottom: 6 }}>
+                          <button
+                            type="button"
+                            className="hr-tab"
+                            onClick={() => setOpenPerson(openPerson === personKey ? '' : personKey)}
+                          >
+                            👤 {person} ({files.length})
+                          </button>
+                          {openPerson === personKey && (
+                            <div className="hr-table-wrap" style={{ marginTop: 8 }}>
+                              <table className="hr-table">
+                                <thead>
+                                  <tr><th>Type</th><th>Title</th><th>File</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                  {files.map((d) => (
+                                    <tr key={d.id}>
+                                      <td><span className="hr-badge">{d.doc_type || d.category || 'Other'}</span></td>
+                                      <td>{d.title || d.file_name || '—'}</td>
+                                      <td>{d.file_url ? <a href={d.file_url} target="_blank" rel="noreferrer">{d.file_name || 'Open'}</a> : '—'}</td>
+                                      <td><button type="button" className="hr-btn ghost" onClick={() => remove(d.id)}>Delete</button></td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           ))
         )}
