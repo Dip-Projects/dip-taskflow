@@ -11,6 +11,18 @@ function normalizeWhatsAppNumber(raw) {
   return n;
 }
 
+/** Meta rejects newlines / tabs / 4+ spaces / # in template body params. */
+function sanitizeWaParam(text) {
+  return (
+    String(text ?? '—')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/ {4,}/g, ' ')
+      .replace(/#/g, '')
+      .trim()
+      .slice(0, 1024) || '—'
+  );
+}
+
 async function metaSend(body) {
   if (!META_PHONE_NUMBER_ID || !META_ACCESS_TOKEN) {
     console.error(
@@ -33,7 +45,12 @@ async function metaSend(body) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('WhatsApp send failed:', JSON.stringify(data));
-      return { ok: false, reason: 'api_error', data };
+      const errMsg =
+        data?.error?.error_user_msg ||
+        data?.error?.message ||
+        data?.error?.error_data?.details ||
+        'api_error';
+      return { ok: false, reason: 'api_error', error: errMsg, data };
     }
     return { ok: true, data };
   } catch (err) {
@@ -64,7 +81,7 @@ async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = []) {
           type: 'body',
           parameters: bodyParams.map((text) => ({
             type: 'text',
-            text: String(text ?? '—').slice(0, 1024) || '—',
+            text: sanitizeWaParam(text),
           })),
         },
       ],

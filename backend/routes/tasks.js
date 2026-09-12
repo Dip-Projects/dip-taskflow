@@ -1188,45 +1188,90 @@ router.patch(
 
       const { data: verifierUser } = await supabase
         .from('users')
-        .select('whatsapp_number, full_name, id')
+        .select('whatsapp_number, full_name, id, username')
         .eq('id', verifier_id)
         .maybeSingle();
+
+      // Most employees still have this seed/default number — not personal WhatsApp.
+      const SHARED_PLACEHOLDER_WA = '8208026194';
+      const waDigits = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
+      const isPlaceholderWa = (raw) => waDigits(raw) === SHARED_PLACEHOLDER_WA;
 
       let waVerify = null;
       const waVerifyAll = [];
       if (verifierUser?.whatsapp_number) {
+        const shared = isPlaceholderWa(verifierUser.whatsapp_number);
+        if (shared) {
+          console.warn(
+            'Verification WA: verifier uses shared placeholder number',
+            verifierUser.full_name,
+            verifierUser.username
+          );
+        }
         waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
           verifierName: verifierUser.full_name || 'Verifier',
           taskDescription: data.description || 'Task',
           projectName: data.project?.name || '—',
         });
-        waVerifyAll.push({ label: verifierUser.full_name, ok: !!waVerify?.ok, to: waVerify?.to });
+        // Treat shared default as delivery-risk: Meta may accept, but not the verifier's phone.
+        const deliveredOk = !!waVerify?.ok && !shared;
+        waVerifyAll.push({
+          role: 'verifier',
+          label: verifierUser.full_name || 'Verifier',
+          ok: deliveredOk,
+          reason: shared
+            ? 'shared_placeholder_number'
+            : waVerify?.ok
+              ? null
+              : waVerify?.reason || waVerify?.error || 'fail',
+          to: waVerify?.to || null,
+          meta_ok: !!waVerify?.ok,
+        });
         console.log(
           'Verification WA:',
           verifierUser.full_name,
-          waVerify?.ok ? 'ok' : waVerify?.reason || 'fail'
+          shared ? 'shared_placeholder' : waVerify?.ok ? 'ok' : waVerify?.reason || 'fail'
         );
       } else {
         console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
         waVerify = { ok: false, reason: 'no_number' };
-        waVerifyAll.push({ label: 'verifier', ok: false, reason: 'no_number' });
+        waVerifyAll.push({
+          role: 'verifier',
+          label: verifierUser?.full_name || 'verifier',
+          ok: false,
+          reason: 'no_number',
+          to: null,
+        });
       }
 
-      // Always CC Chirag (unless he is already the verifier)
+      // Always CC Chirag (unless he is already the verifier / same number)
       try {
         const chirag = await userWaByUsername('chirag.s');
         const same =
           chirag?.whatsapp_number &&
           verifierUser?.whatsapp_number &&
-          String(chirag.whatsapp_number).replace(/\D/g, '').slice(-10) ===
-            String(verifierUser.whatsapp_number).replace(/\D/g, '').slice(-10);
+          waDigits(chirag.whatsapp_number) === waDigits(verifierUser.whatsapp_number);
         if (chirag?.whatsapp_number && !same) {
           const waChirag = await sendVerificationAlertTemplate(chirag.whatsapp_number, {
             verifierName: chirag.full_name || 'Chirag',
             taskDescription: `Verify by ${verifierUser?.full_name || 'verifier'}: ${data.description || 'Task'}`,
             projectName: data.project?.name || '—',
           });
-          waVerifyAll.push({ label: 'Chirag', ok: !!waChirag?.ok, to: waChirag?.to });
+          waVerifyAll.push({
+            role: 'chirag',
+            label: 'Chirag',
+            ok: !!waChirag?.ok,
+            reason: waChirag?.ok ? null : waChirag?.reason || waChirag?.error || 'fail',
+            to: waChirag?.to || null,
+          });
+        } else if (same) {
+          waVerifyAll.push({
+            role: 'chirag',
+            label: 'Chirag',
+            ok: !!waVerifyAll.find((r) => r.role === 'verifier')?.ok,
+            reason: 'same_as_verifier',
+            to: waVerify?.to || null,
+          });
         }
       } catch (ccErr) {
         console.warn('Verification WA Chirag CC skip:', ccErr.message);
@@ -1245,7 +1290,17 @@ router.patch(
         console.warn('Verifier bot notify skip:', botErr.message);
       }
 
-      res.json({ ...data, _whatsapp: { ok: waVerifyAll.some((r) => r.ok), recipients: waVerifyAll } });
+      const verifierOk = waVerifyAll.some((r) => r.role === 'verifier' && r.ok);
+      res.json({
+        ...data,
+        _whatsapp: {
+          ok: verifierOk,
+          recipients: waVerifyAll,
+          reason: verifierOk
+            ? null
+            : waVerifyAll.find((r) => r.role === 'verifier')?.reason || 'verifier_failed',
+        },
+      });
     } catch (err) {
       console.error('Send for verification error:', err.message);
       res.status(500).json({ error: err.message || 'Could not send for verification' });

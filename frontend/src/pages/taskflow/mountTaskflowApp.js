@@ -3541,12 +3541,19 @@ export async function mountTaskflowApp(opts = {}) {
         method: 'PATCH', body: formData, isForm: true
       });
       const wa = sent?._whatsapp;
+      const parts = (wa?.recipients || []).map((r) => {
+        if (r.ok) return `${r.label} ✓`;
+        if (r.reason === 'shared_placeholder_number') {
+          return `${r.label} ✗ (WhatsApp number shared/default — update in Employees)`;
+        }
+        return `${r.label} ✗${r.reason ? ` (${r.reason})` : ''}`;
+      });
+      const summary = parts.join(' · ') || wa?.to || '—';
       if (wa?.ok) {
-        const who = (wa.recipients || []).filter((r) => r.ok).map((r) => r.label || r.to).join(', ');
-        showToast(`Sent for verification ✅ WhatsApp → ${who || wa.to || 'verifier'}`, 'success');
+        showToast(`Sent for verification ✅ WhatsApp → ${summary}`, 'success');
       } else {
         showToast(
-          `Sent for verification ✅ but WhatsApp failed (${wa?.reason || 'no number / Meta error'})`,
+          `Task sent, but verifier WhatsApp issue → ${summary}`,
           'error'
         );
       }
@@ -4218,13 +4225,18 @@ export async function mountTaskflowApp(opts = {}) {
         method: 'PATCH', body: formData, isForm: true
       });
       const wa = sent?._whatsapp;
+      const parts = (wa?.recipients || []).map((r) => {
+        if (r.ok) return `${r.label} ✓`;
+        if (r.reason === 'shared_placeholder_number') {
+          return `${r.label} ✗ (WhatsApp number shared/default — update in Employees)`;
+        }
+        return `${r.label} ✗${r.reason ? ` (${r.reason})` : ''}`;
+      });
+      const summary = parts.join(' · ') || wa?.to || '—';
       if (wa?.ok) {
-        showToast(`Resent for verification ✅ WhatsApp → ${wa.to || 'verifier'}`, 'success');
+        showToast(`Resent for verification ✅ WhatsApp → ${summary}`, 'success');
       } else {
-        showToast(
-          `Resent ✅ but WhatsApp failed (${wa?.reason || 'no number / Meta error'})`,
-          'error'
-        );
+        showToast(`Resent, but verifier WhatsApp issue → ${summary}`, 'error');
       }
       els.resendVerifyModal.hidden = true;
       loadCorrections();
