@@ -289,7 +289,7 @@ export default function TaskflowDom() {
         <section id="view-my" className="view" hidden={true}>
           <div className="view-heading">
             <h2 className="view-title">My tasks</h2>
-            <p className="view-sub">Your delegated work and recurring tasks — switch tabs below.</p>
+            <p className="view-sub">Your delegated work.</p>
           </div>
 
           <div className="smt-day-row" id="officeMyTasksDayRow" hidden style={{display: 'none'}}></div>

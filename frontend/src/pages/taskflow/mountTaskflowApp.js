@@ -2789,8 +2789,25 @@ export async function mountTaskflowApp(opts = {}) {
     const isAdmin = state.user.role === 'admin';
     const tabBar = document.getElementById('myTasksTabBar');
     const otherBtn = document.getElementById('otherPendingTabBtn');
-    if (tabBar) tabBar.hidden = false;
+    const recurringBtn = document.getElementById('myRecurringTabBtn');
+    const myPanel = document.getElementById('myTaskTabPanel');
+    const recPanel = document.getElementById('myRecurringTabPanel');
+    const otherPanel = document.getElementById('otherPendingTabPanel');
+
+    // Recurring + Other Pending tabs are admin-only (employees use sidebar "My recurring tasks")
+    if (recurringBtn) recurringBtn.hidden = !isAdmin;
     if (otherBtn) otherBtn.hidden = !isAdmin;
+    if (tabBar) tabBar.hidden = !isAdmin;
+    if (!isAdmin) {
+      if (myPanel) myPanel.hidden = false;
+      if (recPanel) recPanel.hidden = true;
+      if (otherPanel) otherPanel.hidden = true;
+      document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.mytab === 'mytask');
+      });
+    } else if (tabBar) {
+      tabBar.hidden = false;
+    }
 
     const recBody = document.getElementById('myTasksRecurringTableBody');
     if (recBody) recBody.innerHTML = `<tr><td colspan="4" class="empty-state">Loading recurring…</td></tr>`;
@@ -2798,12 +2815,12 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const [allTasks, recurring] = await Promise.all([
         api('/tasks/my'),
-        api('/recurring-tasks/my').catch(() => []),
+        isAdmin ? api('/recurring-tasks/my').catch(() => []) : Promise.resolve([]),
       ]);
       officeMyAllTasks = Array.isArray(allTasks) ? allTasks : [];
       officeMyRecurringTasks = Array.isArray(recurring) ? recurring : [];
       paintOfficeMyTasks();
-      paintMyRecurringInMyTasks();
+      if (isAdmin) paintMyRecurringInMyTasks();
     } catch (err) {
       showToast(err.message, 'error');
     }
