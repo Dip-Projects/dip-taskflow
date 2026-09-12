@@ -19,9 +19,10 @@ router.use(requireAuth);
 
 async function notifyWa(toNumber, templateName, bodyParams) {
   try {
-    await sendWhatsAppTemplate(toNumber, templateName, bodyParams);
+    return await sendWhatsAppTemplate(toNumber, templateName, bodyParams);
   } catch (err) {
     console.warn('WhatsApp skip:', templateName, err.message);
+    return { ok: false, reason: err.message };
   }
 }
 
@@ -524,20 +525,28 @@ if (!isMdoOffice && !project_id) {
         .eq('id', assigned_to)
         .maybeSingle();
 
+      let waAssign = null;
       if (assigneeUser?.whatsapp_number) {
         try {
-          await notifyAssigneeOpenTasksList(
+          waAssign = await notifyAssigneeOpenTasksList(
             assigned_to,
             assigneeUser.whatsapp_number,
             assigneeUser.full_name || 'Team member'
           );
+          console.log(
+            'Task assign WA:',
+            assigneeUser.full_name,
+            waAssign?.ok ? `ok via ${waAssign.via || 'list'}` : waAssign?.reason || 'fail'
+          );
         } catch (waErr) {
           console.warn('WhatsApp list digest skip:', waErr.message);
+          waAssign = { ok: false, reason: waErr.message };
         }
       } else {
         console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
+        waAssign = { ok: false, reason: 'no_number' };
       }
-      res.status(201).json(data);
+      res.status(201).json({ ...data, _whatsapp: waAssign });
     } catch (err) {
       console.error('Create task error:', err.message);
       res.status(500).json({ error: err.message || 'Could not create task' });
@@ -1138,14 +1147,21 @@ router.patch(
         .eq('id', verifier_id)
         .maybeSingle();
 
+      let waVerify = null;
       if (verifierUser?.whatsapp_number) {
-        await notifyWa(verifierUser.whatsapp_number, 'task_verification_request', [
+        waVerify = await notifyWa(verifierUser.whatsapp_number, 'task_verification_request', [
           verifierUser.full_name || 'Verifier',
           (data.description || 'Task').slice(0, 200),
           data.project?.name || '—',
         ]);
+        console.log(
+          'Verification WA:',
+          verifierUser.full_name,
+          waVerify?.ok ? 'ok' : waVerify?.reason || 'fail'
+        );
       } else {
         console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
+        waVerify = { ok: false, reason: 'no_number' };
       }
 
       try {
@@ -1161,7 +1177,7 @@ router.patch(
         console.warn('Verifier bot notify skip:', botErr.message);
       }
 
-      res.json(data);
+      res.json({ ...data, _whatsapp: waVerify });
     } catch (err) {
       console.error('Send for verification error:', err.message);
       res.status(500).json({ error: err.message || 'Could not send for verification' });

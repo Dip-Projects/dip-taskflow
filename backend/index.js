@@ -51,12 +51,41 @@ app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
 app.use('/api/whatsapp',        require('./routes/whatsapp'));
 app.use('/api/ea-meeting',      require('./routes/ea_meeting'));
-app.get('/api/health', (_, res) => {
-  const phoneId = !!(process.env.META_PHONE_NUMBER_ID && String(process.env.META_PHONE_NUMBER_ID).trim());
-  const accessToken = !!(process.env.META_ACCESS_TOKEN && String(process.env.META_ACCESS_TOKEN).trim());
+app.get('/api/health', async (_, res) => {
+  const phoneIdRaw = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  const accessTokenRaw = String(process.env.META_ACCESS_TOKEN || '').trim();
+  const phoneId = !!phoneIdRaw;
+  const accessToken = !!accessTokenRaw;
+  let metaPing = { ok: false, reason: 'not_configured' };
+  if (phoneId && accessToken) {
+    try {
+      const r = await fetch(
+        `https://graph.facebook.com/v20.0/${phoneIdRaw}?fields=display_phone_number,quality_rating`,
+        { headers: { Authorization: `Bearer ${accessTokenRaw}` } }
+      );
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && !d.error) {
+        metaPing = {
+          ok: true,
+          phone: d.display_phone_number || null,
+          quality: d.quality_rating || null,
+        };
+      } else {
+        metaPing = {
+          ok: false,
+          reason: 'api_error',
+          code: d.error?.code || r.status,
+          message: String(d.error?.message || 'Meta Graph rejected token').slice(0, 160),
+        };
+      }
+    } catch (err) {
+      metaPing = { ok: false, reason: 'exception', message: String(err.message || err).slice(0, 160) };
+    }
+  }
   res.json({
     status: 'ok',
     whatsappConfigured: phoneId && accessToken,
+    metaPing,
     botConfigured: true,
     openaiConfigured: !!process.env.OPENAI_API_KEY,
     whatsappEnv: {

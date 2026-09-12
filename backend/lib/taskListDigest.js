@@ -190,7 +190,7 @@ async function sendOpenTasksListPicker(toNumber, userId, opts = {}) {
     .slice(0, 3)
     .map((t, i) => `${i + 1}) ${clip(t.description, 40)}`)
     .join('; ');
-  await sendWhatsAppTemplate(toNumber, tmpl, [
+  const tmplResult = await sendWhatsAppTemplate(toNumber, tmpl, [
     fullName,
     clip(`${dayName}: ${tasks.length} open: ${preview}`, 200),
     'DIP Projects',
@@ -198,10 +198,11 @@ async function sendOpenTasksListPicker(toNumber, userId, opts = {}) {
     'Open',
   ]);
   return {
-    ok: true,
+    ok: !!tmplResult?.ok,
     count: tasks.length,
     via: 'template_fallback',
     listError: listResult,
+    templateError: tmplResult?.ok ? null : tmplResult,
     dayYmd,
     done: doneN,
   };

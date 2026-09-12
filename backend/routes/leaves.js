@@ -732,8 +732,10 @@ router.post('/', async (req, res) => {
     }
 if (error) throw error;
 
+    let waStakeholders = [];
+    let waBuddy = null;
     try {
-      const waResults = await notifyLeaveStakeholders({
+      waStakeholders = await notifyLeaveStakeholders({
         applicantName: req.user.full_name,
         from_date,
         to_date,
@@ -742,10 +744,11 @@ if (error) throw error;
       });
       console.log(
         'Leave WA stakeholders:',
-        (waResults || []).map((r) => `${r.label}:${r.ok ? 'ok' : r.reason || 'fail'}`).join(', ') || 'none'
+        (waStakeholders || []).map((r) => `${r.label}:${r.ok ? 'ok' : r.reason || 'fail'}`).join(', ') || 'none'
       );
     } catch (waErr) {
       console.warn('Leave WA (head/Chirag) skip:', waErr.message);
+      waStakeholders = [{ ok: false, reason: waErr.message, label: 'stakeholders' }];
     }
 
     try {
@@ -757,15 +760,30 @@ if (error) throw error;
           to_date,
           reason: reason.trim(),
         });
+        waBuddy = {
+          label: buddy.full_name,
+          ok: !!buddySent?.ok,
+          reason: buddySent?.reason || null,
+        };
         console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
       } else {
+        waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
         console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
       }
     } catch (buddyWaErr) {
       console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
+      waBuddy = { ok: false, reason: buddyWaErr.message, label: buddy?.full_name };
     }
 
-    res.status(201).json(data);
+    res.status(201).json({
+      ...data,
+      _whatsapp: {
+        stakeholders: waStakeholders,
+        buddy: waBuddy,
+        ok:
+          (waStakeholders || []).some((r) => r.ok) || !!(waBuddy && waBuddy.ok),
+      },
+    });
   } catch (err) {
     console.error('Apply leave error:', err.message);
     res.status(500).json({ error: err.message || 'Could not submit leave request' });
