@@ -102,14 +102,56 @@ function letterheadHtml(logo) {
 function incrementSentenceHtml(f) {
   // Only when user ticks "Further salary increment" and fills fields
   if (!f.includeFurtherIncrement) return '';
-  const months = String(f.incrementAfterMonths || '').trim();
-  const amt = String(f.incrementAmount || '').trim();
-  if (!months && !amt) return '';
-  const after = esc(months || '______');
-  const hike = amt || '______';
-  const looksPercent = /%/.test(hike);
-  const hikeShow = looksPercent ? esc(hike) : (hike.includes('₹') ? esc(hike) : `₹${esc(hike)}/-`);
-  return ` Further, salary increment shall be reviewed after every <b>${after} month(s)</b>, and the increment shall be <b>${hikeShow}</b> subject to satisfactory performance and management approval.`;
+  const monthsNum = Number(String(f.incrementAfterMonths || '').replace(/[^\d.]/g, ''));
+  const amtRaw = String(f.incrementAmount || '').trim();
+  if (!monthsNum && !amtRaw) return '';
+  const after = monthsNum || String(f.incrementAfterMonths || '').trim() || '______';
+  const looksPercent = /%/.test(amtRaw);
+  const hikeNum = Number(String(amtRaw).replace(/[^\d.]/g, ''));
+  const hikeShow = looksPercent
+    ? esc(amtRaw.includes('%') ? amtRaw : `${amtRaw}%`)
+    : (amtRaw.includes('₹') ? esc(amtRaw) : `₹${esc(inr(hikeNum || amtRaw))}/-`);
+
+  // Starting salary for cumulative schedule (post-probation if available)
+  let base = Number(String(f.revisedSalary || '').replace(/[^\d.]/g, ''));
+  if (!base || f.includeProbationSalaryRevision === false) {
+    base = Number(String(f.probationSalary || '').replace(/[^\d.]/g, '')) || base;
+  }
+
+  // Flat ₹ amount → write 1st / 2nd / 3rd cycle examples (cumulative)
+  if (!looksPercent && monthsNum && hikeNum) {
+    const steps = [];
+    for (let i = 1; i <= 3; i += 1) {
+      const at = monthsNum * i;
+      if (base) {
+        const nextSal = base + hikeNum * i;
+        steps.push(
+          `after first <b>${at} month(s)</b> salary shall become <b>₹${esc(inr(nextSal))}/-</b>`
+        );
+      } else {
+        steps.push(
+          `after <b>${at} month(s)</b> add another <b>₹${esc(inr(hikeNum))}/-</b>`
+        );
+      }
+    }
+    // Prefer clearer wording matching offer sample
+    if (base) {
+      return (
+        ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
+        ` subject to satisfactory performance and management approval` +
+        ` (1st cycle after ${esc(String(monthsNum))} months → <b>₹${esc(inr(base + hikeNum))}/-</b>;` +
+        ` 2nd cycle after ${esc(String(monthsNum * 2))} months → <b>₹${esc(inr(base + hikeNum * 2))}/-</b>;` +
+        ` 3rd cycle after ${esc(String(monthsNum * 3))} months → <b>₹${esc(inr(base + hikeNum * 3))}/-</b>; and so on).`
+      );
+    }
+    return (
+      ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
+      ` subject to satisfactory performance and management approval` +
+      ` (${steps.join('; ')}; and so on).`
+    );
+  }
+
+  return ` Further, salary increment shall be reviewed after every <b>${esc(String(after))} month(s)</b>, and the increment shall be <b>${hikeShow}</b> subject to satisfactory performance and management approval.`;
 }
 
 /** Returns HTML paragraph strings (already escaped where needed). */

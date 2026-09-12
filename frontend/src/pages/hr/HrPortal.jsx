@@ -203,6 +203,8 @@ const HR_DESIGNATIONS_FALLBACK = [
   'Team lead',
   'Coordinator',
   'Office Head',
+  'Estimator',
+  'Sr Estimator',
   'JR.ESTIMATOR',
   'Jr. Estimator',
   'MIS',
@@ -210,6 +212,63 @@ const HR_DESIGNATIONS_FALLBACK = [
   'Sales Executive',
   'Staff',
 ];
+
+/** Select + optional custom designation via "+" */
+function DesignationPicker({ value, onChange, designations, required }) {
+  const base = designations?.length ? designations : HR_DESIGNATIONS_FALLBACK;
+  const list = [...base];
+  ['Estimator', 'Sr Estimator'].forEach((d) => {
+    if (!list.includes(d)) list.push(d);
+  });
+  const inList = list.includes(value);
+  const [customMode, setCustomMode] = useState(!inList && !!value);
+
+  useEffect(() => {
+    if (value && !list.includes(value)) setCustomMode(true);
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%' }}>
+      {customMode ? (
+        <input
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Type designation…"
+          required={required}
+          style={{ flex: 1 }}
+        />
+      ) : (
+        <select
+          value={inList ? value : (list[0] || '')}
+          onChange={(e) => onChange(e.target.value)}
+          required={required}
+          style={{ flex: 1 }}
+        >
+          {list.map((d) => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+      )}
+      <button
+        type="button"
+        className="hr-btn ghost"
+        title={customMode ? 'Back to list' : 'Add custom designation'}
+        onClick={() => {
+          if (customMode) {
+            setCustomMode(false);
+            onChange(list.includes(value) ? value : list[0] || 'Site Engineer');
+          } else {
+            setCustomMode(true);
+            onChange('');
+          }
+        }}
+        style={{ flexShrink: 0, minWidth: 36, padding: '7px 10px' }}
+      >
+        {customMode ? '↩' : '+'}
+      </button>
+    </div>
+  );
+}
 
 /** Normalize directory row (system user OR hr_only) for pickers */
 function asEmpShape(s) {
@@ -391,9 +450,12 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
               </select>
             </label>
             <label>Designation *
-              <select value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })}>
-                {desigs.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <DesignationPicker
+                value={form.designation}
+                onChange={(v) => setForm({ ...form, designation: v })}
+                designations={desigs}
+                required
+              />
             </label>
             <label>WhatsApp
               <input value={form.whatsapp_number} onChange={(e) => setForm({ ...form, whatsapp_number: e.target.value })} placeholder="91xxxxxxxxxx" />
@@ -2025,15 +2087,12 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
               </select>
             </label>
             <label>Designation
-              <select
-                value={desigs.includes(offerFields.designation) ? offerFields.designation : (offerFields.designation || 'Site Engineer')}
-                onChange={(e) => setOfferFields({ ...offerFields, designation: e.target.value })}
-              >
-                {!desigs.includes(offerFields.designation) && offerFields.designation ? (
-                  <option value={offerFields.designation}>{offerFields.designation}</option>
-                ) : null}
-                {desigs.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <DesignationPicker
+                value={offerFields.designation || ''}
+                onChange={(v) => setOfferFields({ ...offerFields, designation: v })}
+                designations={desigs}
+                required
+              />
             </label>
             <label>Joining date
               <input value={offerFields.joiningDate || ''} onChange={(e) => setOfferFields({ ...offerFields, joiningDate: e.target.value })} placeholder="e.g. 1 OCT 2026" />
@@ -2106,22 +2165,22 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 checked={!!offerFields.includeFurtherIncrement}
                 onChange={(e) => setOfferFields({ ...offerFields, includeFurtherIncrement: e.target.checked })}
               />
-              Add further salary increment line (after X months → amount)
+              Add further salary increment (every X months → +₹ amount, letter pe cumulative 1st/2nd/3rd cycle)
             </label>
             {offerFields.includeFurtherIncrement && (
               <>
-                <label>Increment after (months)
+                <label>Every (months)
                   <input
                     value={offerFields.incrementAfterMonths || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAfterMonths: e.target.value })}
-                    placeholder="e.g. 12"
+                    placeholder="e.g. 2"
                   />
                 </label>
-                <label>Increment amount (₹ or %)
+                <label>Increment amount each cycle (₹)
                   <input
                     value={offerFields.incrementAmount || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAmount: e.target.value })}
-                    placeholder="e.g. 5000 or 10%"
+                    placeholder="e.g. 2000"
                   />
                 </label>
               </>

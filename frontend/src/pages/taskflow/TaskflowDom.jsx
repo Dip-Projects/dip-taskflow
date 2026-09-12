@@ -922,7 +922,24 @@ export default function TaskflowDom() {
           <form id="hrRecruitForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
             <div className="field">
               <label htmlFor="hr-rec-designation">Designation needed <span className="req">*</span></label>
-              <input id="hr-rec-designation" required placeholder="e.g. Site Engineer, Sales Executive, Safety Officer" />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <select id="hr-rec-designation" required defaultValue="Site Engineer" style={{ flex: 1 }}>
+                  <option value="Site Engineer">Site Engineer</option>
+                  <option value="Site Incharge">Site Incharge</option>
+                  <option value="Site Head">Site Head</option>
+                  <option value="Estimator">Estimator</option>
+                  <option value="Sr Estimator">Sr Estimator</option>
+                  <option value="Jr. Estimator">Jr. Estimator</option>
+                  <option value="Coordinator">Coordinator</option>
+                  <option value="Sales Executive">Sales Executive</option>
+                  <option value="MIS">MIS</option>
+                  <option value="EA">EA</option>
+                  <option value="Staff">Staff</option>
+                  <option value="__custom__">Other (type below)…</option>
+                </select>
+                <button type="button" className="ghost-btn" id="hr-rec-desig-plus" title="Custom designation" style={{ minWidth: 36 }}>+</button>
+              </div>
+              <input id="hr-rec-designation-custom" hidden placeholder="Type custom designation…" style={{ marginTop: 8 }} />
             </div>
             <div className="field">
               <label htmlFor="hr-rec-experience">Experience required <span className="req">*</span></label>

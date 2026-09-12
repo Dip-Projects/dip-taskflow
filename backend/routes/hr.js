@@ -57,6 +57,8 @@ const HR_DESIGNATIONS = [
   'Coordinator',
   'Site Co-ordinater',
   'Office Head',
+  'Estimator',
+  'Sr Estimator',
   'JR.ESTIMATOR',
   'Jr. Estimator',
   'MIS',

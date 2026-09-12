@@ -5479,11 +5479,45 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  function resolveHrRecDesignation() {
+    const sel = document.getElementById('hr-rec-designation');
+    const custom = document.getElementById('hr-rec-designation-custom');
+    const v = sel?.value?.trim() || '';
+    if (v === '__custom__' || (custom && !custom.hidden)) {
+      return custom?.value?.trim() || '';
+    }
+    return v;
+  }
+
+  function showHrRecCustomDesig(show) {
+    const sel = document.getElementById('hr-rec-designation');
+    const custom = document.getElementById('hr-rec-designation-custom');
+    if (!custom) return;
+    custom.hidden = !show;
+    if (show) {
+      if (sel) sel.value = '__custom__';
+      custom.required = true;
+      custom.focus();
+    } else {
+      custom.required = false;
+      custom.value = '';
+      if (sel && sel.value === '__custom__') sel.value = 'Site Engineer';
+    }
+  }
+
+  document.getElementById('hr-rec-desig-plus')?.addEventListener('click', () => {
+    const custom = document.getElementById('hr-rec-designation-custom');
+    showHrRecCustomDesig(!!custom?.hidden);
+  });
+  document.getElementById('hr-rec-designation')?.addEventListener('change', (e) => {
+    showHrRecCustomDesig(e.target.value === '__custom__');
+  });
+
   document.getElementById('hrRecruitForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const msg = document.getElementById('hrRecruitMsg');
     if (msg) { msg.hidden = true; msg.textContent = ''; }
-    const designation = document.getElementById('hr-rec-designation')?.value?.trim();
+    const designation = resolveHrRecDesignation();
     const experience = document.getElementById('hr-rec-experience')?.value?.trim();
     const openingsRaw = document.getElementById('hr-rec-openings')?.value;
     const openings = Math.max(1, Math.min(50, parseInt(openingsRaw, 10) || 1));
@@ -5509,10 +5543,13 @@ export async function mountTaskflowApp(opts = {}) {
         },
       });
       e.target.reset();
+      showHrRecCustomDesig(false);
       const openingsEl = document.getElementById('hr-rec-openings');
       if (openingsEl) openingsEl.value = '1';
       const urg = document.getElementById('hr-rec-urgency');
       if (urg) urg.value = 'Normal';
+      const desigSel = document.getElementById('hr-rec-designation');
+      if (desigSel) desigSel.value = 'Site Engineer';
       showToast('Requirement sent to HR', 'success');
       loadHrRecruitmentMine();
     } catch (err) {
