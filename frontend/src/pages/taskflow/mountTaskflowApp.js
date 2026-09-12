@@ -4908,7 +4908,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="leave-task-action-opts">
           <label class="leave-task-opt">
             <input type="radio" name="leave-act-${t.id}" value="buddy" checked />
-            Assign to buddy (${escapeHtml(_leaveTaskPlanBuddyName)})
+            Plan for buddy (${escapeHtml(_leaveTaskPlanBuddyName)}) — moves only after they Accept + leave approved
           </label>
           <label class="leave-task-opt">
             <input type="radio" name="leave-act-${t.id}" value="hold" />
@@ -4970,10 +4970,16 @@ export async function mountTaskflowApp(opts = {}) {
         body: { actions },
       });
       const failed = (res.results || []).filter((r) => !r.ok);
+      const queued = (res.results || []).filter((r) => r.ok && r.queued).length;
       if (failed.length) {
         showToast(
           `Saved ${res.applied || 0} task plan(s); ${failed.length} failed (e.g. reschedule not allowed)`,
           'error'
+        );
+      } else if (queued) {
+        showToast(
+          `Task plans saved ✅ ${queued} stay with you until buddy Accepts and leave is approved`,
+          'success'
         );
       } else {
         showToast(`Task plans saved for leave (${res.applied || actions.length}) ✅`, 'success');

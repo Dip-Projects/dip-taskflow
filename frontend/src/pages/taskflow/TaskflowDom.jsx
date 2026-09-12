@@ -2039,8 +2039,8 @@ export default function TaskflowDom() {
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
-            After you submit, you can choose per task: assign to this buddy now, keep on hold, or request a reschedule.
-            Head/admin can approve leave anytime. Open tasks move to the buddy only after they say Yes (if leave is already approved, transfer happens then; if they Yes first, transfer happens when leave is approved).
+            After you submit, choose per task: plan for buddy (moves only after they Accept and leave is approved), keep on hold, or request a reschedule.
+            Head/admin can approve leave anytime. Open tasks move to the buddy only after they say Yes and leave is approved.
           </p>
         </div>
         <p id="leaveFormMsg" className="form-error" hidden={true}></p>

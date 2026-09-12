@@ -331,8 +331,9 @@ async function transferTasksToBuddy(leave) {
 }
 
 /** If tasks were moved for this leave, put them back on the original assignee. */
-async function revertTasksFromBuddy(leave) {
+async function revertTasksFromBuddy(leave, opts = {}) {
   if (!leave?.id) return { reverted: 0 };
+  const onlyIfOnBuddy = !!opts.onlyIfOnBuddy;
   let rows = [];
   const withCover = await supabase
     .from('tasks')
@@ -346,6 +347,11 @@ async function revertTasksFromBuddy(leave) {
 
   let reverted = 0;
   for (const t of rows) {
+    // Hold/reschedule markers stay on the employee — only pull back tasks
+    // that were actually reassigned to the buddy too early.
+    if (onlyIfOnBuddy && leave.buddy_id && String(t.assigned_to) !== String(leave.buddy_id)) {
+      continue;
+    }
     const backTo = t.leave_cover_from || leave.user_id;
     if (!backTo) continue;
     const patch = {
@@ -364,8 +370,17 @@ async function revertTasksFromBuddy(leave) {
       reverted += 1;
     }
   }
-  await setCoverNeeded(leave.id, false);
+  if (!onlyIfOnBuddy) await setCoverNeeded(leave.id, false);
   return { reverted };
+}
+
+/** Undo early buddy assigns until leave is Approved AND buddy Accepted. */
+async function revertPrematureBuddyTransfers(leave) {
+  if (!leave?.id) return { reverted: 0 };
+  if (leave.buddy_status === 'Accepted' && String(leave.status || '') === 'Approved') {
+    return { reverted: 0 };
+  }
+  return revertTasksFromBuddy(leave, { onlyIfOnBuddy: true });
 }
 
 function normDept(d) {
@@ -832,6 +847,13 @@ router.post('/:id/task-actions', async (req, res) => {
       return res.status(400).json({ error: 'Leave is no longer open for task planning' });
     }
 
+    // Pull back any tasks that were wrongly moved to buddy before Accept+Approve
+    try {
+      await revertPrematureBuddyTransfers(leave);
+    } catch (revErr) {
+      console.warn('Leave task-actions premature revert skip:', revErr.message);
+    }
+
     const actions = Array.isArray(req.body?.actions) ? req.body.actions : [];
     if (!actions.length) {
       return res.json({ ok: true, results: [] });
@@ -870,6 +892,28 @@ router.post('/:id/task-actions', async (req, res) => {
         if (action === 'buddy') {
           if (!leave.buddy_id) {
             results.push({ task_id: taskId, action, ok: false, error: 'No buddy on this leave' });
+            continue;
+          }
+          // Never move to buddy until they Accept AND leave is Approved.
+          // Premature assign was putting all tasks on buddy while request still Pending.
+          if (leave.buddy_status !== 'Accepted') {
+            results.push({
+              task_id: taskId,
+              action,
+              ok: true,
+              queued: true,
+              message: 'Kept with you — moves to buddy only after they Accept (and leave is approved)',
+            });
+            continue;
+          }
+          if (String(leave.status || '') !== 'Approved') {
+            results.push({
+              task_id: taskId,
+              action,
+              ok: true,
+              queued: true,
+              message: 'Buddy accepted — tasks move when leave is approved',
+            });
             continue;
           }
           const patch = {
@@ -1095,6 +1139,13 @@ router.patch('/:id/buddy-respond', async (req, res) => {
     }
     if (existing.status === 'Rejected' || existing.status === 'Cancelled') {
       return res.status(400).json({ error: 'This leave is no longer active' });
+    }
+
+    // Safety: never leave tasks on buddy while request was still Pending
+    try {
+      await revertPrematureBuddyTransfers(existing);
+    } catch (revErr) {
+      console.warn('Buddy respond premature revert skip:', revErr.message);
     }
 
     const buddy_status = accept ? 'Accepted' : 'Declined';
