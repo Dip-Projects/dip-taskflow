@@ -138,16 +138,16 @@ function incrementSentenceHtml(f) {
     if (base) {
       return (
         ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
-        ` subject to satisfactory performance and management approval` +
-        ` (after ${esc(String(monthsNum))} months salary shall be <b>₹${esc(inr(base + hikeNum))}/-</b>;` +
-        ` after ${esc(String(monthsNum * 2))} months salary shall be <b>₹${esc(inr(base + hikeNum * 2))}/-</b>;` +
-        ` after ${esc(String(monthsNum * 3))} months salary shall be <b>₹${esc(inr(base + hikeNum * 3))}/-</b>; and so on).`
+        ` subject to satisfactory performance and management approval.` +
+        ` After ${esc(String(monthsNum))} months salary shall be <b>₹${esc(inr(base + hikeNum))}/-</b>.` +
+        ` After ${esc(String(monthsNum * 2))} months salary shall be <b>₹${esc(inr(base + hikeNum * 2))}/-</b>.` +
+        ` After ${esc(String(monthsNum * 3))} months salary shall be <b>₹${esc(inr(base + hikeNum * 3))}/-</b>. And so on.`
       );
     }
     return (
       ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
-      ` subject to satisfactory performance and management approval` +
-      ` (${steps.join('; ')}; and so on).`
+      ` subject to satisfactory performance and management approval.` +
+      ` ${steps.map((s) => s.charAt(0).toUpperCase() + s.slice(1) + '.').join(' ')} And so on.`
     );
   }
 
