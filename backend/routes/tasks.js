@@ -1459,6 +1459,31 @@ router.post('/:id/reschedule-request', async (req, res) => {
 
     if (error) throw error;
 
+    // Alert Chirag that a reschedule request needs approval
+    try {
+      const { data: chirag } = await supabase
+        .from('users')
+        .select('whatsapp_number')
+        .eq('username', 'chirag.s')
+        .maybeSingle();
+      if (chirag?.whatsapp_number) {
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          req.user.full_name || 'Employee',
+          reason && reason.trim()
+            ? `REQUEST: ${reason.trim()}`
+            : 'REQUEST: employee asked to move deadline',
+          data.target_date || '—',
+          requested_date,
+        ]);
+      } else {
+        console.warn('Reschedule request WA: Chirag has no whatsapp_number');
+      }
+    } catch (waErr) {
+      console.warn('Reschedule request WA skip:', waErr.message);
+    }
+
     res.status(201).json(data);
   } catch (err) {
     console.error('Reschedule request error:', err.message);
@@ -1599,6 +1624,53 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
     }
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+
+    // WhatsApp: Chirag + assignee (approve path previously sent nothing)
+    try {
+      const { data: chirag } = await supabase
+        .from('users')
+        .select('whatsapp_number')
+        .eq('username', 'chirag.s')
+        .maybeSingle();
+      if (chirag?.whatsapp_number) {
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          req.user.full_name || 'Admin',
+          existing.reschedule_reason
+            ? `APPROVED: ${existing.reschedule_reason}`
+            : 'APPROVED: deadline moved',
+          existing.target_date || '—',
+          approvedDate,
+        ]);
+      }
+    } catch (waErr) {
+      console.warn('Approve reschedule WA (Chirag) skip:', waErr.message);
+    }
+
+    try {
+      if (data.assigned_to) {
+        const { data: assignee } = await supabase
+          .from('users')
+          .select('whatsapp_number, full_name')
+          .eq('id', data.assigned_to)
+          .maybeSingle();
+        if (assignee?.whatsapp_number) {
+          await notifyWa(assignee.whatsapp_number, 'task_reschedule', [
+            data.description || 'Task',
+            data.project?.name || '—',
+            req.user.full_name || 'Admin',
+            'Your reschedule request was approved',
+            existing.target_date || '—',
+            approvedDate,
+          ]);
+        } else {
+          console.warn('Approve reschedule WA: assignee has no whatsapp_number', data.assigned_to);
+        }
+      }
+    } catch (waErr) {
+      console.warn('Approve reschedule WA (assignee) skip:', waErr.message);
+    }
 
     res.json({
       ...data,

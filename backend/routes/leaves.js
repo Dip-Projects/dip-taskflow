@@ -142,6 +142,32 @@ async function sendLeaveApplicationWa(recipients, { applicantName, from_date, to
   return results;
 }
 
+/**
+ * Buddy cover ping. Preferred template leave_buddy_request is not on Meta WABA
+ * yet — fall back to leave_application_notification so the buddy still gets WA.
+ */
+async function sendLeaveBuddyRequestWa(toNumber, { buddyName, applicantName, from_date, to_date, reason }) {
+  const preferred = await sendWhatsAppTemplate(toNumber, 'leave_buddy_request', [
+    buddyName || 'Colleague',
+    applicantName || 'Employee',
+    String(from_date || '—').slice(0, 10),
+    String(to_date || '—').slice(0, 10),
+    String(reason || '—').slice(0, 400),
+  ]);
+  if (preferred?.ok) return preferred;
+
+  console.warn(
+    'Leave buddy template missing/failed; falling back to leave_application_notification:',
+    preferred?.reason || preferred?.data?.error?.message || 'unknown'
+  );
+  return sendWhatsAppTemplate(toNumber, 'leave_application_notification', [
+    `${applicantName || 'Employee'} (cover request for ${buddyName || 'you'})`,
+    String(from_date || '—').slice(0, 10),
+    String(to_date || '—').slice(0, 10),
+    `Buddy cover please: ${String(reason || '—').slice(0, 400)}`,
+  ]);
+}
+
 async function whatsappForUsername(username) {
   if (!username) return null;
   const { data } = await supabase
@@ -558,13 +584,13 @@ router.post('/mdo-notify', async (req, res) => {
       try {
         const proxy = await whatsappForUsername(proxy_username);
         if (proxy?.number) {
-          const sent = await sendWhatsAppTemplate(proxy.number, 'leave_buddy_request', [
-            proxy_name || proxy.label || proxy_username,
+          const sent = await sendLeaveBuddyRequestWa(proxy.number, {
+            buddyName: proxy_name || proxy.label || proxy_username,
             applicantName,
-            String(from_date).slice(0, 10),
-            String(to_date).slice(0, 10),
-            reasonText,
-          ]);
+            from_date,
+            to_date,
+            reason: reasonText,
+          });
           proxyResult = { to: proxy.number, label: proxy.label, ok: !!sent?.ok, reason: sent?.reason || null };
         } else {
           console.warn('MDO leave WA: proxy has no whatsapp', proxy_username);
@@ -724,13 +750,13 @@ if (error) throw error;
 
     try {
       if (buddy.whatsapp_number) {
-        const buddySent = await sendWhatsAppTemplate(buddy.whatsapp_number, 'leave_buddy_request', [
-          buddy.full_name,
-          req.user.full_name,
+        const buddySent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
+          buddyName: buddy.full_name,
+          applicantName: req.user.full_name,
           from_date,
           to_date,
-          reason.trim(),
-        ]);
+          reason: reason.trim(),
+        });
         console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
       } else {
         console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
@@ -1131,13 +1157,21 @@ router.patch('/:id/buddy-respond', async (req, res) => {
         .eq('id', existing.user_id)
         .maybeSingle();
       if (applicant?.whatsapp_number) {
-        await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_buddy_response', [
+        const preferred = await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_buddy_response', [
           applicant.full_name,
           req.user.full_name,
           accept ? 'accepted' : 'declined',
           existing.from_date,
           existing.to_date,
         ]);
+        if (!preferred?.ok) {
+          await sendWhatsAppTemplate(applicant.whatsapp_number, 'leave_application_notification', [
+            applicant.full_name || 'Employee',
+            String(existing.from_date || '—').slice(0, 10),
+            String(existing.to_date || '—').slice(0, 10),
+            `Buddy ${req.user.full_name || 'colleague'} ${accept ? 'accepted' : 'declined'} your cover request`,
+          ]);
+        }
       }
     } catch (buddyWaErr) {
       console.warn('Leave WA (applicant buddy response) skip:', buddyWaErr.message);
