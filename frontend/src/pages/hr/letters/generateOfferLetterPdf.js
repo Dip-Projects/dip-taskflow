@@ -139,9 +139,9 @@ function incrementSentenceHtml(f) {
       return (
         ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
         ` subject to satisfactory performance and management approval` +
-        ` (1st cycle after ${esc(String(monthsNum))} months → <b>₹${esc(inr(base + hikeNum))}/-</b>;` +
-        ` 2nd cycle after ${esc(String(monthsNum * 2))} months → <b>₹${esc(inr(base + hikeNum * 2))}/-</b>;` +
-        ` 3rd cycle after ${esc(String(monthsNum * 3))} months → <b>₹${esc(inr(base + hikeNum * 3))}/-</b>; and so on).`
+        ` (after ${esc(String(monthsNum))} months salary shall be <b>₹${esc(inr(base + hikeNum))}/-</b>;` +
+        ` after ${esc(String(monthsNum * 2))} months salary shall be <b>₹${esc(inr(base + hikeNum * 2))}/-</b>;` +
+        ` after ${esc(String(monthsNum * 3))} months salary shall be <b>₹${esc(inr(base + hikeNum * 3))}/-</b>; and so on).`
       );
     }
     return (

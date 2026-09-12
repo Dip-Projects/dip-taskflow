@@ -2165,7 +2165,7 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 checked={!!offerFields.includeFurtherIncrement}
                 onChange={(e) => setOfferFields({ ...offerFields, includeFurtherIncrement: e.target.checked })}
               />
-              Add further salary increment (every X months → +₹ amount, letter pe cumulative 1st/2nd/3rd cycle)
+              Add further salary increment (every X months, +₹ amount; letter pe cumulative schedule)
             </label>
             {offerFields.includeFurtherIncrement && (
               <>
