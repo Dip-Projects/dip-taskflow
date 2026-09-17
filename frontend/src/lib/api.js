@@ -127,6 +127,8 @@ export function processControllerPath() {
 export function postLoginPath(user) {
   if (isClient(user)) return '/client';
   if (isHr(user)) return '/hr';
+  // MDO only via Process Controller role or Permissions "Office ↔ MDO" toggle
+  // (dept name alone must NOT auto-open MDO when toggle is Off).
   if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();
   const dept = (user.department || '').trim().toLowerCase();
   if (dept === 'site engineer') return '/site';
@@ -199,9 +201,15 @@ export function canToggleSite(user) {
   );
 }
 
-/** Office ↔ MDO: Process Controller by role, or Permissions toggle. */
+/**
+ * Office ↔ MDO switch / /mdo access.
+ * Only: Process Controller designation, or Permissions toggle can_switch_office_mdo.
+ * Being in "MDO Office" department alone does NOT grant MDO when the toggle is Off.
+ */
 export function canToggleMdo(user) {
   if (!user || isClient(user)) return false;
+  const role = String(user.role || '').toLowerCase().trim();
+  if (role === 'admin') return true;
   if (isProcessController(user)) return true;
   return !!user.can_switch_office_mdo;
 }

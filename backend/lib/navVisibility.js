@@ -18,7 +18,7 @@ const MODULES = [
   { key: 'daily-report', label: 'Daily report', area: 'office' },
   { key: 'mis-report', label: 'MIS report', area: 'office' },
   { key: 'time-dashboard', label: 'Work & Verification', area: 'office' },
-  { key: 'delay-report', label: 'Emp Delay Report', area: 'office' },
+  { key: 'delay-report', label: 'Task Report', area: 'office' },
   { key: 'fms', label: 'FMS tracker', area: 'office' },
   { key: 'monthly-report', label: 'Monthly Report', area: 'office' },
   { key: 'applyleave', label: 'Apply leave', area: 'office' },

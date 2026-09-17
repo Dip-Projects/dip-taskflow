@@ -1210,14 +1210,35 @@ export default function TaskflowDom() {
             </div>
             <button id="openAddRecurring" className="primary-btn primary-btn-inline" hidden={true}>+ Add recurring task</button>
           </div>
+          <div id="recurringFilterPanel" className="filter-panel" hidden={true}>
+            <div className="filter-row">
+              <div className="filter-field">
+                <label className="filter-label">Project</label>
+                <select id="recurring-filter-project">
+                  <option value="">All projects</option>
+                </select>
+              </div>
+              <div className="filter-field">
+                <label className="filter-label">Name</label>
+                <input type="text" id="recurring-filter-name" placeholder="Search task name…" />
+              </div>
+              <button type="button" id="clearRecurringFilters" className="clear-btn">✕ Clear</button>
+            </div>
+          </div>
           <div id="adminRecurringWrap" hidden={true}>
             <div className="table-card view-desktop-only" style={{marginTop: 20}}>
               <div className="table-scroll">
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Employee</th><th>Description</th><th>Frequency</th>
-                      <th>Period</th><th>Checkpoints</th><th>Active</th><th>Actions</th>
+                      <th>Employee</th>
+                      <th>Project</th>
+                      <th>Description</th>
+                      <th>Frequency</th>
+                      <th>Period</th>
+                      <th>Checkpoints</th>
+                      <th>Active</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="recurringTasksTableBody"></tbody>
@@ -1482,7 +1503,7 @@ export default function TaskflowDom() {
         <section id="view-delay-report" className="view" hidden={true}>
           <div className="view-header-row" style={{flexWrap: 'wrap', gap: 12}}>
             <div className="view-heading" style={{marginBottom: 0}}>
-              <h2 className="view-title">Task Delay Report</h2>
+              <h2 className="view-title">Task Report</h2>
               <p className="view-sub">Employee-wise assigned → accept → deadline → submit → Start Verification → verified. Work + verify delays use office hours (9:30–6:30, lunch 1–2, Mon–Sat; verify SLA = 2h).</p>
             </div>
             <div className="mis-toolbar">
@@ -2522,25 +2543,48 @@ export default function TaskflowDom() {
           </div>
         </div>
 
-        {/* Monthly day-of-month picker */}
+        {/* Monthly day-of-month range (from–to, e.g. 14–17) */}
         <div className="field" id="monthlyDayField" hidden={true}>
-          <label htmlFor="rec-monthly-day">Day of month <span className="req">*</span></label>
-          <select id="rec-monthly-day" defaultValue="1">
-            {Array.from({ length: 31 }, (_, i) => {
-              const d = i + 1;
-              const suf =
-                d === 1 || d === 21 || d === 31 ? 'st'
-                  : d === 2 || d === 22 ? 'nd'
-                    : d === 3 || d === 23 ? 'rd'
-                      : 'th';
-              return (
-                <option key={d} value={d}>
-                  {d}{suf} of every month
-                </option>
-              );
-            })}
-          </select>
-          <p className="form-note">Short months (e.g. Feb): if day is past month-end, task fires on last day.</p>
+          <label>Days of month <span className="req">*</span></label>
+          <div className="field-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="rec-monthly-day">From</label>
+              <select id="rec-monthly-day" defaultValue="1">
+                {Array.from({ length: 31 }, (_, i) => {
+                  const d = i + 1;
+                  const suf =
+                    d === 1 || d === 21 || d === 31 ? 'st'
+                      : d === 2 || d === 22 ? 'nd'
+                        : d === 3 || d === 23 ? 'rd'
+                          : 'th';
+                  return (
+                    <option key={d} value={d}>
+                      {d}{suf}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="rec-monthly-day-to">To</label>
+              <select id="rec-monthly-day-to" defaultValue="1">
+                {Array.from({ length: 31 }, (_, i) => {
+                  const d = i + 1;
+                  const suf =
+                    d === 1 || d === 21 || d === 31 ? 'st'
+                      : d === 2 || d === 22 ? 'nd'
+                        : d === 3 || d === 23 ? 'rd'
+                          : 'th';
+                  return (
+                    <option key={`to-${d}`} value={d}>
+                      {d}{suf}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          </div>
+          <p className="form-note">Same day = once per month. Range (e.g. 14–17) = one task each day in that window. Short months clamp to month-end.</p>
         </div>
 
         {/* Active period */}

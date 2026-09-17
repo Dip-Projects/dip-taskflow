@@ -51,17 +51,17 @@ export const OFFER_TEMPLATES = [
     id: 'site',
     label: 'Site / Office / General (SITE HEAD format)',
     fields: [
-      'candidateName', 'title', 'designation', 'joiningDate', 'workTimings',
-      'probationSalary', 'revisedSalary', 'incrementAfterMonths', 'incrementAmount',
+      'candidateName', 'title', 'designation', 'joiningDate', 'workTimings', 'reportingAt',
+      'probationSalary', 'revisedSalary', 'incrementAfterMonths', 'incrementAmount', 'incrementSteps',
     ],
   },
   {
     id: 'sales',
     label: 'Sales Executive format',
     fields: [
-      'candidateName', 'title', 'designation', 'joiningDate', 'workTimings',
+      'candidateName', 'title', 'designation', 'joiningDate', 'workTimings', 'reportingAt',
       'probationSalary', 'revisedPercent', 'projectIncentivePercent',
-      'incrementAfterMonths', 'incrementAmount',
+      'incrementAfterMonths', 'incrementAmount', 'incrementSteps',
     ],
   },
 ];
@@ -72,12 +72,14 @@ export const FIELD_LABELS = {
   designation: 'Designation / Position',
   joiningDate: 'Joining date',
   workTimings: 'Working hours',
-  probationSalary: 'Probation salary (₹)',
+  reportingAt: 'Reporting at (Site / Office)',
+  probationSalary: 'Starting / probation salary (₹)',
   revisedSalary: 'Salary from 4th month (₹)',
   revisedPercent: 'After probation hike %',
   projectIncentivePercent: 'Project incentive %',
-  incrementAfterMonths: 'Next increment after (months)',
-  incrementAmount: 'Increment amount (₹ or %)',
+  incrementAfterMonths: 'Increment every (months)',
+  incrementAmount: 'Increment amount each step (₹)',
+  incrementSteps: 'How many increment steps',
 };
 
 function letterheadHtml(logo) {
@@ -99,8 +101,53 @@ function letterheadHtml(logo) {
     </div>`;
 }
 
+function numMoney(v) {
+  const n = Number(String(v || '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function rupeeShort(n) {
+  const v = numMoney(n);
+  if (!v) return '₹__________/-';
+  return `₹${inr(v)}/-`;
+}
+
+/**
+ * Step-up salary line like:
+ * "₹18,000/- per month, after 3 months ₹20,000/- per month, … only."
+ */
+function salaryLadderSentenceHtml(f) {
+  if (!f.includeFurtherIncrement) return '';
+  const monthsNum = Number(String(f.incrementAfterMonths || '').replace(/[^\d.]/g, ''));
+  const hikeNum = numMoney(f.incrementAmount);
+  const start = numMoney(f.probationSalary);
+  if (!monthsNum || !hikeNum || !start) return '';
+
+  let steps = Number(String(f.incrementSteps || '').replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(steps) || steps < 1) steps = 3;
+  if (steps > 8) steps = 8;
+
+  const parts = [`<b>${esc(rupeeShort(start))} Rs per month</b>`];
+  for (let i = 1; i <= steps; i += 1) {
+    const sal = start + hikeNum * i;
+    const isLast = i === steps;
+    parts.push(
+      `<b>after ${esc(String(monthsNum))} months ${esc(rupeeShort(sal))} per month${isLast ? ' only' : ''}</b>`
+    );
+  }
+
+  return (
+    ` We would also like to inform you that for performing your duties and responsibilities` +
+    ` at Dip Group Of Companies, you will be eligible to receive ${parts.join(', ')}.`
+  );
+}
+
 function incrementSentenceHtml(f) {
-  // Only when user ticks "Further salary increment" and fills fields
+  // Prefer step-up ladder (probation salary + every X months + ₹ hike)
+  const ladder = salaryLadderSentenceHtml(f);
+  if (ladder) return ladder;
+
+  // Fallback: percent / incomplete fields
   if (!f.includeFurtherIncrement) return '';
   const monthsNum = Number(String(f.incrementAfterMonths || '').replace(/[^\d.]/g, ''));
   const amtRaw = String(f.incrementAmount || '').trim();
@@ -112,46 +159,19 @@ function incrementSentenceHtml(f) {
     ? esc(amtRaw.includes('%') ? amtRaw : `${amtRaw}%`)
     : (amtRaw.includes('₹') ? esc(amtRaw) : `₹${esc(inr(hikeNum || amtRaw))}/-`);
 
-  // Starting salary for cumulative schedule (post-probation if available)
-  let base = Number(String(f.revisedSalary || '').replace(/[^\d.]/g, ''));
-  if (!base || f.includeProbationSalaryRevision === false) {
-    base = Number(String(f.probationSalary || '').replace(/[^\d.]/g, '')) || base;
-  }
+  return (
+    ` Further, salary increment shall be reviewed after every <b>${esc(String(after))} month(s)</b>,` +
+    ` and the increment shall be <b>${hikeShow}</b> subject to satisfactory performance and management approval.`
+  );
+}
 
-  // Flat ₹ amount → write 1st / 2nd / 3rd cycle examples (cumulative)
-  if (!looksPercent && monthsNum && hikeNum) {
-    const steps = [];
-    for (let i = 1; i <= 3; i += 1) {
-      const at = monthsNum * i;
-      if (base) {
-        const nextSal = base + hikeNum * i;
-        steps.push(
-          `after first <b>${at} month(s)</b> salary shall become <b>₹${esc(inr(nextSal))}/-</b>`
-        );
-      } else {
-        steps.push(
-          `after <b>${at} month(s)</b> add another <b>₹${esc(inr(hikeNum))}/-</b>`
-        );
-      }
-    }
-    // Prefer clearer wording matching offer sample
-    if (base) {
-      return (
-        ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
-        ` subject to satisfactory performance and management approval.` +
-        ` After ${esc(String(monthsNum))} months salary shall be <b>₹${esc(inr(base + hikeNum))}/-</b>.` +
-        ` After ${esc(String(monthsNum * 2))} months salary shall be <b>₹${esc(inr(base + hikeNum * 2))}/-</b>.` +
-        ` After ${esc(String(monthsNum * 3))} months salary shall be <b>₹${esc(inr(base + hikeNum * 3))}/-</b>. And so on.`
-      );
-    }
-    return (
-      ` Further, salary increment of <b>${hikeShow}</b> shall be added after every <b>${esc(String(after))} month(s)</b>` +
-      ` subject to satisfactory performance and management approval.` +
-      ` ${steps.map((s) => s.charAt(0).toUpperCase() + s.slice(1) + '.').join(' ')} And so on.`
-    );
-  }
-
-  return ` Further, salary increment shall be reviewed after every <b>${esc(String(after))} month(s)</b>, and the increment shall be <b>${hikeShow}</b> subject to satisfactory performance and management approval.`;
+function reportingPlace(f, fallback = 'Site') {
+  const raw = String(f.reportingAt || '').trim();
+  if (!raw) return fallback;
+  // Keep Site / Office capitalization tidy
+  if (/^site$/i.test(raw)) return 'Site';
+  if (/^office$/i.test(raw)) return 'Office';
+  return raw;
 }
 
 /** Returns HTML paragraph strings (already escaped where needed). */
@@ -160,25 +180,35 @@ function buildSiteParagraphs(f) {
   const desig = esc((f.designation || 'SITE HEAD').toUpperCase());
   const join = esc(f.joiningDate || '__________');
   const timings = esc(f.workTimings || '9.00 a.m. to 6.30 p.m.');
-  const prob = esc(rupeeLine(f.probationSalary || 120000));
-  const revised = esc(rupeeLine(f.revisedSalary || 125000));
+  const place = esc(reportingPlace(f, 'Site'));
+  const probAmt = numMoney(f.probationSalary);
+  const revisedAmt = numMoney(f.revisedSalary);
+  const prob = esc(rupeeLine(probAmt || ''));
+  const revised = esc(rupeeLine(revisedAmt || ''));
   const paras = [];
+  const hasLadder = !!salaryLadderSentenceHtml(f);
 
   paras.push(
-    `We are pleased to extend to you a formal offer of employment with Dip Group Of Companies, for the position of <b>${desig}</b> at Dip Group Of Companies PMC, beginning from <b>${join}</b>, reporting time at Site would be <b>${timings}</b>.`
+    `We are pleased to extend to you a formal offer of employment with Dip Group Of Companies, for the position of <b>${desig}</b> at Dip Group Of Companies PMC, beginning from <b>${join}</b>, reporting time at <b>${place}</b> would be <b>${timings}</b>.`
   );
 
   let duty =
     'As an employee of Dip Group Of Companies, there are several duties and responsibilities laid upon you, which we wholeheartedly trust you will perform with full honesty, loyalty, and to the best of your knowledge.';
 
-  if (f.includeProbationSalaryRevision !== false) {
-    duty +=
-      ` We would also like to inform you that during the initial probation period of <b>three (3) months</b>, you will be eligible to receive a consolidated salary <b>${prob}</b> per month. Upon successful completion of the probation period and mutual agreement to continue the employment relationship, the salary shall be revised to <b>${revised}</b> per month from the <b>fourth month</b> onwards.`;
-  } else if (String(f.probationSalary || '').trim()) {
-    duty +=
-      ` We would also like to inform you that you will be eligible to receive a consolidated salary <b>${prob}</b> per month.`;
+  // Step-up schedule (like 18k → after 3 months 20k → …) replaces the short probation salary line
+  if (hasLadder) {
+    duty += salaryLadderSentenceHtml(f);
+  } else {
+    const wantRevision = f.includeProbationSalaryRevision === true && revisedAmt > 0;
+    if (wantRevision && probAmt > 0) {
+      duty +=
+        ` We would also like to inform you that during the initial probation period of <b>three (3) months</b>, you will be eligible to receive a consolidated salary <b>${prob}</b> per month. Upon successful completion of the probation period and mutual agreement to continue the employment relationship, the salary shall be revised to <b>${revised}</b> per month from the <b>fourth month</b> onwards.`;
+    } else if (probAmt > 0) {
+      duty +=
+        ` We would also like to inform you that during the initial probation period of <b>three (3) months</b>, you will be eligible to receive a consolidated salary <b>${prob}</b> per month.`;
+    }
+    duty += incrementSentenceHtml(f);
   }
-  duty += incrementSentenceHtml(f);
   if (f.includeFoodStayByClient) {
     duty += ' Your <b>Food and Stay</b> expenses for the month will be bear additionally by the client.';
   }
@@ -207,27 +237,37 @@ function buildSalesParagraphs(f) {
   const desig = esc(f.designation || 'Sales Executive');
   const join = esc(f.joiningDate || '__________');
   const timings = esc(f.workTimings || '9:30 a.m. to 6:30 p.m.');
-  const probSal = esc(rupeeLine(f.probationSalary || 40000, true));
-  const hike = esc(f.revisedPercent || '10');
-  const incentive = esc(f.projectIncentivePercent || '5');
+  const place = esc(reportingPlace(f, 'Office'));
+  const probSalAmt = Number(String(f.probationSalary || '').replace(/[^\d.]/g, ''));
+  const probSal = esc(rupeeLine(probSalAmt > 0 ? probSalAmt : '', true));
+  const hike = esc(String(f.revisedPercent || '').trim() || '______');
+  const incentive = esc(String(f.projectIncentivePercent || '').trim() || '______');
   const welcomeName =
     honorific(f) === 'MS.' || honorific(f) === 'MRS.'
       ? `Ms. ${name}`
       : `${honorific(f)} ${name}`;
 
-  const paras = [
-    `We are pleased to extend to you a formal offer of employment with Dip Projects, for the position of <b>${desig}</b> at Dip Projects PMC, commencing from <b>${join}</b>. Your regular reporting and working hours shall be from <b>${timings}</b>, subject to project and business requirements.`,
+const paras = [
+    `We are pleased to extend to you a formal offer of employment with Dip Projects, for the position of <b>${desig}</b> at Dip Projects PMC, commencing from <b>${join}</b>. Your regular reporting at <b>${place}</b> and working hours shall be from <b>${timings}</b>, subject to project and business requirements.`,
     'As an employee of Dip Projects, you will be entrusted with various duties and responsibilities related to <b>sales, client coordination, business development</b>, enquiry generation, follow-ups, and project-related communication. We trust that you will perform your responsibilities with honesty, loyalty, dedication, professionalism, and to the best of your knowledge and ability.',
-    `The first <b>three (3) months</b> of employment shall be treated as the probation period. During the probation period, you will be eligible to receive a monthly consolidated salary of <b>${probSal}</b>.`,
   ];
 
-  // Probation % hike — only if ticked (default on)
-  if (f.includeProbationHike !== false) {
+  const ladder = salaryLadderSentenceHtml(f).replace('Dip Group Of Companies', 'Dip Projects');
+  if (ladder) {
+    paras.push(ladder.trim());
+  } else {
+    paras.push(
+      `The first <b>three (3) months</b> of employment shall be treated as the probation period. During the probation period, you will be eligible to receive a monthly consolidated salary of <b>${probSal}</b>.`
+    );
+  }
+
+  // Probation % hike — only if ticked and not using ₹ step ladder
+  if (!ladder && f.includeProbationHike !== false) {
     let hikePara =
       `Upon successful completion of the three-month probation period and mutual agreement to continue the employment relationship, your salary shall be revised by <b>${hike}%</b> from the fourth month onwards, subject to satisfactory performance.`;
     hikePara += incrementSentenceHtml(f);
     paras.push(hikePara);
-  } else if (f.includeFurtherIncrement) {
+  } else if (!ladder && f.includeFurtherIncrement) {
     const onlyInc = incrementSentenceHtml(f).trim();
     if (onlyInc) paras.push(onlyInc.replace(/^Further,\s*/i, 'Further, '));
   }

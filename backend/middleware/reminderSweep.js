@@ -11,6 +11,8 @@ let lastSweepAt = 0;
 let sweeping = false;
 let lastInsuranceDay = '';
 let insuranceSweeping = false;
+let lastWeeklyPlanDay = '';
+let weeklyPlanSweeping = false;
 
 function istParts(now) {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -77,11 +79,37 @@ function maybeInsuranceMorning() {
     .finally(() => { insuranceSweeping = false; });
 }
 
+function maybeWeeklyPlanMorning() {
+  const now = new Date();
+  if (weeklyPlanSweeping) return;
+  const { minutes, weekday, dayKey } = istParts(now);
+  // Mon–Sat after 08:30 IST (cron is ~08:30 IST → 03:00 UTC)
+  if (weekday === 'Sun') return;
+  if (minutes < 8 * 60 + 30 || minutes > 11 * 60) return;
+  if (lastWeeklyPlanDay === dayKey) return;
+
+  weeklyPlanSweeping = true;
+  lastWeeklyPlanDay = dayKey;
+  Promise.resolve()
+    .then(() => require('../lib/weeklyPlanDayList').runWeeklyPlanDayListCron({ now }))
+    .then((r) => {
+      console.log('weekly-plan day-list sweep sent', r?.sent || 0, 'skipped', r?.skipped || 0);
+    })
+    .catch((err) => {
+      lastWeeklyPlanDay = '';
+      console.warn('weekly-plan day-list sweep:', err.message);
+    })
+    .finally(() => {
+      weeklyPlanSweeping = false;
+    });
+}
+
 module.exports = function reminderSweep(req, res, next) {
   res.on('finish', () => {
     try {
       maybeSweep();
       maybeInsuranceMorning();
+      maybeWeeklyPlanMorning();
     } catch (_) { /* never affect the request */ }
   });
   next();

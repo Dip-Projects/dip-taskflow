@@ -1405,7 +1405,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
       if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
-      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Task Report'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
       if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
@@ -7222,6 +7222,7 @@ export async function mountTaskflowApp(opts = {}) {
     weeklyField:   () => document.getElementById('weeklyDaysField'),
     monthlyField:  () => document.getElementById('monthlyDayField'),
     monthlyDay:    () => document.getElementById('rec-monthly-day'),
+    monthlyDayTo:  () => document.getElementById('rec-monthly-day-to'),
     startDate:     () => document.getElementById('rec-start'),
     endDate:       () => document.getElementById('rec-end'),
     checkpointsList: () => document.getElementById('checkpointsList'),
@@ -7233,6 +7234,10 @@ export async function mountTaskflowApp(opts = {}) {
     empList:       () => document.getElementById('employeeRecurringList'),
     adminTable:    () => document.getElementById('recurringTasksTableBody'),
     adminCards:    () => document.getElementById('adminRecurringCards'),
+    filterPanel:   () => document.getElementById('recurringFilterPanel'),
+    filterProject: () => document.getElementById('recurring-filter-project'),
+    filterName:    () => document.getElementById('recurring-filter-name'),
+    clearFilters:  () => document.getElementById('clearRecurringFilters'),
     newTaskTypeRow:    () => document.getElementById('recNewTaskTypeRow'),
     newTaskTypeInput:  () => document.getElementById('recNewTaskTypeInput'),
     newTaskTypeSave:   () => document.getElementById('recNewTaskTypeSave'),
@@ -7241,6 +7246,8 @@ export async function mountTaskflowApp(opts = {}) {
   };
   
   let recurringSelectedFreq = '';
+  let adminRecurringTasksCache = [];
+  let recurringFiltersBound = false;
   
   function syncRecurringFreqFields() {
     if (recEls.weeklyField()) recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
@@ -7258,14 +7265,22 @@ export async function mountTaskflowApp(opts = {}) {
         // Default monthly day from start date if empty/unset
         if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay() && recEls.startDate()?.value) {
           const d = Number(String(recEls.startDate().value).slice(8, 10));
-          if (d >= 1 && d <= 31) recEls.monthlyDay().value = String(d);
+          if (d >= 1 && d <= 31) {
+            recEls.monthlyDay().value = String(d);
+            if (recEls.monthlyDayTo()) recEls.monthlyDayTo().value = String(d);
+          }
         }
       });
     });
     recEls.startDate()?.addEventListener('change', () => {
       if (recurringSelectedFreq !== 'Monthly' || !recEls.monthlyDay()) return;
       const d = Number(String(recEls.startDate().value || '').slice(8, 10));
-      if (d >= 1 && d <= 31) recEls.monthlyDay().value = String(d);
+      if (d >= 1 && d <= 31) {
+        recEls.monthlyDay().value = String(d);
+        if (recEls.monthlyDayTo() && Number(recEls.monthlyDayTo().value) === 1) {
+          recEls.monthlyDayTo().value = String(d);
+        }
+      }
     });
   
     // Add checkpoint
@@ -7391,6 +7406,7 @@ export async function mountTaskflowApp(opts = {}) {
     // uncheck all days
     document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => c.checked = false);
     if (recEls.monthlyDay()) recEls.monthlyDay().value = '1';
+    if (recEls.monthlyDayTo()) recEls.monthlyDayTo().value = '1';
   
     if (task) {
       // Edit mode
@@ -7417,12 +7433,25 @@ export async function mountTaskflowApp(opts = {}) {
         });
       }
       if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay()) {
-        const raw = String(task.frequency_days || '').split(',')[0];
-        let day = Number(raw);
-        if (!Number.isFinite(day) || day < 1 || day > 31) {
-          day = Number(String(task.start_date || '').slice(8, 10)) || 1;
+        const raw = String(task.frequency_days || '').trim();
+        const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+        let from;
+        let to;
+        if (rangeMatch) {
+          from = Number(rangeMatch[1]);
+          to = Number(rangeMatch[2]);
+        } else {
+          from = Number(String(raw).split(',')[0]);
+          to = from;
         }
-        recEls.monthlyDay().value = String(Math.min(31, Math.max(1, day)));
+        if (!Number.isFinite(from) || from < 1 || from > 31) {
+          from = Number(String(task.start_date || '').slice(8, 10)) || 1;
+        }
+        if (!Number.isFinite(to) || to < 1 || to > 31) to = from;
+        recEls.monthlyDay().value = String(Math.min(31, Math.max(1, from)));
+        if (recEls.monthlyDayTo()) {
+          recEls.monthlyDayTo().value = String(Math.min(31, Math.max(1, to)));
+        }
       }
       // Checkpoints
       (task.checkpoints || [])
@@ -7478,13 +7507,19 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     if (recurringSelectedFreq === 'Monthly') {
-      const day = Number(recEls.monthlyDay()?.value || 0);
-      if (!Number.isFinite(day) || day < 1 || day > 31) {
-        recEls.formMsg().textContent = 'Please select a day of the month (1–31)';
+      const from = Number(recEls.monthlyDay()?.value || 0);
+      const to = Number(recEls.monthlyDayTo()?.value || from);
+      if (!Number.isFinite(from) || from < 1 || from > 31) {
+        recEls.formMsg().textContent = 'Please select a valid from day (1–31)';
         recEls.formMsg().hidden = false;
         return;
       }
-      freqDays.push(day);
+      if (!Number.isFinite(to) || to < 1 || to > 31) {
+        recEls.formMsg().textContent = 'Please select a valid to day (1–31)';
+        recEls.formMsg().hidden = false;
+        return;
+      }
+      freqDays.push(from, to);
     }
   
     const body = {
@@ -7533,23 +7568,81 @@ export async function mountTaskflowApp(opts = {}) {
     recEls.openBtn().hidden = !canManageRecurring;
     recEls.adminWrap().hidden = !canManageRecurring;
     recEls.empWrap().hidden = canManageRecurring;
+    if (recEls.filterPanel()) recEls.filterPanel().hidden = !canManageRecurring;
   
     if (canManageRecurring) {
+      bindRecurringFilters();
+      fillRecurringFilterProjects();
       await loadAdminRecurringTasks();
     } else {
       await loadEmployeeRecurringTasks();
     }
   }
   // ─── Admin view ───────────────────────────────────────────────────────────────
+
+  function fillRecurringFilterProjects() {
+    const sel = recEls.filterProject();
+    if (!sel) return;
+    const prev = sel.value;
+    const projects = [...(state.master?.projects || [])].sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
+    );
+    sel.innerHTML = '<option value="">All projects</option>';
+    projects.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name || '—';
+      sel.appendChild(opt);
+    });
+    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  }
+
+  function getFilteredAdminRecurringTasks() {
+    const projectId = String(recEls.filterProject()?.value || '').trim();
+    const nameQ = String(recEls.filterName()?.value || '').trim().toLowerCase();
+    return adminRecurringTasksCache.filter((task) => {
+      if (projectId) {
+        const tid = String(task.project_id || task.project?.id || '');
+        if (tid !== projectId) return false;
+      }
+      if (nameQ) {
+        const desc = String(task.description || '').toLowerCase();
+        if (!desc.includes(nameQ)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applyAdminRecurringFilters() {
+    const filtered = getFilteredAdminRecurringTasks();
+    renderAdminRecurringTable(filtered);
+    renderAdminRecurringCards(filtered);
+  }
+
+  function bindRecurringFilters() {
+    if (recurringFiltersBound) return;
+    recurringFiltersBound = true;
+    recEls.filterProject()?.addEventListener('change', applyAdminRecurringFilters);
+    let nameTimer = null;
+    recEls.filterName()?.addEventListener('input', () => {
+      clearTimeout(nameTimer);
+      nameTimer = setTimeout(applyAdminRecurringFilters, 180);
+    });
+    recEls.clearFilters()?.addEventListener('click', () => {
+      if (recEls.filterProject()) recEls.filterProject().value = '';
+      if (recEls.filterName()) recEls.filterName().value = '';
+      applyAdminRecurringFilters();
+    });
+  }
   
   async function loadAdminRecurringTasks() {
     const tbody = recEls.adminTable();
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
     recEls.adminCards().innerHTML = `<div class="empty-state">Loading…</div>`;
     try {
       const tasks = await api('/recurring-tasks/all');
-      renderAdminRecurringTable(tasks);
-      renderAdminRecurringCards(tasks);
+      adminRecurringTasksCache = Array.isArray(tasks) ? tasks : [];
+      applyAdminRecurringFilters();
     } catch (err) { showToast(err.message, 'error'); }
   }
   
@@ -7560,18 +7653,29 @@ export async function mountTaskflowApp(opts = {}) {
       return `Weekly (${days})`;
     }
     if (task.frequency === 'Monthly') {
-      const raw = String(task.frequency_days || '').split(',')[0];
-      let day = Number(raw);
-      if (!Number.isFinite(day) || day < 1 || day > 31) {
-        day = Number(String(task.start_date || '').slice(8, 10)) || null;
+      const raw = String(task.frequency_days || '').trim();
+      const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+      let from;
+      let to;
+      if (rangeMatch) {
+        from = Number(rangeMatch[1]);
+        to = Number(rangeMatch[2]);
+      } else {
+        from = Number(String(raw).split(',')[0]);
+        to = from;
       }
-      if (day) {
-        const suf =
-          day === 1 || day === 21 || day === 31 ? 'st'
-            : day === 2 || day === 22 ? 'nd'
-              : day === 3 || day === 23 ? 'rd'
+      if (!Number.isFinite(from) || from < 1 || from > 31) {
+        from = Number(String(task.start_date || '').slice(8, 10)) || null;
+        to = from;
+      }
+      if (from) {
+        const suf = (d) =>
+          d === 1 || d === 21 || d === 31 ? 'st'
+            : d === 2 || d === 22 ? 'nd'
+              : d === 3 || d === 23 ? 'rd'
                 : 'th';
-        return `Monthly (${day}${suf})`;
+        if (to && to !== from) return `Monthly (${from}${suf(from)}–${to}${suf(to)})`;
+        return `Monthly (${from}${suf(from)})`;
       }
     }
     return task.frequency;
@@ -7580,7 +7684,7 @@ export async function mountTaskflowApp(opts = {}) {
   function renderAdminRecurringTable(tasks) {
     const tbody = recEls.adminTable();
     if (!tasks.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No recurring tasks yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No recurring tasks yet</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -7589,6 +7693,7 @@ export async function mountTaskflowApp(opts = {}) {
       const cpCount = (task.checkpoints || []).length;
       tr.innerHTML = `
         <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
+        <td>${escapeHtml(task.project?.name ?? '—')}</td>
         <td style="max-width:200px">${escapeHtml(task.description?.slice(0,80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
         <td>${escapeHtml(freqLabel(task))}</td>
         <td style="font-size:12px">${escapeHtml(task.start_date ?? '—')} → ${escapeHtml(task.end_date ?? 'ongoing')}</td>
@@ -7623,6 +7728,7 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="task-card-body">
           <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project?.name ?? '—')}</div>
           <div class="task-detail-line"><span class="task-detail-label">Task:</span> ${escapeHtml(task.description?.slice(0,100) ?? '—')}${task.description?.length>100?'…':''}</div>
           <div class="task-detail-line"><span class="task-detail-label">Period:</span> ${escapeHtml(task.start_date)} → ${escapeHtml(task.end_date ?? 'ongoing')}</div>
           <div class="task-detail-line"><span class="task-detail-label">Checkpoints:</span> ${cpCount ? `${cpCount}` : 'None'}</div>
@@ -7981,6 +8087,7 @@ export async function mountTaskflowApp(opts = {}) {
       extraOption: { value: '__add_new__', label: '+ Add new task type…' }
     });
     fillSelect(recEls.project(), state.master.projects, { placeholder: 'Select Project' });
+    fillRecurringFilterProjects();
     syncRecurringEmployeeDropdown();
     const deptSel = recEls.department();
     if (deptSel && !deptSel.dataset.deptFilterBound) {
@@ -8875,28 +8982,115 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  function printWorkDashboardPdf() {
-    const report = document.getElementById('wvdReport');
-    if (!report) return showToast('Generate the dashboard first', 'error');
+  /** Shared print → Save as PDF (full multi-page, no scroll clip). */
+  function openReportPrintWindow(reportEl, { title, landscape = true } = {}) {
+    if (!reportEl) return showToast('Generate the report first', 'error');
     const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to download PDF', 'error');
+    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
+
     const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map((el) => el.outerHTML)
       .join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Work & Verification Dashboard</title>
+    const pageSize = landscape ? 'A4 landscape' : 'A4';
+
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8" />
+      <title>${escapeHtml(title || 'Report')}</title>
       ${styles}
       <style>
-        body { background: #F7F4EE !important; margin: 0; padding: 24px; }
-        .wvd { box-shadow: none !important; border: none !important; }
-        @page { size: A4; margin: 12mm; }
+        html, body {
+          background: #fff !important;
+          margin: 0 !important;
+          padding: 16px !important;
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+        .dr-report, .wvd {
+          box-shadow: none !important;
+          border: none !important;
+          max-height: none !important;
+          overflow: visible !important;
+          height: auto !important;
+        }
+        .dr-table-wrap,
+        .wvd-table-wrap,
+        .wvd-emp-grid,
+        .wvd-ver-grid,
+        .wvd-bars,
+        .wvd-corr-list,
+        .table-scroll,
+        .td-sheet-scroll {
+          overflow: visible !important;
+          max-height: none !important;
+          height: auto !important;
+        }
+        .dr-table, .wvd-matrix {
+          min-width: 0 !important;
+          width: 100% !important;
+        }
+        .dr-table th, .dr-table td,
+        .wvd-matrix th, .wvd-matrix td {
+          white-space: normal !important;
+        }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+        tr, .wvd-sec, .wvd-stat, .wvd-emp-col, .wvd-ver-col, .wvd-corr-row {
+          page-break-inside: avoid;
+          break-inside: avoid;
+        }
+        table { page-break-inside: auto; break-inside: auto; }
+        @page { size: ${pageSize}; margin: 8mm; }
         @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          html, body {
+            height: auto !important;
+            overflow: visible !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .dr-table-wrap,
+          .wvd-table-wrap {
+            overflow: visible !important;
+            max-height: none !important;
+          }
         }
       </style>
-    </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+    </head><body>${reportEl.outerHTML}
+      <script>
+        (function () {
+          function go() {
+            try { window.focus(); } catch (e) {}
+            setTimeout(function () { window.print(); }, 400);
+          }
+          function waitSheets() {
+            var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
+            if (!links.length) return Promise.resolve();
+            return Promise.all(links.map(function (l) {
+              return new Promise(function (resolve) {
+                if (l.sheet) return resolve();
+                l.addEventListener('load', resolve);
+                l.addEventListener('error', resolve);
+                setTimeout(resolve, 1500);
+              });
+            }));
+          }
+          function ready() {
+            var fonts = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
+            Promise.all([waitSheets(), fonts]).then(go).catch(go);
+          }
+          if (document.readyState === 'complete') ready();
+          else window.addEventListener('load', ready);
+        })();
+      <\/script>
     </body></html>`);
     win.document.close();
+  }
+
+  function printWorkDashboardPdf() {
+    openReportPrintWindow(document.getElementById('wvdReport'), {
+      title: 'Work & Verification Dashboard',
+      landscape: true,
+    });
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -9305,7 +9499,7 @@ export async function mountTaskflowApp(opts = {}) {
     }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
 
     return `<div class="dr-report" id="drReport">
-      <h1 class="dr-title">Task Delay Report</h1>
+      <h1 class="dr-title">Task Report</h1>
       <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
         · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
         · <span class="dr-ontime">${s.on_time || 0} on time</span>
@@ -9345,7 +9539,7 @@ export async function mountTaskflowApp(opts = {}) {
     await fillDelayEmployees();
     const range = document.getElementById('drRange')?.value || 'month';
     const emp = document.getElementById('drEmployee')?.value || '';
-    body.innerHTML = '<div class="empty-state">Loading Task Delay Report…</div>';
+    body.innerHTML = '<div class="empty-state">Loading Task Report…</div>';
     try {
       const qs = new URLSearchParams({ range });
       if (emp) qs.set('employee_id', emp);
@@ -9462,20 +9656,10 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function printEmpReportPdf() {
-    const report = document.getElementById('erReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Emp Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    openReportPrintWindow(document.getElementById('erReport'), {
+      title: 'Emp Report',
+      landscape: true,
+    });
   }
 
   async function loadMdoDelayReport() {
@@ -9523,20 +9707,10 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
 
   function printDelayReportPdf() {
-    const report = document.getElementById('drReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Task Delay Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    openReportPrintWindow(document.getElementById('drReport'), {
+      title: 'Task Report',
+      landscape: true,
+    });
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
@@ -9549,7 +9723,7 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('erTo')?.addEventListener('change', () => loadEmpReport());
   document.getElementById('erPdfBtn')?.addEventListener('click', () => printEmpReportPdf());
   document.getElementById('drWaBtn')?.addEventListener('click', async () => {
-    if (!confirm('Send last-week Task Delay Report on WhatsApp to each employee + their head now?')) return;
+    if (!confirm('Send last-week Task Report on WhatsApp to each employee + their head now?')) return;
     try {
       showToast('Sending WhatsApp reports…', 'success');
       const result = await api('/delay-report/send-monday-now', { method: 'POST' });

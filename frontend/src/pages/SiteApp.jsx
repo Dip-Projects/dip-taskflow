@@ -1,7 +1,7 @@
 import { Navigate, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { syncSiteUser } from '../lib/api';
+import { syncSiteUser, isSitePortalOnlyStaff } from '../lib/api';
 import SitePortal from './site/SitePortal';
 import QrAttendance from './site/QrAttendance';
 import './SurfaceToggle.css';
@@ -27,8 +27,9 @@ export default function SiteApp() {
     return <Navigate to={last === 'app' || last === 'office' ? '/app' : '/mdo'} replace />;
   }
 
-  // Only site engineers and heads (can_access_site / is_head) may open /site
-  if (!isSiteEngineer && !canToggleSite) {
+  // Site portal: field staff OR office users with Office↔Site permission
+  const mayUseSite = isSiteEngineer || isSitePortalOnlyStaff(user) || canToggleSite;
+  if (!mayUseSite) {
     return <Navigate to="/app" replace />;
   }
 

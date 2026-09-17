@@ -3908,6 +3908,13 @@ body.sidebar-open { overflow: hidden; }
 }
 @media print {
   .wvd { border: none; border-radius: 0; }
+  .wvd-table-wrap,
+  .dr-table-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+  .dr-table, .wvd-matrix { min-width: 0 !important; }
 }
 
 /* ── Task Delay Report (emp-wise sheet) ─────────────────────────────────── */
@@ -3965,6 +3972,11 @@ body.sidebar-open { overflow: hidden; }
 .dr-na { color: #6B7280; font-weight: 600; }
 @media print {
   .dr-report { border: none; }
+  .dr-table-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
   .dr-table tr.dr-alt td { background: #F7F3EC !important; }
 }
 

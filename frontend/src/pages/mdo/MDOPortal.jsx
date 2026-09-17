@@ -2782,8 +2782,24 @@ function MdoTaskDelayReport() {
   );
 }
 
-export default function MDOPortal({ onLogout }) {
-  const [user, setUser] = useState(null);
+export default function MDOPortal({ onLogout, authUser }) {
+  const [user, setUser] = useState(() => {
+    if (!authUser) return null;
+    return {
+      id: authUser.id,
+      user_name: authUser.username || authUser.user_name,
+      username: authUser.username || authUser.user_name,
+      name: authUser.full_name || authUser.name,
+      department: authUser.department || "",
+      role: authUser.designation || authUser.role || "Process Controller",
+      tf_role: authUser.role || "",
+      app_role: authUser.role || "",
+      designation: authUser.designation || authUser.role || "",
+      is_mis_executive: !!authUser.is_mis_executive,
+      site_name: authUser.site_name || "",
+      site_names: authUser.site_names || null,
+    };
+  });
   const [activeTab, setActiveTab] = useState("attendance");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hoveredNavKey, setHoveredNavKey] = useState(null);
@@ -2962,6 +2978,34 @@ useEffect(() => {
     if (user) fetchDrawings(user, allSites);
   }, [user, allSites, fetchDrawings]);
 
+  const ownSites = useMemo(() => {
+    if (!user) return [];
+    return uniqueNamesCaseInsensitive(
+      Array.isArray(user.site_names) && user.site_names.length
+        ? user.site_names
+        : user.site_name
+          ? [user.site_name]
+          : []
+    );
+  }, [user]);
+
+  const sites = useMemo(
+    () => (ownSites.length ? ownSites : allSites),
+    [ownSites, allSites]
+  );
+
+  const visibleNav = useMemo(
+    () => NAV.filter((n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)),
+    [user]
+  );
+
+  useEffect(() => {
+    if (!user) return;
+    if (activeTab === "task-delay" && !canSeeMdoTaskDelayReport(user)) {
+      setActiveTab("attendance");
+    }
+  }, [activeTab, user]);
+
   if (!user) {
     return (
       <div className="loading" style={{ minHeight: "100vh" }}>
@@ -2971,26 +3015,7 @@ useEffect(() => {
     );
   }
 
-  const ownSites = uniqueNamesCaseInsensitive(
-    Array.isArray(user.site_names) && user.site_names.length
-      ? user.site_names
-      : user.site_name
-        ? [user.site_name]
-        : []
-  );
-  const sites = ownSites.length ? ownSites : allSites;
-
   const activeItem = NAV.find((n) => n.key === activeTab);
-  const visibleNav = useMemo(
-    () => NAV.filter((n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)),
-    [user]
-  );
-
-  useEffect(() => {
-    if (activeTab === "task-delay" && !canSeeMdoTaskDelayReport(user)) {
-      setActiveTab("attendance");
-    }
-  }, [activeTab, user]);
 
   return (
     <div>

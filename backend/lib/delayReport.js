@@ -274,7 +274,7 @@ function buildDelayReportRows(tasks, opts = {}) {
     .sort((a, b) => (a.sr || 0) - (b.sr || 0));
 }
 
-function delayReportHtml(rows, { title = 'Task Delay Report', subtitle = '', showEmployee = false } = {}) {
+function delayReportHtml(rows, { title = 'Task Report', subtitle = '', showEmployee = false } = {}) {
   const headExtra = showEmployee ? '<th>Employee</th>' : '';
   const body = (rows || []).map((r, i) => {
     const bg = i % 2 === 0 ? '#F7F3EC' : '#FFFFFF';
@@ -347,7 +347,7 @@ function delayReportTextSummary(rows, employeeName) {
   const onTime = rows.filter((r) => r.status === 'On Time').length;
   const na = rows.filter((r) => r.status === 'N/A').length;
   const lines = [
-    `Task Delay Report${employeeName ? ` — ${employeeName}` : ''}`,
+    `Task Report${employeeName ? ` — ${employeeName}` : ''}`,
     `Total ${rows.length} · Delayed ${delayed} · On Time ${onTime} · N/A ${na}`,
     '',
   ];

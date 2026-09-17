@@ -145,19 +145,61 @@ function classifyRecurring(inst, asOfYmd) {
   return s;
 }
 
+const MDO_OFFICE_DEPT_ID = '3dce1637-bbec-4081-9b7d-01e2e890e2ae';
+
+function isMdoOfficeDept(task) {
+  if (task?.department_id === MDO_OFFICE_DEPT_ID || task?.department?.id === MDO_OFFICE_DEPT_ID) {
+    return true;
+  }
+  const name = String(task?.department?.name || task?.departments?.name || '').toLowerCase().trim();
+  return name === 'mdo office' || name === 'mdo';
+}
+
+function calendarWeekday(date) {
+  const s = ymd(date);
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
 function shouldFireOn(task, date) {
   const start = new Date(task.start_date);
   const end = task.end_date ? new Date(task.end_date) : null;
   const d = new Date(ymd(date));
   if (d < new Date(ymd(start))) return false;
   if (end && d > new Date(ymd(end))) return false;
+  // MDO OFFICE: Mon–Sat only — never create/count Sunday instances.
+  if (isMdoOfficeDept(task) && calendarWeekday(date) === 0) return false;
   const freq = task.frequency;
+  const dow = calendarWeekday(date);
   if (freq === 'Daily') return true;
   if (freq === 'Weekly') {
     const days = (task.frequency_days || '').split(',').map(Number);
-    return days.includes(date.getDay());
+    return days.includes(dow);
   }
-  if (freq === 'Monthly') return date.getDate() === start.getDate();
+  if (freq === 'Monthly') {
+    const raw = String(task.frequency_days || '').trim();
+    const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+    let from;
+    let to;
+    if (rangeMatch) {
+      from = Number(rangeMatch[1]);
+      to = Number(rangeMatch[2]);
+    } else {
+      const first = Number(String(raw).split(',')[0].trim());
+      from = Number.isFinite(first) && first >= 1 ? first : start.getDate();
+      to = from;
+    }
+    if (!Number.isFinite(from) || from < 1) from = start.getDate();
+    if (!Number.isFinite(to) || to < 1) to = from;
+    if (to < from) {
+      const swap = from;
+      from = to;
+      to = swap;
+    }
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    const day = date.getDate();
+    return day >= Math.min(from, lastDay) && day <= Math.min(to, lastDay);
+  }
   if (freq === 'Yearly') {
     return date.getDate() === start.getDate() && date.getMonth() === start.getMonth();
   }
@@ -300,7 +342,9 @@ router.get('/', async (req, res) => {
     if (includeRecurring) {
       const { data: recurring, error: rtErr } = await supabase
         .from('recurring_tasks')
-        .select('id, assigned_to, frequency, frequency_days, start_date, end_date, is_active')
+        .select(
+          'id, assigned_to, department_id, frequency, frequency_days, start_date, end_date, is_active, department:departments(id,name)'
+        )
         .eq('is_active', true);
       if (rtErr) throw rtErr;
 

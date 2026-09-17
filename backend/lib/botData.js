@@ -485,6 +485,14 @@ function shouldFireOn(task, date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   if (d < start) return false;
   if (end && d > end) return false;
+  // MDO OFFICE: Mon–Sat only
+  const deptId = task.department_id || task.department?.id;
+  const deptName = String(task.department?.name || '').toLowerCase().trim();
+  const isMdo =
+    deptId === '3dce1637-bbec-4081-9b7d-01e2e890e2ae' ||
+    deptName === 'mdo office' ||
+    deptName === 'mdo';
+  if (isMdo && date.getDay() === 0) return false;
   const freq = task.frequency;
   if (freq === 'Daily') return true;
   if (freq === 'Weekly') {
@@ -493,7 +501,30 @@ function shouldFireOn(task, date) {
       .map(Number);
     return days.includes(date.getDay());
   }
-  if (freq === 'Monthly') return date.getDate() === start.getDate();
+  if (freq === 'Monthly') {
+    const raw = String(task.frequency_days || '').trim();
+    const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+    let from;
+    let to;
+    if (rangeMatch) {
+      from = Number(rangeMatch[1]);
+      to = Number(rangeMatch[2]);
+    } else {
+      const first = Number(String(raw).split(',')[0].trim());
+      from = Number.isFinite(first) && first >= 1 ? first : start.getDate();
+      to = from;
+    }
+    if (!Number.isFinite(from) || from < 1) from = start.getDate();
+    if (!Number.isFinite(to) || to < 1) to = from;
+    if (to < from) {
+      const swap = from;
+      from = to;
+      to = swap;
+    }
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+    const day = date.getDate();
+    return day >= Math.min(from, lastDay) && day <= Math.min(to, lastDay);
+  }
   if (freq === 'Yearly') return date.getDate() === start.getDate() && date.getMonth() === start.getMonth();
   return false;
 }
@@ -525,8 +556,9 @@ async function overdueRecurring(assignedTo) {
   let tq = supabase
     .from('recurring_tasks')
     .select(
-      `id, description, is_active, assigned_to, frequency, frequency_days, start_date, end_date,
+      `id, description, is_active, assigned_to, department_id, frequency, frequency_days, start_date, end_date,
        project:projects(name),
+       department:departments(id,name),
        assigned_to_user:users!recurring_tasks_assigned_to_fkey(full_name)`
     )
     .eq('is_active', true);

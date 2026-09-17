@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import QRCode from 'qrcode';
+import Navbar from '../../components/Navbar';
 import { api } from '../../lib/api';
 import { uploadViaApi } from '../../lib/ensureBucket';
 import { generateExpCertificatePdf } from './letters/generateExpCertPdf';
@@ -10,6 +11,112 @@ import {
 import { generateSalarySlipPdf, amountInWords } from './payroll/generateSalarySlipPdf';
 import { generateJoiningFormPdf } from './generateJoiningFormPdf';
 import './HrPortal.css';
+
+const svgProps = {
+  width: 15,
+  height: 15,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+};
+
+const Ico = {
+  dashboard: (
+    <svg {...svgProps} stroke="#d97706">
+      <rect x="3" y="3" width="7" height="9" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="12" width="7" height="9" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+    </svg>
+  ),
+  users: (
+    <svg {...svgProps} stroke="#2563eb">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+  clock: (
+    <svg {...svgProps} stroke="#2563eb">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  ),
+  leave: (
+    <svg {...svgProps} stroke="#7c3aed">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="9" y1="13" x2="15" y2="13" />
+      <line x1="9" y1="17" x2="13" y2="17" />
+    </svg>
+  ),
+  recruit: (
+    <svg {...svgProps} stroke="#db2777">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <line x1="19" y1="8" x2="19" y2="14" />
+      <line x1="22" y1="11" x2="16" y2="11" />
+    </svg>
+  ),
+  shield: (
+    <svg {...svgProps} stroke="#16a34a">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  ),
+  payroll: (
+    <svg {...svgProps} stroke="#d97706">
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+    </svg>
+  ),
+  letter: (
+    <svg {...svgProps} stroke="#7c3aed">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="13" y2="17" />
+    </svg>
+  ),
+  docs: (
+    <svg {...svgProps} stroke="#db2777">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  office: (
+    <svg {...svgProps} stroke="#2563eb">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  ),
+  logout: (
+    <svg {...svgProps} stroke="#dc2626">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  ),
+  sun: (
+    <svg {...svgProps} stroke="currentColor">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  ),
+  moon: (
+    <svg {...svgProps} stroke="currentColor">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  ),
+};
 
 function safePathSeg(s) {
   return (
@@ -42,15 +149,15 @@ async function makeQrDataUrl(text) {
 }
 
 const NAV = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'employees', label: 'Employees' },
-  { key: 'attendance', label: 'Attendance' },
-  { key: 'leaves', label: 'Leaves' },
-  { key: 'recruitment', label: 'Recruitment' },
-  { key: 'insurance', label: 'Insurance' },
-  { key: 'payroll', label: 'Payroll' },
-  { key: 'letters', label: 'Letters' },
-  { key: 'documents', label: 'Documents' },
+  { key: 'dashboard', label: 'Dashboard', icon: Ico.dashboard },
+  { key: 'employees', label: 'Employees', icon: Ico.users },
+  { key: 'attendance', label: 'Attendance', icon: Ico.clock },
+  { key: 'leaves', label: 'Leaves', icon: Ico.leave },
+  { key: 'recruitment', label: 'Recruitment', icon: Ico.recruit },
+  { key: 'insurance', label: 'Insurance', icon: Ico.shield },
+  { key: 'payroll', label: 'Payroll', icon: Ico.payroll },
+  { key: 'letters', label: 'Letters', icon: Ico.letter },
+  { key: 'documents', label: 'Documents', icon: Ico.docs },
 ];
 
 const RECRUIT_STATUSES = [
@@ -117,15 +224,42 @@ function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onS
   return (
     <>
       <div className="hr-cards">
-        <div className="hr-stat"><div className="n">{active}</div><div className="l">Active employees</div></div>
-        <div className="hr-stat"><div className="n">{present}</div><div className="l">Present today</div></div>
-        <div className="hr-stat"><div className="n">{pendingLeaves}</div><div className="l">Pending leaves</div></div>
-        <div className="hr-stat"><div className="n">{openHiring}</div><div className="l">Open hiring</div></div>
+        <div className="hr-stat hr-stat--blue">
+          <div className="hr-stat-ico" aria-hidden>{Ico.users}</div>
+          <div>
+            <div className="n">{active}</div>
+            <div className="l">Active employees</div>
+          </div>
+        </div>
+        <div className="hr-stat hr-stat--green">
+          <div className="hr-stat-ico" aria-hidden>{Ico.clock}</div>
+          <div>
+            <div className="n">{present}</div>
+            <div className="l">Present today</div>
+          </div>
+        </div>
+        <div className="hr-stat hr-stat--amber">
+          <div className="hr-stat-ico" aria-hidden>{Ico.leave}</div>
+          <div>
+            <div className="n">{pendingLeaves}</div>
+            <div className="l">Pending leaves</div>
+          </div>
+        </div>
+        <div className="hr-stat hr-stat--pink">
+          <div className="hr-stat-ico" aria-hidden>{Ico.recruit}</div>
+          <div>
+            <div className="n">{openHiring}</div>
+            <div className="l">Open hiring</div>
+          </div>
+        </div>
       </div>
 
       <div className="hr-panel">
         <div className="hr-toolbar">
-          <h3 style={{ margin: 0, flex: 1 }}>Today&apos;s attendance</h3>
+          <h3 className="hr-panel-title">
+            <span className="hr-panel-title-ico" aria-hidden>{Ico.clock}</span>
+            Today&apos;s attendance
+          </h3>
           <span className="hr-badge">{attendanceToday.length} records</span>
         </div>
         <div className="hr-table-wrap">
@@ -150,36 +284,85 @@ function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onS
         </div>
       </div>
 
-      <div className="hr-panel">
+      <div id="hr-alerts-section" className="hr-panel hr-alerts-panel">
         <div className="hr-toolbar">
-          <h3 style={{ margin: 0, flex: 1 }}>Alerts</h3>
-          <button type="button" className="hr-btn ghost" onClick={onSendWa}>Send WhatsApp reminders</button>
+          <h3 className="hr-panel-title">
+            <span className="hr-panel-title-ico" aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </span>
+            Alerts
+          </h3>
+          <button type="button" className="hr-btn ghost" onClick={onSendWa}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M22 2L11 13" />
+              <path d="M22 2L15 22l-4-9-9-4 20-7z" />
+            </svg>
+            Send WhatsApp reminders
+          </button>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
-          <div>
-            <h4 style={{ marginTop: 0 }}>Birthdays in 7 days</h4>
+
+        <div className="hr-alert-grid">
+          <div className="hr-alert-card hr-alert-card--birthday">
+            <div className="hr-alert-card-head">
+              <span className="hr-alert-card-ico" aria-hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#db2777" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8" />
+                  <path d="M4 16s.5-1 2-1 2.5 1 4 1 2.5-1 4-1 2.5 1 4 1 2-1 2-1" />
+                  <path d="M2 21h20" />
+                  <path d="M7 8v3" />
+                  <path d="M12 8v3" />
+                  <path d="M17 8v3" />
+                  <path d="M7 3h.01" />
+                  <path d="M12 3h.01" />
+                  <path d="M17 3h.01" />
+                </svg>
+              </span>
+              <div>
+                <div className="hr-alert-card-title">Birthdays in 7 days</div>
+                <div className="hr-alert-card-sub">{birthdays.length} upcoming</div>
+              </div>
+            </div>
             {!birthdays.length ? (
-              <div className="hr-empty">None upcoming.</div>
+              <div className="hr-alert-empty">No birthdays in the next week.</div>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <ul className="hr-alert-list">
                 {birthdays.map((b) => (
-                  <li key={b.id || b.employee_id}>
-                    <b>{b.employee_name}</b> — {b.days_until === 0 ? 'Today' : `${b.days_until}d`} ({b.dob})
+                  <li key={b.id || b.employee_id} className="hr-alert-item">
+                    <span className="hr-alert-item-name">{b.employee_name}</span>
+                    <span className="hr-badge warn">
+                      {b.days_until === 0 ? 'Today' : `${b.days_until}d`}
+                    </span>
+                    <span className="hr-alert-item-meta">{b.dob}</span>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-          <div>
-            <h4 style={{ marginTop: 0 }}>Insurance due / overdue (≤4 days)</h4>
+
+          <div className="hr-alert-card hr-alert-card--insurance">
+            <div className="hr-alert-card-head">
+              <span className="hr-alert-card-ico" aria-hidden>{Ico.shield}</span>
+              <div>
+                <div className="hr-alert-card-title">Insurance due / overdue</div>
+                <div className="hr-alert-card-sub">Within 4 days · {insuranceDue.length} policies</div>
+              </div>
+            </div>
             {!insuranceDue.length ? (
-              <div className="hr-empty">None due soon.</div>
+              <div className="hr-alert-empty">No renewals due soon.</div>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <ul className="hr-alert-list">
                 {insuranceDue.map((i) => (
-                  <li key={i.id}>
-                    <b>{i.employee_name}</b> — {i.policy_type} renew {i.renew_date}
-                    {' '}({i.days_until < 0 ? `overdue ${Math.abs(i.days_until)}d` : `${i.days_until}d`})
+                  <li key={i.id} className="hr-alert-item">
+                    <span className="hr-alert-item-name">{i.employee_name}</span>
+                    <span className={`hr-badge ${i.days_until < 0 ? 'bad' : 'warn'}`}>
+                      {i.days_until < 0 ? `Overdue ${Math.abs(i.days_until)}d` : `${i.days_until}d`}
+                    </span>
+                    <span className="hr-alert-item-meta">
+                      {i.policy_type} · renew {i.renew_date}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1214,6 +1397,14 @@ function InsuranceView({ employees }) {
   });
   const [dobForm, setDobForm] = useState({ employee_id: '', employee_name: '', dob: '', whatsapp_number: '' });
 
+  // Refs so the floating buttons can scroll straight to each form section.
+  const insuranceFormRef = useRef(null);
+  const birthdayFormRef = useRef(null);
+
+  const scrollToSection = (ref) => {
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const load = useCallback(async () => {
     setBusy(true);
     setError('');
@@ -1410,7 +1601,22 @@ function InsuranceView({ employees }) {
                       </select>
                     </td>
                     <td>
-                      <button type="button" className="hr-btn ghost" disabled={busy} onClick={() => remove(r.id)}>Del</button>
+                      <button
+                        type="button"
+                        className="hr-btn ghost hr-btn-icon hr-btn-icon--danger"
+                        disabled={busy}
+                        onClick={() => remove(r.id)}
+                        title="Delete"
+                        aria-label="Delete"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                        </svg>
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -1420,7 +1626,7 @@ function InsuranceView({ employees }) {
         </div>
       </div>
 
-      <div className="hr-panel">
+      <div className="hr-panel hr-panel-insurance" ref={insuranceFormRef}>
         <h3 style={{ marginTop: 0 }}>Add / update insurance</h3>
         <p className="hr-sub">WhatsApp reminder ~8 AM IST, 3–4 days before renew (full Aadhaar/PAN/nominee pack to HR).</p>
         <div className="hr-form">
@@ -1472,7 +1678,7 @@ function InsuranceView({ employees }) {
         </div>
       </div>
 
-      <div className="hr-panel">
+      <div className="hr-panel hr-panel-birthday" ref={birthdayFormRef}>
         <h3 style={{ marginTop: 0 }}>Birthday profile (alerts)</h3>
         <p className="hr-sub">Save DOB so dashboard shows birthdays in 7 days and WhatsApp reminders can fire.</p>
         <div className="hr-form">
@@ -1503,6 +1709,27 @@ function InsuranceView({ employees }) {
             <button type="button" className="hr-btn" disabled={busy} onClick={saveDob}>Save DOB</button>
           </div>
         </div>
+      </div>
+
+      <div className="hr-fab-stack">
+        <button
+          type="button"
+          className="hr-fab hr-fab-insurance"
+          title="Go to Add / update insurance"
+          onClick={() => scrollToSection(insuranceFormRef)}
+        >
+          +
+          <span className="hr-fab-tip">Add insurance</span>
+        </button>
+        <button
+          type="button"
+          className="hr-fab hr-fab-birthday"
+          title="Go to Birthday profile"
+          onClick={() => scrollToSection(birthdayFormRef)}
+        >
+          +
+          <span className="hr-fab-tip">Add birthday</span>
+        </button>
       </div>
     </>
   );
@@ -1752,51 +1979,194 @@ function PayrollView({ employees }) {
     }
   };
 
+  const money = (n) =>
+    `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
   return (
-    <div className="hr-panel">
-      <div className="hr-form">
-        <label>Employee
-          <select value={empId} onChange={(e) => setEmpId(e.target.value)}>
-            <option value="">Select…</option>
-            {employees.filter((e) => e.is_active !== false).map((e) => (
-              <option key={e.id} value={e.id}>{e.full_name}</option>
-            ))}
-          </select>
-        </label>
-        <label>Month<input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></label>
-        <label>Pay date<input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} /></label>
-        <label>Paid days<input value={paidDays} onChange={(e) => setPaidDays(e.target.value)} /></label>
-        <label>LOP days<input value={lopDays} onChange={(e) => setLopDays(e.target.value)} /></label>
+    <div className="hr-panel hr-payroll">
+      <div className="hr-payroll-head">
+        <div>
+          <h3 className="hr-payroll-title">
+            <span className="hr-panel-title-ico" aria-hidden>{Ico.payroll}</span>
+            Salary slip
+          </h3>
+          <p className="hr-sub">Fill employee & pay period, adjust earnings / deductions, then download PDF.</p>
+        </div>
       </div>
 
-      <h4>Earnings</h4>
-      {earnings.map((r, i) => (
-        <div className="hr-toolbar" key={`e-${i}`}>
-          <input value={r.label} onChange={(e) => updateRow(earnings, setEarnings, i, 'label', e.target.value)} />
-          <input type="number" value={r.amt} onChange={(e) => updateRow(earnings, setEarnings, i, 'amt', e.target.value)} />
-          <button type="button" className="hr-btn ghost" onClick={() => setEarnings(earnings.filter((_, j) => j !== i))}>Remove</button>
+      <section className="hr-payroll-card">
+        <div className="hr-payroll-card-label">Employee & period</div>
+        <div className="hr-payroll-meta">
+          <label className="hr-field hr-payroll-emp">
+            <span className="hr-field-label">Employee</span>
+            <select value={empId} onChange={(e) => setEmpId(e.target.value)}>
+              <option value="">Select employee…</option>
+              {employees.filter((e) => e.is_active !== false).map((e) => (
+                <option key={e.id} value={e.id}>{e.full_name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="hr-field">
+            <span className="hr-field-label">Month</span>
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </label>
+          <label className="hr-field">
+            <span className="hr-field-label">Pay date</span>
+            <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+          </label>
+          <label className="hr-field">
+            <span className="hr-field-label">Paid days</span>
+            <input inputMode="numeric" value={paidDays} onChange={(e) => setPaidDays(e.target.value)} />
+          </label>
+          <label className="hr-field">
+            <span className="hr-field-label">LOP days</span>
+            <input inputMode="numeric" value={lopDays} onChange={(e) => setLopDays(e.target.value)} />
+          </label>
         </div>
-      ))}
-      <button type="button" className="hr-btn ghost" onClick={() => setEarnings([...earnings, { label: 'Allowance', amt: 0 }])}>+ Earning</button>
+        {emp ? (
+          <div className="hr-payroll-emp-chip">
+            <strong>{emp.full_name}</strong>
+            <span>{emp.designation || '—'}</span>
+            <span>{emp.department || '—'}</span>
+          </div>
+        ) : null}
+      </section>
 
-      <h4>Deductions</h4>
-      {deductions.map((r, i) => (
-        <div className="hr-toolbar" key={`d-${i}`}>
-          <input value={r.label} onChange={(e) => updateRow(deductions, setDeductions, i, 'label', e.target.value)} />
-          <input type="number" value={r.amt} onChange={(e) => updateRow(deductions, setDeductions, i, 'amt', e.target.value)} />
-          <button type="button" className="hr-btn ghost" onClick={() => setDeductions(deductions.filter((_, j) => j !== i))}>Remove</button>
+      <div className="hr-payroll-cols">
+        <section className="hr-payroll-card hr-payroll-card--earn">
+          <div className="hr-payroll-card-head">
+            <div className="hr-payroll-card-label">Earnings</div>
+            <span className="hr-payroll-card-sum">{money(gross)}</span>
+          </div>
+          <div className="hr-payroll-rows">
+            <div className="hr-payroll-row hr-payroll-row--head">
+              <span>Component</span>
+              <span>Amount (₹)</span>
+              <span />
+            </div>
+            {earnings.map((r, i) => (
+              <div className="hr-payroll-row" key={`e-${i}`}>
+                <input
+                  className="hr-payroll-name"
+                  value={r.label}
+                  onChange={(e) => updateRow(earnings, setEarnings, i, 'label', e.target.value)}
+                  placeholder="Component"
+                />
+                <input
+                  className="hr-payroll-amt"
+                  type="number"
+                  min="0"
+                  value={r.amt}
+                  onChange={(e) => updateRow(earnings, setEarnings, i, 'amt', e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="hr-btn ghost hr-btn-icon hr-btn-icon--danger"
+                  onClick={() => setEarnings(earnings.filter((_, j) => j !== i))}
+                  title="Remove"
+                  aria-label="Remove earning"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M3 6h18" />
+                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6" />
+                    <path d="M14 11v6" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="hr-btn ghost hr-payroll-add"
+            onClick={() => setEarnings([...earnings, { label: 'Allowance', amt: 0 }])}
+          >
+            + Add earning
+          </button>
+        </section>
+
+        <section className="hr-payroll-card hr-payroll-card--deduct">
+          <div className="hr-payroll-card-head">
+            <div className="hr-payroll-card-label">Deductions</div>
+            <span className="hr-payroll-card-sum hr-payroll-card-sum--deduct">{money(totalDeductions)}</span>
+          </div>
+          <div className="hr-payroll-rows">
+            <div className="hr-payroll-row hr-payroll-row--head">
+              <span>Component</span>
+              <span>Amount (₹)</span>
+              <span />
+            </div>
+            {deductions.map((r, i) => (
+              <div className="hr-payroll-row" key={`d-${i}`}>
+                <input
+                  className="hr-payroll-name"
+                  value={r.label}
+                  onChange={(e) => updateRow(deductions, setDeductions, i, 'label', e.target.value)}
+                  placeholder="Component"
+                />
+                <input
+                  className="hr-payroll-amt"
+                  type="number"
+                  min="0"
+                  value={r.amt}
+                  onChange={(e) => updateRow(deductions, setDeductions, i, 'amt', e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="hr-btn ghost hr-btn-icon hr-btn-icon--danger"
+                  onClick={() => setDeductions(deductions.filter((_, j) => j !== i))}
+                  title="Remove"
+                  aria-label="Remove deduction"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M3 6h18" />
+                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6" />
+                    <path d="M14 11v6" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="hr-btn ghost hr-payroll-add"
+            onClick={() => setDeductions([...deductions, { label: 'Deduction', amt: 0 }])}
+          >
+            + Add deduction
+          </button>
+        </section>
+      </div>
+
+      <section className="hr-payroll-summary">
+        <div className="hr-payroll-stat">
+          <span className="hr-payroll-stat-label">Gross</span>
+          <strong className="hr-payroll-stat-val">{money(gross)}</strong>
         </div>
-      ))}
-      <button type="button" className="hr-btn ghost" onClick={() => setDeductions([...deductions, { label: 'Deduction', amt: 0 }])}>+ Deduction</button>
-
-      <p style={{ marginTop: 16 }}>
-        Gross: <b>₹{gross.toLocaleString('en-IN')}</b> · Deductions:{' '}
-        <b>₹{totalDeductions.toLocaleString('en-IN')}</b> · Net:{' '}
-        <b>₹{netPayable.toLocaleString('en-IN')}</b>
-      </p>
-      <button type="button" className="hr-btn" disabled={busy} onClick={download}>
-        {busy ? 'Generating…' : 'Download salary slip PDF'}
-      </button>
+        <div className="hr-payroll-stat hr-payroll-stat--deduct">
+          <span className="hr-payroll-stat-label">Deductions</span>
+          <strong className="hr-payroll-stat-val">{money(totalDeductions)}</strong>
+        </div>
+        <div className="hr-payroll-stat hr-payroll-stat--net">
+          <span className="hr-payroll-stat-label">Net payable</span>
+          <strong className="hr-payroll-stat-val">{money(netPayable)}</strong>
+        </div>
+        <button
+          type="button"
+          className="hr-btn hr-payroll-download"
+          disabled={busy || !empId}
+          onClick={download}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          {busy ? 'Generating…' : 'Download salary slip PDF'}
+        </button>
+      </section>
     </div>
   );
 }
@@ -1830,15 +2200,17 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
     candidateName: '',
     designation: 'SITE HEAD',
     workTimings: '9.00 a.m. to 6.30 p.m.',
-    probationSalary: '120000',
-    revisedSalary: '125000',
-    includeProbationSalaryRevision: true,
+    reportingAt: 'Site',
+    probationSalary: '',
+    revisedSalary: '',
+    includeProbationSalaryRevision: false,
     includeFoodStayByClient: false,
     includeFurtherIncrement: false,
     includeProbationHike: true,
     includeProjectIncentive: true,
     incrementAfterMonths: '',
     incrementAmount: '',
+    incrementSteps: '3',
   });
 
   useEffect(() => {
@@ -1850,16 +2222,21 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
       if (templateId === 'sales') {
         if (!next.designation || next.designation === 'SITE HEAD') next.designation = 'Sales Executive';
         if (!next.workTimings || next.workTimings.startsWith('9.00')) next.workTimings = '9:30 a.m. to 6:30 p.m.';
-        if (!next.probationSalary || next.probationSalary === '120000') next.probationSalary = '40000';
+        if (!next.reportingAt || next.reportingAt === 'Site') next.reportingAt = 'Office';
+        // Clear site-only sample salaries — never force 120000/125000
+        if (next.probationSalary === '120000' || next.probationSalary === '125000') next.probationSalary = '';
+        if (next.revisedSalary === '125000' || next.revisedSalary === '120000') next.revisedSalary = '';
         if (!next.revisedPercent) next.revisedPercent = '10';
         if (!next.projectIncentivePercent) next.projectIncentivePercent = '5';
         if (!next.title || next.title === 'MR') next.title = 'MS';
       } else {
         if (!next.designation || next.designation === 'Sales Executive') next.designation = 'SITE HEAD';
         if (!next.workTimings || next.workTimings.includes('9:30')) next.workTimings = '9.00 a.m. to 6.30 p.m.';
-        if (!next.probationSalary || next.probationSalary === '40000') next.probationSalary = '120000';
-        if (!next.revisedSalary) next.revisedSalary = '125000';
-        if (next.includeProbationSalaryRevision === undefined) next.includeProbationSalaryRevision = true;
+        if (!next.reportingAt) next.reportingAt = 'Site';
+        // Do not auto-fill revised salary — only what HR types
+        if (next.revisedSalary === '125000') next.revisedSalary = '';
+        if (next.probationSalary === '120000') next.probationSalary = '';
+        if (next.includeProbationSalaryRevision === undefined) next.includeProbationSalaryRevision = false;
       }
       return next;
     });
@@ -2107,8 +2484,21 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
             <label>Working hours
               <input value={offerFields.workTimings || ''} onChange={(e) => setOfferFields({ ...offerFields, workTimings: e.target.value })} />
             </label>
-            <label>Probation salary (₹)
-              <input value={offerFields.probationSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, probationSalary: e.target.value })} />
+            <label>Reporting at
+              <select
+                value={offerFields.reportingAt || 'Site'}
+                onChange={(e) => setOfferFields({ ...offerFields, reportingAt: e.target.value })}
+              >
+                <option value="Site">Site</option>
+                <option value="Office">Office</option>
+              </select>
+            </label>
+            <label>Starting / probation salary (₹)
+              <input
+                value={offerFields.probationSalary || ''}
+                onChange={(e) => setOfferFields({ ...offerFields, probationSalary: e.target.value })}
+                placeholder="e.g. 18000"
+              />
             </label>
 
             {templateId === 'sales' ? (
@@ -2145,14 +2535,14 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 <label className="full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <input
                     type="checkbox"
-                    checked={offerFields.includeProbationSalaryRevision !== false}
+                    checked={offerFields.includeProbationSalaryRevision === true}
                     onChange={(e) => setOfferFields({ ...offerFields, includeProbationSalaryRevision: e.target.checked })}
                   />
                   Add probation salary revision (3 months → 4th month amount)
                 </label>
-                {offerFields.includeProbationSalaryRevision !== false && (
+                {offerFields.includeProbationSalaryRevision === true && (
                   <label>Revised salary from 4th month (₹)
-                    <input value={offerFields.revisedSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, revisedSalary: e.target.value })} placeholder="125000" />
+                    <input value={offerFields.revisedSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, revisedSalary: e.target.value })} placeholder="Only if revising after probation" />
                   </label>
                 )}
                 <label className="full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2172,24 +2562,44 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 checked={!!offerFields.includeFurtherIncrement}
                 onChange={(e) => setOfferFields({ ...offerFields, includeFurtherIncrement: e.target.checked })}
               />
-              Add further salary increment (every X months, +₹ amount; letter pe cumulative schedule)
+              Add step-up salary schedule (starting salary → after every X months +₹…)
             </label>
             {offerFields.includeFurtherIncrement && (
               <>
-                <label>Every (months)
+                <label>Increment every (months)
                   <input
                     value={offerFields.incrementAfterMonths || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAfterMonths: e.target.value })}
-                    placeholder="e.g. 2"
+                    placeholder="e.g. 3"
                   />
                 </label>
-                <label>Increment amount each cycle (₹)
+                <label>Increment amount each step (₹)
                   <input
                     value={offerFields.incrementAmount || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAmount: e.target.value })}
                     placeholder="e.g. 2000"
                   />
                 </label>
+                <label>How many steps
+                  <input
+                    value={offerFields.incrementSteps || '3'}
+                    onChange={(e) => setOfferFields({ ...offerFields, incrementSteps: e.target.value })}
+                    placeholder="e.g. 3"
+                  />
+                </label>
+                {!!(offerFields.probationSalary && offerFields.incrementAfterMonths && offerFields.incrementAmount) && (
+                  <p className="full" style={{ margin: 0, fontSize: 13, color: '#555' }}>
+                    Letter pe: ₹{Number(String(offerFields.probationSalary).replace(/[^\d.]/g, '') || 0).toLocaleString('en-IN')}/-
+                    {Array.from({ length: Math.min(8, Math.max(1, Number(offerFields.incrementSteps) || 3)) }, (_, i) => {
+                      const start = Number(String(offerFields.probationSalary).replace(/[^\d.]/g, '')) || 0;
+                      const hike = Number(String(offerFields.incrementAmount).replace(/[^\d.]/g, '')) || 0;
+                      const months = offerFields.incrementAfterMonths || '—';
+                      const sal = start + hike * (i + 1);
+                      return `, after ${months} months ₹${sal.toLocaleString('en-IN')}/-`;
+                    }).join('')}
+                    {' '}only
+                  </p>
+                )}
               </>
             )}
 
@@ -2207,6 +2617,13 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
 
 export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [tab, setTab] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    return saved === 'dark';
+  });
   const isAdminUser = String(user?.role || '').toLowerCase() === 'admin';
   const isHrUser = (() => {
     const role = String(user?.role || '').toLowerCase().trim();
@@ -2233,10 +2650,24 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [attendanceToday, setAttendanceToday] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
   const [alerts, setAlerts] = useState({ birthdays: [], insuranceDue: [] });
+  const [scrollToAlerts, setScrollToAlerts] = useState(false);
+
+  const alertCount = (alerts.birthdays?.length || 0) + (alerts.insuranceDue?.length || 0);
 
   useEffect(() => {
     if (tab === 'recruitment' && !canManageRecruitment) setTab('dashboard');
   }, [tab, canManageRecruitment]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth <= 999;
+      setIsMobile(mobile);
+      setSidebarOpen(!mobile);
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const loadEmployees = useCallback(async () => {
     setEmpLoading(true);
@@ -2320,80 +2751,190 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     })();
   }, [loadEmployees, loadLeaves, loadRecruitments, loadAlerts]);
 
-  const title = useMemo(
-    () => navItems.find((n) => n.key === tab)?.label || NAV.find((n) => n.key === tab)?.label || 'HR',
+  useEffect(() => {
+    if (!scrollToAlerts || tab !== 'dashboard') return;
+    const t = window.setTimeout(() => {
+      document.getElementById('hr-alerts-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setScrollToAlerts(false);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [scrollToAlerts, tab]);
+
+  const goToAlerts = () => {
+    if (tab !== 'dashboard') {
+      setTab('dashboard');
+      if (isMobile) setSidebarOpen(false);
+      setScrollToAlerts(true);
+      return;
+    }
+    document.getElementById('hr-alerts-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const activeNav = useMemo(
+    () => navItems.find((n) => n.key === tab) || NAV.find((n) => n.key === tab),
     [tab, navItems]
   );
+  const title = activeNav?.label || 'HR';
+
+  const scrollPageToTop = () => {
+    const run = () => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      const main = document.querySelector('.hr-main');
+      if (main) main.scrollTop = 0;
+    };
+    run();
+    requestAnimationFrame(() => {
+      run();
+      window.setTimeout(run, 40);
+    });
+  };
+
+  const goTab = (key) => {
+    setTab(key);
+    if (isMobile) setSidebarOpen(false);
+    scrollPageToTop();
+  };
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    const val = next ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', val);
+    localStorage.setItem('theme', val);
+  };
 
   return (
     <div className="hr-shell">
-      <aside className="hr-side">
-        <div className="hr-brand">DIP HRMS</div>
-        <p className="hr-brand-sub">HR · {user?.full_name || 'User'}</p>
-        {navItems.map((n) => (
-          <button
-            key={n.key}
-            type="button"
-            className={tab === n.key ? 'hr-nav-btn active' : 'hr-nav-btn'}
-            onClick={() => setTab(n.key)}
-          >
-            {n.label}
-          </button>
-        ))}
-        <div className="hr-side-foot">
-          {onOpenOffice && (
-            <button type="button" onClick={onOpenOffice}>Office TaskFlow</button>
-          )}
-          <button type="button" onClick={onLogout}>Log out</button>
-        </div>
-      </aside>
-      <main className="hr-main">
-        <h1>{title}</h1>
-        <p className="hr-sub">Human Resource Management — Dip Projects</p>
+      <Navbar
+        onMenuToggle={() => setSidebarOpen((p) => !p)}
+        menuOpen={sidebarOpen}
+        onLogout={onLogout}
+      />
 
-        {tab === 'dashboard' && (
-          <Dashboard
-            employees={employees}
-            leaves={leaves}
-            attendanceToday={attendanceToday}
-            candidates={canManageRecruitment ? recruitments : []}
-            alerts={alerts}
-            onSendWa={sendWaReminders}
+      <div className="hr-body">
+        {sidebarOpen && isMobile && (
+          <button
+            type="button"
+            className="hr-sb-backdrop"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close sidebar"
           />
         )}
-        {tab === 'employees' && (
-          <EmployeesView
-            staff={employees}
-            loading={empLoading}
-            error={empError}
-            q={empQ}
-            setQ={setEmpQ}
-            onReload={loadEmployees}
-            departments={departments}
-            designations={designations}
-          />
-        )}
-        {tab === 'attendance' && <AttendanceView />}
-        {tab === 'leaves' && (
-          <LeavesView leaves={leaves} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
-        )}
-        {tab === 'recruitment' && canManageRecruitment && (
-          <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
-        )}
-        {tab === 'insurance' && <InsuranceView employees={employees} />}
-        {tab === 'payroll' && <PayrollView employees={employees} />}
-        {tab === 'letters' && (
-          <LettersView
-            employees={employees}
-            onEmployeesReload={loadEmployees}
-            departments={departments}
-            designations={designations}
-          />
-        )}
-        {tab === 'documents' && (
-          <DocumentsView employees={employees} user={user} />
-        )}
-      </main>
+
+        <aside className={`hr-sidebar${sidebarOpen ? ' open' : ' closed'}`}>
+          <nav className="hr-snav">
+            {navItems.map((n) => (
+              <button
+                key={n.key}
+                type="button"
+                className={`hr-sni${tab === n.key ? ' active' : ''}`}
+                onClick={() => goTab(n.key)}
+              >
+                <span className="hr-sni-ico">{n.icon}</span>
+                <span>{n.label}</span>
+              </button>
+            ))}
+          </nav>
+          <div className="hr-side-foot">
+            {onOpenOffice && (
+              <button type="button" className="hr-sni" onClick={onOpenOffice}>
+                <span className="hr-sni-ico">{Ico.office}</span>
+                <span>Office TaskFlow</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="hr-theme-toggle"
+              onClick={toggleTheme}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              <span className="hr-theme-toggle-left">
+                {isDark ? Ico.sun : Ico.moon}
+                {isDark ? 'Light Mode' : 'Dark Mode'}
+              </span>
+              <span className={`hr-theme-switch${isDark ? ' is-dark' : ''}`} aria-hidden>
+                <span className="hr-theme-knob" />
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <main className="hr-main">
+          <div className="hr-page-card">
+            <div className="hr-card-hdr">
+              <div className="hr-card-ico">{activeNav?.icon || Ico.dashboard}</div>
+              <div>
+                <h1 className="hr-card-title">{title}</h1>
+                <p className="hr-card-sub">Human Resource Management — Dip Projects</p>
+              </div>
+            </div>
+
+            {tab === 'dashboard' && (
+              <Dashboard
+                employees={employees}
+                leaves={leaves}
+                attendanceToday={attendanceToday}
+                candidates={canManageRecruitment ? recruitments : []}
+                alerts={alerts}
+                onSendWa={sendWaReminders}
+              />
+            )}
+            {tab === 'employees' && (
+              <EmployeesView
+                staff={employees}
+                loading={empLoading}
+                error={empError}
+                q={empQ}
+                setQ={setEmpQ}
+                onReload={loadEmployees}
+                departments={departments}
+                designations={designations}
+              />
+            )}
+            {tab === 'attendance' && <AttendanceView />}
+            {tab === 'leaves' && (
+              <LeavesView leaves={leaves} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
+            )}
+            {tab === 'recruitment' && canManageRecruitment && (
+              <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
+            )}
+            {tab === 'insurance' && <InsuranceView employees={employees} />}
+            {tab === 'payroll' && <PayrollView employees={employees} />}
+            {tab === 'letters' && (
+              <LettersView
+                employees={employees}
+                onEmployeesReload={loadEmployees}
+                departments={departments}
+                designations={designations}
+              />
+            )}
+            {tab === 'documents' && (
+              <DocumentsView employees={employees} user={user} />
+            )}
+          </div>
+        </main>
+      </div>
+
+      {alertCount > 0 && (
+        <button
+          type="button"
+          className={`hr-alert-bell${tab === 'insurance' ? ' hr-alert-bell--raised' : ''}`}
+          onClick={goToAlerts}
+          title="View alerts"
+          aria-label={`${alertCount} alert${alertCount === 1 ? '' : 's'} — go to alerts`}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span className="hr-alert-bell-count">{alertCount > 99 ? '99+' : alertCount}</span>
+          <span className="hr-alert-bell-tip">
+            {alertCount} alert{alertCount === 1 ? '' : 's'} — view
+          </span>
+        </button>
+      )}
     </div>
   );
 }

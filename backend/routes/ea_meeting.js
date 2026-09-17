@@ -6,6 +6,10 @@ const {
   normalizeWhatsAppNumber,
 } = require('../lib/whatsapp');
 const {
+  notifyWeeklyPlanAfterUpload,
+  istYmd: weeklyPlanIstYmd,
+} = require('../lib/weeklyPlanDayList');
+const {
   isAdminUser,
   userCanViewAllEaUploads,
   findBeenaOrPcUsers,
@@ -235,6 +239,10 @@ async function notifyUploaderWhatsApp(user, opts = {}) {
   }
 
   if (opts.kind === 'uploaded') {
+    // Day-list WhatsApp follows via notifyWeeklyPlanAfterUpload — avoid duplicate text.
+    if (opts.skipUploaderText) {
+      return { ok: true, kind: 'uploaded', who: fullName, skipped: 'day_list_follows' };
+    }
     await sendWhatsAppText(
       wa,
       `✅ EA weekly plan uploaded.\nWeek: ${opts.weekStart || '—'}\nSite → My Tasks.\nBeena + your site can see the files.`
@@ -296,8 +304,27 @@ router.post('/notify', async (req, res) => {
       kind,
       weekStart: req.body?.weekStart,
       fileName: req.body?.fileName,
+      skipUploaderText: kind === 'uploaded',
     });
-    res.json(result);
+    let weeklyPlan = null;
+    if (kind === 'uploaded') {
+      try {
+        const profile = await loadUserProfile(req.user);
+        const username = profile.username || req.user.username;
+        const whatsapp = await notifyWeeklyPlanAfterUpload({
+          username,
+          user: profile,
+          toNumber: profile.whatsapp_number,
+          fullName: profile.full_name || username,
+          dayYmd: weeklyPlanIstYmd(),
+        });
+        weeklyPlan = { ok: !!whatsapp?.ok, whatsapp };
+      } catch (wpErr) {
+        console.error('EA weekly plan WA:', wpErr.message);
+        weeklyPlan = { ok: false, error: wpErr.message };
+      }
+    }
+    res.json({ ...result, weeklyPlan });
   } catch (err) {
     console.error('EA notify:', err.message);
     res.status(500).json({ error: err.message || 'Notify failed' });

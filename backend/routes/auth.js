@@ -14,15 +14,25 @@ const USER_SELECT_BASIC =
 function toPayload(user) {
   const role = (user.role || '').toLowerCase();
   const desig = (user.designation || '').toLowerCase().trim();
-  // Auto roles + Permissions toggle "Office ↔ Site"
+  const dept = String(user.department || '').toLowerCase().trim();
+  // Field staff: Site portal only — never auto-grant Office↔Site toggle / is_head
+  const siteOnlyStaff =
+    dept === 'site engineer' ||
+    /jr\.?\s*site engineer|junior site engineer|site engineer|site incharge|site coordinator/.test(
+      desig
+    ) ||
+    /site engineer|site incharge|site coordinator/.test(role);
+
+  // Who may open /site (includes site-only staff + office people with switch permission)
   const canAccessSite =
     role !== 'client' &&
-    (!!user.can_switch_office_site ||
+    (siteOnlyStaff ||
+      !!user.can_switch_office_site ||
       !!user.is_head ||
       role === 'admin' ||
       role === 'head' ||
       desig === 'project head' ||
-      desig === 'site incharge');
+      desig === 'site head');
 
   return {
     id: user.id,
@@ -32,9 +42,11 @@ function toPayload(user) {
     department: user.department,
     department_id: user.department_id,
     designation: user.designation || '',
-    is_head: role === 'client' ? false : (!!user.is_head || role === 'head' || canAccessSite),
+    // Do NOT promote Site Incharge to is_head — that wrongly showed Office↔Site toggle
+    is_head: role === 'client' ? false : (!!user.is_head || role === 'head'),
     can_access_site: canAccessSite,
-    can_switch_office_site: !!user.can_switch_office_site,
+    // Site-only staff never get the Office↔Site switch, even if DB flag was ticked
+    can_switch_office_site: siteOnlyStaff ? false : !!user.can_switch_office_site,
     can_switch_office_mdo: !!user.can_switch_office_mdo,
     site_name: user.site_name || '',
     site_names: user.site_names || null,

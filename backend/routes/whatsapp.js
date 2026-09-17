@@ -14,6 +14,14 @@ const {
   formatStatusSummary,
   istYmd,
 } = require('../lib/taskListDigest');
+const {
+  parseWeeklyPlanReply,
+  sendWeeklyPlanDayList,
+  completeWeeklyPlanByIndexes,
+  formatWeeklyPlanMessage,
+  loadWeeklyPlanDayBundle,
+  runWeeklyPlanDayListCron,
+} = require('../lib/weeklyPlanDayList');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -213,6 +221,55 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
+      // Weekly plan list / complete: PLAN | WP | PLAN 1,3
+      if (text) {
+        const wpParsed = parseWeeklyPlanReply(text);
+        if (wpParsed) {
+          const dayYmd = istYmd();
+          const username = user.username;
+          if (wpParsed.list) {
+            const result = await sendWeeklyPlanDayList(username, {
+              user,
+              toNumber: msg.from,
+              fullName: user.full_name || user.username,
+              dayYmd,
+              sayEmpty: true,
+              force: true,
+            });
+            if (!result.ok && result.reason === 'missing_table') {
+              await sendWhatsAppText(msg.from, 'Weekly plan table is not set up yet. Ask admin to run weekly_plan_tasks.sql.');
+            }
+            continue;
+          }
+          if (wpParsed.all) {
+            const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
+            const idxs = (bundle.openOrdered || []).map((_, i) => i);
+            const { done, bundle: refreshed } = await completeWeeklyPlanByIndexes(username, idxs, dayYmd);
+            await sendWhatsAppText(
+              msg.from,
+              `✅ Marked ${done} weekly-plan task(s) complete.\n\n${formatWeeklyPlanMessage(refreshed, {
+                fullName: user.full_name || user.username,
+              })}`
+            );
+            continue;
+          }
+          if (wpParsed.indexes) {
+            const { done, lastName, bundle } = await completeWeeklyPlanByIndexes(
+              username,
+              wpParsed.indexes,
+              dayYmd
+            );
+            await sendWhatsAppText(
+              msg.from,
+              `✅ Done: ${done === 1 ? lastName || 'task' : `${done} tasks`}\n\n${formatWeeklyPlanMessage(bundle, {
+                fullName: user.full_name || user.username,
+              })}`
+            );
+            continue;
+          }
+        }
+      }
+
       // Text commands: LIST / ALL / 1,3 — scoped to today (+ overdue)
       if (text) {
         const dayYmd = istYmd();
@@ -292,6 +349,20 @@ async function handleListDigestCron(req, res) {
 
 router.post('/cron/tasks-list-digest', handleListDigestCron);
 router.get('/cron/tasks-list-digest', handleListDigestCron);
+
+async function handleWeeklyPlanDayListCron(req, res) {
+  try {
+    if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
+    const result = await runWeeklyPlanDayListCron();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('WA weekly-plan day-list cron:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+router.post('/cron/weekly-plan-day-list', handleWeeklyPlanDayListCron);
+router.get('/cron/weekly-plan-day-list', handleWeeklyPlanDayListCron);
 
 /** Admin / MIS / Beena: send today's WhatsApp list to Beena now. */
 router.post('/send-day-list-now', requireAuth, async (req, res) => {

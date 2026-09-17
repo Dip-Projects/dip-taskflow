@@ -249,7 +249,7 @@ async function uploadDelayHtml(path, html) {
 
 async function notifyDelayWa(toNumber, name, summaryLine, link) {
   const preferred = process.env.WA_DELAY_REPORT_TEMPLATE || 'task_delay_report';
-  const linkText = link || 'Open TaskFlow Emp Delay Report';
+  const linkText = link || 'Open TaskFlow Task Report';
   let result = await sendWhatsAppTemplate(toNumber, preferred, [
     name || 'Team member',
     summaryLine,
@@ -260,7 +260,7 @@ async function notifyDelayWa(toNumber, name, summaryLine, link) {
     result = await sendWhatsAppTemplate(toNumber, 'task_notification_v2', [
       name || 'Team member',
       `DELAY REPORT: ${summaryLine}`.slice(0, 180),
-      'Task Delay Report',
+      'Task Report',
       new Date().toISOString().slice(0, 10),
       linkText.slice(0, 60),
     ]);
@@ -299,7 +299,7 @@ async function runMondayDelayWhatsApp() {
     const u = userMap[empId];
     if (!u?.whatsapp_number) continue;
     const html = delayReportHtml(rows, {
-      title: 'Task Delay Report',
+      title: 'Task Report',
       subtitle: `${u.full_name} · ${startDate.toISOString().slice(0, 10)} → ${endDate.toISOString().slice(0, 10)}`,
       showEmployee: false,
     });
@@ -331,7 +331,7 @@ async function runMondayDelayWhatsApp() {
     if (!teamRows.length) continue;
 
     const html = delayReportHtml(teamRows, {
-      title: 'Task Delay Report',
+      title: 'Task Report',
       subtitle: `Team of ${head.full_name} · ${startDate.toISOString().slice(0, 10)} → ${endDate.toISOString().slice(0, 10)}`,
       showEmployee: true,
     });

@@ -263,13 +263,25 @@ export default function ManpowerReport({ user }) {
   const printRef = useRef();
 
   useEffect(() => {
-  // Build site list directly from user's assigned sites — no DB fetch needed
+  // Build site list from user's assigned sites; if empty (admin/head), load from recent DPRs
   const userSites = Array.isArray(user?.site_names) && user.site_names.length
     ? user.site_names
     : user?.site_name ? [user.site_name] : [];
 
   setSites(userSites);
-  if (userSites.length === 1) setSelectedSite(userSites[0]); // auto-select if only one
+  if (userSites.length === 1) setSelectedSite(userSites[0]);
+
+  if (!userSites.length) {
+    sbFetch("dpr_reports?select=site&order=date.desc&limit=200")
+      .then((rows) => {
+        const uniq = [...new Set((rows || []).map((r) => r.site).filter(Boolean))].sort();
+        if (uniq.length) {
+          setSites(uniq);
+          if (uniq.length === 1) setSelectedSite(uniq[0]);
+        }
+      })
+      .catch(() => {});
+  }
 
   const now = new Date();
   const y = now.getFullYear();
@@ -284,20 +296,32 @@ export default function ManpowerReport({ user }) {
     setLoading(true);
     setReportData(null);
     try {
-      let query = `dpr_reports?select=id,date,report_type,payload,engineer&payload->>site=ilike.${encodeURIComponent(selectedSite)}&order=date.asc`;  
+      // Prefer `site` column; also match payload.site (older rows)
+      const sitePat = encodeURIComponent(`*${selectedSite}*`);
+      let query =
+        `dpr_reports?select=id,date,report_type,payload,engineer,site` +
+        `&or=(site.ilike.${sitePat},payload->>site.ilike.${sitePat})` +
+        `&order=date.asc`;
       if (fromDate) query += `&date=gte.${fromDate}`;
       if (toDate)   query += `&date=lte.${toDate}`;
 
-      const rows = await sbFetch(query);
+      let rows = await sbFetch(query);
+      // Fallback: exact site column match if or-filter returns nothing
+      if (!rows?.length) {
+        let q2 =
+          `dpr_reports?select=id,date,report_type,payload,engineer,site` +
+          `&site=eq.${encodeURIComponent(selectedSite)}&order=date.asc`;
+        if (fromDate) q2 += `&date=gte.${fromDate}`;
+        if (toDate)   q2 += `&date=lte.${toDate}`;
+        rows = await sbFetch(q2);
+      }
 
       const colMap  = new Map();
       const dateMap = new Map();
 
-      // Sort rows so evening reports (if any) come last per date — 
-      // their summary & reportType will win, but counts are always merged
+      // Morning first, evening last — evening manpower replaces morning for that day
       const sortedRows = [...(rows || [])].sort((a, b) => {
         if (a.date !== b.date) return a.date.localeCompare(b.date);
-        // Within same date: morning first, evening last (so evening summary wins)
         const order = { morning: 0, evening: 1 };
         return (order[a.report_type] ?? 0) - (order[b.report_type] ?? 0);
       });
@@ -305,38 +329,60 @@ export default function ManpowerReport({ user }) {
       for (const row of sortedRows) {
         const p      = row.payload || {};
         const date   = row.date;
-        const mpList = p.manpower || [];
+        const mpList = Array.isArray(p.manpower) ? p.manpower : [];
+        const rowSite = String(row.site || p.site || "").trim();
+        // Extra client-side site filter (handles punctuation / case)
+        if (
+          selectedSite &&
+          rowSite &&
+          !rowSite.toLowerCase().includes(selectedSite.toLowerCase()) &&
+          !selectedSite.toLowerCase().includes(rowSite.toLowerCase())
+        ) {
+          continue;
+        }
 
         if (!dateMap.has(date)) {
-          // First report for this date — initialise entry
-          dateMap.set(date, { date, summary: p.summary || "", reportType: row.report_type, counts: new Map() });
-        } else {
-          // Another report for same date — update summary & reportType if this one is newer/evening
-          const existing = dateMap.get(date);
-          // Evening report summary takes priority; otherwise keep existing
-          if (row.report_type === "evening" || !existing.summary) {
-            existing.summary    = p.summary || existing.summary;
-            existing.reportType = row.report_type;
-          }
+          dateMap.set(date, {
+            date,
+            summary: p.summary || "",
+            reportType: row.report_type,
+            counts: new Map(),
+            source: row.report_type || "morning",
+          });
         }
 
         const dateEntry = dateMap.get(date);
+        const isEvening = row.report_type === "evening";
+        const hadMorningOnly = dateEntry.source !== "evening";
+
+        // Evening DPR replaces that day's manpower snapshot (not double-count morning+evening)
+        if (isEvening && hadMorningOnly && mpList.length) {
+          dateEntry.counts = new Map();
+          dateEntry.source = "evening";
+          dateEntry.summary = p.summary || dateEntry.summary;
+          dateEntry.reportType = "evening";
+        } else if (isEvening || !dateEntry.summary) {
+          dateEntry.summary = p.summary || dateEntry.summary;
+          dateEntry.reportType = row.report_type || dateEntry.reportType;
+        }
 
         for (const mp of mpList) {
-          const key = colKey(mp.scope, mp.category, mp.labour, mp.gender, mp.skill);
+          const scope = (mp.displayScope || mp.scope || "").toString();
+          const key = colKey(scope, mp.category, mp.labour, mp.gender, mp.skill);
           if (!colMap.has(key)) {
             colMap.set(key, {
               key,
-              scope:    (mp.scope    || "").toUpperCase(),
+              scope:    (scope || "").toUpperCase(),
               category: mp.category  || "",
               labour:   mp.labour    || "",
               gender:   mp.gender    || "",
               skill:    mp.skill     || "",
-              label:    colLabel(mp.scope, mp.category, mp.labour, mp.gender, mp.skill),
+              label:    colLabel(scope, mp.category, mp.labour, mp.gender, mp.skill),
             });
           }
-          
-          dateEntry.counts.set(key, (Number(mp.count) || 0));
+          const n = Number(mp.count) || 0;
+          // Same report type / same day: sum duplicate labour lines
+          dateEntry.counts.set(key, (dateEntry.counts.get(key) || 0) + n);
         }
       }
 
@@ -387,73 +433,69 @@ export default function ManpowerReport({ user }) {
   };
 
   const downloadExcel = () => {
-    if (!rd) return;
+    if (!reportData) return;
+    const rd = reportData;
+    const grand = rd.cols.reduce((s, c) => s + (rd.colTotals[c.key] || 0), 0);
 
-    // ── xlsx helper: cell address ──────────────────────────────────
     const addr  = (r, c) => XLSX.utils.encode_cell({ r, c });
-    const nCols = rd.cols.length; // data columns count
-    const totalCol = nCols + 2;   // 0=Date,1=Summary,2..n+1=data,n+2=DailyTotal
+    const nCols = rd.cols.length;
+    const totalCol = nCols + 2;
 
-    // ── Colours (ARGB hex, no #) ───────────────────────────────────
     const CLR = {
-      // header rows — light scope bands
-      scope_client:     { bg: "FFEFF6FF", fg: "FF1D4ED8" },   // light blue
-      scope_pmc:        { bg: "FFFEF9C3", fg: "FF854D0E" },   // light yellow
-      scope_contractor: { bg: "FFFFF7ED", fg: "FFC2410C" },   // light orange
+      title:            { bg: "FF1E3A5F", fg: "FFFFFFFF" },
+      meta:             { bg: "FFE0F2FE", fg: "FF0F172A" },
+      scope_client:     { bg: "FFEFF6FF", fg: "FF1D4ED8" },
+      scope_pmc:        { bg: "FFFEF9C3", fg: "FF854D0E" },
+      scope_contractor: { bg: "FFFFF7ED", fg: "FFC2410C" },
       scope_other:      { bg: "FFF8FAFC", fg: "FF64748B" },
-      category:         { bg: "FFBFDBFE", fg: "FF1E3A5F" },   // soft blue
-      labour:           { bg: "FFFDE68A", fg: "FF78350F" },   // amber/yellow
-      skill:            { bg: "FFFED7AA", fg: "FF92400E" },   // peach/orange
-      gender:           { bg: "FFFEF9C3", fg: "FF713F12" },   // pale yellow
-      // fixed cols
-      fixed:            { bg: "FF1E3A5F", fg: "FFE0F2FE" },   // deep blue
-      daily_total_hdr:  { bg: "FFB45309", fg: "FFFEF3C7" },   // warm amber
-      // body
-      date_cell:        { bg: "FFFFFBEB", fg: "FF78350F" },   // warm cream
+      category:         { bg: "FFBFDBFE", fg: "FF1E3A5F" },
+      labour:           { bg: "FFFDE68A", fg: "FF78350F" },
+      skill:            { bg: "FFFED7AA", fg: "FF92400E" },
+      gender:           { bg: "FFFEF9C3", fg: "FF713F12" },
+      fixed:            { bg: "FF1E3A5F", fg: "FFE0F2FE" },
+      daily_total_hdr:  { bg: "FFB45309", fg: "FFFEF3C7" },
+      date_cell:        { bg: "FFFFFBEB", fg: "FF78350F" },
       summary_cell:     { bg: "FFFFFBEB", fg: "FF92400E" },
       count_cell:       { bg: "FFFFFFFF", fg: "FF1E3A5F" },
-      zero_cell:        { bg: "FFFFFFFF", fg: "FFCBD5E1" },
-      row_total_cell:   { bg: "FFDBEAFE", fg: "FF1E3A5F" },   // light blue
-      // month separator
-      month_sep:        { bg: "FFFDE68A", fg: "FF78350F" },   // yellow band
-      // month subtotal
-      month_sub:        { bg: "FFDBEAFE", fg: "FF1E3A5F" },   // soft blue
-      month_sub_total:  { bg: "FFBFDBFE", fg: "FF1E3A5F" },   // slightly deeper blue
-      // grand total
-      grand:            { bg: "FFFEE2E2", fg: "FF7F1D1D" },   // light red/maroon
-      grand_val:        { bg: "FFFCA5A5", fg: "FF7F1D1D" },   // soft red
+      zero_cell:        { bg: "FFF8FAFC", fg: "FF94A3B8" },
+      row_total_cell:   { bg: "FFDBEAFE", fg: "FF1E3A5F" },
+      month_sep:        { bg: "FFFDE68A", fg: "FF78350F" },
+      month_sub:        { bg: "FFDBEAFE", fg: "FF1E3A5F" },
+      month_sub_total:  { bg: "FFBFDBFE", fg: "FF1E3A5F" },
+      grand:            { bg: "FFFEE2E2", fg: "FF7F1D1D" },
+      grand_val:        { bg: "FFFCA5A5", fg: "FF7F1D1D" },
     };
 
     const scopeClr = (scope) => {
       const s = (scope || "").toUpperCase();
-      if (s === "CLIENT")     return CLR.scope_client;
-      if (s === "PMC")        return CLR.scope_pmc;
+      if (s === "CLIENT") return CLR.scope_client;
+      if (s === "PMC") return CLR.scope_pmc;
       if (s === "CONTRACTOR") return CLR.scope_contractor;
       return CLR.scope_other;
     };
 
-    // ── Build cell style ──────────────────────────────────────────
     const style = ({ bg, fg }, extra = {}) => ({
-      fill:      { patternType: "solid", fgColor: { rgb: bg } },
-      font:      { color: { rgb: fg }, bold: true, sz: 10, name: "Calibri", ...( extra.font || {}) },
+      fill: { patternType: "solid", fgColor: { rgb: bg } },
+      font: { color: { rgb: fg }, bold: true, sz: 10, name: "Calibri", ...(extra.font || {}) },
       alignment: { horizontal: "center", vertical: "center", wrapText: true, ...(extra.align || {}) },
       border: {
-        top:    { style: "thin", color: { rgb: "FFD1D5DB" } },
-        bottom: { style: "thin", color: { rgb: "FFD1D5DB" } },
-        left:   { style: "thin", color: { rgb: "FFD1D5DB" } },
-        right:  { style: "thin", color: { rgb: "FFD1D5DB" } },
+        top: { style: "thin", color: { rgb: "FFCBD5E1" } },
+        bottom: { style: "thin", color: { rgb: "FFCBD5E1" } },
+        left: { style: "thin", color: { rgb: "FFCBD5E1" } },
+        right: { style: "thin", color: { rgb: "FFCBD5E1" } },
       },
       ...extra.raw,
     });
 
-    // ── Worksheet data array + styles ─────────────────────────────
-    const ws   = {};
-    const merg = []; // merged cell ranges
-    let   R    = 0;  // current row index (0-based)
+    const ws = {};
+    const merg = [];
+    let R = 0;
 
-    const setCell = (r, c, v, st) => {
+    const setCell = (r, c, v, st, type) => {
       const a = addr(r, c);
-      ws[a] = { v, t: typeof v === "number" ? "n" : "s", s: st };
+      const t = type || (typeof v === "number" ? "n" : "s");
+      ws[a] = { v: v == null ? "" : v, t, s: st };
+      if (t === "n") ws[a].z = "0";
     };
 
     const mergeRange = (r1, c1, r2, c2) => {
@@ -461,147 +503,239 @@ export default function ManpowerReport({ user }) {
       merg.push({ s: { r: r1, c: c1 }, e: { r: r2, c: c2 } });
     };
 
-    // ── Pre-compute spans (same logic as UI) ──────────────────────
-    const scopeSpans_xl    = getSpans(rd.cols, c => c.scope);
-    const categorySpans_xl = getSpans(rd.cols, c => `${c.scope}||${c.label.category}`);
-    const labourSpans_xl   = getSpans(rd.cols, c => `${c.scope}||${c.label.category}||${c.label.labour}`);
-    const skillSpans_xl    = getSpans(rd.cols, c => `${c.scope}||${c.label.category}||${c.label.labour}||${c.label.skill}`);
+    const fillRow = (r, fromC, toC, st) => {
+      for (let c = fromC; c <= toC; c += 1) {
+        if (!ws[addr(r, c)]) setCell(r, c, "", st);
+      }
+    };
 
-    // ── HEADER ROWS 1–5 ──────────────────────────────────────────
+    // ── Title + meta ──
+    setCell(R, 0, "DIP PROJECTS — MANPOWER REPORT", style(CLR.title, { font: { sz: 14, bold: true }, align: { horizontal: "left" } }));
+    mergeRange(R, 0, R, totalCol);
+    fillRow(R, 1, totalCol, style(CLR.title));
+    R++;
+    const meta =
+      `Site: ${rd.site}   |   Period: ${rd.from ? fmtDate(rd.from) : "All"} → ${rd.to ? fmtDate(rd.to) : "All"}` +
+      `   |   Days: ${rd.dates.length}   |   Labour types: ${rd.cols.length}   |   Grand total: ${grand}`;
+    setCell(R, 0, meta, style(CLR.meta, { font: { sz: 10, bold: false }, align: { horizontal: "left" } }));
+    mergeRange(R, 0, R, totalCol);
+    fillRow(R, 1, totalCol, style(CLR.meta, { font: { bold: false } }));
+    R++;
+    R++; // blank spacer row
 
-    // Row 0: Scope
-    // Date & Summary span 5 rows vertically
-    setCell(R, 0, "Date",         style(CLR.fixed, { align: { horizontal:"left",  vertical:"center" } }));
-    setCell(R, 1, "Work Summary", style(CLR.fixed, { align: { horizontal:"left",  vertical:"center" } }));
+    const headerStart = R;
+    const scopeSpans_xl = getSpans(rd.cols, (c) => c.scope);
+    const categorySpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}`);
+    const labourSpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}||${c.label.labour}`);
+    const skillSpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}||${c.label.labour}||${c.label.skill}`);
+
+    // Row: Scope (+ Date/Summary/Daily Total vertical merge across 5 header rows)
+    setCell(R, 0, "Date", style(CLR.fixed, { align: { horizontal: "left" } }));
+    setCell(R, 1, "Work Summary", style(CLR.fixed, { align: { horizontal: "left" } }));
     mergeRange(R, 0, R + 4, 0);
     mergeRange(R, 1, R + 4, 1);
-
     for (const { col, span, idx } of scopeSpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.scope || "—", style(scopeClr(col.scope), { font: { sz: 11, bold: true } }));
       mergeRange(R, c, R, c + span - 1);
+      fillRow(R, c + 1, c + span - 1, style(scopeClr(col.scope)));
     }
-    // Daily Total spans 5 rows
-    setCell(R, totalCol, "Daily Total", style(CLR.daily_total_hdr, { align: { horizontal:"center", vertical:"center" } }));
+    setCell(R, totalCol, "Daily Total", style(CLR.daily_total_hdr));
     mergeRange(R, totalCol, R + 4, totalCol);
     R++;
 
-    // Row 1: Category
+    // Category / Labour / Skill / Gender — pad Date+Summary cells for merge continuity
     for (const { col, span, idx } of categorySpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.label.category || "—", style(CLR.category));
       mergeRange(R, c, R, c + span - 1);
+      fillRow(R, c + 1, c + span - 1, style(CLR.category));
     }
+    setCell(R, 0, "", style(CLR.fixed));
+    setCell(R, 1, "", style(CLR.fixed));
+    setCell(R, totalCol, "", style(CLR.daily_total_hdr));
     R++;
 
-    // Row 2: Labour
     for (const { col, span, idx } of labourSpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.label.labour || "—", style(CLR.labour));
       mergeRange(R, c, R, c + span - 1);
+      fillRow(R, c + 1, c + span - 1, style(CLR.labour));
     }
+    setCell(R, 0, "", style(CLR.fixed));
+    setCell(R, 1, "", style(CLR.fixed));
+    setCell(R, totalCol, "", style(CLR.daily_total_hdr));
     R++;
 
-    // Row 3: Skill
     for (const { col, span, idx } of skillSpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.label.skill || "—", style(CLR.skill, { font: { sz: 9, bold: false } }));
       mergeRange(R, c, R, c + span - 1);
+      fillRow(R, c + 1, c + span - 1, style(CLR.skill, { font: { bold: false } }));
     }
+    setCell(R, 0, "", style(CLR.fixed));
+    setCell(R, 1, "", style(CLR.fixed));
+    setCell(R, totalCol, "", style(CLR.daily_total_hdr));
     R++;
 
-    // Row 4: Gender (never merged)
     rd.cols.forEach((col, i) => {
       const g = col.label.gender
         ? col.label.gender.charAt(0).toUpperCase() + col.label.gender.slice(1).toLowerCase()
         : "—";
       setCell(R, i + 2, g, style(CLR.gender, { font: { sz: 9, bold: false } }));
     });
+    setCell(R, 0, "", style(CLR.fixed));
+    setCell(R, 1, "", style(CLR.fixed));
+    setCell(R, totalCol, "", style(CLR.daily_total_hdr));
     R++;
+    const headerEnd = R - 1;
 
-    // ── BODY ──────────────────────────────────────────────────────
+    // Body
     for (const [mk, mDates] of rd.monthMap.entries()) {
       const monthRowTotal = rd.cols.reduce((s, c) => s + (rd.monthTotals[mk][c.key] || 0), 0);
 
-      // Month separator row
-      setCell(R, 0, `${fmtMonth(mk).toUpperCase()}`,
-        style(CLR.month_sep, { align: { horizontal:"left", vertical:"center" }, font: { sz: 11, bold: true } }));
+      setCell(
+        R,
+        0,
+        `${fmtMonth(mk).toUpperCase()}`,
+        style(CLR.month_sep, { align: { horizontal: "left" }, font: { sz: 11, bold: true } })
+      );
       mergeRange(R, 0, R, totalCol);
+      fillRow(R, 1, totalCol, style(CLR.month_sep));
       R++;
 
-      // Daily rows
       for (const de of mDates) {
-        const rowTotal     = rd.cols.reduce((s, c) => s + (de.counts.get(c.key) || 0), 0);
-        const summaryLines = (de.summary || "").split("\n").slice(0, 5).join(" | ").replace(/^[•\-]\s*/gm, "").slice(0, 200);
+        const rowTotal = rd.cols.reduce((s, c) => s + (de.counts.get(c.key) || 0), 0);
+        const summaryLines = (de.summary || "")
+          .split("\n")
+          .map((l) => l.replace(/^[•\-]\s*/, "").trim())
+          .filter(Boolean)
+          .slice(0, 6)
+          .join(" | ")
+          .slice(0, 400);
 
-        setCell(R, 0, fmtDate(de.date), style(CLR.date_cell,    { align: { horizontal:"left" }, font: { bold:true, sz:10, color:{rgb:"FF334155"} } }));
-        setCell(R, 1, summaryLines||"—", style(CLR.summary_cell, { align: { horizontal:"left", wrapText:true }, font: { bold:false, sz:9, color:{rgb:"FF475569"} } }));
+        setCell(
+          R,
+          0,
+          fmtDate(de.date),
+          style(CLR.date_cell, { align: { horizontal: "left" }, font: { bold: true, sz: 10 } })
+        );
+        setCell(
+          R,
+          1,
+          summaryLines || "—",
+          style(CLR.summary_cell, {
+            align: { horizontal: "left", wrapText: true },
+            font: { bold: false, sz: 9 },
+          })
+        );
 
         rd.cols.forEach((col, i) => {
           const cnt = de.counts.get(col.key) || 0;
-          setCell(R, i + 2, cnt > 0 ? cnt : "-",
-            cnt > 0
-              ? style(CLR.count_cell, { font: { bold:true, sz:11, color:{rgb:"FF0F172A"} } })
-              : style(CLR.zero_cell,  { font: { bold:false, sz:10, color:{rgb:"FF94A3B8"} } })
-          );
+          if (cnt > 0) {
+            setCell(R, i + 2, cnt, style(CLR.count_cell, { font: { bold: true, sz: 11 } }), "n");
+          } else {
+            setCell(R, i + 2, "", style(CLR.zero_cell, { font: { bold: false } }));
+          }
         });
 
-        setCell(R, totalCol, rowTotal > 0 ? rowTotal : "-",
-          style(CLR.row_total_cell, { font: { bold:true, sz:11, color:{rgb:"FF166534"} } }));
+        if (rowTotal > 0) {
+          setCell(R, totalCol, rowTotal, style(CLR.row_total_cell, { font: { bold: true, sz: 11 } }), "n");
+        } else {
+          setCell(R, totalCol, "", style(CLR.row_total_cell, { font: { bold: false } }));
+        }
         R++;
       }
 
-            // Monthly subtotal row
-      setCell(R, 0, `${fmtMonth(mk).toUpperCase()} — TOTAL`,
-        style(CLR.month_sub, { align: { horizontal:"left" }, font: { bold:true, sz:10, color:{rgb:"FF1E3A5F"} } }));
+      setCell(
+        R,
+        0,
+        `${fmtMonth(mk).toUpperCase()} — TOTAL`,
+        style(CLR.month_sub, { align: { horizontal: "left" }, font: { bold: true, sz: 10 } })
+      );
       mergeRange(R, 0, R, 1);
       setCell(R, 1, "", style(CLR.month_sub));
 
       rd.cols.forEach((col, i) => {
         const cnt = rd.monthTotals[mk][col.key] || 0;
-        setCell(R, i + 2, cnt > 0 ? cnt : "-",
-          cnt > 0
-            ? style(CLR.month_sub,      { font: { bold:true,  sz:11, color:{rgb:"FF1E3A5F"} } })
-            : style(CLR.month_sub,      { font: { bold:false, sz:10, color:{rgb:"FF4B6584"} } })
-        );
+        if (cnt > 0) setCell(R, i + 2, cnt, style(CLR.month_sub, { font: { bold: true, sz: 11 } }), "n");
+        else setCell(R, i + 2, "", style(CLR.month_sub, { font: { bold: false } }));
       });
-      setCell(R, totalCol, monthRowTotal > 0 ? monthRowTotal : "-",
-        style(CLR.month_sub_total, { font: { bold:true, sz:12, color:{rgb:"FF1E3A5F"} } }));
+      if (monthRowTotal > 0) {
+        setCell(R, totalCol, monthRowTotal, style(CLR.month_sub_total, { font: { bold: true, sz: 12 } }), "n");
+      } else {
+        setCell(R, totalCol, "", style(CLR.month_sub_total));
+      }
       R++;
-
-      // Blank spacer
-      R++;
+      R++; // spacer
     }
 
-
-    // Grand total row
-    setCell(R, 0, "GRAND TOTAL — ALL MONTHS",
-      style(CLR.grand, { align: { horizontal:"left" }, font: { bold:true, sz:11, color:{rgb:"FF7F1D1D"} } }));
+    setCell(
+      R,
+      0,
+      "GRAND TOTAL — ALL MONTHS",
+      style(CLR.grand, { align: { horizontal: "left" }, font: { bold: true, sz: 11 } })
+    );
     mergeRange(R, 0, R, 1);
     setCell(R, 1, "", style(CLR.grand));
-
     rd.cols.forEach((col, i) => {
       const cnt = rd.colTotals[col.key] || 0;
-      setCell(R, i + 2, cnt > 0 ? cnt : "-", style(CLR.grand, { font: { bold:true, sz:11, color:{rgb:"FF7F1D1D"} } }));
+      if (cnt > 0) setCell(R, i + 2, cnt, style(CLR.grand, { font: { bold: true, sz: 11 } }), "n");
+      else setCell(R, i + 2, "", style(CLR.grand));
     });
-    setCell(R, totalCol, grandTotal, style(CLR.grand_val, { font: { bold:true, sz:14, color:{rgb:"FF7F1D1D"} } }));
+    setCell(R, totalCol, grand, style(CLR.grand_val, { font: { bold: true, sz: 14 } }), "n");
 
-    // ── Sheet range + merges + col widths ─────────────────────────
-    ws["!ref"]   = XLSX.utils.encode_range({ s:{ r:0, c:0 }, e:{ r:R, c:totalCol } });
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: R, c: totalCol } });
     ws["!merges"] = merg;
-    ws["!cols"]  = [
-      { wch: 14 },  // Date
-      { wch: 38 },  // Summary
-      ...rd.cols.map(() => ({ wch: 11 })),
-      { wch: 12 },  // Daily Total
+    ws["!cols"] = [
+      { wch: 14 },
+      { wch: 42 },
+      ...rd.cols.map((col) => ({
+        wch: Math.min(18, Math.max(10, String(col.label.labour || col.label.category || "x").length + 2)),
+      })),
+      { wch: 12 },
     ];
-    ws["!rows"] = [
-      { hpt: 20 }, { hpt: 20 }, { hpt: 20 }, { hpt: 18 }, { hpt: 18 }, // 5 header rows
+    ws["!rows"] = [{ hpt: 24 }, { hpt: 18 }, { hpt: 8 }];
+    ws["!freeze"] = { xSplit: 2, ySplit: headerEnd + 1, topLeftCell: addr(headerEnd + 1, 2), activePane: "bottomRight", state: "frozen" };
+
+    // Summary sheet
+    const sumRows = [
+      ["DIP PROJECTS — MANPOWER SUMMARY"],
+      [`Site: ${rd.site}`],
+      [`Period: ${rd.from || "All"} to ${rd.to || "All"}`],
+      [],
+      ["Scope", "Category", "Labour", "Skill", "Gender", "Total Count"],
     ];
+    const scopeSum = { CLIENT: 0, PMC: 0, CONTRACTOR: 0, OTHER: 0 };
+    for (const col of rd.cols) {
+      const tot = rd.colTotals[col.key] || 0;
+      sumRows.push([
+        col.scope || "—",
+        col.label.category || "—",
+        col.label.labour || "—",
+        col.label.skill || "—",
+        col.label.gender || "—",
+        tot,
+      ]);
+      const sk = ["CLIENT", "PMC", "CONTRACTOR"].includes(col.scope) ? col.scope : "OTHER";
+      scopeSum[sk] += tot;
+    }
+    sumRows.push([]);
+    sumRows.push(["Scope totals"]);
+    sumRows.push(["CLIENT", scopeSum.CLIENT]);
+    sumRows.push(["PMC", scopeSum.PMC]);
+    sumRows.push(["CONTRACTOR", scopeSum.CONTRACTOR]);
+    if (scopeSum.OTHER) sumRows.push(["OTHER", scopeSum.OTHER]);
+    sumRows.push(["GRAND TOTAL", grand]);
+
+    const wsSum = XLSX.utils.aoa_to_sheet(sumRows);
+    wsSum["!cols"] = [{ wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 12 }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Manpower Report");
-    XLSX.writeFile(wb, `Manpower_${rd.site.replace(/\s+/g, "_")}_${rd.from}_to_${rd.to}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, wsSum, "Summary");
+    const safeSite = String(rd.site || "site").replace(/[^\w\-]+/g, "_");
+    XLSX.writeFile(wb, `Manpower_${safeSite}_${rd.from || "all"}_to_${rd.to || "all"}.xlsx`);
   };
 
   const rd         = reportData;

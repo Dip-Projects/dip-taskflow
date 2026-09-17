@@ -44,7 +44,7 @@ function parseCheckpointIds(body) {
 
 const RT_SELECT = `
   id, description, priority, frequency, frequency_days,
-  start_date, end_date, is_active, created_at,
+  start_date, end_date, is_active, created_at, department_id,
   department:departments ( id, name ),
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
@@ -62,8 +62,82 @@ function isInstanceClosed(status) {
   return status === 'Completed' || status === 'NotApplicable';
 }
 
-// Date-agnostic version of "should this task fire on this particular day" —
-// lets us check any day in the backfill window, not just today.
+const MDO_OFFICE_DEPT_ID = '3dce1637-bbec-4081-9b7d-01e2e890e2ae';
+
+function ymdParts(date) {
+  if (date instanceof Date && !Number.isNaN(date.getTime())) {
+    // Prefer calendar Y-M-D from ISO when the Date was built from a date-only
+    // string (UTC midnight); otherwise use local Y-M-D.
+    const iso = date.toISOString().slice(0, 10);
+    const [iy, im, id] = iso.split('-').map(Number);
+    const localY = date.getFullYear();
+    const localM = date.getMonth() + 1;
+    const localD = date.getDate();
+    // If UTC and local calendar days differ, trust local (server TZ); for
+    // date-only UTC midnights they match on UTC hosts (Vercel).
+    if (date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0) {
+      return { y: iy, m: im, d: id };
+    }
+    return { y: localY, m: localM, d: localD };
+  }
+  const [y, m, d] = String(date).slice(0, 10).split('-').map(Number);
+  return { y, m, d };
+}
+
+/** Weekday of a calendar date (0=Sun … 6=Sat), timezone-safe. */
+function calendarWeekday(date) {
+  const { y, m, d } = ymdParts(date);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+function isMdoOfficeDept(task) {
+  if (task?.department_id === MDO_OFFICE_DEPT_ID || task?.department?.id === MDO_OFFICE_DEPT_ID) {
+    return true;
+  }
+  const name = String(
+    task?.department?.name ||
+      task?.departments?.name ||
+      task?.assignee_department ||
+      ''
+  )
+    .toLowerCase()
+    .trim();
+  return name === 'mdo office' || name === 'mdo';
+}
+
+/** frequency_days: "5" (single day) or "14-17" (inclusive day-of-month window). */
+function parseMonthlyDayRange(frequencyDays, startDate) {
+  const raw = String(frequencyDays || '').trim();
+  const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+  let from;
+  let to;
+  if (rangeMatch) {
+    from = Number(rangeMatch[1]);
+    to = Number(rangeMatch[2]);
+  } else {
+    const first = Number(String(raw).split(',')[0].trim());
+    from = first;
+    to = first;
+  }
+  if (!Number.isFinite(from) || from < 1 || from > 31) {
+    from = startDate instanceof Date && !Number.isNaN(startDate.getTime())
+      ? startDate.getDate()
+      : 1;
+  }
+  if (!Number.isFinite(to) || to < 1 || to > 31) {
+    to = from;
+  }
+  from = Math.min(31, Math.max(1, Math.floor(from)));
+  to = Math.min(31, Math.max(1, Math.floor(to)));
+  if (to < from) {
+    const swap = from;
+    from = to;
+    to = swap;
+  }
+  return { from, to };
+}
+
+/** Daily MDO tasks never fire on Sunday — belt-and-suspenders. */
 function shouldFireOn(task, date) {
   const start = new Date(task.start_date);
   const end = task.end_date ? new Date(task.end_date) : null;
@@ -72,26 +146,31 @@ function shouldFireOn(task, date) {
   if (d < start) return false;
   if (end && d > end) return false;
 
+  const dow = calendarWeekday(date);
+  // MDO OFFICE: Mon–Sat only (no Sunday instances).
+  if (isMdoOfficeDept(task) && dow === 0) return false;
+  // Extra safety: any Daily task under MDO dept id string match
+  if (dow === 0 && String(task?.department_id || '') === MDO_OFFICE_DEPT_ID) return false;
+
   const freq = task.frequency;
   if (freq === 'Daily') return true;
   if (freq === 'Weekly') {
     const days = (task.frequency_days || '').split(',').map(Number);
-    return days.includes(date.getDay());
+    return days.includes(dow);
   }
   if (freq === 'Monthly') {
-    // Prefer explicit day-of-month in frequency_days; fall back to start_date day
-    const raw = String(task.frequency_days || '').split(',')[0].trim();
-    let wanted = Number(raw);
-    if (!Number.isFinite(wanted) || wanted < 1 || wanted > 31) {
-      wanted = start.getDate();
-    }
-    const y = date.getFullYear();
-    const m = date.getMonth();
-    const lastDay = new Date(y, m + 1, 0).getDate();
-    const fireDay = Math.min(wanted, lastDay);
-    return date.getDate() === fireDay;
+    // "5" or "14-17" → one instance per calendar day in the window each month
+    const { from, to } = parseMonthlyDayRange(task.frequency_days, start);
+    const { y, m, d: dayNum } = ymdParts(date);
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const fromDay = Math.min(from, lastDay);
+    const toDay = Math.min(to, lastDay);
+    return dayNum >= fromDay && dayNum <= toDay;
   }
-  if (freq === 'Yearly') return date.getDate() === start.getDate() && date.getMonth() === start.getMonth();
+  if (freq === 'Yearly') {
+    const parts = ymdParts(date);
+    return parts.d === start.getDate() && parts.m - 1 === start.getMonth();
+  }
   return false;
 }
 
@@ -106,6 +185,12 @@ function shouldFireToday(task, today) {
 // lets a missed day (e.g. task not done on the 6th) keep showing up as its
 // own pending row on the 7th instead of silently disappearing — each due
 // date gets its own instance/row.
+function isSundayYmd(ymdStr) {
+  const [y, m, d] = String(ymdStr).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return false;
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0;
+}
+
 function getFireDates(task, today) {
   const dates = [];
   const start = new Date(task.start_date);
@@ -126,9 +211,31 @@ function getFireDates(task, today) {
 // creates whichever ones are still missing (e.g. a day the employee never
 // opened the app on so no instance was ever created for it). Returns them
 // all, in the same oldest→newest order as dueDates.
-async function getOrCreateInstances(recurringTaskId, dueDates) {
+async function getOrCreateInstances(recurringTaskId, dueDates, task = null) {
   if (!dueDates.length) return [];
-  const dueDateStrs = dueDates.map(d => d.toISOString().slice(0, 10));
+  const skipSunday = task ? isMdoOfficeDept(task) : false;
+  const dueDateStrs = dueDates
+    .map(d => d.toISOString().slice(0, 10))
+    .filter(d => !(skipSunday && isSundayYmd(d)));
+  if (!dueDateStrs.length) return [];
+
+  // Hard cleanup: never keep MDO Sunday instances around (even if not in fireDates).
+  if (skipSunday) {
+    const windowStart = dueDates.length
+      ? dueDates.map((d) => d.toISOString().slice(0, 10)).sort()[0]
+      : null;
+    let q = supabase
+      .from('recurring_task_instances')
+      .select('id, due_date')
+      .eq('recurring_task_id', recurringTaskId);
+    if (windowStart) q = q.gte('due_date', windowStart);
+    const { data: sunRows } = await q;
+    const sunIds = (sunRows || []).filter((r) => isSundayYmd(r.due_date)).map((r) => r.id);
+    if (sunIds.length) {
+      await supabase.from('recurring_task_instances').delete().in('id', sunIds);
+    }
+  }
+
   const selectWithPhoto = 'id, due_date, status, completed_at, photo_url, recurring_task_checkpoint_completions ( checkpoint_id )';
   const selectNoPhoto = 'id, due_date, status, completed_at, recurring_task_checkpoint_completions ( checkpoint_id )';
 
@@ -151,7 +258,10 @@ async function getOrCreateInstances(recurringTaskId, dueDates) {
   if (error) throw error;
 
   const byDate = {};
-  (existing || []).forEach(i => { byDate[i.due_date] = i; });
+  (existing || []).forEach(i => {
+    if (skipSunday && isSundayYmd(i.due_date)) return;
+    byDate[i.due_date] = i;
+  });
 
   const missing = dueDateStrs.filter(d => !byDate[d]);
   if (missing.length) {
@@ -203,11 +313,26 @@ router.post('/', requireAdmin, async (req, res) => {
     if (frequency === 'Weekly' && (!frequency_days || frequency_days.length === 0)) {
       return res.status(400).json({ error: 'Please select at least one day for weekly tasks' });
     }
+    let storedFrequencyDays = null;
+    if (frequency === 'Weekly') {
+      storedFrequencyDays = Array.isArray(frequency_days)
+        ? frequency_days.join(',')
+        : frequency_days;
+    }
     if (frequency === 'Monthly') {
-      const day = Number(Array.isArray(frequency_days) ? frequency_days[0] : String(frequency_days || '').split(',')[0]);
-      if (!Number.isFinite(day) || day < 1 || day > 31) {
-        return res.status(400).json({ error: 'Please select a day of the month (1–31) for monthly tasks' });
+      let raw = '';
+      if (Array.isArray(frequency_days) && frequency_days.length >= 2) {
+        raw = `${frequency_days[0]}-${frequency_days[1]}`;
+      } else if (Array.isArray(frequency_days) && frequency_days.length === 1) {
+        raw = String(frequency_days[0]);
+      } else {
+        raw = String(frequency_days || '');
       }
+      const { from, to } = parseMonthlyDayRange(raw, new Date(start_date));
+      if (!Number.isFinite(from) || from < 1 || from > 31 || !Number.isFinite(to) || to < 1 || to > 31) {
+        return res.status(400).json({ error: 'Please select a valid monthly duration (from/to days 1–31)' });
+      }
+      storedFrequencyDays = from === to ? String(from) : `${from}-${to}`;
     }
 
     const { data: rt, error } = await supabase
@@ -221,9 +346,7 @@ router.post('/', requireAdmin, async (req, res) => {
         description,
         priority: priority || 'Medium',
         frequency,
-        frequency_days: (frequency === 'Weekly' || frequency === 'Monthly')
-          ? (Array.isArray(frequency_days) ? frequency_days.join(',') : frequency_days)
-          : null,
+        frequency_days: storedFrequencyDays,
         start_date,
         end_date: end_date || null,
         is_active: true
@@ -290,7 +413,7 @@ router.get('/all', requireAdmin, async (req, res) => {
 
       if (task.is_active) {
         const fireDates = getFireDates(task, today);
-        const instances = await getOrCreateInstances(task.id, fireDates);
+        const instances = await getOrCreateInstances(task.id, fireDates, task);
         const overdueInstances = instances.filter(
           i => !isInstanceClosed(i.status) && i.due_date < todayOnly.toISOString().slice(0, 10)
         );
@@ -335,9 +458,11 @@ router.get('/my', async (req, res) => {
     const result = [];
     for (const task of tasks) {
       const fireDates = getFireDates(task, today);
-      const instances = await getOrCreateInstances(task.id, fireDates);
+      const instances = await getOrCreateInstances(task.id, fireDates, task);
 
       for (const inst of instances) {
+        // MDO OFFICE: never show Sunday rows (even if stale rows linger).
+        if (isMdoOfficeDept(task) && isSundayYmd(inst.due_date)) continue;
         // A day that's already been completed just disappears — except
         // today's, which stays visible (as "Completed") until the page
         // is next refreshed, so the checkmark doesn't vanish instantly.
@@ -382,18 +507,33 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     for (const f of allowed) {
       if (req.body[f] !== undefined) updates[f] = req.body[f];
     }
-    if (updates.frequency_days && Array.isArray(updates.frequency_days)) {
-      updates.frequency_days = updates.frequency_days.join(',');
+    if (updates.frequency_days !== undefined) {
+      if (Array.isArray(updates.frequency_days)) {
+        const isMonthly =
+          updates.frequency === 'Monthly' ||
+          (!updates.frequency && req.body.frequency === 'Monthly');
+        if (isMonthly && updates.frequency_days.length >= 2) {
+          updates.frequency_days = `${updates.frequency_days[0]}-${updates.frequency_days[1]}`;
+        } else {
+          updates.frequency_days = updates.frequency_days.join(',');
+        }
+      }
     }
     // When switching away from Weekly/Monthly, clear day list unless provided
     if (updates.frequency && updates.frequency !== 'Weekly' && updates.frequency !== 'Monthly') {
       if (updates.frequency_days === undefined) updates.frequency_days = null;
     }
-    if (updates.frequency === 'Monthly') {
-      const day = Number(String(updates.frequency_days || '').split(',')[0]);
-      if (!Number.isFinite(day) || day < 1 || day > 31) {
-        return res.status(400).json({ error: 'Please select a day of the month (1–31) for monthly tasks' });
+    const effectiveFreq = updates.frequency || req.body.frequency;
+    if (effectiveFreq === 'Monthly' && updates.frequency_days !== undefined) {
+      const startHint = updates.start_date || req.body.start_date || null;
+      const { from, to } = parseMonthlyDayRange(
+        updates.frequency_days,
+        startHint ? new Date(startHint) : new Date()
+      );
+      if (!Number.isFinite(from) || from < 1 || from > 31 || !Number.isFinite(to) || to < 1 || to > 31) {
+        return res.status(400).json({ error: 'Please select a valid monthly duration (from/to days 1–31)' });
       }
+      updates.frequency_days = from === to ? String(from) : `${from}-${to}`;
     }
 
     const { data, error } = await supabase

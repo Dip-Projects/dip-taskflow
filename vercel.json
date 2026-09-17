@@ -25,6 +25,10 @@
     {
       "path": "/api/hr/cron/insurance-whatsapp",
       "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/whatsapp/cron/weekly-plan-day-list",
+      "schedule": "0 3 * * 1-6"
     }
   ],
   "headers": [
