@@ -165,7 +165,7 @@ async function loadDrawingsForScope(projectIds, aliases) {
   try {
     const { data, error } = await supabase
       .from('drawings')
-      .select('id, project_id, drawing_date, file_urls, file_paths, created_at, category, remarks')
+      .select('id, project_id, drawing_date, file_urls, file_paths, created_at, category, sub_cat_1, sub_cat_2, sub_cat_3, remarks, revision')
       .order('created_at', { ascending: false });
     if (error) throw error;
     const idSet = new Set(projectIds || []);
@@ -175,7 +175,7 @@ async function loadDrawingsForScope(projectIds, aliases) {
     }
     const { data: withProj } = await supabase
       .from('drawings')
-      .select('id, project_id, drawing_date, file_urls, file_paths, created_at, category, remarks, project:projects!drawings_project_id_fkey(id, name)')
+      .select('id, project_id, drawing_date, file_urls, file_paths, created_at, category, sub_cat_1, sub_cat_2, sub_cat_3, remarks, revision, project:projects!drawings_project_id_fkey(id, name)')
       .order('created_at', { ascending: false });
     return (withProj || []).filter(
       (d) => idSet.has(d.project_id) || rowMatchesSite(d.project?.name, aliases)
@@ -185,7 +185,7 @@ async function loadDrawingsForScope(projectIds, aliases) {
     if (!(projectIds || []).length) return [];
     const { data } = await supabase
       .from('drawings')
-      .select('id, project_id, drawing_date, file_urls, created_at, category, remarks')
+      .select('id, project_id, drawing_date, file_urls, created_at, category, sub_cat_1, sub_cat_2, sub_cat_3, remarks, revision')
       .in('project_id', projectIds)
       .order('created_at', { ascending: false });
     return data || [];
