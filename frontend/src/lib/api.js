@@ -146,14 +146,29 @@ export function isSiteEngineer(user) {
   return (user?.department || '').trim().toLowerCase() === 'site engineer';
 }
 
+/**
+ * Field staff who only use the Site portal (no Office TaskFlow, no Office↔Site toggle).
+ * Site Engineer department, Site Engineer / Site Incharge / Site Coordinator roles.
+ */
+export function isSitePortalOnlyStaff(user) {
+  if (!user) return false;
+  if (isSiteEngineer(user)) return true;
+  const blob = [user.role, user.designation, user.site_role]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /jr\.?\s*site engineer|junior site engineer|site engineer|site incharge|site coordinator/.test(
+    blob
+  );
+}
+
 /** People who work on site (clock-in, own DPR). Not office heads. */
 export function isOnSiteStaff(user) {
   if (!user) return false;
-  if (isSiteEngineer(user)) return true;
+  if (isSitePortalOnlyStaff(user)) return true;
   const blob = [user.role, user.designation, user.department, user.site_role]
     .map((s) => String(s || '').toLowerCase())
     .join(' ');
-  return /jr\.?\s*site engineer|junior site engineer|site engineer|site incharge|site coordinator|co-?ordinator/.test(blob);
+  return /co-?ordinator/.test(blob);
 }
 
 /** Office head on Site view: only their team's submitted reports. */
