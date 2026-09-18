@@ -1,7 +1,7 @@
 import { useEffect, memo } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
-import { isHr } from '../../lib/api';
+import { isHr, isSitePortalOnlyStaff } from '../../lib/api';
 import TaskflowDom from './TaskflowDom';
 import { mountTaskflowApp, unmountTaskflowApp } from './mountTaskflowApp';
 import './taskflow.css';
@@ -72,7 +72,8 @@ export default function TaskflowApp() {
   }
 
   const dept = (user?.department || '').trim().toLowerCase();
-  if (dept === 'site engineer' && !canToggleSite) {
+  // Site field staff never stay on Office — Site portal only
+  if (isSitePortalOnlyStaff(user) && !canToggleSite) {
     return <Navigate to="/site" replace />;
   }
   if ((user?.role || '').toLowerCase() === 'client' || dept === 'client') {

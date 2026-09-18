@@ -130,8 +130,8 @@ export function postLoginPath(user) {
   // MDO only via Process Controller role or Permissions "Office ↔ MDO" toggle
   // (dept name alone must NOT auto-open MDO when toggle is Off).
   if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();
-  const dept = (user.department || '').trim().toLowerCase();
-  if (dept === 'site engineer') return '/site';
+  // Site field staff → Site portal only (no Office)
+  if (isSitePortalOnlyStaff(user)) return '/site';
   return '/app';
 }
 
@@ -200,20 +200,20 @@ export function isSiteHead(user) {
 }
 
 export function canToggleSite(user) {
-  // Clients never toggle. Admin / Head / permission toggle / known site roles.
+  // Clients never toggle. Site field staff never toggle (Site portal only).
   if (!user || isClient(user)) return false;
+  if (isSitePortalOnlyStaff(user)) return false;
+
   const role = (user.role || '').toLowerCase().trim();
   if (role === 'admin' || role === 'head') return true;
-  if (user.can_switch_office_site || user.is_head || user.can_access_site) return true;
-  if (isSiteEngineer(user)) return false;
+  // Explicit Permissions "Office ↔ Site" toggle
+  if (user.can_switch_office_site) return true;
+  // Office heads who may also open Site
+  if (user.is_head) return true;
+
   const desig = (user.designation || '').toLowerCase().trim();
-  return (
-    desig === 'project head' ||
-    desig === 'site incharge' ||
-    desig === 'site head' ||
-    desig === 'head' ||
-    /co-?ordinator/.test(desig)
-  );
+  // Do NOT auto-grant for Site Incharge / Site Engineer / Coordinator — those are site-only
+  return desig === 'project head' || desig === 'site head' || desig === 'head';
 }
 
 /**
