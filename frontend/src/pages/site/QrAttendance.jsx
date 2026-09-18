@@ -418,21 +418,67 @@ export default function QrAttendance() {
     let cancelled = false;
 
     (async () => {
-      try {
-        const html5Qr = new Html5Qrcode("qr-reader", { verbose: false });
-        if (cancelled) return;
-        scannerRef.current = html5Qr;
-        await html5Qr.start(
-          { facingMode: "environment" },
-          { fps: 12, qrbox: { width: 220, height: 220 } },
-          (text) => {
-            handleDecoded(text);
-          }
-        );
-      } catch {
-        if (!cancelled) {
-          setCamError("Camera could not start. Allow camera access and try again.");
+      // Wait a tick so #qr-reader is in the DOM (React mount / StrictMode).
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      if (cancelled) return;
+      if (!document.getElementById("qr-reader")) {
+        setCamError("Scanner area missing. Refresh the page.");
+        return;
+      }
+
+      const html5Qr = new Html5Qrcode("qr-reader", { verbose: false });
+      if (cancelled) {
+        try {
+          await html5Qr.clear();
+        } catch {
+          /* ignore */
         }
+        return;
+      }
+      scannerRef.current = html5Qr;
+
+      const config = { fps: 12, qrbox: { width: 220, height: 220 } };
+      const onScan = (text) => {
+        handleDecoded(text);
+      };
+
+      // Prefer back camera; fall back to any listed device / front camera (desktop).
+      const attempts = [{ facingMode: "environment" }, { facingMode: "user" }];
+      try {
+        const cams = await Html5Qrcode.getCameras();
+        if (Array.isArray(cams) && cams.length) {
+          for (const cam of cams) {
+            if (cam?.id) attempts.push(cam.id);
+          }
+        }
+      } catch {
+        /* permissions may be granted only inside start() */
+      }
+
+      let lastErr = null;
+      for (const camera of attempts) {
+        if (cancelled) return;
+        try {
+          await html5Qr.start(camera, config, onScan);
+          if (!cancelled) setCamError("");
+          return;
+        } catch (err) {
+          lastErr = err;
+          try {
+            if (html5Qr.isScanning) await html5Qr.stop();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      if (!cancelled) {
+        const detail = lastErr?.message || lastErr?.name || "";
+        setCamError(
+          detail
+            ? `Camera could not start (${detail}). Allow camera, or use Upload QR from device.`
+            : "Camera could not start. Allow camera access, or use Upload QR from device."
+        );
       }
     })();
 
@@ -589,7 +635,24 @@ export default function QrAttendance() {
               {(busy || phase === "loading") && (
                 <div className="qr-busy">Marking EM meeting present…</div>
               )}
-              {camError && <div className="qr-note">{camError}</div>}
+              {camError && (
+                <div className="qr-error" style={{ marginTop: 12 }}>
+                  {camError}
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="qr-btn-secondary"
+                      onClick={() => {
+                        setCamError("");
+                        setPhase("loading");
+                        requestAnimationFrame(() => setPhase("scan"));
+                      }}
+                    >
+                      Retry camera
+                    </button>
+                  </div>
+                </div>
+              )}
               {message && <div className="qr-error">{message}</div>}
               {!busy && phase === "scan" && !camError && (
                 <div className="qr-note">
@@ -616,6 +679,9 @@ export default function QrAttendance() {
                   />
                 </div>
               )}
+              <div className="qr-build-stamp" aria-hidden>
+                build qr-cam-fix · 2026-09-18
+              </div>
             </div>
           )}
 

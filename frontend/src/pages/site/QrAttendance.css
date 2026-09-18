@@ -90,6 +90,27 @@
   position: relative;
 }
 
+.qr-reader:empty::after {
+  content: "Starting camera…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #d1d5db;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.qr-build-stamp {
+  margin-top: 14px;
+  font-size: 11px;
+  color: #9ca3af;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .qr-reader video,
 .qr-reader canvas {
   width: 100% !important;
