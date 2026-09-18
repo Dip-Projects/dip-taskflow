@@ -57,23 +57,48 @@ export async function api(path, options = {}) {
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let body = options.body;
+  if (body != null && typeof body === 'object' && !(body instanceof FormData) && !(body instanceof Blob)) {
+    body = JSON.stringify(body);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, body });
   const newToken = res.headers.get('X-New-Token');
   if (newToken) localStorage.setItem('tf_token', newToken);
 
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== '/auth/login') {
-    // Wipe storage + notify AuthContext so UI does not stay "logged in" with a dead token
-    clearSession();
+  const raw = await res.text();
+  let data = {};
+  if (raw) {
     try {
-      window.dispatchEvent(new CustomEvent('tf:session-cleared'));
+      data = JSON.parse(raw);
     } catch {
-      /* ignore */
+      data = {};
+    }
+  }
+  if (res.status === 401 && path !== '/auth/login') {
+    // Only wipe session on real auth failures — not every stray 401 from
+    // background polls / missing routes (that was logging HR out mid-use).
+    const msg = String(data.error || data.message || '').toLowerCase();
+    const authFail = /session expired|please log in|invalid token|jwt malformed|jwt expired/i.test(msg);
+    if (authFail) {
+      clearSession();
+      try {
+        window.dispatchEvent(new CustomEvent('tf:session-cleared'));
+      } catch {
+        /* ignore */
+      }
     }
   }
   if (!res.ok) {
-    const err = new Error(data.error || 'Request failed');
+    const errMsg =
+      data.error ||
+      data.note ||
+      data.message ||
+      (raw && !raw.trim().startsWith('<') ? raw.trim().slice(0, 180) : '') ||
+      `Request failed (${res.status})`;
+    const err = new Error(errMsg);
     err.status = res.status;
+    err.data = data;
     throw err;
   }
   return data;

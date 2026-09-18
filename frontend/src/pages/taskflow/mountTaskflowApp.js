@@ -360,8 +360,13 @@ export async function mountTaskflowApp(opts = {}) {
       if (path === '/auth/login') {
         throw new Error(data.error || 'Invalid username or password');
       }
-      logout();
-      throw new Error('Session expired, please log in again');
+      // Don't force-logout on every background poll 401 (e.g. after leaving /app
+      // for /hr). Only logout when the token is clearly dead.
+      const msg = String(data.error || data.message || '').toLowerCase();
+      if (/session expired|please log in|invalid token|jwt/i.test(msg) || !state.token) {
+        logout();
+      }
+      throw new Error(data.error || 'Session expired, please log in again');
     }
     if (!res.ok) {
       const err = new Error(data.message || data.error || 'Something went wrong');
@@ -10357,6 +10362,10 @@ export async function mountTaskflowApp(opts = {}) {
       clearInterval(_chatPollTimer);
       _chatPollTimer = null;
     }
+    if (window._chatPollTimer) {
+      clearInterval(window._chatPollTimer);
+      window._chatPollTimer = null;
+    }
   }
 
   function startChatPoll() {
@@ -10376,6 +10385,7 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('team-chat', chatUnread?.total || 0);
       } catch (_) {}
     }, 8000);
+    window._chatPollTimer = _chatPollTimer;
   }
 
   async function loadTeamChatRoomsOnly() {
@@ -10971,5 +10981,9 @@ export function unmountTaskflowApp() {
   if (window._timerInterval) {
     clearInterval(window._timerInterval);
     window._timerInterval = null;
+  }
+  if (window._chatPollTimer) {
+    clearInterval(window._chatPollTimer);
+    window._chatPollTimer = null;
   }
 }

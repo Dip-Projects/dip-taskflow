@@ -252,3 +252,763 @@
     margin-left: 32px;
   }
 }
+
+/* ==== Weekly plan Excel preview styles ==== */
+
+.smt-excel-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.smt-excel-preview {
+  margin-top: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.smt-excel-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.smt-excel-preview__name {
+  font-size: 12px;
+  color: #374151;
+}
+
+.smt-excel-preview__link {
+  font-size: 12px;
+  color: #0f766e;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.smt-excel-preview__msg {
+  padding: 10px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.smt-excel-preview__msg--err {
+  color: #b91c1c;
+}
+
+.smt-excel-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: min(70vh, 720px);
+  min-height: 280px;
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  border: 1px solid #c5cdd6;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.02);
+}
+
+.smt-task-scroll {
+  overflow-x: scroll;
+  scrollbar-gutter: stable;
+}
+
+.smt-pdf-frame {
+  display: block;
+  border: 1px solid #c5cdd6;
+  padding: 0;
+  overflow: hidden;
+}
+
+.smt-task-sheet {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: max(100%, 960px);
+  font-size: 12px;
+}
+
+.smt-task-sheet th,
+.smt-task-sheet td {
+  border: 1px solid #9ca3af;
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.smt-task-sheet th {
+  background: #e5e7eb;
+  font-weight: 700;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  white-space: nowrap;
+  min-width: 110px;
+}
+
+.smt-task-sheet__day {
+  background: #fef9c3;
+  min-width: 220px;
+}
+
+.smt-task-sheet__weekday {
+  font-size: 10px;
+  font-weight: 600;
+  color: #78716c;
+  margin-top: 2px;
+}
+
+.smt-task-sheet__half {
+  background: #fefce8;
+  font-size: 11px;
+  min-width: 120px;
+  top: 40px;
+}
+
+.smt-task-sheet__half-sub {
+  font-size: 9px;
+  font-weight: 600;
+  color: #a8a29e;
+  margin-top: 2px;
+}
+
+.smt-task-sheet__sticky-sr {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #f3f4f6;
+}
+
+.smt-task-sheet th.smt-task-sheet__sticky-sr {
+  z-index: 4;
+  background: #e5e7eb;
+}
+
+.smt-task-sheet__sticky-name {
+  position: sticky;
+  left: 48px;
+  z-index: 3;
+  background: #fff;
+}
+
+.smt-task-sheet th.smt-task-sheet__sticky-name {
+  z-index: 4;
+  background: #e5e7eb;
+}
+
+.smt-task-sheet__sr {
+  text-align: center;
+  min-width: 48px;
+  width: 48px;
+  font-weight: 700;
+  background: #f3f4f6;
+}
+
+.smt-task-sheet__name {
+  min-width: 200px;
+  max-width: 280px;
+  text-align: left;
+  font-weight: 600;
+  background: #fff;
+}
+
+.smt-task-cell {
+  min-width: 120px;
+  width: 120px;
+  text-align: center;
+  padding: 0;
+}
+
+.smt-task-cell--empty {
+  color: #9ca3af;
+  padding: 6px 8px;
+}
+
+.smt-task-cell__btn {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.smt-task-cell__btn:disabled {
+  cursor: default;
+}
+
+.smt-task-cell--pending {
+  background: #fff7ed;
+}
+
+.smt-task-cell--pending .smt-task-cell__btn:hover {
+  background: #ffedd5;
+}
+
+.smt-task-cell--done {
+  background: #ecfdf5;
+}
+
+.smt-task-cell--cancel {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.smt-task-cell__time {
+  font-size: 11px;
+  color: #374151;
+}
+
+.smt-task-cell__status {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.smt-task-cell--pending .smt-task-cell__status {
+  color: #c2410c;
+}
+
+.smt-task-cell--done .smt-task-cell__status {
+  color: #047857;
+}
+
+.smt-excel-scroll table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.smt-excel-scroll td {
+  box-sizing: border-box;
+}
+
+.smt-excel-sheet {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-size: 11px;
+}
+
+.smt-excel-sheet td {
+  box-sizing: border-box;
+}
+
+.smt-excel-sheet__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: inherit;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 100%;
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  white-space: pre-wrap;
+  cursor: pointer;
+}
+
+.smt-excel-sheet__btn:disabled {
+  cursor: default;
+}
+
+.smt-excel-sheet__plan {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  min-height: 100%;
+}
+
+.smt-excel-sheet__text {
+  /* Keep Excel font color on the plan text only — not on the status control. */
+  color: inherit;
+}
+
+.smt-excel-sheet__complete,
+.smt-excel-sheet__status-btn {
+  align-self: center;
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  /* Default = Pending chip so it never falls back to plain inherited text. */
+  color: #c2410c;
+  border: 1px solid #fb923c;
+  background: #fff7ed;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.2);
+}
+
+.smt-excel-sheet__status-btn.smt-excel-sheet__cell--pending {
+  color: #c2410c;
+  border-color: #fb923c;
+  background: #fff7ed;
+}
+
+.smt-excel-sheet__status-btn.smt-excel-sheet__cell--pending:hover:not(:disabled) {
+  background: #ffedd5;
+}
+
+.smt-excel-sheet__status-btn.smt-excel-sheet__cell--done {
+  color: #047857;
+  border-color: #34d399;
+  background: #ecfdf5;
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25);
+  cursor: pointer;
+}
+
+.smt-excel-sheet__status-btn.smt-excel-sheet__cell--done:hover:not(:disabled) {
+  background: #d1fae5;
+}
+
+.smt-excel-sheet__status-btn.smt-excel-sheet__cell--cancel {
+  color: #6b7280;
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  box-shadow: none;
+  cursor: default;
+}
+
+.smt-excel-sheet__status-btn:disabled {
+  cursor: default;
+  opacity: 1;
+  filter: none;
+}
+
+.smt-excel-sheet__complete {
+  border: 1px solid #0f766e;
+  background: #ecfdf5;
+  color: #0f766e;
+}
+
+.smt-excel-sheet__complete:hover:not(:disabled) {
+  background: #d1fae5;
+}
+
+.smt-excel-sheet__complete:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.smt-excel-sheet__status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.smt-excel-sheet__cell--pending .smt-excel-sheet__status {
+  color: #c2410c;
+}
+
+.smt-excel-sheet__cell--done .smt-excel-sheet__status {
+  color: #047857;
+}
+
+.smt-excel-sheet__cell--cancel .smt-excel-sheet__status {
+  color: #6b7280;
+}
+
+.smt-excel-sheet__cell--pending {
+  box-shadow: inset 0 0 0 1px rgba(194, 65, 12, 0.18);
+}
+
+.smt-excel-sheet__cell--done {
+  box-shadow: inset 0 0 0 1px rgba(4, 120, 87, 0.22);
+}
+
+@media (max-width: 768px) {
+  .smt-page--wide {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .smt-excel-card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .smt-excel-scroll {
+    height: min(62vh, 560px);
+    min-height: 220px;
+    border-radius: 6px;
+  }
+
+  .smt-excel-scroll table {
+    font-size: 10px;
+  }
+}
+
+.smt-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.smt-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.smt-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #3d1200;
+}
+
+.smt-sub {
+  margin: 0;
+  font-size: 13px;
+  color: #6b635b;
+  line-height: 1.4;
+}
+
+.smt-refresh {
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  color: #3d1200;
+  font-weight: 650;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.smt-refresh:disabled {
+  opacity: 0.6;
+}
+
+.smt-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.smt-day-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.smt-day {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 8px 8px 6px;
+  border-radius: 12px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.smt-day.today {
+  border-color: #c96a10;
+}
+
+.smt-day.act {
+  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  border-color: transparent;
+  color: #fff;
+}
+
+.smt-day-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
+}
+
+.smt-day-num {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.smt-day-count {
+  font-size: 9px;
+  font-weight: 650;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.smt-day.act .smt-day-name,
+.smt-day.act .smt-day-count {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.smt-late {
+  font-weight: 800;
+  color: #b91c1c;
+}
+
+.smt-tab {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid #e8e2d8;
+  background: #fff;
+  color: #6b635b;
+  font-weight: 650;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.smt-tab.act {
+  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  border-color: transparent;
+  color: #fff;
+}
+
+.smt-error {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.smt-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: #6b635b;
+  font-size: 14px;
+  background: #fffefb;
+  border: 1px dashed #e8e2d8;
+  border-radius: 14px;
+}
+
+.smt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smt-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  background: #fffefb;
+  border: 1px solid #e8e2d8;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(15, 13, 10, 0.04);
+}
+
+.smt-card.done {
+  opacity: 0.72;
+}
+
+.smt-check-wrap {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+  cursor: pointer;
+}
+
+.smt-check {
+  width: 20px;
+  height: 20px;
+  accent-color: #16a34a;
+  cursor: pointer;
+}
+
+.smt-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.smt-desc {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f0d0a;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.smt-card.done .smt-desc {
+  text-decoration: line-through;
+  color: #6b635b;
+}
+
+.smt-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b635b;
+}
+
+.smt-pri {
+  font-weight: 700;
+  color: #9a3412;
+}
+
+.smt-status {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #c96a10;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.smt-done-btn {
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #166534, #16a34a);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.smt-done-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+/* ── Dark theme: weekly plan / Excel preview ── */
+[data-theme="dark"] .smt-page {
+  color: #f0ede8;
+}
+
+[data-theme="dark"] .smt-excel-card {
+  background: #161410;
+  border-color: #3a342c;
+  color: #f3efe8;
+}
+
+[data-theme="dark"] .smt-excel-card__meta,
+[data-theme="dark"] .smt-excel-preview__name,
+[data-theme="dark"] .smt-excel-preview__msg {
+  color: #c4bdb4;
+}
+
+[data-theme="dark"] .smt-excel-preview__msg--err {
+  color: #f87171;
+}
+
+[data-theme="dark"] .smt-excel-preview__link {
+  color: #fb923c;
+}
+
+[data-theme="dark"] .smt-excel-scroll,
+[data-theme="dark"] .smt-pdf-frame {
+  background: #12100e;
+  border-color: #3a342c;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+[data-theme="dark"] .smt-excel-sheet {
+  color: #f3efe8;
+}
+
+[data-theme="dark"] .smt-excel-sheet__text {
+  color: inherit;
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn,
+[data-theme="dark"] .smt-excel-sheet__complete {
+  color: #fdba74;
+  border-color: #c2410c;
+  background: rgba(59, 36, 18, 0.92);
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.22);
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn.smt-excel-sheet__cell--pending {
+  color: #fdba74;
+  border-color: #ea580c;
+  background: rgba(59, 36, 18, 0.95);
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn.smt-excel-sheet__cell--pending:hover:not(:disabled) {
+  background: rgba(74, 46, 22, 0.98);
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn.smt-excel-sheet__cell--done {
+  color: #6ee7b7;
+  border-color: #059669;
+  background: rgba(15, 47, 36, 0.95);
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.22);
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn.smt-excel-sheet__cell--done:hover:not(:disabled) {
+  background: rgba(19, 78, 58, 0.98);
+}
+
+[data-theme="dark"] .smt-excel-sheet__status-btn.smt-excel-sheet__cell--cancel {
+  color: #a8a29e;
+  border-color: #57534e;
+  background: #292524;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .smt-excel-sheet__cell--pending {
+  box-shadow: inset 0 0 0 1px rgba(251, 146, 60, 0.28);
+}
+
+[data-theme="dark"] .smt-excel-sheet__cell--done {
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.28);
+}
+
+[data-theme="dark"] .smt-task-sheet th,
+[data-theme="dark"] .smt-task-sheet td {
+  border-color: #3f3a34;
+}
+
+[data-theme="dark"] .smt-task-sheet th,
+[data-theme="dark"] .smt-task-sheet th.smt-task-sheet__sticky-sr,
+[data-theme="dark"] .smt-task-sheet th.smt-task-sheet__sticky-name {
+  background: #2a2724;
+  color: #f0ede8;
+}
+

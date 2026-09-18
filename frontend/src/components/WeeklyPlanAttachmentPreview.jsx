@@ -1,185 +1,261 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { parseDateFromText, ymdRangeInclusive, parseWeeklyPlanBuffer } from "../lib/weeklyPlanExcel";
-
-const MAX_DAY_COLS = 7;
+import {
+  loadExcelSheetFromBuffer,
+  omitStatusHeaderColumns,
+  sheetHasContent,
+} from "../lib/excelSheetPreview";
+import {
+  buildSheetTaskIndex,
+  findDateForSheetColumn,
+  findHalfForSheetColumn,
+  findTaskForSheetCell,
+  getCellStatusText,
+  hasHalfPlanningLayout,
+  isActionablePlanCell,
+} from "../lib/weeklyPlanPreview";
+import { parseWeeklyPlanBuffer } from "../lib/weeklyPlanExcel";
+import { parseWeeklyPlanPdfBuffer } from "../lib/weeklyPlanPdf";
+import { ExcelSheetTable } from "./ExcelSheetTable";
 
 function isPdfAttachment(fileName, fileUrl) {
   const lower = String(fileName || fileUrl || "").toLowerCase();
   return lower.includes(".pdf") || lower.endsWith("pdf");
 }
 
-function fmtDayHeader(ymd) {
-  try {
-    const dt = new Date(`${ymd}T12:00:00`);
-    return `${String(dt.getDate()).padStart(2, "0")} ${dt.toLocaleString("en", { month: "short" })}`;
-  } catch {
-    return ymd;
-  }
-}
-
 function statusClass(status) {
-  const s = String(status || "").toLowerCase();
-  if (s === "completed") return "smt-task-cell--done";
-  if (s === "cancelled") return "smt-task-cell--cancel";
-  return "smt-task-cell--pending";
+  const s = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (s === "completed" || s === "complete" || s === "done") return "smt-excel-sheet__cell--done";
+  if (s === "cancelled" || s === "canceled") return "smt-excel-sheet__cell--cancel";
+  return "smt-excel-sheet__cell--pending";
 }
 
-function weekRangeFromName(fileName) {
-  const s = String(fileName || "");
-  const m = s.match(
-    /(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\s*(?:to|-|–|—)\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
-  );
-  if (!m) return [];
-  const from = parseDateFromText(m[1]);
-  const to = parseDateFromText(m[2]);
-  return ymdRangeInclusive(from, to, MAX_DAY_COLS);
+function normalizeStatusLabel(status) {
+  const s = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (s === "completed" || s === "complete" || s === "done") return "Completed";
+  if (s === "cancelled" || s === "canceled") return "Cancelled";
+  return "Pending";
 }
 
-function clampDates(dates, preferredStart, preferredEnd) {
-  const unique = [...new Set((dates || []).filter(Boolean))].sort();
-  if (!unique.length) {
-    return ymdRangeInclusive(preferredStart, preferredEnd, MAX_DAY_COLS);
+function cellBusyKey(rowIdx, colIdx) {
+  return `cell-${rowIdx}-${colIdx}`;
+}
+
+function preparePreviewSheet(sheet) {
+  return omitStatusHeaderColumns(sheet || { matrix: [], merges: [], colWidths: [] });
+}
+
+function sheetCellText(matrix, r, c) {
+  const cell = matrix?.[r]?.[c];
+  if (cell == null) return "";
+  if (typeof cell === "object") return String(cell.display ?? "").trim();
+  return String(cell).trim();
+}
+
+function countActionableCells(matrix) {
+  if (!Array.isArray(matrix)) return 0;
+  let n = 0;
+  for (let r = 0; r < matrix.length; r += 1) {
+    const row = matrix[r] || [];
+    for (let c = 0; c < row.length; c += 1) {
+      if (isActionablePlanCell(matrix, r, c, sheetCellText(matrix, r, c))) n += 1;
+    }
   }
-  const span = ymdRangeInclusive(unique[0], unique[unique.length - 1], MAX_DAY_COLS);
-  if (span.length && span.length <= MAX_DAY_COLS) return span;
-  const week = ymdRangeInclusive(preferredStart, preferredEnd, MAX_DAY_COLS);
-  if (week.length) return week;
-  return unique.slice(0, MAX_DAY_COLS);
-}
-
-/** Split "TO CALL · 1st half" → { base, half: 1|2|0 } */
-function splitTaskHalf(taskName) {
-  const raw = String(taskName || "").trim();
-  const m = raw.match(/^(.*?)\s*·\s*(1st half|2nd half)\s*$/i);
-  if (m) {
-    return { base: m[1].trim(), half: /1st/i.test(m[2]) ? 1 : 2 };
-  }
-  return { base: raw, half: 0 };
-}
-
-function dayName(ymd) {
-  try {
-    return new Date(`${ymd}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" }).toUpperCase();
-  } catch {
-    return "";
-  }
+  return n;
 }
 
 /**
- * Shows weekly_plan_tasks as an Excel-like grid (1st half | 2nd half per day).
- * Heavy PDF/Excel re-parse is ONLY on explicit button click — never on mount.
+ * Shows the submitted weekly-plan Excel as a same-layout sheet.
+ * Each actionable cell is linked 1:1 to a saved weekly_plan_tasks row.
+ * Click Pending/Completed always ensures a saved task first (ingest if needed).
  */
 export function WeeklyPlanAttachmentPreview({
   eaId,
   sourceFile,
   fileUrl,
   fileName,
-  weekStart,
-  weekEnd,
 }) {
   const isPdf = isPdfAttachment(fileName, fileUrl);
+  const [sheet, setSheet] = useState({ matrix: [], merges: [], colWidths: [] });
   const [tasks, setTasks] = useState([]);
-  const [extraDates, setExtraDates] = useState(() => weekRangeFromName(fileName));
-  const [loading, setLoading] = useState(Boolean(eaId));
-  const [reparsing, setReparsing] = useState(false);
+  const [parsedTasks, setParsedTasks] = useState([]);
+  const [loading, setLoading] = useState(Boolean(fileUrl || eaId));
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [note, setNote] = useState("");
+  const [fromPdf, setFromPdf] = useState(false);
+  const [cellStatus, setCellStatus] = useState(() => ({}));
   const cancelledRef = useRef(false);
+  const tasksRef = useRef([]);
+  const parsedRef = useRef([]);
+  const sheetRef = useRef({ matrix: [], merges: [], colWidths: [] });
+  const indexRef = useRef(new Map());
+
+  useEffect(() => {
+    tasksRef.current = tasks;
+  }, [tasks]);
+  useEffect(() => {
+    parsedRef.current = parsedTasks;
+  }, [parsedTasks]);
+  useEffect(() => {
+    sheetRef.current = sheet;
+  }, [sheet]);
+
+  const cellTaskIndex = useMemo(
+    () => buildSheetTaskIndex(sheet.matrix, tasks),
+    [sheet.matrix, tasks]
+  );
+  useEffect(() => {
+    indexRef.current = cellTaskIndex;
+  }, [cellTaskIndex]);
+
+  const layoutHint = useMemo(
+    () => (hasHalfPlanningLayout(sheet.matrix) ? "half" : "daily"),
+    [sheet.matrix]
+  );
+
+  const linkedCount = cellTaskIndex.size;
+  const actionableCount = useMemo(
+    () => countActionableCells(sheet.matrix),
+    [sheet.matrix]
+  );
 
   const loadTasks = useCallback(async () => {
     if (!eaId) return [];
     const qs = sourceFile ? `?source=${encodeURIComponent(sourceFile)}` : "";
     const data = await api(`/ea-meeting/${eaId}/tasks${qs}`);
-    return Array.isArray(data?.tasks) ? data.tasks : [];
+    const listed = Array.isArray(data?.tasks) ? data.tasks : [];
+    if (listed.length || !sourceFile) return listed;
+    const fallback = await api(`/ea-meeting/${eaId}/tasks`);
+    return Array.isArray(fallback?.tasks) ? fallback.tasks : [];
   }, [eaId, sourceFile]);
 
-  /** Fast path: DB only — keeps the page responsive. */
+  const ingestParsed = useCallback(
+    async (parsed) => {
+      if (!eaId || !parsed?.tasks?.length) return loadTasks();
+      const result = await api(`/ea-meeting/${eaId}/ingest`, {
+        method: "POST",
+        body: {
+          clientParsed: [
+            {
+              source_file: sourceFile || "attachment_1",
+              tasks: parsed.tasks.slice(0, 400),
+              meta: parsed.meta || null,
+            },
+          ],
+        },
+      });
+      if (!result?.ok && !Number(result?.inserted) && result?.error) {
+        throw new Error(
+          result?.note || result?.error || "Could not save weekly-plan tasks."
+        );
+      }
+      return loadTasks();
+    },
+    [eaId, loadTasks, sourceFile]
+  );
+
   const load = useCallback(async () => {
-    if (!eaId) {
-      setTasks([]);
-      setLoading(false);
-      return;
-    }
     cancelledRef.current = false;
     setLoading(true);
     setError("");
+    setNote("");
+    setFromPdf(false);
+    setCellStatus({});
     try {
-      const list = await loadTasks();
+      const dbTasksPromise = loadTasks().catch(() => []);
+      const [dbTasks, fileRes] = await Promise.all([
+        dbTasksPromise,
+        fileUrl ? fetch(fileUrl) : Promise.resolve(null),
+      ]);
       if (cancelledRef.current) return;
-      setTasks(list);
-      setExtraDates(weekRangeFromName(fileName));
-      const hasHalves = list.some((t) => /·\s*(1st|2nd)\s*half/i.test(String(t.task_name || "")));
-      if (list.length && !hasHalves && fileUrl) {
-        setNote('Click "Re-parse file" once to split 1st half / 2nd half columns.');
+
+      let nextSheet = { matrix: [], merges: [], colWidths: [] };
+      let parsed = null;
+      let convertedFromPdf = false;
+
+      if (fileRes) {
+        if (!fileRes.ok) throw new Error("Could not download plan file");
+        const buf = await fileRes.arrayBuffer();
+        if (cancelledRef.current) return;
+
+        if (isPdf) {
+          const pdfParsed = await parseWeeklyPlanPdfBuffer(buf);
+          if (cancelledRef.current) return;
+          convertedFromPdf = true;
+          if (sheetHasContent(pdfParsed?.sheet)) {
+            nextSheet = preparePreviewSheet(pdfParsed.sheet);
+          } else if (pdfParsed?.excelBuffer) {
+            try {
+              nextSheet = preparePreviewSheet(
+                await loadExcelSheetFromBuffer(
+                  pdfParsed.excelBuffer,
+                  "weekly-plan-from-pdf.xlsx"
+                )
+              );
+            } catch {
+              nextSheet = { matrix: [], merges: [], colWidths: [] };
+            }
+          }
+          parsed = pdfParsed;
+          if (!sheetHasContent(nextSheet) && !pdfParsed?.tasks?.length) {
+            throw new Error(
+              pdfParsed?.meta?.error
+                ? `Could not convert PDF to Excel preview (${pdfParsed.meta.error}).`
+                : "Could not convert this PDF into an Excel weekly-plan preview."
+            );
+          }
+        } else {
+          nextSheet = preparePreviewSheet(await loadExcelSheetFromBuffer(buf, fileName));
+          try {
+            parsed = parseWeeklyPlanBuffer(buf);
+          } catch {
+            parsed = null;
+          }
+        }
+      }
+
+      setFromPdf(convertedFromPdf);
+      setSheet(nextSheet);
+      setParsedTasks(Array.isArray(parsed?.tasks) ? parsed.tasks : []);
+
+      let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
+      // Always try ingest when we have a fresh parse — fills missing cells without wiping status.
+      if (parsed?.tasks?.length) {
+        try {
+          nextTasks = await ingestParsed(parsed);
+        } catch (err) {
+          if (!cancelledRef.current) {
+            setNote(err.message || "Could not save weekly-plan tasks for click-to-complete.");
+          }
+        }
+      }
+
+      if (!cancelledRef.current) {
+        setTasks(nextTasks);
+        const linked = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
+        const actionable = countActionableCells(nextSheet.matrix);
+        if (actionable > 0 && linked === 0 && nextTasks.length > 0) {
+          setNote(
+            "Saved tasks did not match this sheet layout. Click Pending on a cell to create the missing link."
+          );
+        }
       }
     } catch (err) {
       if (!cancelledRef.current) {
-        setError(err.message || "Could not load plan tasks.");
+        setError(err.message || "Could not load weekly plan file.");
+        setSheet({ matrix: [], merges: [], colWidths: [] });
         setTasks([]);
+        setFromPdf(false);
       }
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
-  }, [eaId, fileName, fileUrl, loadTasks]);
-
-  /** Heavy path: user-triggered only. */
-  const reparseFile = useCallback(async () => {
-    if (!eaId || !fileUrl || reparsing) return;
-    setReparsing(true);
-    setNote(isPdf ? "Parsing PDF… (may take a few seconds)" : "Parsing Excel…");
-    setError("");
-    try {
-      // Dynamic import so PDF code is not loaded until needed.
-      let parsed;
-      const res = await fetch(fileUrl);
-      if (!res.ok) throw new Error("Could not download plan file");
-      const buf = await res.arrayBuffer();
-
-      // Yield so the browser can paint the "Parsing…" note.
-      await new Promise((r) => setTimeout(r, 50));
-
-      if (isPdf) {
-        const { parseWeeklyPlanPdfBuffer } = await import("../lib/weeklyPlanPdf");
-        parsed = await parseWeeklyPlanPdfBuffer(buf);
-      } else {
-        parsed = parseWeeklyPlanBuffer(buf);
-      }
-
-      const parsedTasks = (parsed.tasks || []).slice(0, 400);
-      const parsedDays = (Array.isArray(parsed?.meta?.days) ? parsed.meta.days : []).slice(
-        0,
-        MAX_DAY_COLS
-      );
-      setExtraDates([...new Set([...parsedDays, ...weekRangeFromName(fileName)])].sort());
-
-      if (!parsedTasks.length) {
-        setNote("No tasks found in file. Check the plan layout (dates + 1st/2nd half columns).");
-        return;
-      }
-
-      await api(`/ea-meeting/${eaId}/ingest`, {
-        method: "POST",
-        body: JSON.stringify({
-          clientParsed: [
-            {
-              source_file: sourceFile || "attachment_1",
-              tasks: parsedTasks,
-              meta: parsed.meta || null,
-            },
-          ],
-        }),
-      });
-      const refreshed = await loadTasks();
-      setTasks(refreshed);
-      setNote(`Loaded ${refreshed.length} cells (1st & 2nd half).`);
-    } catch (err) {
-      setNote(err.message || "Re-parse failed.");
-    } finally {
-      setReparsing(false);
-    }
-  }, [eaId, fileUrl, fileName, isPdf, loadTasks, reparsing, sourceFile]);
+  }, [fileName, fileUrl, ingestParsed, isPdf, loadTasks]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -189,98 +265,195 @@ export function WeeklyPlanAttachmentPreview({
     };
   }, [load]);
 
-  const { dates, rows, useHalves } = useMemo(() => {
-    const seed = [];
-    ymdRangeInclusive(weekStart, weekEnd, MAX_DAY_COLS).forEach((d) => seed.push(d));
-    extraDates.forEach((d) => seed.push(d));
-    weekRangeFromName(fileName).forEach((d) => seed.push(d));
-    tasks.forEach((t) => {
-      if (t.task_date) seed.push(t.task_date);
-    });
+  const setTaskStatus = async (task, nextStatus, busyKey) => {
+    const wanted = nextStatus === "Pending" ? "Pending" : "Completed";
+    if (!task?.id) return;
+    if (normalizeStatusLabel(task.status) === "Cancelled") return;
+    if (normalizeStatusLabel(task.status) === wanted) {
+      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
+      setBusyId("");
+      return;
+    }
 
-    const datesSorted = clampDates(seed, weekStart, weekEnd);
-    const halvesPresent = tasks.some((t) => splitTaskHalf(t.task_name).half > 0);
+    if (busyKey) setBusyId(busyKey);
+    setNote("");
+    if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
 
-    const byKey = new Map();
-    tasks.forEach((t) => {
-      const { base, half } = splitTaskHalf(t.task_name);
-      const key = `${t.sr_no ?? ""}::${base.toLowerCase()}`;
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          sr_no: t.sr_no,
-          task_name: base,
-          cells: {},
+    const at = new Date().toISOString();
+    const taskId = String(task.id);
+    const previous = { ...task };
+    const optimistic =
+      wanted === "Completed"
+        ? { status: "Completed", completed_at: at, completed_via: "portal" }
+        : { status: "Pending", completed_at: null, completed_via: null };
+
+    setTasks((prev) =>
+      prev.map((row) => (String(row.id) === taskId ? { ...row, ...optimistic } : row))
+    );
+
+    try {
+      const result = await api(`/ea-meeting/tasks/${encodeURIComponent(taskId)}/status`, {
+        method: "PATCH",
+        body: { status: wanted },
+      });
+      const refreshed = await loadTasks().catch(() => []);
+      setTasks((prev) => {
+        const base = refreshed.length ? refreshed : prev;
+        return base.map((row) => {
+          if (String(row.id) !== taskId) return row;
+          return { ...row, ...(result?.task || {}), status: wanted };
+        });
+      });
+      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
+    } catch (err) {
+      setTasks((prev) =>
+        prev.map((row) => (String(row.id) === taskId ? previous : row))
+      );
+      if (busyKey) {
+        setCellStatus((prev) => {
+          const next = { ...prev };
+          delete next[busyKey];
+          return next;
         });
       }
-      const bucket = byKey.get(key).cells;
-      if (!bucket[t.task_date]) bucket[t.task_date] = {};
-      const h = half || 0;
-      bucket[t.task_date][h] = t;
-      if (h === 0) bucket[t.task_date][1] = t;
-    });
-
-    const rowsSorted = [...byKey.values()]
-      .sort((a, b) => {
-        const sa = a.sr_no == null ? 9999 : Number(a.sr_no);
-        const sb = b.sr_no == null ? 9999 : Number(b.sr_no);
-        if (sa !== sb) return sa - sb;
-        return String(a.task_name || "").localeCompare(String(b.task_name || ""));
-      })
-      .slice(0, 80);
-
-    return { dates: datesSorted, rows: rowsSorted, useHalves: halvesPresent || true };
-  }, [tasks, extraDates, weekStart, weekEnd, fileName]);
-
-  const completeTask = async (task) => {
-    if (!task?.id) return;
-    if (String(task.status) === "Completed" || String(task.status) === "Cancelled") return;
-    setBusyId(task.id);
-    setNote("");
-    try {
-      await api(`/ea-meeting/tasks/${task.id}/complete`, { method: "PATCH" });
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === task.id
-            ? { ...t, status: "Completed", completed_at: new Date().toISOString(), completed_via: "portal" }
-            : t
-        )
-      );
-      setNote(`Marked done: ${splitTaskHalf(task.task_name).base}`);
-    } catch (err) {
-      setNote(err.message || "Could not complete task.");
+      setNote(err.message || `Could not mark task ${wanted}.`);
+      throw err;
     } finally {
       setBusyId("");
     }
   };
 
-  const renderHalfCell = (cell, dateKey, half) => {
-    if (!cell) {
-      return (
-        <td key={`${dateKey}-${half}`} className="smt-task-cell smt-task-cell--empty">
-          —
-        </td>
-      );
+  const resolveTaskForCell = async (rowIdx, colIdx) => {
+    const matrix = sheetRef.current.matrix;
+    const key = `${rowIdx}:${colIdx}`;
+    let task = indexRef.current.get(key) || null;
+    if (task?.id) return task;
+
+    const cellText = sheetCellText(matrix, rowIdx, colIdx);
+    const rowTaskName =
+      sheetCellText(matrix, rowIdx, 1) || sheetCellText(matrix, rowIdx, 0);
+    const srRaw = sheetCellText(matrix, rowIdx, 0);
+    const srNo = /^\d+$/.test(srRaw) ? Number(srRaw) : null;
+    const taskDate = findDateForSheetColumn(matrix, colIdx);
+    const half = findHalfForSheetColumn(matrix, colIdx);
+
+    const rebuild = (list) => {
+      const next = buildSheetTaskIndex(matrix, list);
+      indexRef.current = next;
+      return next.get(key) || findTaskForSheetCell(list, {
+        cellText,
+        rowTaskName,
+        taskDate,
+        half,
+        colIdx,
+        rowIdx,
+        matrix,
+      });
+    };
+
+    // 1) Ingest full parse (deduped) then rematch.
+    const parsed = parsedRef.current;
+    if (parsed.length) {
+      const refreshed = await ingestParsed({ tasks: parsed });
+      setTasks(refreshed);
+      task = rebuild(refreshed);
+      if (task?.id) return task;
+    } else {
+      const refreshed = await loadTasks();
+      setTasks(refreshed);
+      task = rebuild(refreshed);
+      if (task?.id) return task;
     }
-    const done = String(cell.status) === "Completed";
-    const cancelled = String(cell.status) === "Cancelled";
-    const clickable = !done && !cancelled;
+
+    // 2) Create exactly this cell as a saved task, then rematch.
+    if (!taskDate || !rowTaskName || !cellText) return null;
+    const synthetic = {
+      task_date: taskDate,
+      task_name: rowTaskName,
+      time_slot: cellText,
+      status: "Pending",
+      sr_no: srNo,
+      half: half || 0,
+    };
+    const after = await ingestParsed({ tasks: [synthetic, ...parsed] });
+    setTasks(after);
+    return rebuild(after);
+  };
+
+  const completeCell = async (rowIdx, colIdx) => {
+    const busyKey = cellBusyKey(rowIdx, colIdx);
+    if (!eaId) {
+      setNote("Missing EM attendance id — cannot update task status.");
+      return;
+    }
+
+    setBusyId(busyKey);
+    setNote("");
+
+    try {
+      const task = await resolveTaskForCell(rowIdx, colIdx);
+      if (!task?.id) {
+        throw new Error(
+          "Could not save a task for this cell. Re-upload the weekly plan, then try again."
+        );
+      }
+
+      const live =
+        tasksRef.current.find((row) => String(row.id) === String(task.id)) || task;
+      const done = normalizeStatusLabel(live.status) === "Completed";
+      await setTaskStatus(live, done ? "Pending" : "Completed", busyKey);
+    } catch (err) {
+      setNote(err.message || "Could not complete task.");
+      setBusyId("");
+    }
+  };
+
+  const renderCell = ({ style, rowIdx, colIdx }) => {
+    const text = style.display || "";
+    if (!isActionablePlanCell(sheet.matrix, rowIdx, colIdx, text)) {
+      return text;
+    }
+
+    const busyKey = cellBusyKey(rowIdx, colIdx);
+    const task = cellTaskIndex.get(`${rowIdx}:${colIdx}`) || null;
+    const status = cellStatus[busyKey] || (task ? getCellStatusText(task) : "Pending");
+    const statusCss = statusClass(status);
+    const done = statusCss === "smt-excel-sheet__cell--done";
+    const cancelled = statusCss === "smt-excel-sheet__cell--cancel";
+    // Clickable even before link — click will ingest/create then toggle.
+    const clickable = Boolean(eaId) && !cancelled;
+    const busy = busyId === busyKey;
+
     return (
-      <td key={`${dateKey}-${half}`} className={`smt-task-cell ${statusClass(cell.status)}`}>
+      <div className={`smt-excel-sheet__plan ${statusCss}`}>
+        <div className="smt-excel-sheet__text">{text}</div>
         <button
           type="button"
-          className="smt-task-cell__btn"
-          disabled={!clickable || busyId === cell.id}
-          title={clickable ? "Click to mark Completed" : done ? "Already completed" : "Cancelled"}
-          onClick={() => completeTask(cell)}
+          className={`smt-excel-sheet__status-btn ${statusCss}`}
+          disabled={!clickable || Boolean(busyId)}
+          title={
+            cancelled
+              ? "Cancelled"
+              : !task?.id
+                ? "Click to save & complete this plan cell"
+                : done
+                  ? "Click Completed to mark Pending"
+                  : "Click Pending to mark Completed"
+          }
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!clickable || busyId) return;
+            completeCell(rowIdx, colIdx);
+          }}
         >
-          <span className="smt-task-cell__time">{cell.time_slot || "—"}</span>
-          <span className="smt-task-cell__status">
-            {busyId === cell.id ? "…" : cell.status || "Pending"}
-          </span>
+          {busy ? "…" : done ? "Completed" : cancelled ? "Cancelled" : "Pending"}
         </button>
-      </td>
+      </div>
     );
   };
+
+  const hasSheet = sheetHasContent(sheet);
 
   return (
     <div className="smt-excel-preview">
@@ -293,22 +466,11 @@ export function WeeklyPlanAttachmentPreview({
             type="button"
             className="smt-excel-preview__link"
             onClick={load}
-            disabled={loading || reparsing}
+            disabled={loading}
             style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }}
           >
             Refresh
           </button>
-          {fileUrl ? (
-            <button
-              type="button"
-              className="smt-excel-preview__link"
-              onClick={reparseFile}
-              disabled={loading || reparsing}
-              style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }}
-            >
-              {reparsing ? "Parsing…" : "Re-parse file"}
-            </button>
-          ) : null}
           {fileUrl ? (
             <a href={fileUrl} target="_blank" rel="noreferrer" className="smt-excel-preview__link">
               Open file
@@ -317,76 +479,40 @@ export function WeeklyPlanAttachmentPreview({
         </div>
       </div>
 
-      {note ? <div className="smt-excel-preview__msg">{note}</div> : null}
+      {note ? <div className="smt-excel-preview__msg smt-excel-preview__msg--err">{note}</div> : null}
 
       {loading ? (
-        <div className="smt-excel-preview__msg">Loading plan table…</div>
+        <div className="smt-excel-preview__msg">
+          {isPdf ? "Converting PDF to Excel preview…" : "Loading spreadsheet preview…"}
+        </div>
       ) : error ? (
         <div className="smt-excel-preview__msg smt-excel-preview__msg--err">{error}</div>
-      ) : !rows.length ? (
+      ) : !hasSheet ? (
         <div className="smt-excel-preview__msg">
-          No parsed tasks yet.
-          {fileUrl ? (
-            <>
-              {" "}
-              Click <strong>Re-parse file</strong> to build 1st/2nd half columns from the upload.
-            </>
-          ) : null}
+          {fileUrl
+            ? isPdf
+              ? "Could not convert this PDF into an Excel weekly-plan preview. Open the original PDF instead."
+              : "Could not read this file as a spreadsheet."
+            : "No weekly plan file attached."}
         </div>
       ) : (
         <>
           <div className="smt-excel-preview__msg" style={{ paddingTop: 0 }}>
-            <strong>1st half (8AM–1PM)</strong> · <strong>2nd half (2PM–7PM)</strong> — click Pending to complete
-            {dates.length ? ` · ${fmtDayHeader(dates[0])} → ${fmtDayHeader(dates[dates.length - 1])}` : ""}.
+            {fromPdf ? "Rebuilt from PDF · " : ""}
+            {layoutHint === "half"
+              ? "Type 2 · click Pending on 1st/2nd half planning task cells"
+              : "Type 1 · click Pending on plan cells"}
+            {eaId
+              ? ` · ${linkedCount}/${actionableCount} cells linked · ${tasks.length} saved tasks`
+              : ""}
           </div>
           <div className="smt-excel-scroll smt-task-scroll">
-            <table className="smt-task-sheet">
-              <thead>
-                <tr>
-                  <th className="smt-task-sheet__sticky-sr" rowSpan={useHalves ? 2 : 1}>
-                    SR
-                  </th>
-                  <th className="smt-task-sheet__sticky-name" rowSpan={useHalves ? 2 : 1}>
-                    Task
-                  </th>
-                  {dates.map((d) => (
-                    <th key={`d-${d}`} colSpan={useHalves ? 2 : 1} className="smt-task-sheet__day">
-                      <div>{fmtDayHeader(d)}</div>
-                      <div className="smt-task-sheet__weekday">{dayName(d)}</div>
-                    </th>
-                  ))}
-                </tr>
-                {useHalves ? (
-                  <tr>
-                    {dates.flatMap((d) => [
-                      <th key={`${d}-h1`} className="smt-task-sheet__half">
-                        1st half
-                        <div className="smt-task-sheet__half-sub">8AM–1PM</div>
-                      </th>,
-                      <th key={`${d}-h2`} className="smt-task-sheet__half">
-                        2nd half
-                        <div className="smt-task-sheet__half-sub">2PM–7PM</div>
-                      </th>,
-                    ])}
-                  </tr>
-                ) : null}
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={`${row.sr_no}-${row.task_name}`}>
-                    <td className="smt-task-sheet__sr smt-task-sheet__sticky-sr">{row.sr_no ?? "—"}</td>
-                    <td className="smt-task-sheet__name smt-task-sheet__sticky-name">{row.task_name}</td>
-                    {dates.flatMap((d) => {
-                      const halves = row.cells[d] || {};
-                      if (!useHalves) {
-                        return [renderHalfCell(halves[0] || halves[1] || halves[2], d, 0)];
-                      }
-                      return [renderHalfCell(halves[1], d, 1), renderHalfCell(halves[2], d, 2)];
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ExcelSheetTable
+              matrix={sheet.matrix}
+              merges={sheet.merges}
+              colWidths={sheet.colWidths}
+              renderCell={renderCell}
+            />
           </div>
         </>
       )}
