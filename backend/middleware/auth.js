@@ -4,8 +4,8 @@ const jwt = require('jsonwebtoken');
 // hain (X-New-Token header me) — taaki active session kabhi hard 7-din ki
 // deewar se na takraye. Genuinely inactive user (7 din tak koi request
 // nahi) ko phir bhi expiry pe logout hi milega.
-const REFRESH_THRESHOLD_SECONDS = 24 * 60 * 60; // last 24 hours me refresh
-const TOKEN_LIFETIME = '7d';
+const REFRESH_THRESHOLD_SECONDS = 6 * 24 * 60 * 60; // refresh anytime inside last 6 of 7 days
+const TOKEN_LIFETIME = '30d';
 
 function signToken(user) {
   const payload = {

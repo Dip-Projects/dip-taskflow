@@ -13,10 +13,10 @@ export function getStoredUser() {
 }
 
 export function setSession(token, user) {
-  localStorage.setItem('tf_token', token);
-  localStorage.setItem('tf_user', JSON.stringify(user));
+  if (token) localStorage.setItem('tf_token', token);
+  if (user) localStorage.setItem('tf_user', JSON.stringify(user));
   // Site portal still reads localStorage.user in the dip-projects shape
-  syncSiteUser(user);
+  if (user) syncSiteUser(user);
 }
 
 export function syncSiteUser(user) {
@@ -55,6 +55,7 @@ export async function api(path, options = {}) {
     ...(options.headers || {}),
   };
   const token = getToken();
+  const tokenUsed = token || '';
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let body = options.body;
@@ -64,7 +65,13 @@ export async function api(path, options = {}) {
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers, body });
   const newToken = res.headers.get('X-New-Token');
-  if (newToken) localStorage.setItem('tf_token', newToken);
+  if (newToken) {
+    // Only apply refresh if this response is still for the active session
+    const current = getToken();
+    if (!current || current === tokenUsed) {
+      localStorage.setItem('tf_token', newToken);
+    }
+  }
 
   const raw = await res.text();
   let data = {};
@@ -76,17 +83,23 @@ export async function api(path, options = {}) {
     }
   }
   if (res.status === 401 && path !== '/auth/login') {
-    // Only wipe session on proven JWT failures when we actually sent a token.
-    // Do NOT logout on "Please log in to continue" (often a race / missing header)
-    // or soft 401s from background polls — that was kicking Site/HR users out.
+    // Soft polls (heartbeat) must NEVER wipe a fresh login — old in-flight
+    // 401s were racing and clearing the new session ("login → instant logout").
+    if (options.softAuth) {
+      const err = new Error(data.error || data.message || 'Unauthorized');
+      err.status = 401;
+      err.data = data;
+      throw err;
+    }
     const msg = String(data.error || data.message || '').toLowerCase();
-    const hadToken = !!token;
+    const hadToken = !!tokenUsed;
     const authFail =
       hadToken &&
       /session expired|invalid token|jwt malformed|jwt expired|token expired|jwt must be provided/i.test(
         msg
       );
-    if (authFail) {
+    // Only clear if the failing token is STILL the stored one (not replaced by a newer login)
+    if (authFail && getToken() === tokenUsed) {
       clearSession();
       try {
         window.dispatchEvent(new CustomEvent('tf:session-cleared'));
@@ -113,8 +126,14 @@ export async function api(path, options = {}) {
 export async function login(username, password) {
   const data = await api('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: {
+      username: String(username || '').trim(),
+      password: String(password || '').trim(),
+    },
   });
+  if (!data?.token || !data?.user) {
+    throw new Error('Login failed — no session returned. Try again.');
+  }
   setSession(data.token, data.user);
   return data.user;
 }

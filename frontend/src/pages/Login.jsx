@@ -37,7 +37,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      const { path } = await login(username.trim(), password);
+      const { path } = await login(username.trim(), password.trim());
       navigate(safeNext || path, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid username or password.');

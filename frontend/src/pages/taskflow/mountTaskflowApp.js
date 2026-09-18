@@ -326,14 +326,9 @@ export async function mountTaskflowApp(opts = {}) {
   
   async function api(path, { method = 'GET', body, isForm = false } = {}) {
     const headers = {};
-    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+    const tokenUsed = state.token || localStorage.getItem('tf_token') || '';
+    if (tokenUsed) headers.Authorization = `Bearer ${tokenUsed}`;
     if (!isForm && body) headers['Content-Type'] = 'application/json';
-    // const res = await fetch(`${API_BASE}${path}`, {
-    //   method, headers,
-    //   cache: 'no-store',
-    //   body: isForm ? body : (body ? JSON.stringify(body) : undefined)
-    // });
-    // if (res.status === 401) { logout(); throw new Error('Session expired, please log in again'); }
     const res = await fetch(`${API_BASE}${path}`, {
       method, headers,
       cache: 'no-store',
@@ -344,16 +339,14 @@ export async function mountTaskflowApp(opts = {}) {
     // token bhej deta hai — usko silently swap kar do
     const newToken = res.headers.get('X-New-Token');
     if (newToken) {
-      state.token = newToken;
-      localStorage.setItem('tf_token', newToken);
+      const current = localStorage.getItem('tf_token');
+      if (!current || current === tokenUsed) {
+        state.token = newToken;
+        localStorage.setItem('tf_token', newToken);
+      }
     }
   
-  //   if (res.status === 401) { logout(); throw new Error('Session expired, please log in again'); }
-  //   const data = await res.json().catch(() => ({}));
-  //   if (!res.ok) throw new Error(data.error || 'Something went wrong');
-  //   return data;
-  // }
-  const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
       // Login attempt ke liye backend ka asli message dikhao (e.g. "Invalid
       // username or password"), do not auto-logout — login has not succeeded yet.
@@ -361,8 +354,12 @@ export async function mountTaskflowApp(opts = {}) {
         throw new Error(data.error || 'Invalid username or password');
       }
       const msg = String(data.error || data.message || '').toLowerCase();
-      // Only hard-logout on proven JWT death — not every 401 (site/HR soft fails)
-      if (/session expired|invalid token|jwt malformed|jwt expired|token expired/i.test(msg)) {
+      // Only hard-logout on proven JWT death — and only if token wasn't replaced by a newer login
+      if (
+        /session expired|invalid token|jwt malformed|jwt expired|token expired/i.test(msg) &&
+        tokenUsed &&
+        localStorage.getItem('tf_token') === tokenUsed
+      ) {
         logout();
         throw new Error('Session expired, please log in again');
       }

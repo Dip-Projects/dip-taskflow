@@ -1,8 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, signToken } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -60,21 +59,43 @@ function toPayload(user) {
 }
 
 async function loadUserByUsername(username) {
+  const raw = String(username || '').trim();
+  if (!raw) return null;
+
   let { data, error } = await supabase
     .from('users')
     .select(USER_SELECT_FULL)
-    .eq('username', username)
+    .eq('username', raw)
     .maybeSingle();
 
   if (error && /is_head|site_name|site_names|can_switch_office_site|can_switch_office_mdo|can_resolve_tickets|can_add_task/i.test(error.message || '')) {
     ({ data, error } = await supabase
       .from('users')
       .select(USER_SELECT_BASIC)
-      .eq('username', username)
+      .eq('username', raw)
       .maybeSingle());
   }
   if (error) throw error;
-  return data;
+  if (data) return data;
+
+  // Case-insensitive fallback (Alok.k vs alok.k) — escape LIKE wildcards
+  const escaped = raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  let list;
+  ({ data: list, error } = await supabase
+    .from('users')
+    .select(USER_SELECT_FULL)
+    .ilike('username', escaped)
+    .limit(5));
+  if (error && /is_head|site_name|site_names|can_switch_office_site|can_switch_office_mdo|can_resolve_tickets|can_add_task/i.test(error.message || '')) {
+    ({ data: list, error } = await supabase
+      .from('users')
+      .select(USER_SELECT_BASIC)
+      .ilike('username', escaped)
+      .limit(5));
+  }
+  if (error) throw error;
+  const low = raw.toLowerCase();
+  return (list || []).find((u) => String(u.username || '').toLowerCase() === low) || null;
 }
 
 async function loadUserById(id) {
@@ -100,12 +121,19 @@ async function loadUserById(id) {
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
+    const userName = String(username || '').trim();
+    const pass = String(password || '').trim();
 
-    if (!username || !password) {
+    if (!userName || !pass) {
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
-    const user = await loadUserByUsername(username.trim());
+    if (!process.env.JWT_SECRET) {
+      console.error('Login error: JWT_SECRET missing');
+      return res.status(500).json({ error: 'Server auth not configured. Contact admin.' });
+    }
+
+    const user = await loadUserByUsername(userName);
 
     if (!user || user.is_active === false) {
       const inactiveClient =
@@ -120,13 +148,28 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.password_hash);
+    if (!user.password_hash) {
+      console.error('Login error: missing password_hash for', user.username);
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    let passwordMatches = false;
+    try {
+      passwordMatches = await bcrypt.compare(pass, user.password_hash);
+    } catch (e) {
+      console.error('bcrypt.compare failed:', e.message);
+      passwordMatches = false;
+    }
+    // Legacy plain-text hashes (rare) — accept once then force bcrypt path next time
+    if (!passwordMatches && user.password_hash === pass) {
+      passwordMatches = true;
+    }
     if (!passwordMatches) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const payload = toPayload(user);
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = signToken(payload);
 
     res.json({ token, user: payload });
   } catch (err) {

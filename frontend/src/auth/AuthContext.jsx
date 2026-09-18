@@ -31,27 +31,29 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener('tf:session-cleared', onCleared);
   }, []);
 
-  // Site portal mostly talks to Supabase directly, so JWT never slid-refreshes.
-  // Ping /auth/me on an interval so X-New-Token keeps the session alive.
+  // Keep JWT alive; softAuth so a failed/old heartbeat never wipes a fresh login.
   useEffect(() => {
     if (!token) return undefined;
     let cancelled = false;
     const beat = async () => {
       try {
-        const me = await api('/auth/me');
+        const me = await api('/auth/me', { softAuth: true });
         if (cancelled || !me?.id) return;
         const t = getToken();
-        if (t) setSession(t, me);
+        if (!t) return;
+        setSession(t, me);
         setUser(me);
-        setToken(t || getToken());
+        setToken(t);
       } catch {
-        /* soft — do not force logout here; api() already handles hard JWT fails */
+        /* soft — never force logout from heartbeat */
       }
     };
-    beat();
-    const id = setInterval(beat, 5 * 60 * 1000);
+    // Delay first beat so it cannot race with the login response itself
+    const first = setTimeout(beat, 8000);
+    const id = setInterval(beat, 10 * 60 * 1000);
     return () => {
       cancelled = true;
+      clearTimeout(first);
       clearInterval(id);
     };
   }, [token]);
