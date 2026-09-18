@@ -358,15 +358,38 @@ export default function ManpowerReport({ user }) {
     ? user.site_names
     : user?.site_name ? [user.site_name] : [];
 
-  setSites(userSites);
-  if (userSites.length === 1) setSelectedSite(userSites[0]);
+  let qsSite = "";
+  let qsFrom = "";
+  let qsTo = "";
+  try {
+    const qs = new URLSearchParams(window.location.search);
+    qsSite = String(qs.get("site") || "").trim();
+    qsFrom = String(qs.get("from") || "").trim();
+    qsTo = String(qs.get("to") || "").trim();
+  } catch { /* ignore */ }
 
-  if (!userSites.length) {
+  const mergedSites = [...userSites];
+  if (qsSite && !mergedSites.some((s) => s.toLowerCase() === qsSite.toLowerCase())) {
+    mergedSites.push(qsSite);
+  }
+  setSites(mergedSites);
+
+  if (qsSite) {
+    const hit = mergedSites.find((s) => s.toLowerCase() === qsSite.toLowerCase()) || qsSite;
+    setSelectedSite(hit);
+  } else if (mergedSites.length === 1) {
+    setSelectedSite(mergedSites[0]);
+  }
+
+  if (!userSites.length && !qsSite) {
     sbFetch("dpr_reports?select=site&order=date.desc&limit=200")
       .then((rows) => {
         const uniq = [...new Set((rows || []).map((r) => r.site).filter(Boolean))].sort();
         if (uniq.length) {
-          setSites(uniq);
+          setSites((prev) => {
+            const set = new Set([...(prev || []), ...uniq]);
+            return [...set].sort((a, b) => a.localeCompare(b));
+          });
           if (uniq.length === 1) setSelectedSite(uniq[0]);
         }
       })
@@ -376,9 +399,30 @@ export default function ManpowerReport({ user }) {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
-  setFromDate(`${y}-${m}-01`);
-  setToDate(`${y}-${m}-${String(new Date(y, now.getMonth() + 1, 0).getDate()).padStart(2, "0")}`);
+  const monthStart = `${y}-${m}-01`;
+  const monthEnd = `${y}-${m}-${String(new Date(y, now.getMonth() + 1, 0).getDate()).padStart(2, "0")}`;
+  setFromDate(/^\d{4}-\d{2}-\d{2}$/.test(qsFrom) ? qsFrom : monthStart);
+  setToDate(/^\d{4}-\d{2}-\d{2}$/.test(qsTo) ? qsTo : (/^\d{4}-\d{2}-\d{2}$/.test(qsFrom) ? qsFrom : monthEnd));
 }, [user]);
+
+  // Deep-link from DIP Bot: /site?tab=manpower-reports&site=…&from=…&to=…
+  const autoGenRef = useRef(false);
+  useEffect(() => {
+    if (autoGenRef.current) return;
+    let wantsAuto = false;
+    try {
+      const qs = new URLSearchParams(window.location.search);
+      wantsAuto = !!(qs.get("site") && (qs.get("from") || qs.get("to")));
+    } catch { /* ignore */ }
+    if (!wantsAuto || !selectedSite || !fromDate || !toDate) return;
+    autoGenRef.current = true;
+    // Defer so state is committed
+    const t = setTimeout(() => {
+      generateReport();
+    }, 50);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite, fromDate, toDate]);
 
   const generateReport = async () => {
     if (!selectedSite) { setError("Please select a site."); return; }
