@@ -17,6 +17,7 @@ create table if not exists public.weekly_plan_tasks (
   task_name text not null,
   time_slot text,
   sr_no int,
+  half smallint not null default 0,
   source_file text, -- attachment_1 | attachment_2
 
   status text not null default 'Pending',
@@ -38,11 +39,12 @@ create index if not exists weekly_plan_tasks_week_idx
 create index if not exists weekly_plan_tasks_ea_idx
   on public.weekly_plan_tasks (ea_attendance_id);
 
+drop index if exists public.weekly_plan_tasks_dedupe_idx;
 create unique index if not exists weekly_plan_tasks_dedupe_idx
-  on public.weekly_plan_tasks (ea_attendance_id, task_date, source_file, sr_no, task_name);
+  on public.weekly_plan_tasks (ea_attendance_id, task_date, source_file, sr_no, task_name, half, time_slot);
 
 comment on table public.weekly_plan_tasks is
-  'Tasks extracted from EA weekly plan Excel; WhatsApp number-reply marks Completed.';
+  'Tasks extracted from EM weekly plan Excel; WhatsApp number-reply marks Completed.';
 
 alter table public.weekly_plan_tasks enable row level security;
 

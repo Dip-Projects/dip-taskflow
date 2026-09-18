@@ -16,6 +16,7 @@ import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
 import "./SiteMyTasks.css";
 import { WeeklyPlanAttachmentPreview } from '../../components/WeeklyPlanAttachmentPreview';
+import { formatWeekDate } from '../../lib/weeklyPlanPreview';
 import "./SitePortal.css";
 import {
   computeMonthlyLeaveBalance,
@@ -1709,6 +1710,7 @@ function WeeklyPlanReport({ user }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedWeek, setSelectedWeek] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1747,6 +1749,20 @@ function WeeklyPlanReport({ user }) {
     load();
   }, [load]);
 
+  const weekOptions = useMemo(() => {
+    const map = new Map();
+    rows.forEach((row) => {
+      if (!row.week_start) return;
+      map.set(row.week_start, {
+        value: row.week_start,
+        label: formatWeekDate(row.week_start) + " to " + formatWeekDate(row.week_end || row.week_start),
+      });
+    });
+    return [...map.values()].sort((a, b) => b.value.localeCompare(a.value));
+  }, [rows]);
+
+  const selectedRows = selectedWeek ? rows.filter((row) => row.week_start === selectedWeek) : [];
+
   const fmt = (ts) => {
     if (!ts) return "—";
     try {
@@ -1769,7 +1785,7 @@ function WeeklyPlanReport({ user }) {
         <div>
           <h1 className="smt-title">Weekly Plan</h1>
           <p className="smt-sub">
-            Submitted weekly EA plan files for your site and your own uploads. Click a Pending cell to mark the task completed.
+            Submitted weekly EM plan files for your site and your own uploads. The table matches the uploaded Excel; click a plan cell to mark it completed.
           </p>
         </div>
         <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
@@ -1779,13 +1795,27 @@ function WeeklyPlanReport({ user }) {
 
       {error ? <div className="smt-error">{error}</div> : null}
 
+      <div className="fgroup" style={{ maxWidth: 360, marginBottom: 18 }}>
+        <label className="flabel">Week</label>
+        <select className="finput" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)}>
+          <option value="">Select week</option>
+          {weekOptions.map((week) => (
+            <option key={week.value} value={week.value}>{week.label}</option>
+          ))}
+        </select>
+      </div>
+
       {loading ? (
         <div className="smt-empty">Loading weekly plan submissions…</div>
       ) : rows.length === 0 ? (
         <div className="smt-empty">No submitted weekly plans yet for this site.</div>
+      ) : !selectedWeek ? (
+        <div className="smt-empty">Select a week to view the weekly plan.</div>
+      ) : selectedRows.length === 0 ? (
+        <div className="smt-empty">No submitted weekly plans found for this week.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", minWidth: 0 }}>
-          {rows.map((r) => (
+          {selectedRows.map((r) => (
             <div key={r.id} className="smt-excel-card">
               <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <div>

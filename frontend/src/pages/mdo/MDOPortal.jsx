@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo } from "react";
 import Navbar from "../../components/Navbar";
 import { supabase, fromMaybe } from "../../lib/supabase";
 import { api } from "../../lib/api";
+import { WeeklyPlanAttachmentPreview } from "../../components/WeeklyPlanAttachmentPreview";
+import { formatWeekDate } from "../../lib/weeklyPlanPreview";
 import "../site/SitePortal.css";
 import "../site/SiteMyTasks.css";
-import { WeeklyPlanAttachmentPreview } from "../../components/WeeklyPlanAttachmentPreview";
 
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -197,6 +198,13 @@ function employeeMatches(person, key) {
 }
 function locationCell(label, url) {
   const text = pendText(label);
+  if (isOnLeaveValue(text)) {
+    return (
+      <span style={{ fontWeight: 700, color: "#7c3aed" }}>
+        On Leave
+      </span>
+    );
+  }
   if (text === "Pend" || !url) {
     return (
       <span style={{ fontWeight: text === "Pend" ? 700 : undefined, color: text === "Pend" ? "var(--amber2, #d97706)" : undefined }}>
@@ -244,59 +252,96 @@ function parseLatLng(raw) {
 function mapsUrlFromCoords(lat, lng) {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
-function placeLabelFromGeo(data) {
-  if (!data) return "";
-  const area = data.locality || data.localityInfo?.informative?.[0]?.name || "";
-  const city = data.city || "";
-  const parts = [area, city].map((p) => String(p || "").trim()).filter(Boolean);
-  return [...new Set(parts)].join(", ");
+
+/** Must match backend/routes/geocode.js cacheKey (~1km buckets). */
+function coordCacheKey(lat, lng) {
+  return `${Number(lat).toFixed(3)},${Number(lng).toFixed(3)}`;
 }
-async function reverseGeocodeLatLng(lat, lng) {
-  const res = await fetch(
-    `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
-  );
-  if (!res.ok) throw new Error("geocode failed");
-  return res.json();
+
+function cloneEngineerSheets(sheets) {
+  return (sheets || []).map((sheet) => ({
+    ...sheet,
+    rows: (sheet.rows || []).map((row) => ({ ...row })),
+  }));
 }
-async function resolveLocationInfo(raw, cache) {
-  const text = String(raw || "").trim();
-  if (!text) return { label: "Pend", url: "" };
-  const coords = parseLatLng(text);
-  if (!coords) return { label: text, url: "" };
-  const key = `${coords.lat.toFixed(5)},${coords.lng.toFixed(5)}`;
-  if (cache.has(key)) return cache.get(key);
-  const promise = (async () => {
-    const url = mapsUrlFromCoords(coords.lat, coords.lng);
-    try {
-      const geo = await reverseGeocodeLatLng(coords.lat, coords.lng);
-      return { label: placeLabelFromGeo(geo) || "View on Maps", url };
-    } catch {
-      return { label: "View on Maps", url };
-    }
-  })();
-  cache.set(key, promise);
-  return promise;
-}
-async function attachResolvedLocations(sheets) {
-  const cache = new Map();
-  const pending = [];
+
+/**
+ * Resolve lat/lng → city/area name (e.g. Kotputli, Surat) via backend.
+ * BigDataCloud client API is banned/broken on this network (HTTP 400/402),
+ * so we only use our /geocode/reverse-batch (Photon + Nominatim).
+ */
+async function attachResolvedLocations(sheets, onProgress) {
+  const points = [];
+  const rowRefs = [];
+
   (sheets || []).forEach((sheet) => {
     (sheet.rows || []).forEach((row) => {
-      pending.push(
-        resolveLocationInfo(row.clockInLocation, cache).then((info) => {
-          row.clockInLocation = info.label;
-          row.clockInMaps = info.url;
-        })
-      );
-      pending.push(
-        resolveLocationInfo(row.clockOutLocation, cache).then((info) => {
-          row.clockOutLocation = info.label;
-          row.clockOutMaps = info.url;
-        })
+      [["clockInLocation", "clockInMaps"], ["clockOutLocation", "clockOutMaps"]].forEach(
+        ([locKey, mapsKey]) => {
+          const raw = row[locKey];
+          const coords = parseLatLng(raw);
+          rowRefs.push({ row, locKey, mapsKey, coords, raw });
+          if (coords) points.push({ lat: coords.lat, lng: coords.lng });
+        }
       );
     });
   });
-  await Promise.all(pending);
+
+  const applyLabels = (labels) => {
+    rowRefs.forEach(({ row, locKey, mapsKey, coords, raw }) => {
+      const text = String(raw || "").trim();
+      if (!text) {
+        row[locKey] = "Pend";
+        row[mapsKey] = "";
+        return;
+      }
+      if (!coords) {
+        row[locKey] = text;
+        row[mapsKey] = "";
+        return;
+      }
+      const key = coordCacheKey(coords.lat, coords.lng);
+      const place = labels?.[key] || "";
+      row[mapsKey] = mapsUrlFromCoords(coords.lat, coords.lng);
+      row[locKey] = place || "…";
+    });
+    if (typeof onProgress === "function") onProgress(cloneEngineerSheets(sheets));
+  };
+
+  // Show placeholders + maps links immediately.
+  applyLabels({});
+
+  if (!points.length) {
+    rowRefs.forEach(({ row, locKey, coords }) => {
+      if (coords && row[locKey] === "…") row[locKey] = "Map";
+    });
+    return sheets;
+  }
+
+  let labels = {};
+  try {
+    const data = await Promise.race([
+      api("/geocode/reverse-batch", {
+        method: "POST",
+        body: JSON.stringify({ points }),
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("geocode timeout")), 60000)
+      ),
+    ]);
+    labels = data?.labels || {};
+  } catch (err) {
+    console.warn("[employee-report] geocode batch failed", err?.message || err);
+  }
+
+  rowRefs.forEach(({ row, locKey, mapsKey, coords }) => {
+    if (!coords) return;
+    const key = coordCacheKey(coords.lat, coords.lng);
+    const place = labels[key] || "";
+    row[mapsKey] = mapsUrlFromCoords(coords.lat, coords.lng);
+    row[locKey] = place || "Map";
+  });
+
   return sheets;
 }
 function excelSheetName(name, used) {
@@ -415,6 +460,12 @@ const Ico = {
       <polyline points="14 2 14 8 20 8" />
     </svg>
   ),
+  taskReport: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6" /><path d="M9 15h6" /><path d="M9 11h6" />
+    </svg>
+  ),
   weeklyPlan: (
     <svg
       width="16"
@@ -486,10 +537,22 @@ apply: (
     <path d="M18 10l2 2 3-3" />
   </svg>
   ),
-  taskReport: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c2410c" strokeWidth="2" strokeLinecap="round">
-      <path d="M9 11l3 3L22 4" />
-      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  theme: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  ),
+  moon: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
     </svg>
   ),
   check: (
@@ -558,11 +621,90 @@ return [...byUser.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Per-date, per-employee attendance rows: Date · Name · Clock In · Clock Out
+// async function fetchAttendanceLog(sites, from, to) {
+//   if (!from || !to) return [];
+
+//   const people = await resolvePeopleForSites(sites);
+//   const nameByUsername = Object.fromEntries(people);
+//   const { data, error } = await supabase
+//     .from("attendance")
+//     .select("user_name, date, clock_in, clock_out, status, clock_in_status")
+//     .gte("date", from)
+//     .lte("date", to);
+//   if (error) throw error;
+
+//   return (data || [])
+//     .map((r) => ({
+//       date: r.date,
+//       name: nameByUsername[r.user_name] || r.user_name,
+//       clockIn: r.clock_in,
+//       clockOut: r.clock_out,
+//       late: isLateAttendance(r),
+//     }))
+//     .sort((a, b) =>
+//       a.date === b.date ? a.name.localeCompare(b.name) : a.date.localeCompare(b.date)
+//     );
+// }
+
+// Same idea as resolveEngineers, but returns a username -> name map
+// instead of a per-site joined string. Only site-department roles included.
+function isSiteEngineerRole(role) {
+  const r = String(role || "");
+  return ENGINEER_ROLES.some((er) => r.toLowerCase().includes(er.toLowerCase())) ||
+    /engineer|incharge|coordinator/i.test(r);
+}
+
+async function resolveSiteEngineersForSites(sites) {
+  const people = new Map();
+
+  // users table — must actually be a site-role by designation/role
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("username, full_name, site_name, site_names, is_active, designation, role, department")
+  );
+  (users || []).forEach((u) => {
+    if (!u?.username || u.is_active === false) return;
+    if (!rowTouchesSites(u, sites)) return;
+    const role = u.designation || u.role || u.department || "";
+    if (!isSiteEngineerRole(role)) return;
+    people.set(u.username, u.full_name || u.username);
+  });
+
+  // user_site_assignments — this table is specifically for site engineers,
+  // so entries here are treated as Site Engineer by default (matches resolveEngineers)
+  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
+    q.select("user_name, full_name, site_name")
+  );
+  (assigns || []).forEach((a) => {
+    if (!a?.user_name) return;
+    const hit =
+      !sites?.length ||
+      sites.some((s) => s.toLowerCase() === String(a.site_name || "").toLowerCase());
+    if (!hit) return;
+    people.set(a.user_name, a.full_name || people.get(a.user_name) || a.user_name);
+  });
+
+  // user_details fallback — same role filter
+  const { data: details } = await fromMaybe("user_details", (q) =>
+    q.select("username, name, site_name, site_names, role")
+  );
+  (details || []).forEach((u) => {
+    if (!u?.username) return;
+    if (!rowTouchesSites(u, sites)) return;
+    if (!isSiteEngineerRole(u.role)) return;
+    people.set(u.username, u.name || people.get(u.username) || u.username);
+  });
+
+  return people;
+}
+
 async function fetchAttendanceLog(sites, from, to) {
   if (!from || !to) return [];
 
-  const people = await resolvePeopleForSites(sites);
+  const people = await resolveSiteEngineersForSites(sites); // ← changed
   const nameByUsername = Object.fromEntries(people);
+  const usernames = [...people.keys()];
+  const dates = dateRange(from, to);
+
   const { data, error } = await supabase
     .from("attendance")
     .select("user_name, date, clock_in, clock_out, status, clock_in_status")
@@ -570,17 +712,28 @@ async function fetchAttendanceLog(sites, from, to) {
     .lte("date", to);
   if (error) throw error;
 
-  return (data || [])
-    .map((r) => ({
-      date: r.date,
-      name: nameByUsername[r.user_name] || r.user_name,
-      clockIn: r.clock_in,
-      clockOut: r.clock_out,
-      late: isLateAttendance(r),
-    }))
-    .sort((a, b) =>
-      a.date === b.date ? a.name.localeCompare(b.name) : a.date.localeCompare(b.date)
-    );
+  const byKey = new Map();
+  (data || []).forEach((r) => {
+    byKey.set(`${r.user_name}__${r.date}`, r);
+  });
+
+  const rows = [];
+  usernames.forEach((uname) => {
+    dates.forEach((d) => {
+      const rec = byKey.get(`${uname}__${d}`);
+      rows.push({
+        date: d,
+        name: nameByUsername[uname] || uname,
+        clockIn: rec?.clock_in || null,
+        clockOut: rec?.clock_out || null,
+        late: rec ? isLateAttendance(rec) : false,
+      });
+    });
+  });
+
+  return rows.sort((a, b) =>
+    a.date === b.date ? a.name.localeCompare(b.name) : a.date.localeCompare(b.date)
+  );
 }
 
 const ENGINEER_ROLES = ["Site Engineer", "Site Incharge", "Site Coordinator"];
@@ -729,6 +882,15 @@ function engineerReportMark(onLeave, done) {
   return done ? "Done" : "Pend";
 }
 
+function isOnLeaveValue(value) {
+  return String(value || "").trim().toLowerCase() === "on leave";
+}
+
+function clockDisplay(value) {
+  if (isOnLeaveValue(value)) return "On Leave";
+  return pendText(fmtTimeIST24(value));
+}
+
 async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
   if (!from || !to) return [];
   const dates = dateRange(from, to);
@@ -824,6 +986,21 @@ async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
       const lateMins = lateMinutesFromClockIn(clockIn);
       const onLeave = leaveDays.has(`${normKey(eng.username)}__${date}`)
         || leaveDays.has(`${normKey(eng.name)}__${date}`);
+      if (onLeave) {
+        return {
+          date,
+          name: eng.name,
+          clockIn: "On Leave",
+          clockInLocation: "On Leave",
+          clockOut: "On Leave",
+          clockOutLocation: "On Leave",
+          status: "On Leave",
+          lateMinutes: "On Leave",
+          morning: "On Leave",
+          evening: "On Leave",
+          onLeave: true,
+        };
+      }
       return {
         date,
         name: eng.name,
@@ -832,109 +1009,142 @@ async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
         clockOut,
         clockOutLocation: att?.clock_out_location || "",
         status: engineerDayStatus({ onLeave, clockIn, clockOut, lateMins, att }),
-        lateMinutes: clockIn && !onLeave ? lateMins : 0,
-        morning: engineerReportMark(onLeave, dpr.morning),
-        evening: engineerReportMark(onLeave, dpr.evening),
+        lateMinutes: clockIn ? lateMins : 0,
+        morning: engineerReportMark(false, dpr.morning),
+        evening: engineerReportMark(false, dpr.evening),
+        onLeave: false,
       };
     });
     return { name: eng.name, username: eng.username, rows };
   });
-  return attachResolvedLocations(sheets);
+  // Return attendance data immediately — city names resolve in the UI after.
+  return sheets;
+}
+
+function engineerExcelTableStyles() {
+  const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+  return {
+    border,
+    titleStyle: {
+      font: { bold: true, sz: 14, name: "Calibri", color: { rgb: "FF1A3A5C" } },
+      fill: { patternType: "solid", fgColor: { rgb: "FFBDD7EE" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border,
+    },
+    headStyle: {
+      font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
+      fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border,
+    },
+    bodyStyle: (align = "center") => ({
+      font: { sz: 10, name: "Calibri", color: { rgb: "FF1A2E42" } },
+      alignment: { horizontal: align, vertical: "center" },
+      border,
+    }),
+    headers: [
+      "Date", "Employee Name", "Check In Time", "Check In Location",
+      "Check Out Time", "Check Out Location", "Status", "Late Minutes",
+      "Morning Report", "Evening DPR",
+    ],
+    colWidths: [
+      { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 32 },
+      { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 14 },
+      { wch: 16 }, { wch: 14 },
+    ],
+  };
+}
+
+/** Write one employee attendance table into `ws` at (startR, startC). Returns row height used. */
+function writeEngineerExcelTable(ws, sheet, startR, startC, merges, styles) {
+  const { titleStyle, headStyle, bodyStyle, headers } = styles;
+  const name = String(sheet.name || "ENGINEER").toUpperCase();
+  const lastCol = startC + 9;
+
+  for (let c = startC; c <= lastCol; c++) {
+    ws[XLSX.utils.encode_cell({ r: startR, c })] = {
+      v: c === startC ? name : "",
+      t: "s",
+      s: titleStyle,
+    };
+  }
+  merges.push({ s: { r: startR, c: startC }, e: { r: startR, c: lastCol } });
+
+  headers.forEach((h, i) => {
+    ws[XLSX.utils.encode_cell({ r: startR + 1, c: startC + i })] = {
+      v: h,
+      t: "s",
+      s: headStyle,
+    };
+  });
+
+  (sheet.rows || []).forEach((row, i) => {
+    const r = startR + 2 + i;
+    const vals = [
+      fmtDMonYY(row.date),
+      row.name,
+      clockDisplay(row.clockIn),
+      isOnLeaveValue(row.clockInLocation) ? "On Leave" : pendText(row.clockInLocation),
+      clockDisplay(row.clockOut),
+      isOnLeaveValue(row.clockOutLocation) ? "On Leave" : pendText(row.clockOutLocation),
+      row.status,
+      isOnLeaveValue(row.lateMinutes) ? "On Leave" : (row.lateMinutes || 0),
+      row.morning,
+      row.evening,
+    ];
+    vals.forEach((v, iCol) => {
+      const c = startC + iCol;
+      const st = bodyStyle(iCol === 1 ? "left" : "center");
+      const mapsUrl = iCol === 3 ? row.clockInMaps : iCol === 5 ? row.clockOutMaps : "";
+      const onLeaveCell = isOnLeaveValue(v) || row.onLeave || row.status === "On Leave";
+      if (onLeaveCell && iCol >= 2) {
+        st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
+      } else if (iCol === 6) {
+        if (v === "Late") st.font = { ...st.font, bold: true, color: { rgb: "FFB45309" } };
+        else if (v === "Pend") st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
+        else if (v === "On Time") st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
+      }
+      if ((iCol === 2 || iCol === 3 || iCol === 4 || iCol === 5) && v === "Pend") {
+        st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
+      }
+      if ((iCol === 8 || iCol === 9) && v === "Pend") {
+        st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
+      }
+      if ((iCol === 8 || iCol === 9) && v === "Done") {
+        st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
+      }
+      if (mapsUrl && v !== "Pend" && !isOnLeaveValue(v)) {
+        st.font = { ...st.font, color: { rgb: "FF0563C1" }, underline: true };
+      }
+      const cell = {
+        v,
+        t: typeof v === "number" ? "n" : "s",
+        s: st,
+      };
+      if (mapsUrl && v !== "Pend" && !isOnLeaveValue(v)) cell.l = { Target: mapsUrl };
+      ws[XLSX.utils.encode_cell({ r, c })] = cell;
+    });
+  });
+
+  return 2 + (sheet.rows?.length || 0);
 }
 
 function downloadEngineerExcel(sheets, from, to) {
   const wb = XLSX.utils.book_new();
   const usedNames = new Set();
-  const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
-  const border = { top: thin, bottom: thin, left: thin, right: thin };
-  const titleStyle = {
-    font: { bold: true, sz: 14, name: "Calibri", color: { rgb: "FF1A3A5C" } },
-    fill: { patternType: "solid", fgColor: { rgb: "FFBDD7EE" } },
-    alignment: { horizontal: "center", vertical: "center" },
-    border,
-  };
-  const headStyle = {
-    font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
-    fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
-    alignment: { horizontal: "center", vertical: "center", wrapText: true },
-    border,
-  };
-  const bodyStyle = (align = "center") => ({
-    font: { sz: 10, name: "Calibri", color: { rgb: "FF1A2E42" } },
-    alignment: { horizontal: align, vertical: "center" },
-    border,
-  });
-
-  const headers = [
-    "Date", "Employee Name", "Check In Time", "Check In Location",
-    "Check Out Time", "Check Out Location", "Status", "Late Minutes",
-    "Morning Report", "Evening DPR",
-  ];
+  const styles = engineerExcelTableStyles();
 
   (sheets || []).forEach((sheet) => {
     const ws = {};
-    const name = String(sheet.name || "ENGINEER").toUpperCase();
-    for (let c = 0; c <= 9; c++) {
-      ws[XLSX.utils.encode_cell({ r: 0, c })] = { v: c === 0 ? name : "", t: "s", s: titleStyle };
-    }
-    headers.forEach((h, c) => {
-      ws[XLSX.utils.encode_cell({ r: 1, c })] = { v: h, t: "s", s: headStyle };
+    const merges = [];
+    const height = writeEngineerExcelTable(ws, sheet, 0, 0, merges, styles);
+    ws["!merges"] = merges;
+    ws["!ref"] = XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: Math.max(height - 1, 1), c: 9 },
     });
-    (sheet.rows || []).forEach((row, i) => {
-      const r = i + 2;
-      const vals = [
-        fmtDMonYY(row.date),
-        row.name,
-        pendText(fmtTimeIST24(row.clockIn)),
-        pendText(row.clockInLocation),
-        pendText(fmtTimeIST24(row.clockOut)),
-        pendText(row.clockOutLocation),
-        row.status,
-        row.lateMinutes || 0,
-        row.morning,
-        row.evening,
-      ];
-      vals.forEach((v, c) => {
-        const st = bodyStyle(c === 1 ? "left" : "center");
-        const mapsUrl = c === 3 ? row.clockInMaps : c === 5 ? row.clockOutMaps : "";
-        if (c === 6) {
-          if (v === "Late") st.font = { ...st.font, bold: true, color: { rgb: "FFB45309" } };
-          else if (v === "Pend") st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
-          else if (v === "On Leave") st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
-          else if (v === "On Time") st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
-        }
-        if ((c === 2 || c === 3 || c === 4 || c === 5) && v === "Pend") {
-          st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
-        }
-        if ((c === 8 || c === 9) && v === "Pend") {
-          st.font = { ...st.font, bold: true, color: { rgb: "FFD97706" } };
-        }
-        if ((c === 8 || c === 9) && v === "Done") {
-          st.font = { ...st.font, bold: true, color: { rgb: "FF16A34A" } };
-        }
-        if ((c === 8 || c === 9) && v === "On Leave") {
-          st.font = { ...st.font, bold: true, color: { rgb: "FF7C3AED" } };
-        }
-        if (mapsUrl && v !== "Pend") {
-          st.font = { ...st.font, color: { rgb: "FF0563C1" }, underline: true };
-        }
-        const cell = {
-          v,
-          t: typeof v === "number" ? "n" : "s",
-          s: st,
-        };
-        if (mapsUrl && v !== "Pend") cell.l = { Target: mapsUrl };
-        ws[XLSX.utils.encode_cell({ r, c })] = cell;
-      });
-    });
-    const lastRow = 1 + (sheet.rows?.length || 0);
-    ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } }];
-    ws["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(lastRow, 1), c: 9 } });
-    ws["!cols"] = [
-      { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 32 },
-      { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 14 },
-      { wch: 16 }, { wch: 14 },
-    ];
+    ws["!cols"] = styles.colWidths;
     ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
     XLSX.utils.book_append_sheet(wb, ws, excelSheetName(sheet.name, usedNames));
   });
@@ -946,49 +1156,73 @@ function downloadEngineerExcel(sheets, from, to) {
   XLSX.writeFile(wb, `SITE_ATT_REPORT_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
 }
 
-async function resolveEngineers(sites) {
-  if (!sites.length) return {};
+/** All employee tables on one sheet: 4 side-by-side, then next 4 below, etc. */
+function downloadEngineerExcelCombined(sheets, from, to) {
+  const wb = XLSX.utils.book_new();
+  const list = sheets || [];
+  if (!list.length) {
+    const empty = XLSX.utils.aoa_to_sheet([["No site engineers found"]]);
+    XLSX.utils.book_append_sheet(wb, empty, "All Employees");
+    XLSX.writeFile(wb, `SITE_ATT_REPORT_COMBINED_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
+    return;
+  }
 
-  const rows = [];
-  const { data: users } = await fromMaybe("users", (q) =>
-    q.select("full_name, designation, role, department, site_name, site_names")
-  );
-  (users || []).forEach((u) => {
-    const role = String(u.designation || u.role || u.department || "");
-    rows.push({ name: u.full_name, role, site_names: sitesOfRow(u) });
-  });
-  const { data: assigns } = await fromMaybe("user_site_assignments", (q) =>
-    q.select("full_name, user_name, site_name")
-  );
-  (assigns || []).forEach((a) => {
-    rows.push({ name: a.full_name || a.user_name, role: "Site Engineer", site_names: a.site_name ? [a.site_name] : [] });
-  });
-  const { data: details } = await fromMaybe("user_details", (q) =>
-    q.select("name, role, site_names, site_name")
-  );
-  (details || []).forEach((u) => {
-    rows.push({ name: u.name, role: u.role, site_names: sitesOfRow(u) });
+  const TABLES_PER_ROW = 4;
+  const TABLE_COLS = 10;
+  const COL_GAP = 1;
+  const ROW_GAP = 2;
+  const BLOCK_WIDTH = TABLE_COLS + COL_GAP;
+  const styles = engineerExcelTableStyles();
+  const ws = {};
+  const merges = [];
+  let bandStartRow = 0;
+  let maxCol = 0;
+  let maxRow = 0;
+
+  for (let i = 0; i < list.length; i += TABLES_PER_ROW) {
+    const band = list.slice(i, i + TABLES_PER_ROW);
+    let bandHeight = 0;
+    band.forEach((sheet, colIdx) => {
+      const startCol = colIdx * BLOCK_WIDTH;
+      const height = writeEngineerExcelTable(ws, sheet, bandStartRow, startCol, merges, styles);
+      bandHeight = Math.max(bandHeight, height);
+      maxCol = Math.max(maxCol, startCol + TABLE_COLS - 1);
+    });
+    maxRow = Math.max(maxRow, bandStartRow + bandHeight - 1);
+    bandStartRow += bandHeight + ROW_GAP;
+  }
+
+  ws["!merges"] = merges;
+  ws["!ref"] = XLSX.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: Math.max(maxRow, 1), c: Math.max(maxCol, 9) },
   });
 
-  const map = {};
-  sites.forEach((site) => {
-    const siteLc = normKey(site);
-    const names = rows
-      .filter((u) => {
-        const onSite = (u.site_names || []).some((s) => normKey(s) === siteLc);
-        if (!onSite) return false;
-        const role = String(u.role || "");
-        return ENGINEER_ROLES.some((r) => role.toLowerCase().includes(r.toLowerCase())) || /engineer|incharge|coordinator/i.test(role);
-      })
-      .map((u) => u.name)
-      .filter(Boolean);
-    map[siteLc] = uniqueNamesCaseInsensitive(names).sort((a, b) => a.localeCompare(b));
-  });
+  const cols = [];
+  for (let c = 0; c <= maxCol; c++) {
+    const within = c % BLOCK_WIDTH;
+    if (within >= TABLE_COLS) cols.push({ wch: 2 });
+    else cols.push(styles.colWidths[within] || { wch: 12 });
+  }
+  ws["!cols"] = cols;
+  ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
 
-  return map;
+  XLSX.utils.book_append_sheet(wb, ws, "All Employees");
+  XLSX.writeFile(wb, `SITE_ATT_REPORT_COMBINED_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
 }
 
-// DPR sheet: one row per site (case-insensitive), or one row per engineer when a site has several.
+/** Normalize DB/ISO dates to YYYY-MM-DD for DPR sheet day matching. */
+function dprDateKey(value) {
+  if (!value) return "";
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return toISODateLocal(d);
+  return "";
+}
+
+// DPR sheet: engineers with ≥1 morning or evening DPR in the selected period.
+// Each day carries { morning, evening } status: "DONE" | "PEND".
 async function fetchDprSheet(sites, from, to) {
   if (!from || !to) return { rows: [], dates: [] };
 
@@ -1000,6 +1234,7 @@ async function fetchDprSheet(sites, from, to) {
 
   const knownKeys = new Set(uniqueSites.map(normKey));
   const dates = dateRange(from, to);
+  const periodDates = new Set(dates);
 
   // Fetch the date range (not only exact site strings) so "Proposed Cafe" and
   // "PROPOSED CAFE" submissions fold into the same site.
@@ -1011,61 +1246,69 @@ async function fetchDprSheet(sites, from, to) {
       .select("site, engineer, report_type, date")
       .gte("date", from)
       .lte("date", to)
-      .neq("report_type", "morning")
       .range(page * pageSize, page * pageSize + pageSize - 1);
     if (error) throw error;
     data.push(...(chunk || []));
     if (!chunk || chunk.length < pageSize) break;
   }
 
-  // siteKey -> engineerKey -> { display, dates }
+  // siteKey -> engineerKey -> { display, days: Map<ymd, { morning, evening }> }
   const submittedBySite = new Map();
   (data || []).forEach((r) => {
     const sk = normKey(r.site);
     if (!knownKeys.has(sk)) return;
     const eng = String(r.engineer || "").trim();
-    const ek = normKey(eng) || "__none__";
+    if (!eng) return;
+    const day = dprDateKey(r.date);
+    if (!day || !periodDates.has(day)) return;
+
+    const type = String(r.report_type || "")
+      .trim()
+      .toLowerCase();
+    // Explicit morning; everything else (evening / blank legacy) counts as evening.
+    const isMorning = type === "morning";
+    const isEvening = !isMorning;
+
+    const ek = normKey(eng);
     if (!submittedBySite.has(sk)) submittedBySite.set(sk, new Map());
     const engMap = submittedBySite.get(sk);
     if (!engMap.has(ek)) {
-      engMap.set(ek, { display: eng || "—", dates: new Set() });
-    } else if (eng) {
+      engMap.set(ek, { display: eng, days: new Map() });
+    } else {
       engMap.get(ek).display = preferDisplayName(engMap.get(ek).display, eng);
     }
-    if (r.date) engMap.get(ek).dates.add(r.date);
+    const entry = engMap.get(ek);
+    if (!entry.days.has(day)) entry.days.set(day, { morning: false, evening: false });
+    const bucket = entry.days.get(day);
+    if (isMorning) bucket.morning = true;
+    if (isEvening) bucket.evening = true;
   });
-
-  const assignedBySite = await resolveEngineers(uniqueSites);
 
   const rows = [];
   uniqueSites.forEach((site) => {
     const sk = normKey(site);
     const submittedEngs = submittedBySite.get(sk);
-    const assigned = assignedBySite[sk] || [];
-    const fromReports = [...(submittedEngs?.values() || [])]
-      .map((e) => e.display)
-      .filter((d) => d && d !== "—");
-    const engineers = uniqueNamesCaseInsensitive([...assigned, ...fromReports])
-      .sort((a, b) => a.localeCompare(b));
-    const list = engineers.length ? engineers : ["—"];
+    if (!submittedEngs?.size) return;
 
-    list.forEach((eng) => {
-      const ek = normKey(eng);
-      const ownDates = ek && submittedEngs ? submittedEngs.get(ek)?.dates : null;
-      const anySiteDates = new Set();
-      if (eng === "—") {
-        submittedEngs?.forEach((v) => v.dates.forEach((d) => anySiteDates.add(d)));
-      }
-
-      rows.push({
-        site,
-        engineer: eng,
-        days: dates.map((d) => {
-          if (eng === "—") return anySiteDates.has(d) ? "DONE" : "PEND";
-          return ownDates?.has(d) ? "DONE" : "PEND";
-        }),
+    const people = [];
+    submittedEngs.forEach((entry) => {
+      if (!entry.days?.size) return;
+      const days = dates.map((d) => {
+        const bucket = entry.days.get(d);
+        return {
+          morning: bucket?.morning ? "DONE" : "PEND",
+          evening: bucket?.evening ? "DONE" : "PEND",
+        };
       });
+      // Must have at least one DONE (morning or evening) in range.
+      const anyDone = days.some((d) => d.morning === "DONE" || d.evening === "DONE");
+      if (!anyDone) return;
+      people.push({ engineer: entry.display, days });
     });
+
+    people
+      .sort((a, b) => a.engineer.localeCompare(b.engineer))
+      .forEach((p) => rows.push({ site, engineer: p.engineer, days: p.days }));
   });
 
   rows.forEach((r, i) => {
@@ -1179,36 +1422,71 @@ function drawCross(doc, x, y, size, color) {
 }
 
 function downloadDprPdf(rows, dates, from, to) {
-  const doc = new jsPDF({ orientation: dates.length > 6 ? "landscape" : "portrait" });
+  // Two status cols per day → landscape sooner.
+  const doc = new jsPDF({ orientation: dates.length > 3 ? "landscape" : "portrait" });
   const startY = drawReportHeader(
     doc,
     "DPR SHEET",
     `Period: ${fmtDMonYYYY(from)}  to  ${fmtDMonYYYY(to)}`
   );
 
-  const useIcons = dates.length > 7; // switch DONE/PEND text -> ✓/✗ glyphs
+  const useIcons = dates.length > 4; // switch DONE/PEND text -> ✓/✗ glyphs
 
-  const dayHead = dates.map((d) => {
+  const dateHeadRow = dates.map((d) => {
     const dt = new Date(d + "T00:00:00");
-    return `${pad(dt.getDate())}\n${MONTHS_SHORT[dt.getMonth()]}`;
+    return {
+      content: `${pad(dt.getDate())} ${MONTHS_SHORT[dt.getMonth()]}`,
+      colSpan: 2,
+      styles: { halign: "center" },
+    };
   });
+  const slotHeadRow = dates.flatMap(() => ["Morning report", "Evening report"]);
+
+  const body = rows.map((r) => [
+    r.srNo,
+    r.engineer,
+    r.site.toUpperCase(),
+    ...r.days.flatMap((day) => [
+      day?.morning === "DONE" ? "DONE" : "PEND",
+      day?.evening === "DONE" ? "DONE" : "PEND",
+    ]),
+  ]);
 
   autoTable(doc, {
     startY,
     theme: "grid",
-    head: [["SR NO", "ENGINEER NAME", "SITE NAME", ...dayHead]],
-    body: rows.map((r) => [r.srNo, r.engineer, r.site.toUpperCase(), ...r.days]),
-    styles: { fontSize: useIcons ? 7 : 8, halign: "center", cellPadding: useIcons ? 1.5 : 3, lineColor: [0, 0, 0], lineWidth: 0.1 },
-    headStyles: { fillColor: [30, 58, 95], textColor: [255, 255, 255], fontStyle: "bold", lineColor: [0, 0, 0], lineWidth: 0.1 },
+    head: [
+      [
+        { content: "SR NO", rowSpan: 2 },
+        { content: "ENGINEER NAME", rowSpan: 2 },
+        { content: "SITE NAME", rowSpan: 2 },
+        ...dateHeadRow,
+      ],
+      slotHeadRow,
+    ],
+    body,
+    styles: {
+      fontSize: useIcons ? 6.5 : 7.5,
+      halign: "center",
+      cellPadding: useIcons ? 1.2 : 2.5,
+      lineColor: [0, 0, 0],
+      lineWidth: 0.1,
+    },
+    headStyles: {
+      fillColor: [30, 58, 95],
+      textColor: [255, 255, 255],
+      fontStyle: "bold",
+      lineColor: [0, 0, 0],
+      lineWidth: 0.1,
+      fontSize: useIcons ? 6 : 7,
+    },
     bodyStyles: { fillColor: [255, 255, 255] },
     columnStyles: {
       0: { cellWidth: useIcons ? 8 : "auto" },
-      1: { halign: "center", cellWidth: useIcons ? 30 : "auto" },
-      2: { halign: "center", fontStyle: "bold", cellWidth: useIcons ? 32 : "auto" },
+      1: { halign: "center", cellWidth: useIcons ? 28 : "auto" },
+      2: { halign: "center", fontStyle: "bold", cellWidth: useIcons ? 30 : "auto" },
     },
 
-    // Suppress the default DONE/PEND text draw for day columns when
-    // useIcons is on — we'll draw the glyph ourselves in didDrawCell.
     willDrawCell: (data) => {
       if (useIcons && data.section === "body" && data.column.index >= 3) {
         data.cell.text = [];
@@ -1218,7 +1496,7 @@ function downloadDprPdf(rows, dates, from, to) {
     didDrawCell: (data) => {
       if (useIcons && data.section === "body" && data.column.index >= 3) {
         const isDone = data.cell.raw === "DONE";
-        const size = 2.6;
+        const size = 2.4;
         const cx = data.cell.x + data.cell.width / 2 - size / 2;
         const cy = data.cell.y + data.cell.height / 2 - size / 2;
         if (isDone) drawCheck(doc, cx, cy, size, [22, 163, 74]);
@@ -1226,7 +1504,6 @@ function downloadDprPdf(rows, dates, from, to) {
       }
     },
 
-    // Keep the colored DONE/PEND text only when NOT using icons (<=7 days)
     didParseCell: (data) => {
       if (!useIcons && data.section === "body" && data.column.index >= 3) {
         if (data.cell.raw === "DONE") {
@@ -1450,6 +1727,539 @@ function AttendanceLog({ sites }) {
   );
 }
 
+const EXCEL_DAY_PAIR_COLORS = [
+  ["#FFF2CC", "#FCE4D6"],
+  ["#DDEBF7", "#E2EFDA"],
+  ["#E4DFEC", "#FCE4D6"],
+  ["#DDEBF7", "#FFF2CC"],
+  ["#E2EFDA", "#FCE4D6"],
+  ["#FCE4D6", "#DDEBF7"],
+  ["#FFF2CC", "#E4DFEC"],
+];
+
+function excelArgbToCss(value) {
+  if (!value) return "";
+  if (typeof value === "object") {
+    if (value.argb) return excelArgbToCss(value.argb);
+    if (value.rgb) return excelArgbToCss(value.rgb);
+    return "";
+  }
+  const hex = String(value).replace(/^#/, "").replace(/\s+/g, "");
+  if (!hex || /^0+$/i.test(hex)) return "";
+  if (hex.length === 8) return `#${hex.slice(2)}`;
+  if (hex.length === 6) return `#${hex}`;
+  return "";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function isDarkHex(bg) {
+  const hex = String(bg || "").replace(/^#/, "");
+  if (hex.length !== 6) return false;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some((n) => Number.isNaN(n))) return false;
+  return (r * 299 + g * 587 + b * 114) / 1000 < 150;
+}
+
+function statusFallbackStyle(text) {
+  const t = String(text || "").trim().toUpperCase();
+  if (!t) return null;
+  if (/(COMPLETED|COMPLETE|DONE)/.test(t)) return { bg: "#C6EFCE", color: "#006100" };
+  if (/IN\s*PROGRESS|PROGRESS/.test(t)) return { bg: "#BDD7EE", color: "#1F4E79" };
+  if (/PENDING/.test(t)) return { bg: "#FFEB9C", color: "#9C5700" };
+  if (/ON\s*HOLD|HOLD/.test(t)) return { bg: "#FFC7CE", color: "#9C0006" };
+  if (/CANCEL/.test(t)) return { bg: "#F2F2F2", color: "#595959" };
+  return null;
+}
+
+function fallbackColumnFill(colIdx, rowIdx, display) {
+  const status = statusFallbackStyle(display);
+  if (status) return status.bg;
+
+  if (rowIdx <= 3) return "#1F4E79";
+  if (rowIdx <= 6) return colIdx % 2 === 0 ? "#305496" : "#2E75B6";
+
+  if (colIdx === 0) return "#D6DCE4";
+  if (colIdx === 1) return "#E2EFDA";
+
+  const dayIdx = Math.floor((colIdx - 2) / 2);
+  const pair = EXCEL_DAY_PAIR_COLORS[((dayIdx % EXCEL_DAY_PAIR_COLORS.length) + EXCEL_DAY_PAIR_COLORS.length) % EXCEL_DAY_PAIR_COLORS.length];
+  return pair[(colIdx - 2) % 2];
+}
+
+function buildTableHtml(matrix, merges = []) {
+  const rowCount = matrix.length;
+  const colCount = matrix.reduce((max, row) => Math.max(max, row.length), 0);
+  if (!rowCount || !colCount) {
+    return "<div style='padding:12px;color:#6b7280;'>No spreadsheet data available.</div>";
+  }
+
+  const mergeStarts = new Map();
+  const covered = new Set();
+  for (const merge of merges) {
+    const r1 = merge.r1;
+    const c1 = merge.c1;
+    const r2 = merge.r2;
+    const c2 = merge.c2;
+    mergeStarts.set(`${r1}:${c1}`, { rowSpan: r2 - r1 + 1, colSpan: c2 - c1 + 1 });
+    for (let r = r1; r <= r2; r += 1) {
+      for (let c = c1; c <= c2; c += 1) {
+        if (r === r1 && c === c1) continue;
+        covered.add(`${r}:${c}`);
+      }
+    }
+  }
+
+  const rows = [];
+  for (let r = 0; r < rowCount; r += 1) {
+    const cells = [];
+    for (let c = 0; c < colCount; c += 1) {
+      if (covered.has(`${r}:${c}`)) continue;
+      const cell = matrix[r][c] || { display: "", bg: "", color: "", bold: false, align: "left" };
+      const display = cell.display ?? "";
+      const status = statusFallbackStyle(display);
+      const bg = cell.bg || fallbackColumnFill(c, r, display);
+      const color = cell.color || (status && !cell.bg ? status.color : null) || (isDarkHex(bg) ? "#FFFFFF" : "#111827");
+      const bold = cell.bold || r <= 6 || Boolean(status);
+      const align = cell.align || (c === 0 || c >= 2 ? "center" : "left");
+      const span = mergeStarts.get(`${r}:${c}`);
+      const minWidth = c === 1 ? 160 : c === 0 ? 56 : 88;
+
+      const style = [
+        `background:${bg}`,
+        `color:${color}`,
+        bold ? "font-weight:700" : "font-weight:500",
+        `text-align:${align}`,
+        "vertical-align:middle",
+        "white-space:normal",
+        "padding:6px 8px",
+        "border:1px solid #9ca3af",
+        `min-width:${minWidth}px`,
+        "line-height:1.25",
+      ].join(";");
+
+      cells.push(
+        `<td style="${style}"${span && span.rowSpan > 1 ? ` rowspan="${span.rowSpan}"` : ""}${span && span.colSpan > 1 ? ` colspan="${span.colSpan}"` : ""}>${escapeHtml(display)}</td>`
+      );
+    }
+    rows.push(`<tr>${cells.join("")}</tr>`);
+  }
+
+  return `<table>${rows.join("")}</table>`;
+}
+
+function excelJsCellDisplay(cell) {
+  if (!cell || cell.value == null || cell.value === "") return "";
+  const value = cell.value;
+  if (typeof value === "object") {
+    if (value.richText) return value.richText.map((p) => p.text || "").join("");
+    if (value.text) return String(value.text);
+    if (value.result != null) return String(value.result);
+    if (value instanceof Date) {
+      return value.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    }
+    if (Array.isArray(value.formula) || value.formula) return value.result != null ? String(value.result) : "";
+  }
+  if (value instanceof Date) {
+    return value.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  }
+  return String(value);
+}
+
+function colLettersToIndex(letters) {
+  let n = 0;
+  const s = String(letters || "").toUpperCase();
+  for (let i = 0; i < s.length; i += 1) {
+    n = n * 26 + (s.charCodeAt(i) - 64);
+  }
+  return n - 1;
+}
+
+function decodeExcelRef(ref) {
+  const match = String(ref || "").toUpperCase().match(/^([A-Z]+)(\d+)$/);
+  if (!match) return null;
+  return { r: Number(match[2]) - 1, c: colLettersToIndex(match[1]) };
+}
+
+async function parseWorkbookWithExcelJs(arrayBuffer) {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) throw new Error("No spreadsheet data found");
+
+  const rowCount = Math.max(worksheet.actualRowCount || 0, worksheet.rowCount || 0);
+  const colCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0);
+  if (!rowCount || !colCount) throw new Error("No spreadsheet data found");
+
+  const matrix = Array.from({ length: rowCount }, () =>
+    Array.from({ length: colCount }, () => ({ display: "", bg: "", color: "", bold: false, align: "left" }))
+  );
+
+  worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      const r = rowNumber - 1;
+      const c = colNumber - 1;
+      if (r >= rowCount || c >= colCount) return;
+
+      const fill = cell.fill || {};
+      const fg =
+        fill.type === "pattern"
+          ? excelArgbToCss(fill.fgColor) || excelArgbToCss(fill.bgColor)
+          : excelArgbToCss(fill.fgColor);
+      const font = cell.font || {};
+      const align = (cell.alignment && cell.alignment.horizontal) || "left";
+
+      matrix[r][c] = {
+        display: excelJsCellDisplay(cell),
+        bg: fg && !/^#(ffffff|000000)$/i.test(fg) ? fg : "",
+        color: excelArgbToCss(font.color),
+        bold: Boolean(font.bold),
+        align,
+      };
+    });
+  });
+
+  const merges = [];
+  const mergeModel = (worksheet.model && worksheet.model.merges) || [];
+  for (const ref of mergeModel) {
+    const [start, end] = String(ref).split(":");
+    const s = decodeExcelRef(start);
+    const e = decodeExcelRef(end || start);
+    if (s && e) merges.push({ r1: s.r, c1: s.c, r2: e.r, c2: e.c });
+  }
+
+  if (!merges.length && worksheet._merges) {
+    for (const merge of Object.values(worksheet._merges)) {
+      merges.push({
+        r1: merge.top - 1,
+        c1: merge.left - 1,
+        r2: merge.bottom - 1,
+        c2: merge.right - 1,
+      });
+    }
+  }
+
+  return buildTableHtml(matrix, merges);
+}
+
+function parseWorkbookWithXlsx(arrayBuffer) {
+  const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+  if (!sheet) throw new Error("No spreadsheet data found");
+
+  const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+  if (!range) throw new Error("No spreadsheet data found");
+
+  const matrix = [];
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      const cell = sheet[XLSX.utils.encode_cell({ r, c })] || {};
+      const value = cell.v != null ? cell.v : "";
+      row.push({
+        display: value instanceof Date
+          ? value.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+          : String(value),
+        bg: "",
+        color: "",
+        bold: false,
+        align: c === 0 || c >= 2 ? "center" : "left",
+      });
+    }
+    matrix.push(row);
+  }
+
+  const merges = (Array.isArray(sheet["!merges"]) ? sheet["!merges"] : []).map((m) => ({
+    r1: m.s.r,
+    c1: m.s.c,
+    r2: m.e.r,
+    c2: m.e.c,
+  }));
+
+  return buildTableHtml(matrix, merges);
+}
+
+function isPdfAttachment(fileName, fileUrl) {
+  const lower = String(fileName || fileUrl || "").toLowerCase();
+  return lower.includes(".pdf") || lower.endsWith("pdf");
+}
+
+function ExcelSheetPreview({ fileUrl, fileName }) {
+  const isPdf = isPdfAttachment(fileName, fileUrl);
+  const [sheetHtml, setSheetHtml] = useState("");
+  const [loading, setLoading] = useState(Boolean(fileUrl) && !isPdf);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!fileUrl || isPdf) {
+      setSheetHtml("");
+      setLoading(false);
+      setError("");
+      return;
+    }
+
+    let cancelled = false;
+
+    const parseFile = async () => {
+      try {
+        setLoading(true);
+        setError("");
+        const response = await fetch(fileUrl);
+        if (!response.ok) throw new Error("Could not fetch file");
+        const arrayBuffer = await response.arrayBuffer();
+        const lowerName = String(fileName || fileUrl).toLowerCase();
+
+        let html = "";
+        const isLegacy = lowerName.includes(".csv") || (lowerName.includes(".xls") && !lowerName.includes(".xlsx"));
+        if (isLegacy) {
+          html = parseWorkbookWithXlsx(arrayBuffer);
+        } else {
+          try {
+            html = await parseWorkbookWithExcelJs(arrayBuffer);
+          } catch {
+            html = parseWorkbookWithXlsx(arrayBuffer);
+          }
+        }
+
+        if (!cancelled) setSheetHtml(html);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Could not preview spreadsheet.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    parseFile();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileUrl, fileName, isPdf]);
+
+  return (
+    <div className="smt-excel-preview">
+      <div className="smt-excel-preview__head">
+        <strong className="smt-excel-preview__name">{fileName || (isPdf ? "PDF" : "Spreadsheet")}</strong>
+        {fileUrl ? (
+          <a href={fileUrl} target="_blank" rel="noreferrer" className="smt-excel-preview__link">
+            Open file
+          </a>
+        ) : null}
+      </div>
+
+      {isPdf ? (
+        fileUrl ? (
+          <iframe
+            className="smt-excel-scroll smt-pdf-frame"
+            src={fileUrl}
+            title={fileName || "PDF preview"}
+          />
+        ) : (
+          <div className="smt-excel-preview__msg">No PDF available.</div>
+        )
+      ) : loading ? (
+        <div className="smt-excel-preview__msg">Loading spreadsheet preview…</div>
+      ) : error ? (
+        <div className="smt-excel-preview__msg smt-excel-preview__msg--err">{error}</div>
+      ) : (
+        <div
+          className="smt-excel-scroll"
+          dangerouslySetInnerHTML={{
+            __html: sheetHtml || "<div style='padding:12px;color:#6b7280;'>No spreadsheet data available.</div>",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function WeeklyPlanReportMdo({ user, sites }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [engineerKey, setEngineerKey] = useState("");
+  const [selectedWeek, setSelectedWeek] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api("/ea-meeting/my");
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const weekly = items
+        .filter((row) => row?.plan_submitted_at && row?.source === "ea_meeting")
+        .map((row) => ({
+          id: row.ea_id || String(row.id || "").replace(/^ea:/, ""),
+          week: row.meeting_week_start || row.target_date || "—",
+          week_start: row.meeting_week_start || null,
+          week_end: row.meeting_week_end || row.target_date || null,
+          employee_name: row.employee_name || row.employee_username || "—",
+          employee_username: row.employee_username || "—",
+          employee_role: row.employee_role || row.priority || "—",
+          site: row.employee_site_name || user?.site_name || "—",
+          submitted_at: row.plan_submitted_at,
+          file_1_name: row.attachment_1_name || "File 1",
+          file_1_url: row.attachment_1_url || "",
+          file_2_name: row.attachment_2_name || "File 2",
+          file_2_url: row.attachment_2_url || "",
+        }))
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+      setRows(weekly);
+    } catch (err) {
+      setError(err.message || "Could not load weekly plan submissions.");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const engineerOptions = useMemo(() => {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      const name = String(row.employee_name || "").trim();
+      const username = String(row.employee_username || "").trim();
+      const key = normKey(username) || normKey(name);
+      if (!key) return;
+      if (!map.has(key)) map.set(key, { key, name: name || username, username });
+    });
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows]);
+
+  const selectedRows = useMemo(() => {
+    if (!engineerKey || !selectedWeek) return [];
+    return rows.filter((row) => {
+      const key = normKey(engineerKey);
+      const sameEngineer = normKey(row.employee_username) === key || normKey(row.employee_name) === key;
+      return sameEngineer && row.week_start === selectedWeek;
+    });
+  }, [engineerKey, rows, selectedWeek]);
+
+  const weekOptions = useMemo(() => {
+    const map = new Map();
+    rows.forEach((row) => {
+      if (!row.week_start) return;
+      map.set(row.week_start, {
+        value: row.week_start,
+        label: `${formatWeekDate(row.week_start)} to ${formatWeekDate(row.week_end || row.week_start)}`,
+      });
+    });
+    return [...map.values()].sort((a, b) => b.value.localeCompare(a.value));
+  }, [rows]);
+
+  const fmt = (ts) => {
+    if (!ts) return "—";
+    try {
+      return new Date(ts).toLocaleString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return String(ts);
+    }
+  };
+
+  return (
+    <div className="smt-page smt-page--wide">
+      <div className="smt-head">
+        <div>
+          <h1 className="smt-title">Weekly Plan</h1>
+          <p className="smt-sub">Select an engineer to load the submitted weekly Excel exactly as uploaded.</p>
+        </div>
+        <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="fgroup" style={{ maxWidth: 360, marginBottom: 12 }}>
+        <label className="flabel">Week</label>
+        <select className="finput" value={selectedWeek} onChange={(e) => setSelectedWeek(e.target.value)}>
+          <option value="">Select week</option>
+          {weekOptions.map((week) => (
+            <option key={week.value} value={week.value}>{week.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="fgroup" style={{ maxWidth: 360, marginBottom: 18 }}>
+        <label className="flabel">Engineer</label>
+        <select className="finput" value={engineerKey} onChange={(e) => setEngineerKey(e.target.value)}>
+          <option value="">Select engineer</option>
+          {engineerOptions.map((eng) => (
+            <option key={eng.key} value={eng.key}>{eng.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {error ? <div className="smt-error">{error}</div> : null}
+
+      {loading ? (
+        <div className="smt-empty">Loading weekly plan submissions…</div>
+      ) : !engineerKey ? (
+        <div className="smt-empty">Select an engineer from the filter to load the weekly plan sheet.</div>
+      ) : !selectedWeek ? (
+        <div className="smt-empty">Select a week to load the weekly plan sheet.</div>
+      ) : selectedRows.length === 0 ? (
+        <div className="smt-empty">No submitted weekly plans found for this engineer.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", minWidth: 0 }}>
+          {selectedRows.map((r) => (
+            <div key={r.id} className="smt-excel-card">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, color: "#6b7280" }}>Week: <strong>{r.week}</strong></div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{r.employee_name}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{r.employee_role} · {r.site}</div>
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>Submitted {fmt(r.submitted_at)}</div>
+              </div>
+
+              {r.file_1_url ? (
+                <WeeklyPlanAttachmentPreview
+                  eaId={r.id}
+                  sourceFile="attachment_1"
+                  fileUrl={r.file_1_url}
+                  fileName={r.file_1_name}
+                  weekStart={r.week_start}
+                  weekEnd={r.week_end}
+                />
+              ) : null}
+              {r.file_2_url ? (
+                <div style={{ marginTop: 16 }}>
+                  <WeeklyPlanAttachmentPreview
+                    eaId={r.id}
+                    sourceFile="attachment_2"
+                    fileUrl={r.file_2_url}
+                    fileName={r.file_2_name}
+                    weekStart={r.week_start}
+                    weekEnd={r.week_end}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EngineerExcelReport({ sites }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -1493,11 +2303,22 @@ function EngineerExcelReport({ sites }) {
     setErr("");
     try {
       const data = await fetchEngineerExcelReport(sites, from, to, employeeKey);
-      setSheets(data);
+      // Show report right away; fill city/area names in the background.
+      setSheets(cloneEngineerSheets(data));
+      setBusy(false);
+
+      void attachResolvedLocations(data, (partial) => {
+        setSheets(partial);
+      })
+        .then((resolved) => {
+          setSheets(cloneEngineerSheets(resolved));
+        })
+        .catch((e) => {
+          console.warn("[employee-report] location resolve failed", e?.message || e);
+        });
     } catch (e) {
       setErr(e.message || "Failed to build engineer Excel report.");
       setSheets(null);
-    } finally {
       setBusy(false);
     }
   };
@@ -1537,16 +2358,27 @@ function EngineerExcelReport({ sites }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
             <div style={{ fontSize: 13, color: "var(--ink2)" }}>
               {employeeKey === "all"
-                ? `${visibleSheets.length} employee${visibleSheets.length !== 1 ? "s" : ""} · ${fmtDDMMYYYY(from)} to ${fmtDDMMYYYY(to)} · one Excel sheet per employee`
+                ? `${visibleSheets.length} employee${visibleSheets.length !== 1 ? "s" : ""} · ${fmtDDMMYYYY(from)} to ${fmtDDMMYYYY(to)}`
                 : `${visibleSheets[0]?.name || "Selected employee"} · ${fmtDDMMYYYY(from)} to ${fmtDDMMYYYY(to)}`}
             </div>
-            <button
-              className="btn btn-out"
-              onClick={() => downloadEngineerExcel(visibleSheets, from, to)}
-              disabled={!visibleSheets.length}
-            >
-              {Ico.dl} Download Excel
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-out"
+                onClick={() => downloadEngineerExcel(visibleSheets, from, to)}
+                disabled={!visibleSheets.length}
+                title="One Excel sheet per employee"
+              >
+                {Ico.dl} Download Excel (per employee)
+              </button>
+              <button
+                className="btn btn-out"
+                onClick={() => downloadEngineerExcelCombined(visibleSheets, from, to)}
+                disabled={!visibleSheets.length}
+                title="All employee tables on one sheet — 4 side by side, then next row"
+              >
+                {Ico.dl} Download Excel (single sheet)
+              </button>
+            </div>
           </div>
 
           {visibleSheets.length === 0 ? (
@@ -1590,13 +2422,32 @@ function EngineerExcelReport({ sites }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {s.rows.map((r) => (
+                      {s.rows.map((r) => {
+                        const onLeave = r.onLeave || r.status === "On Leave";
+                        const leaveStyle = onLeave
+                          ? { fontWeight: 700, color: "#7c3aed" }
+                          : undefined;
+                        return (
                         <tr key={`${s.username}-${r.date}`} style={{ borderBottom: "1px solid var(--line)" }}>
                           <td style={{ padding: "7px 8px", textAlign: "center" }}>{fmtDMonYY(r.date)}</td>
                           <td style={{ padding: "7px 8px" }}>{r.name}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: pendText(fmtTimeIST24(r.clockIn)) === "Pend" ? 700 : undefined, color: pendText(fmtTimeIST24(r.clockIn)) === "Pend" ? "var(--amber2, #d97706)" : undefined }}>{pendText(fmtTimeIST24(r.clockIn))}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            fontWeight: leaveStyle ? 700 : (clockDisplay(r.clockIn) === "Pend" ? 700 : undefined),
+                            color: leaveStyle
+                              ? "#7c3aed"
+                              : (clockDisplay(r.clockIn) === "Pend" ? "var(--amber2, #d97706)" : undefined),
+                          }}>{clockDisplay(r.clockIn)}</td>
                           <td style={{ padding: "7px 8px", textAlign: "center" }}>{locationCell(r.clockInLocation, r.clockInMaps)}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: pendText(fmtTimeIST24(r.clockOut)) === "Pend" ? 700 : undefined, color: pendText(fmtTimeIST24(r.clockOut)) === "Pend" ? "var(--amber2, #d97706)" : undefined }}>{pendText(fmtTimeIST24(r.clockOut))}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            fontWeight: leaveStyle ? 700 : (clockDisplay(r.clockOut) === "Pend" ? 700 : undefined),
+                            color: leaveStyle
+                              ? "#7c3aed"
+                              : (clockDisplay(r.clockOut) === "Pend" ? "var(--amber2, #d97706)" : undefined),
+                          }}>{clockDisplay(r.clockOut)}</td>
                           <td style={{ padding: "7px 8px", textAlign: "center" }}>{locationCell(r.clockOutLocation, r.clockOutMaps)}</td>
                           <td style={{
                             padding: "7px 8px",
@@ -1606,7 +2457,11 @@ function EngineerExcelReport({ sites }) {
                               : r.status === "On Leave" ? "#7c3aed"
                               : r.status === "On Time" ? "var(--green)" : "inherit",
                           }}>{r.status}</td>
-                          <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.lateMinutes}</td>
+                          <td style={{
+                            padding: "7px 8px",
+                            textAlign: "center",
+                            ...(leaveStyle || {}),
+                          }}>{isOnLeaveValue(r.lateMinutes) ? "On Leave" : r.lateMinutes}</td>
                           <td style={{
                             padding: "7px 8px",
                             textAlign: "center",
@@ -1620,7 +2475,8 @@ function EngineerExcelReport({ sites }) {
                             color: r.evening === "Done" ? "var(--green)" : r.evening === "On Leave" ? "#7c3aed" : "var(--amber2, #d97706)",
                           }}>{r.evening}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1862,40 +2718,116 @@ function DprSheetReport({ sites }) {
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead>
-                  <tr style={{ borderBottom: "2px solid var(--line)" }}>
-                    <th style={{ padding: "8px 6px" }}>SR NO</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px" }}>ENGINEER NAME</th>
-                    <th style={{ textAlign: "left", padding: "8px 10px" }}>SITE NAME</th>
+                  <tr style={{ borderBottom: "1px solid var(--line)" }}>
+                    <th rowSpan={2} style={{ padding: "8px 6px", verticalAlign: "bottom" }}>
+                      SR NO
+                    </th>
+                    <th
+                      rowSpan={2}
+                      style={{ textAlign: "left", padding: "8px 10px", verticalAlign: "bottom" }}
+                    >
+                      ENGINEER NAME
+                    </th>
+                    <th
+                      rowSpan={2}
+                      style={{ textAlign: "left", padding: "8px 10px", verticalAlign: "bottom" }}
+                    >
+                      SITE NAME
+                    </th>
                     {result.dates.map((d) => {
                       const dt = new Date(d + "T00:00:00");
                       return (
-                        <th key={d} style={{ padding: "8px 6px", textAlign: "center", whiteSpace: "nowrap" }}>
-                          {pad(dt.getDate())}<br />{MONTHS_SHORT[dt.getMonth()]}
+                        <th
+                          key={d}
+                          colSpan={2}
+                          style={{
+                            padding: "8px 6px 4px",
+                            textAlign: "center",
+                            whiteSpace: "nowrap",
+                            borderBottom: "1px solid var(--line)",
+                          }}
+                        >
+                          {pad(dt.getDate())} {MONTHS_SHORT[dt.getMonth()]}
                         </th>
                       );
                     })}
                   </tr>
+                  <tr style={{ borderBottom: "2px solid var(--line)" }}>
+                    {result.dates.map((d) => (
+                      <Fragment key={`${d}-slots`}>
+                        <th
+                          style={{
+                            padding: "4px 8px 8px",
+                            textAlign: "center",
+                            fontWeight: 600,
+                            fontSize: 11,
+                            color: "var(--ink2)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Morning report
+                        </th>
+                        <th
+                          style={{
+                            padding: "4px 8px 8px",
+                            textAlign: "center",
+                            fontWeight: 600,
+                            fontSize: 11,
+                            color: "var(--ink2)",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Evening report
+                        </th>
+                      </Fragment>
+                    ))}
+                  </tr>
                 </thead>
                 <tbody>
                   {result.rows.map((r) => (
-                    <tr key={`${r.srNo}-${r.site}-${r.engineer}`} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <tr
+                      key={`${r.srNo}-${r.site}-${r.engineer}`}
+                      style={{ borderBottom: "1px solid var(--line)" }}
+                    >
                       <td style={{ padding: "8px 6px", textAlign: "center" }}>{r.srNo}</td>
                       <td style={{ padding: "8px 10px" }}>{r.engineer}</td>
                       <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.site}</td>
-                      {r.days.map((status, i) => (
-                        <td
-                          key={i}
-                          style={{
-                            padding: "8px 6px",
-                            textAlign: "center",
-                            fontWeight: 700,
-                            fontSize: 11,
-                            color: status === "DONE" ? "var(--green)" : "var(--amber2, #d97706)",
-                          }}
-                        >
-                          {status}
-                        </td>
-                      ))}
+                      {r.days.map((day, i) => {
+                        const morning = day?.morning === "DONE" ? "DONE" : "PEND";
+                        const evening = day?.evening === "DONE" ? "DONE" : "PEND";
+                        return (
+                          <Fragment key={i}>
+                            <td
+                              style={{
+                                padding: "8px 6px",
+                                textAlign: "center",
+                                fontWeight: 700,
+                                fontSize: 11,
+                                color:
+                                  morning === "DONE"
+                                    ? "var(--green)"
+                                    : "var(--amber2, #d97706)",
+                              }}
+                            >
+                              {morning}
+                            </td>
+                            <td
+                              style={{
+                                padding: "8px 6px",
+                                textAlign: "center",
+                                fontWeight: 700,
+                                fontSize: 11,
+                                color:
+                                  evening === "DONE"
+                                    ? "var(--green)"
+                                    : "var(--amber2, #d97706)",
+                              }}
+                            >
+                              {evening}
+                            </td>
+                          </Fragment>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -1909,168 +2841,152 @@ function DprSheetReport({ sites }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-function WeeklyPlanReportMdo({ user, sites }) {
-  const [rows, setRows] = useState([]);
+// MAIN MDO PORTAL
+// ═══════════════════════════════════════════════════════════════════════════
+
+function canSeeMdoTaskDelayReport(user) {
+  if (!user) return false;
+  const uname = String(user.user_name || user.username || "").toLowerCase().trim();
+  const name = String(user.name || user.full_name || "").toLowerCase().trim();
+  const role = String(user.tf_role || user.app_role || user.role || "").toLowerCase().trim();
+  // Explicit Chirag logins
+  if (uname === "chirag.s" || uname === "chirag" || uname.startsWith("chirag.")) return true;
+  if (name.includes("chirag") && (name.includes("shah") || uname.includes("chirag"))) return true;
+  // Admin role from TaskFlow JWT /auth/me (Chirag)
+  if (role === "admin") return true;
+  return false;
+}
+
+function MdoTaskDelayReport() {
+  const [range, setRange] = useState("month");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [engineerKey, setEngineerKey] = useState("");
+  const [err, setErr] = useState("");
+  const [data, setData] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError("");
+    setErr("");
     try {
-      const data = await api("/ea-meeting/my");
-      const items = Array.isArray(data?.items) ? data.items : [];
-      const weekly = items
-        .filter((row) => row?.plan_submitted_at && row?.source === "ea_meeting")
-        .map((row) => ({
-          id: row.ea_id || String(row.id || "").replace(/^ea:/, ""),
-          week: row.meeting_week_start || row.target_date || "—",
-          week_start: row.meeting_week_start || null,
-          week_end: row.meeting_week_end || row.target_date || null,
-          employee_name: row.employee_name || row.employee_username || "—",
-          employee_username: row.employee_username || "—",
-          employee_role: row.employee_role || row.priority || "—",
-          site: row.employee_site_name || user?.site_name || "—",
-          submitted_at: row.plan_submitted_at,
-          file_1_name: row.attachment_1_name || "File 1",
-          file_1_url: row.attachment_1_url || "",
-          file_2_name: row.attachment_2_name || "File 2",
-          file_2_url: row.attachment_2_url || "",
-        }))
-        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
-      setRows(weekly);
-    } catch (err) {
-      setError(err.message || "Could not load weekly plan submissions.");
-      setRows([]);
-    } finally {
-      setLoading(false);
+      const res = await api(`/mdo/task-report?range=${encodeURIComponent(range)}`);
+      setData(res);
+    } catch (e) {
+      setErr(e.message || "Could not load report");
+      setData(null);
     }
-  }, [user]);
+    setLoading(false);
+  }, [range]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const engineerOptions = useMemo(() => {
-    const map = new Map();
-    (rows || []).forEach((row) => {
-      const name = String(row.employee_name || "").trim();
-      const username = String(row.employee_username || "").trim();
-      const key = normKey(username) || normKey(name);
-      if (!key) return;
-      if (!map.has(key)) map.set(key, { key, name: name || username, username });
-    });
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [rows]);
-
-  const selectedRows = useMemo(() => {
-    if (!engineerKey) return [];
-    return rows.filter((row) => {
-      const key = normKey(engineerKey);
-      return normKey(row.employee_username) === key || normKey(row.employee_name) === key;
-    });
-  }, [engineerKey, rows]);
-
-  const fmt = (ts) => {
-    if (!ts) return "—";
-    try {
-      return new Date(ts).toLocaleString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-    } catch {
-      return String(ts);
-    }
-  };
+  const rows = data?.rows || [];
+  const s = data?.summary || {};
 
   return (
-    <div className="smt-page smt-page--wide">
-      <div className="smt-head">
-        <div>
-          <h1 className="smt-title">Weekly Plan</h1>
-          <p className="smt-sub">Select an engineer to load the submitted weekly sheet.</p>
-        </div>
-        <button type="button" className="smt-refresh" onClick={load} disabled={loading}>
+    <div>
+      <div className="info-banner" style={{ marginBottom: 16 }}>
+        MDO Office Work tasks — accept time, mark-done time, and whether the employee was delayed.
+        Visible only to Chirag Shah.
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>
+          Range{" "}
+          <select value={range} onChange={(e) => setRange(e.target.value)} style={{ marginLeft: 6, padding: "6px 10px" }}>
+            <option value="day">Today</option>
+            <option value="week">This week</option>
+            <option value="last-week">Last week</option>
+            <option value="month">This month</option>
+            <option value="last-month">Last month</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" className="btn btn-pri" onClick={load} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}
         </button>
       </div>
-
-      <div className="fgroup" style={{ maxWidth: 360, marginBottom: 18 }}>
-        <label className="flabel">Engineer</label>
-        <select className="finput" value={engineerKey} onChange={(e) => setEngineerKey(e.target.value)}>
-          <option value="">Select engineer</option>
-          {engineerOptions.map((eng) => (
-            <option key={eng.key} value={eng.key}>{eng.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {error ? <div className="smt-error">{error}</div> : null}
-
+      {err && (
+        <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>
+          {err}
+        </div>
+      )}
+      {!err && !loading && (
+        <p style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 12 }}>
+          {s.total || 0} tasks · <strong style={{ color: "#c2410c" }}>{s.delayed || 0} delayed</strong>
+          {" · "}
+          <strong style={{ color: "#15803d" }}>{s.on_time || 0} on time</strong>
+          {" · "}
+          {s.pending || 0} not done yet
+        </p>
+      )}
       {loading ? (
-        <div className="smt-empty">Loading weekly plan submissions…</div>
-      ) : !engineerKey ? (
-        <div className="smt-empty">Select an engineer from the filter to load the weekly plan sheet.</div>
-      ) : selectedRows.length === 0 ? (
-        <div className="smt-empty">No submitted weekly plans found for this engineer.</div>
+        <Loading />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 24, width: "100%", minWidth: 0 }}>
-          {selectedRows.map((r) => (
-            <div key={r.id} className="smt-excel-card">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontSize: 13, color: "#6b7280" }}>Week: <strong>{r.week}</strong></div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{r.employee_name}</div>
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>{r.employee_role} · {r.site}</div>
-                </div>
-                <div style={{ fontSize: 12, color: "#6b7280" }}>Submitted {fmt(r.submitted_at)}</div>
-              </div>
-
-              {r.file_1_url ? (
-                <WeeklyPlanAttachmentPreview
-                  eaId={r.id}
-                  sourceFile="attachment_1"
-                  fileUrl={r.file_1_url}
-                  fileName={r.file_1_name}
-                  weekStart={r.week_start}
-                  weekEnd={r.week_end}
-                />
-              ) : null}
-              {r.file_2_url ? (
-                <div style={{ marginTop: 16 }}>
-                  <WeeklyPlanAttachmentPreview
-                    eaId={r.id}
-                    sourceFile="attachment_2"
-                    fileUrl={r.file_2_url}
-                    fileName={r.file_2_name}
-                    weekStart={r.week_start}
-                    weekEnd={r.week_end}
-                  />
-                </div>
-              ) : null}
-            </div>
-          ))}
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#1f2937", color: "#fff", textAlign: "left" }}>
+                <th style={{ padding: "10px 8px" }}>SR</th>
+                <th style={{ padding: "10px 8px" }}>Employee</th>
+                <th style={{ padding: "10px 8px" }}>Task description</th>
+                <th style={{ padding: "10px 8px" }}>Task type</th>
+                <th style={{ padding: "10px 8px" }}>Accepted</th>
+                <th style={{ padding: "10px 8px" }}>Marked done</th>
+                <th style={{ padding: "10px 8px" }}>Due</th>
+                <th style={{ padding: "10px 8px" }}>Delay?</th>
+                <th style={{ padding: "10px 8px" }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: 24, textAlign: "center", color: "#888" }}>
+                    No MDO Office Work tasks in this range
+                  </td>
+                </tr>
+              ) : (
+                rows.map((r) => (
+                  <tr key={r.id} style={{ borderBottom: "1px solid #e5e7eb", background: r.delay ? "#fff7ed" : undefined }}>
+                    <td style={{ padding: "10px 8px", textAlign: "center" }}>{r.sr}</td>
+                    <td style={{ padding: "10px 8px", fontWeight: 600 }}>{r.employee}</td>
+                    <td style={{ padding: "10px 8px", maxWidth: 280 }}>{r.description}</td>
+                    <td style={{ padding: "10px 8px" }}>{r.task_type}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.accepted_label}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.done_label}</td>
+                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.due_label}</td>
+                    <td style={{ padding: "10px 8px", fontWeight: 700, color: r.delay ? "#c2410c" : "#15803d" }}>
+                      {r.delay ? `Yes — ${r.delay_label}` : r.delay_label}
+                    </td>
+                    <td style={{ padding: "10px 8px" }}>{r.status}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
+function isPcLikeRole(value) {
+  const blob = String(value || "").toLowerCase();
+  if (!blob) return false;
+  return (
+    /process controller/.test(blob) ||
+    /\bpc\b/.test(blob) ||
+    /\bbeena\b/.test(blob) ||
+    /mdo office/.test(blob) ||
+    /engineer office/.test(blob)
+  );
+}
 
-// MAIN MDO PORTAL
-// ═══════════════════════════════════════════════════════════════════════════
-
-const NAV = [
+const BASE_NAV = [
   { key: "attendance", label: "Attendance Report", icon: Ico.attendance },
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
-  { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
+  { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan, pcOnly: true },
   { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_only" },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
@@ -2078,6 +2994,22 @@ const NAV = [
   { key: "my-leave", label: "My Leave", icon: Ico.leave },
   { key: "proxy-request", label: "Leave Approvals", icon: Ico.proxy },
 ];
+
+function getNavItems(user) {
+  const isPc = (
+    isPcLikeRole(user?.role) ||
+    isPcLikeRole(user?.designation) ||
+    isPcLikeRole(user?.department) ||
+    isPcLikeRole(user?.site_role) ||
+    /beena/i.test(`${user?.name || ""} ${user?.user_name || ""}`) ||
+    /mdo office|engineer office/i.test(`${user?.department || ""} ${user?.role || ""} ${user?.designation || ""}`)
+  );
+
+  return BASE_NAV.filter((n) => {
+    if (!n.pcOnly) return true;
+    return isPc;
+  });
+}
 
 const NAV_COLORS = {
   attendance: "#2563eb",
@@ -2093,23 +3025,9 @@ const NAV_COLORS = {
   "all-drawings": "#d97706",
 };
 
-/** Only Chirag Shah — MDO Task Delay Report sidebar item. */
-function canSeeMdoTaskDelayReport(user) {
-  if (!user) return false;
-  const uname = String(user.user_name || user.username || "").toLowerCase().trim();
-  const name = String(user.name || user.full_name || "").toLowerCase().trim();
-  const role = String(user.tf_role || user.app_role || user.role || "").toLowerCase().trim();
-  // Explicit Chirag logins
-  if (uname === "chirag.s" || uname === "chirag" || uname.startsWith("chirag.")) return true;
-  if (name.includes("chirag") && (name.includes("shah") || uname.includes("chirag"))) return true;
-  // Admin role from TaskFlow JWT /auth/me (Chirag)
-  if (role === "admin") return true;
-  return false;
-}
-
 const LEAVE_TYPES = [
-  "Casual Leave", "Sick Leave", "Earned Leave",
-  "Maternity Leave", "Paternity Leave", "Compensatory Leave", "Unpaid Leave",
+  "Casual Leave", "Compensatory Leave", "Earned Leave",
+  "Maternity Leave", "Paternity Leave", "Sick Leave", "Unpaid Leave",
 ];
 export function deriveLeaveStatus(levelApproved, headApproved) {
   if (levelApproved === false || headApproved === false) return "rejected";
@@ -2411,24 +3329,6 @@ const submit = async () => {
 
   setBusy(false);
   if (error) { setErr(error.message); return; }
-
-  // MDO insert is client-side — fire WhatsApp to Chirag + Beena + head + proxy
-  try {
-    await api("/leaves/mdo-notify", {
-      method: "POST",
-      body: JSON.stringify({
-        applicant_name: user.name || user.user_name,
-        from_date: form.from_date,
-        to_date: form.to_date,
-        reason: form.reason || form.leave_type || "Leave",
-        proxy_username: form.proxy_user_name || null,
-        proxy_name: proxyUser?.name || form.proxy_user_name || null,
-      }),
-    });
-  } catch (waErr) {
-    console.warn("MDO leave WhatsApp skip:", waErr?.message || waErr);
-  }
-
   setSubmitted(true);
 };
   if (submitted)
@@ -2669,145 +3569,29 @@ const fmtD = (d) =>
         year: "numeric",
       })
     : "—";
-
-function MdoTaskDelayReport() {
-  const [range, setRange] = useState("month");
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-  const [data, setData] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr("");
-    try {
-      const res = await api(`/mdo/task-report?range=${encodeURIComponent(range)}`);
-      setData(res);
-    } catch (e) {
-      setErr(e.message || "Could not load report");
-      setData(null);
-    }
-    setLoading(false);
-  }, [range]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const rows = data?.rows || [];
-  const s = data?.summary || {};
-
-  return (
-    <div>
-      <div className="info-banner" style={{ marginBottom: 16 }}>
-        MDO Office Work tasks — accept time, mark-done time, and whether the employee was delayed.
-        Visible only to Chirag Shah.
-      </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
-        <label style={{ fontSize: 13, fontWeight: 600 }}>
-          Range{" "}
-          <select value={range} onChange={(e) => setRange(e.target.value)} style={{ marginLeft: 6, padding: "6px 10px" }}>
-            <option value="day">Today</option>
-            <option value="week">This week</option>
-            <option value="last-week">Last week</option>
-            <option value="month">This month</option>
-            <option value="last-month">Last month</option>
-            <option value="all">All</option>
-          </select>
-        </label>
-        <button type="button" className="btn btn-pri" onClick={load} disabled={loading}>
-          {loading ? "Loading…" : "Refresh"}
-        </button>
-      </div>
-      {err && (
-        <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>
-          {err}
-        </div>
-      )}
-      {!err && !loading && (
-        <p style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 12 }}>
-          {s.total || 0} tasks · <strong style={{ color: "#c2410c" }}>{s.delayed || 0} delayed</strong>
-          {" · "}
-          <strong style={{ color: "#15803d" }}>{s.on_time || 0} on time</strong>
-          {" · "}
-          {s.pending || 0} not done yet
-        </p>
-      )}
-      {loading ? (
-        <Loading />
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: "#1f2937", color: "#fff", textAlign: "left" }}>
-                <th style={{ padding: "10px 8px" }}>SR</th>
-                <th style={{ padding: "10px 8px" }}>Employee</th>
-                <th style={{ padding: "10px 8px" }}>Task description</th>
-                <th style={{ padding: "10px 8px" }}>Task type</th>
-                <th style={{ padding: "10px 8px" }}>Accepted</th>
-                <th style={{ padding: "10px 8px" }}>Marked done</th>
-                <th style={{ padding: "10px 8px" }}>Due</th>
-                <th style={{ padding: "10px 8px" }}>Delay?</th>
-                <th style={{ padding: "10px 8px" }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} style={{ padding: 24, textAlign: "center", color: "#888" }}>
-                    No MDO Office Work tasks in this range
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: "1px solid #e5e7eb", background: r.delay ? "#fff7ed" : undefined }}>
-                    <td style={{ padding: "10px 8px", textAlign: "center" }}>{r.sr}</td>
-                    <td style={{ padding: "10px 8px", fontWeight: 600 }}>{r.employee}</td>
-                    <td style={{ padding: "10px 8px", maxWidth: 280 }}>{r.description}</td>
-                    <td style={{ padding: "10px 8px" }}>{r.task_type}</td>
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.accepted_label}</td>
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.done_label}</td>
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.due_label}</td>
-                    <td style={{ padding: "10px 8px", fontWeight: 700, color: r.delay ? "#c2410c" : "#15803d" }}>
-                      {r.delay ? `Yes — ${r.delay_label}` : r.delay_label}
-                    </td>
-                    <td style={{ padding: "10px 8px" }}>{r.status}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function MDOPortal({ onLogout, authUser }) {
-  const [user, setUser] = useState(() => {
-    if (!authUser) return null;
-    return {
-      id: authUser.id,
-      user_name: authUser.username || authUser.user_name,
-      username: authUser.username || authUser.user_name,
-      name: authUser.full_name || authUser.name,
-      department: authUser.department || "",
-      role: authUser.designation || authUser.role || "Process Controller",
-      tf_role: authUser.role || "",
-      app_role: authUser.role || "",
-      designation: authUser.designation || authUser.role || "",
-      is_mis_executive: !!authUser.is_mis_executive,
-      site_name: authUser.site_name || "",
-      site_names: authUser.site_names || null,
-    };
-  });
+export default function MDOPortal({ onLogout }) {
+  const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("attendance");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hoveredNavKey, setHoveredNavKey] = useState(null);
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    return saved === "dark";
+  });
   const [drawingForm, setDrawingForm] = useState({ site_name: "", date: "", files: [] });
   const [drawingSubmitting, setDrawingSubmitting] = useState(false);
   const [allDrawings, setAllDrawings] = useState([]);
   const [loadingDrawings, setLoadingDrawings] = useState(false);
   const [allSites, setAllSites] = useState([]);
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    setIsDark(next);
+    const val = next ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", val);
+    localStorage.setItem("theme", val);
+  };
 
   const fetchDrawings = useCallback(async (u, siteList) => {
   if (!u) return;
@@ -2861,40 +3645,14 @@ const handleDrawingSubmit = async () => {
         if (stored) parsed = JSON.parse(stored);
       } catch { /* ignore */ }
     }
-
-    // Authoritative TaskFlow profile (role + username) — needed for Chirag-only nav
-    let me = null;
-    try {
-      me = await api("/auth/me");
-    } catch { /* ignore — may be site-only session */ }
-    if (me) {
-      parsed = {
-        ...(parsed || {}),
-        id: me.id || parsed?.id,
-        username: me.username || parsed?.username || parsed?.user_name,
-        user_name: me.username || parsed?.user_name || parsed?.username,
-        full_name: me.full_name || parsed?.full_name || parsed?.name,
-        name: me.full_name || parsed?.name || parsed?.full_name,
-        role: me.role || parsed?.role,
-        department: me.department || parsed?.department || "",
-        designation: me.designation || parsed?.designation || "",
-        is_mis_executive: !!me.is_mis_executive,
-        site_name: me.site_name || parsed?.site_name || "",
-        site_names: me.site_names || parsed?.site_names || null,
-      };
-    }
     if (!parsed) return;
     const shaped = {
       id: parsed.id,
       user_name: parsed.user_name || parsed.username,
-      username: parsed.username || parsed.user_name,
       name: parsed.name || parsed.full_name,
       department: parsed.department || "",
       role: parsed.designation || parsed.role || "Process Controller",
-      tf_role: parsed.role || "",
-      app_role: parsed.role || "",
       designation: parsed.designation || parsed.role || "",
-      is_mis_executive: !!parsed.is_mis_executive,
       site_name: parsed.site_name || "",
       site_names: parsed.site_names || null,
     };
@@ -2904,7 +3662,7 @@ const handleDrawingSubmit = async () => {
     let data = null;
     if (uname) {
       const { data: fromUsers } = await fromMaybe("users", (q) =>
-        q.select("site_name, site_names, department, designation, full_name, role, is_mis_executive").eq("username", uname).maybeSingle()
+        q.select("site_name, site_names, department, designation, full_name, role").eq("username", uname).maybeSingle()
       );
       const urow = fromUsers && !Array.isArray(fromUsers) ? fromUsers : (fromUsers || [])[0];
       if (urow) {
@@ -2913,8 +3671,6 @@ const handleDrawingSubmit = async () => {
           site_names: urow.site_names,
           department: urow.department,
           role: urow.designation || urow.role || shaped.role,
-          tf_role: urow.role || shaped.tf_role,
-          is_mis_executive: !!urow.is_mis_executive,
           name: urow.full_name,
         };
       }
@@ -2945,11 +3701,6 @@ const handleDrawingSubmit = async () => {
       ...shaped,
       name: data?.name || shaped.name,
       role: data?.role || shaped.role,
-      tf_role: data?.tf_role || shaped.tf_role,
-      app_role: data?.tf_role || shaped.app_role || shaped.tf_role,
-      username: shaped.username || shaped.user_name,
-      user_name: shaped.user_name || shaped.username,
-      is_mis_executive: data?.is_mis_executive != null ? !!data.is_mis_executive : shaped.is_mis_executive,
       site_name: site_names[0] || shaped.site_name,
       site_names,
       department: data?.department ?? shaped.department,
@@ -2978,34 +3729,6 @@ useEffect(() => {
     if (user) fetchDrawings(user, allSites);
   }, [user, allSites, fetchDrawings]);
 
-  const ownSites = useMemo(() => {
-    if (!user) return [];
-    return uniqueNamesCaseInsensitive(
-      Array.isArray(user.site_names) && user.site_names.length
-        ? user.site_names
-        : user.site_name
-          ? [user.site_name]
-          : []
-    );
-  }, [user]);
-
-  const sites = useMemo(
-    () => (ownSites.length ? ownSites : allSites),
-    [ownSites, allSites]
-  );
-
-  const visibleNav = useMemo(
-    () => NAV.filter((n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)),
-    [user]
-  );
-
-  useEffect(() => {
-    if (!user) return;
-    if (activeTab === "task-delay" && !canSeeMdoTaskDelayReport(user)) {
-      setActiveTab("attendance");
-    }
-  }, [activeTab, user]);
-
   if (!user) {
     return (
       <div className="loading" style={{ minHeight: "100vh" }}>
@@ -3015,6 +3738,17 @@ useEffect(() => {
     );
   }
 
+  const ownSites = uniqueNamesCaseInsensitive(
+    Array.isArray(user.site_names) && user.site_names.length
+      ? user.site_names
+      : user.site_name
+        ? [user.site_name]
+        : []
+  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const sites = ownSites.length ? ownSites : allSites;
+  const NAV = getNavItems(user).filter(
+    (n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)
+  );
   const activeItem = NAV.find((n) => n.key === activeTab);
 
   return (
@@ -3026,21 +3760,21 @@ useEffect(() => {
           <button className="sb-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />
         )}
 
-        <aside className={`sidebar${sidebarOpen ? "" : " closed"}`}>
+        <aside className={`site-sidebar${sidebarOpen ? " open" : " closed"}`}>
           <div style={{ padding: "14px 14px 6px", fontSize: 11, fontWeight: 800, letterSpacing: ".08em", color: "var(--ink3)", textTransform: "uppercase" }}>
             MDO Office Portal
           </div>
           <nav
-          className="snav"
-          style={{
-            overflowY: "auto",
-            maxHeight: "none",
-            height: "auto",
-            display: "flex",
-            flexDirection: "column",
-          }}  
-        >
-          {visibleNav.map((n) => {
+            className="snav"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              minHeight: 0,
+              overflow: "visible",
+            }}
+          >
+          {NAV.map((n) => {
             const color = NAV_COLORS[n.key] || "#2563eb";
             const highlighted = activeTab === n.key || hoveredNavKey === n.key;
             return (
@@ -3049,7 +3783,18 @@ useEffect(() => {
                 className={`sni${activeTab === n.key ? " act" : ""}`}
                 onClick={() => {
                   setActiveTab(n.key);
-                  if (window.innerWidth <= 768) setSidebarOpen(false);
+                  if (window.innerWidth <= 999) setSidebarOpen(false);
+                  const run = () => {
+                    window.scrollTo(0, 0);
+                    document.documentElement.scrollTop = 0;
+                    document.body.scrollTop = 0;
+                    const main = document.querySelector(".main");
+                    if (main) main.scrollTop = 0;
+                  };
+                  requestAnimationFrame(() => {
+                    run();
+                    window.setTimeout(run, 40);
+                  });
                 }}
                 onMouseEnter={() => setHoveredNavKey(n.key)}
                 onMouseLeave={() => setHoveredNavKey(null)}
@@ -3069,6 +3814,67 @@ useEffect(() => {
               </button>
             );
           })}
+
+          <button
+            type="button"
+            className="sni mdo-theme-toggle"
+            onClick={toggleTheme}
+            onMouseEnter={() => setHoveredNavKey("theme")}
+            onMouseLeave={() => setHoveredNavKey(null)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 9,
+              visibility: "visible",
+              opacity: 1,
+              height: "auto",
+              minHeight: 40,
+              flexShrink: 0,
+              marginTop: "auto",
+              position: "sticky",
+              bottom: 0,
+              background:
+                hoveredNavKey === "theme"
+                  ? "rgba(217, 119, 6, 0.12)"
+                  : "var(--surface)",
+              color: hoveredNavKey === "theme" ? "#d97706" : undefined,
+              borderTop: "1px solid var(--line)",
+              zIndex: 2,
+            }}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
+              {isDark ? Ico.theme : Ico.moon}
+              {isDark ? "Light Mode" : "Dark Mode"}
+            </span>
+            <span
+              aria-hidden
+              style={{
+                width: 36,
+                height: 20,
+                borderRadius: 11,
+                background: isDark ? "var(--amber, #d97706)" : "var(--line2, #e5e7eb)",
+                position: "relative",
+                flexShrink: 0,
+                transition: "background .2s",
+              }}
+            >
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: "#fff",
+                  position: "absolute",
+                  top: 3,
+                  left: isDark ? 19 : 3,
+                  transition: "left .2s",
+                  boxShadow: "0 1px 3px rgba(0,0,0,.25)",
+                }}
+              />
+            </span>
+          </button>
         </nav>
         </aside>
 

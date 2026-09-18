@@ -58,8 +58,11 @@ function parseDateLoose(raw) {
     s,
     ...(s.match(/\d{1,2}[.\-\/\s]+[A-Za-z]{3,9}[.\-\/\s]+\d{2,4}/g) || []),
     ...(s.match(/\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}/g) || []),
+    ...(s.match(/\d{1,2}[.\-\s\/]+[A-Za-z]{3,9}/g) || []),
     ...(s.match(/\d{4}-\d{1,2}-\d{1,2}/g) || []),
   ];
+
+  const currentYear = new Date().getFullYear();
 
   for (const cand of candidates) {
     const t = cellText(cand);
@@ -67,13 +70,15 @@ function parseDateLoose(raw) {
     if (m) {
       return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
     }
-    m = t.match(/^(\d{1,2})[.\-\s\/]+([A-Za-z]{3,9})[.\-\s\/]+(\d{2,4})$/i);
+    m = t.match(
+      /^(\d{1,2})[.\-\s\/]+([A-Za-z]{3,9})(?:[.\-\s\/]+(?:(\d{2,4})|(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)))?(?:[.\-\s\/]+(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY))?$/i
+    );
     if (m) {
       const mon = MONTHS[m[2].toLowerCase()];
       if (mon == null) continue;
-      let year = Number(m[3]);
-      if (year < 100) year += 2000;
-      return toYmd(new Date(year, mon, Number(m[1]), 12));
+      const year = m[3] ? Number(m[3]) : currentYear;
+      const yy = year < 100 ? year + 2000 : year;
+      return toYmd(new Date(yy, mon, Number(m[1]), 12));
     }
     m = t.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})$/);
     if (m) {
@@ -123,12 +128,25 @@ function normalizeStatus(raw) {
   return "Pending";
 }
 
+function splitCellTasks(raw) {
+  const text = cellText(raw);
+  if (!text) return [];
+  const candidates = text
+    .split(/\n|\s*\/\s*|\s*•\s*|\s*;\s*/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return candidates.length ? candidates : [text];
+}
+
 function isHeaderTaskName(name) {
-  const t = String(name || "").toUpperCase();
+  const t = String(name || "").replace(/\s+/g, " ").trim().toUpperCase();
   if (!t) return true;
-  return /^(SR\s*NO|SITE\s*NAME|DATE|DAYS|TIME|WORK\s*STATUS|WEEKLY\s*PLAN|DIP\s*PROJECT|PROJECT\s*CO|1ST\s*HALF|2ND\s*HALF|FIRST\s*HALF|SECOND\s*HALF)/.test(
-    t
-  );
+  // Exact header labels only — keep real titles like "SITE WORK … PLANNING".
+  if (/^(SR\s*NO|SITE\s*NAME|DATE|DAYS|TIME|WORK\s*STATUS)$/.test(t)) return true;
+  if (/^(WEEKLY\s*PLAN(?:NING)?|DIP\s*PROJECTS?|PROJECT\s*CO\.?)$/.test(t)) return true;
+  if (/^(1ST|2ND|FIRST|SECOND)\s*HALF(\s*PLANNING)?$/.test(t)) return true;
+  if (/^DAYS\s*PLANNING$/.test(t) || /^WORK\s*UPDATE$/.test(t)) return true;
+  return false;
 }
 
 function isHalfOrTimeHeader(text) {
@@ -140,6 +158,20 @@ function isHalfOrTimeHeader(text) {
   );
 }
 
+// function sheetToMatrix(sheet) {
+//   const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+//   if (!range) return [];
+//   const rows = [];
+//   for (let r = range.s.r; r <= range.e.r; r += 1) {
+//     const row = [];
+//     for (let c = range.s.c; c <= range.e.c; c += 1) {
+//       const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+//       row.push(cell ? (cell.v != null ? cell.v : "") : "");
+//     }
+//     rows.push(row);
+//   }
+//   return rows;
+// }
 function sheetToMatrix(sheet) {
   const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
   if (!range) return [];
@@ -152,7 +184,100 @@ function sheetToMatrix(sheet) {
     }
     rows.push(row);
   }
+
+  // XLSX only stores a value in the TOP-LEFT cell of a merged range; every
+  // other cell in that range reads as blank. That silently breaks continuation
+  // rows (e.g. a merged SR/Task column spanning 2 rows where the 2nd row has
+  // extra task content in a day column, but blank SR/Task columns of its own).
+  // Fill every cell in each merge with the master value so downstream row
+  // detection sees the "real" SR/Task identity on every row of the merge.
+  const merges = Array.isArray(sheet["!merges"]) ? sheet["!merges"] : [];
+  for (const m of merges) {
+    const topRow = m.s.r - range.s.r;
+    const topCol = m.s.c - range.s.c;
+    if (topRow < 0 || topCol < 0 || topRow >= rows.length) continue;
+    const masterValue = rows[topRow]?.[topCol];
+    for (let r = m.s.r; r <= m.e.r; r += 1) {
+      const rr = r - range.s.r;
+      if (rr < 0 || rr >= rows.length) continue;
+      for (let c = m.s.c; c <= m.e.c; c += 1) {
+        const cc = c - range.s.c;
+        if (cc < 0 || cc >= rows[rr].length) continue;
+        if (rr === topRow && cc === topCol) continue;
+        rows[rr][cc] = masterValue;
+      }
+    }
+  }
+
   return rows;
+}
+
+/**
+ * Each calendar day owns two partitions (1st half 8AM–1PM | 2nd half 2PM–7PM).
+ */
+
+// function findDateColumns(matrix) {
+//   let best = null;
+//   for (let r = 0; r < Math.min(matrix.length, 20); r += 1) {
+//     const row = matrix[r] || [];
+//     const dates = [];
+//     for (let c = 0; c < row.length; c += 1) {
+//       const ymd = parseDateLoose(row[c]);
+//       if (ymd) dates.push({ col: c, ymd });
+//     }
+//     if (dates.length >= 2 && (!best || dates.length > best.dates.length)) {
+//       best = { row: r, dates };
+//     }
+//   }
+//   if (!best) return [];
+//   const dayCols = [];
+//   for (let i = 0; i < best.dates.length; i += 1) {
+//     const cur = best.dates[i];
+//     const next = best.dates[i + 1];
+//     const span = next ? Math.max(1, next.col - cur.col) : 2;
+//     let firstCol = cur.col;
+//     let secondCol = null;
+//     if (span >= 4) {
+//       // Old TIME|STATUS pairs for each half
+//       firstCol = cur.col;
+//       secondCol = cur.col + 2;
+//     } else if (span >= 2) {
+//       firstCol = cur.col;
+//       secondCol = cur.col + 1;
+//     }
+//     dayCols.push({
+//       ymd: cur.ymd,
+//       firstCol,
+//       secondCol,
+//       // legacy aliases
+//       timeCol: firstCol,
+//       statusCol: secondCol != null ? secondCol : firstCol,
+//     });
+//   }
+//   return dayCols;
+// }
+function isFirstHalfLabel(text) {
+  return /1ST\s*HALF|FIRST\s*HALF/i.test(String(text || ""));
+}
+function isSecondHalfLabel(text) {
+  return /2ND\s*HALF|SECOND\s*HALF/i.test(String(text || ""));
+}
+
+/** Find the row (near the date row) that carries explicit "1st half" / "2nd half" labels. */
+function findHalfLabelRow(matrix, dateHeaderRow) {
+  const maxRows = Math.min(matrix.length, 12);
+  for (let r = dateHeaderRow; r < maxRows; r += 1) {
+    const row = matrix[r] || [];
+    let firstHits = 0;
+    let secondHits = 0;
+    for (let c = 0; c < row.length; c += 1) {
+      const t = cellText(row[c]);
+      if (isFirstHalfLabel(t)) firstHits += 1;
+      else if (isSecondHalfLabel(t)) secondHits += 1;
+    }
+    if (firstHits >= 1 && secondHits >= 1) return r;
+  }
+  return null;
 }
 
 /**
@@ -172,28 +297,73 @@ function findDateColumns(matrix) {
     }
   }
   if (!best) return [];
+
+  const halfRow = findHalfLabelRow(matrix, best.row);
+  const hasHalfLayout = halfRow != null;
+
+  if (!hasHalfLayout) {
+    return best.dates.map((cur) => ({
+      ymd: cur.ymd,
+      firstCol: cur.col,
+      secondCol: null,
+      timeCol: cur.col,
+      statusCol: cur.col,
+      layout: "daily",
+    }));
+  }
+
+  // Prefer the *real* 1st half / 2nd half sub-header columns when present,
+  // instead of guessing offsets from date-cell spacing (which breaks on
+  // merged cells / uneven column widths).
+  let firstHalfCols = [];
+  let secondHalfCols = [];
+  const row = matrix[halfRow] || [];
+  for (let c = 0; c < row.length; c += 1) {
+    const t = cellText(row[c]);
+    if (isFirstHalfLabel(t)) firstHalfCols.push(c);
+    else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
+  }
+
   const dayCols = [];
+  if (firstHalfCols.length >= best.dates.length && secondHalfCols.length >= best.dates.length) {
+    for (let i = 0; i < best.dates.length; i += 1) {
+      const cur = best.dates[i];
+      const firstCol = firstHalfCols[i];
+      const secondCol = secondHalfCols[i];
+      dayCols.push({
+        ymd: cur.ymd,
+        firstCol,
+        secondCol,
+        timeCol: firstCol,
+        statusCol: secondCol != null ? secondCol : firstCol,
+        layout: "half",
+      });
+    }
+    return dayCols;
+  }
+
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
     const next = best.dates[i + 1];
-    const span = next ? Math.max(1, next.col - cur.col) : 2;
-    let firstCol = cur.col;
-    let secondCol = null;
-    if (span >= 4) {
-      // Old TIME|STATUS pairs for each half
+    const rangeEnd = next ? next.col : Infinity;
+
+    let firstCol = firstHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+    let secondCol = secondHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+
+    if (firstCol == null || secondCol == null) {
+      // Fallback to the old spacing heuristic only if labels weren't found.
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
       firstCol = cur.col;
-      secondCol = cur.col + 2;
-    } else if (span >= 2) {
-      firstCol = cur.col;
-      secondCol = cur.col + 1;
+      secondCol = span >= 4 ? cur.col + 2 : span >= 2 ? cur.col + 1 : null;
     }
+
     dayCols.push({
       ymd: cur.ymd,
       firstCol,
       secondCol,
-      // legacy aliases
       timeCol: firstCol,
       statusCol: secondCol != null ? secondCol : firstCol,
+      layout: "half",
     });
   }
   return dayCols;
@@ -211,35 +381,59 @@ function findDataStartRow(matrix, dateHeaderRow) {
       continue;
     }
     if (isHalfOrTimeHeader(a) || isHalfOrTimeHeader(b)) continue;
-    // Skip rows that are only half/time headers across day columns
-    const sample = [2, 3, 4, 5].map((c) => cellText(matrix[r]?.[c])).filter(Boolean);
-    if (sample.length && sample.every((t) => isHalfOrTimeHeader(t) || parseDateLoose(t))) continue;
 
     const sr = Number(cellText(matrix[r]?.[0]));
     const name = cellText(matrix[r]?.[1]);
-    if ((Number.isFinite(sr) && sr > 0 && name) || (name && !isHeaderTaskName(name))) {
+    // Type-1 body rows have AM–PM values in day columns — that must not delay dataStart.
+    if (Number.isFinite(sr) && sr > 0 && name && !isHeaderTaskName(name)) {
+      return r;
+    }
+
+    const sample = [2, 3, 4, 5].map((c) => cellText(matrix[r]?.[c])).filter(Boolean);
+    if (sample.length && sample.every((t) => isHalfOrTimeHeader(t) || parseDateLoose(t))) continue;
+
+    if (name && !isHeaderTaskName(name)) {
       return r;
     }
   }
   return Math.min((dateHeaderRow ?? 0) + 4, matrix.length);
 }
 
+function isSkipPlanCellText(text) {
+  const t = String(text || "").replace(/\s+/g, " ").trim().toUpperCase();
+  if (!t) return true;
+  // Skip half/status headers accidentally read as body cells.
+  // Do NOT skip AM–PM ranges — those are valid type-1 daywise plan values.
+  if (/^(1ST|2ND|FIRST|SECOND)\s*HALF(\s*PLANNING)?$/.test(t)) return true;
+  if (/^WORK\s*STATUS$/.test(t) || /^DAYS\s*PLANNING$/.test(t) || /^WORK\s*UPDATE$/.test(t)) return true;
+  if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) return true;
+  return false;
+}
+
 function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
-  if (!text || isHalfOrTimeHeader(text)) return;
-  const halfLabel = half === 1 ? "1st half" : "2nd half";
-  const maybeStatus = normalizeStatus(text);
-  const isPureStatus =
-    maybeStatus !== "Pending" || /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
-  tasks.push({
-    task_date: ymd,
-    // Suffix keeps DB unique index happy (one row per half per day).
-    task_name: `${taskName} · ${halfLabel}`,
-    time_slot: isPureStatus && maybeStatus !== "Pending" ? halfLabel : text,
-    status: isPureStatus ? maybeStatus : "Pending",
-    sr_no: srNo,
-    half,
-  });
+  if (!text || isSkipPlanCellText(text)) return;
+
+  const items = splitCellTasks(text);
+  if (!items.length) return;
+
+  for (const item of items) {
+    const itemText = cellText(item);
+    if (!itemText || isSkipPlanCellText(itemText)) continue;
+
+    const maybeStatus = normalizeStatus(itemText);
+    const isPureStatus =
+      maybeStatus !== "Pending" || /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(itemText);
+
+    tasks.push({
+      task_date: ymd,
+      task_name: taskName,
+      time_slot: itemText,
+      status: isPureStatus ? maybeStatus : "Pending",
+      sr_no: srNo,
+      half,
+    });
+  }
 }
 
 export function parseWeeklyPlanMatrix(matrix) {
@@ -261,6 +455,8 @@ export function parseWeeklyPlanMatrix(matrix) {
 
   const dataStart = findDataStartRow(matrix, dateHeaderRow);
   const tasks = [];
+  const halfLayout = dayCols.some((day) => day.layout === "half");
+
   for (let r = dataStart; r < matrix.length; r += 1) {
     const row = matrix[r] || [];
     const taskName = cellText(row[1] || row[0]);
@@ -269,11 +465,16 @@ export function parseWeeklyPlanMatrix(matrix) {
     const srNo = /^\d+$/.test(srRaw) ? Number(srRaw) : null;
 
     for (const day of dayCols) {
-      const first = cellText(row[day.firstCol]);
-      const second = day.secondCol != null ? cellText(row[day.secondCol]) : "";
-      pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 1, content: first });
-      if (day.secondCol != null) {
-        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 2, content: second });
+      if (halfLayout) {
+        const first = cellText(row[day.firstCol]);
+        const second = day.secondCol != null ? cellText(row[day.secondCol]) : "";
+        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 1, content: first });
+        if (day.secondCol != null) {
+          pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 2, content: second });
+        }
+      } else {
+        const plan = day.firstCol != null ? cellText(row[day.firstCol]) : "";
+        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 0, content: plan });
       }
     }
   }
@@ -285,7 +486,7 @@ export function parseWeeklyPlanMatrix(matrix) {
       dataStart,
       days: dayCols.map((d) => d.ymd),
       count: tasks.length,
-      halves: true,
+      halves: halfLayout,
     },
     dayCols,
     dataStart,

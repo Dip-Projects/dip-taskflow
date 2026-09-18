@@ -10,14 +10,16 @@ import {
   SITE_FILES_BUCKET,
   uploadViaApi,
 } from "../../lib/ensureBucket";
+import { parseWeeklyPlanFile } from "../../lib/weeklyPlanExcel";
+import { parseWeeklyPlanPdfFile } from "../../lib/weeklyPlanPdf";
 import "./QrAttendance.css";
 
 const POPUP_MS = 2600;
-/** Monday EA meeting desk QR (not clock-in). */
+/** Monday EM meeting desk QR (not clock-in). */
 export const EA_MEETING_QR_TOKEN = "DIP-EA-MEETING";
 /** @deprecated old token — still accepted so existing printed QR keeps working */
 export const DESK_QR_TOKEN = EA_MEETING_QR_TOKEN;
-const EA_QR_TOKENS = new Set(["DIP-EA-MEETING", "DIP-DESK-ATTENDANCE"]);
+const EA_QR_TOKENS = new Set(["DIP-EA-MEETING", "DIP-EM-MEETING", "DIP-DESK-ATTENDANCE"]);
 const EA_TABLE = "ea_meeting_attendance";
 
 function todayIST() {
@@ -51,7 +53,8 @@ function normalizeRole(role) {
     .trim();
 }
 
-/** Site Engineer (incl. Jr) — only these may scan EA QR / upload plans. */
+/** Site Engineer (incl. Jr) — used only to decide the dual-Excel upload rule below,
+ *  no longer used to gate who may scan the QR (see assertSiteEngineerMayScan). */
 function isSiteEngineerRole(role) {
   const r = normalizeRole(role);
   if (!r) return false;
@@ -67,25 +70,26 @@ function isSiteEngineerRole(role) {
   );
 }
 
+/**
+ * Any logged-in Site Portal user (Site Engineer, Co-ordinator, Site Head, etc.)
+ * may scan the EM meeting QR and upload a plan. This used to hard-block anyone
+ * whose role text wasn't literally "Site Engineer" (e.g. Co-ordinators), which
+ * was the bug — Site Portal users of any role should be able to scan.
+ */
 function assertSiteEngineerMayScan(employee, authUser) {
-  const role =
-    employee?.role ||
-    authUser?.designation ||
-    authUser?.site_role ||
-    authUser?.role ||
-    "";
-  if (!isSiteEngineerRole(role)) {
-    throw new Error(
-      "Sirf Site Engineer EA meeting QR scan / plan upload kar sakte hain. Aapka role: " +
-        (role || "—")
-    );
+  const hasIdentity = !!(employee?.username || authUser?.username || authUser?.user_name);
+  if (!hasIdentity) {
+    throw new Error("Could not identify your account. Please log in again and retry.");
   }
 }
 
-/** Site Engineer → 2 Excel uploads (Site Work + Site Engineer). */
+/** Site Engineer → 2 plan uploads (Site Work + Site Engineer): Excel or PDF. */
 function needsDualExcelUpload(role) {
   return isSiteEngineerRole(role);
 }
+
+const PLAN_FILE_ACCEPT =
+  ".xlsx,.xls,.csv,.pdf,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function isExcelFile(file) {
   if (!file) return false;
@@ -99,6 +103,17 @@ function isExcelFile(file) {
     type.includes("excel") ||
     type === "text/csv"
   );
+}
+
+function isPdfFile(file) {
+  if (!file) return false;
+  const name = String(file.name || "").toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+  return name.endsWith(".pdf") || type === "application/pdf" || type.includes("pdf");
+}
+
+function isAllowedPlanFile(file) {
+  return isExcelFile(file) || isPdfFile(file);
 }
 
 function isEaMeetingQr(raw) {
@@ -237,9 +252,11 @@ export default function QrAttendance() {
   const [file1, setFile1] = useState(null);
   const [file2, setFile2] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [waNote, setWaNote] = useState("");
 
   const scannerRef = useRef(null);
   const handlingRef = useRef(false);
+  const qrFileInputRef = useRef(null);
   const week = currentWeekBounds();
   const dualExcel = needsDualExcelUpload(scannedEmployee?.role);
 
@@ -300,7 +317,7 @@ export default function QrAttendance() {
     setBusy(true);
     setMessage("");
     try {
-      if (!user) throw new Error("Please log in first, then scan the EA meeting QR.");
+      if (!user) throw new Error("Please log in first, then scan the EM meeting QR.");
       const employee = await fetchLoggedInEmployee(user);
       if (!employee?.username) throw new Error("Could not load your employee details.");
       assertSiteEngineerMayScan(employee, authUser);
@@ -315,10 +332,10 @@ export default function QrAttendance() {
           body: JSON.stringify({ kind: "present", weekStart: currentWeekBounds().start }),
         });
         if (wa?.reason === "no_whatsapp") {
-          console.warn("EA present saved but user has no whatsapp_number");
+          console.warn("EM present saved but user has no whatsapp_number");
         }
       } catch (waErr) {
-        console.warn("EA WhatsApp notify skip:", waErr.message);
+        console.warn("EM WhatsApp notify skip:", waErr.message);
       }
       const url = new URL(window.location.href);
       if (url.searchParams.has("code")) {
@@ -326,7 +343,7 @@ export default function QrAttendance() {
         window.history.replaceState({}, "", url.pathname + url.search);
       }
     } catch (err) {
-      setMessage(err.message || "Could not mark EA meeting attendance.");
+      setMessage(err.message || "Could not mark EM meeting attendance.");
       handlingRef.current = false;
       setPhase("scan");
     } finally {
@@ -337,13 +354,50 @@ export default function QrAttendance() {
   const handleDecoded = useCallback(
     async (decodedText) => {
       if (!isEaMeetingQr(decodedText)) {
-        setMessage("Please scan the Monday EA meeting QR only.");
+        setMessage("Please scan the Monday EM meeting QR only.");
         handlingRef.current = false;
         return;
       }
       await checkInCurrentUser();
     },
     [checkInCurrentUser]
+  );
+
+  const handleQrImageUpload = useCallback(
+    async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      setMessage("");
+      setBusy(true);
+      setCamError("");
+      try {
+        await stopScanner();
+        const html5Qr = new Html5Qrcode("qr-reader", { verbose: false });
+        try {
+          const decodedText = await html5Qr.scanFile(file, true);
+          if (!isEaMeetingQr(decodedText)) {
+            setMessage("This QR image is not the Monday EM meeting QR.");
+            return;
+          }
+          await handleDecoded(decodedText);
+        } finally {
+          try {
+            await html5Qr.clear();
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (err) {
+        setMessage("Could not read QR from the selected image. Please upload a clearer image.");
+      } finally {
+        setBusy(false);
+        if (event.target) {
+          event.target.value = "";
+        }
+      }
+    },
+    [handleDecoded, stopScanner]
   );
 
   useEffect(() => {
@@ -400,21 +454,26 @@ export default function QrAttendance() {
     if (!file1) {
       setMessage(
         dualExcel
-          ? "Please attach Site Work Excel (file 1)."
+          ? "Please attach Site Work file (Excel or PDF)."
           : "Please attach your weekly plan file."
       );
       return;
     }
     if (dualExcel && !file2) {
-      setMessage("Site Engineers must attach 2 Excel files (Site Work + Site Engineer).");
+      setMessage("Site Engineers must attach 2 files (Site Work + Site Engineer): Excel or PDF.");
       return;
     }
-    if (dualExcel && (!isExcelFile(file1) || !isExcelFile(file2))) {
-      setMessage("Both attachments must be Excel files (.xlsx / .xls / .csv).");
+    if (dualExcel && (!isAllowedPlanFile(file1) || !isAllowedPlanFile(file2))) {
+      setMessage("Both attachments must be Excel (.xlsx / .xls / .csv) or PDF.");
+      return;
+    }
+    if (!dualExcel && !isAllowedPlanFile(file1)) {
+      setMessage("Attachment must be Excel (.xlsx / .xls / .csv) or PDF.");
       return;
     }
     setSubmitting(true);
     setMessage("");
+    setWaNote("");
     try {
       const a1 = await uploadPlanFile(
         file1,
@@ -437,21 +496,62 @@ export default function QrAttendance() {
         })
         .eq("id", attendanceRow.id);
       if (error) throw error;
+
+      const clientParsed = [];
+      const parseOne = async (file, sourceFile) => {
+        if (!file) return;
+        try {
+          const parsed = isPdfFile(file)
+            ? await parseWeeklyPlanPdfFile(file)
+            : isExcelFile(file)
+              ? await parseWeeklyPlanFile(file)
+              : null;
+          if (!parsed) return;
+          clientParsed.push({
+            source_file: sourceFile,
+            tasks: parsed.tasks || [],
+            meta: parsed.meta || null,
+          });
+        } catch (parseErr) {
+          console.warn(`Plan parse ${sourceFile}:`, parseErr.message);
+        }
+      };
+      await parseOne(file1, "attachment_1");
+      if (dualExcel && file2) await parseOne(file2, "attachment_2");
+
       try {
-        await api("/ea-meeting/notify", {
+        const notifyRes = await api("/ea-meeting/notify", {
           method: "POST",
           body: JSON.stringify({
             kind: "uploaded",
             weekStart: week.start,
             fileName: file1?.name || null,
+            eaId: attendanceRow.id,
+            clientParsed,
           }),
         });
+        const openCount = notifyRes?.weeklyPlan?.openCount;
+        const waOk = notifyRes?.weeklyPlan?.whatsapp?.ok;
+        const via = notifyRes?.weeklyPlan?.whatsapp?.via;
+        const note = notifyRes?.weeklyPlan?.note;
+        if (waOk) {
+          setWaNote(
+            `WhatsApp sent (${via || "ok"}) with ${openCount ?? 0} open task(s) Mon→today.`
+          );
+        } else if (notifyRes?.reason === "no_whatsapp" || notifyRes?.weeklyPlan?.whatsapp?.reason === "no_whatsapp") {
+          setWaNote("No WhatsApp: set whatsapp_number on your user profile.");
+        } else {
+          setWaNote(
+            `WhatsApp issue: ${note || notifyRes?.weeklyPlan?.whatsapp?.reason || notifyRes?.error || "check Meta / table setup"}`
+          );
+        }
       } catch (waErr) {
-        console.warn("EA upload WhatsApp skip:", waErr.message);
+        console.warn("EM upload WhatsApp skip:", waErr.message);
+        setWaNote(`WhatsApp notify failed: ${waErr.message}`);
       }
       setPhase("done");
     } catch (err) {
-      setMessage(err.message || "Could not save EA meeting uploads.");
+      setMessage(err.message || "Could not save EM meeting uploads.");
     } finally {
       setSubmitting(false);
     }
@@ -464,6 +564,7 @@ export default function QrAttendance() {
     setFile1(null);
     setFile2(null);
     setMessage("");
+    setWaNote("");
     handlingRef.current = false;
   };
 
@@ -486,14 +587,33 @@ export default function QrAttendance() {
             <div className="qr-scan-body">
               <div id="qr-reader" className="qr-reader" />
               {(busy || phase === "loading") && (
-                <div className="qr-busy">Marking EA meeting present…</div>
+                <div className="qr-busy">Marking EM meeting present…</div>
               )}
               {camError && <div className="qr-note">{camError}</div>}
               {message && <div className="qr-error">{message}</div>}
               {!busy && phase === "scan" && !camError && (
                 <div className="qr-note">
-                  Monday EA meeting — <strong>Site Engineers only</strong>. Scan desk QR, mark present, upload plan.
+                  Monday EM meeting. Scan desk QR, mark present, upload plan.
                   Beena (PC) + aapki site pe files dikhengi.
+                </div>
+              )}
+
+              {!busy && phase === "scan" && (
+                <div className="qr-actions-inline">
+                  <button
+                    type="button"
+                    className="qr-btn-secondary qr-upload-btn"
+                    onClick={() => qrFileInputRef.current?.click()}
+                  >
+                    Upload QR from device
+                  </button>
+                  <input
+                    ref={qrFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    onChange={handleQrImageUpload}
+                  />
                 </div>
               )}
             </div>
@@ -506,15 +626,15 @@ export default function QrAttendance() {
                 <div>
                   <strong>{scannedEmployee.name}</strong>
                   <span>
-                    {scannedEmployee.role || "—"} · EA meeting present · week {week.start}
+                    {scannedEmployee.role || "—"} · EM meeting present · week {week.start}
                   </span>
                 </div>
               </div>
 
               <label className="qr-label">
                 {dualExcel
-                  ? "Excel uploads (2 required for Site Engineer)"
-                  : "EA weekly plan"}
+                  ? "Plan uploads (2 required — Excel or PDF)"
+                  : "EM weekly plan (Excel or PDF)"}
                 <span className="qr-week">
                   {week.start} → {week.end}
                 </span>
@@ -522,25 +642,25 @@ export default function QrAttendance() {
               <label className="qr-file">
                 <input
                   type="file"
-                  accept={dualExcel ? ".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : undefined}
+                  accept={PLAN_FILE_ACCEPT}
                   onChange={(e) => setFile1(e.target.files?.[0] || null)}
                 />
                 <span>
                   {file1
                     ? file1.name
                     : dualExcel
-                      ? "1. Site Work Excel"
-                      : "Choose EA weekly plan file"}
+                      ? "1. Site Work (Excel or PDF)"
+                      : "Choose EM weekly plan file"}
                 </span>
               </label>
               {dualExcel && (
                 <label className="qr-file">
                   <input
                     type="file"
-                    accept=".xlsx,.xls,.csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    accept={PLAN_FILE_ACCEPT}
                     onChange={(e) => setFile2(e.target.files?.[0] || null)}
                   />
-                  <span>{file2 ? file2.name : "2. Site Engineer Excel"}</span>
+                  <span>{file2 ? file2.name : "2. Site Engineer (Excel or PDF)"}</span>
                 </label>
               )}
 
@@ -554,8 +674,8 @@ export default function QrAttendance() {
                   {submitting
                     ? "Saving…"
                     : dualExcel
-                      ? "Submit Excel uploads"
-                      : "Submit EA weekly plan"}
+                      ? "Submit plan uploads"
+                      : "Submit EM weekly plan"}
                 </button>
               </div>
             </form>
@@ -564,13 +684,17 @@ export default function QrAttendance() {
           {phase === "done" && (
             <div className="qr-done">
               <div className="qr-done-ico">✓</div>
-              <h2>{dualExcel ? "Excel uploads submitted" : "EA weekly plan submitted"}</h2>
+              <h2>{dualExcel ? "Plan uploads submitted" : "EM weekly plan submitted"}</h2>
               <p>
-                Saved in <strong>ea_meeting_attendance</strong>.
-                Portal pe dikhne ke liye: <strong>Site → My Tasks → Done</strong> tab
-                (upload complete hone ke baad Open empty ho sakta hai).
-                WhatsApp tab aayega agar aapke account pe <strong>whatsapp_number</strong> set hai.
+                Saved in <strong>ea_meeting_attendance</strong>. Tasks go to{' '}
+                <strong>weekly_plan_tasks</strong>; WhatsApp should list Mon→today open tasks.
+                Reply <strong>1,3</strong> or <strong>ALL</strong> to mark done.
               </p>
+              {waNote ? (
+                <p style={{ marginTop: 10, fontSize: 13, color: waNote.includes("sent") ? "#166534" : "#9a3412" }}>
+                  {waNote}
+                </p>
+              ) : null}
               <div className="qr-plan-actions">
                 <button type="button" className="qr-btn-primary" onClick={() => navigate("/site?tab=my-tasks")}>
                   Open My Tasks
@@ -592,7 +716,7 @@ export default function QrAttendance() {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h2>EA meeting · Present</h2>
+            <h2>EM meeting · Present</h2>
             <p className="qr-popup-name">{scannedEmployee.name}</p>
             <p className="qr-popup-meta">
               {scannedEmployee.role || "Employee"}

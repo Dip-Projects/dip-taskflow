@@ -120,6 +120,17 @@
   margin-top: 14px;
 }
 
+.qr-actions-inline {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.qr-upload-btn {
+  width: 100%;
+  max-width: 280px;
+}
+
 .qr-error {
   margin-top: 12px;
   padding: 10px 12px;

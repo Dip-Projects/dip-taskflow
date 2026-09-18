@@ -7,12 +7,12 @@ import { parseWeeklyPlanMatrix, parseDateFromText } from "./weeklyPlanExcel";
 const MAX_TEXT_ITEMS = 4000;
 
 async function loadPdfjs() {
-  const pdfjs = await import("pdfjs-dist");
+  const [pdfjs, workerUrl] = await Promise.all([
+    import("pdfjs-dist"),
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
+  ]);
   if (pdfjs.GlobalWorkerOptions) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.min.mjs",
-      import.meta.url
-    ).toString();
+    pdfjs.GlobalWorkerOptions.workerSrc = workerUrl.default;
   }
   return pdfjs;
 }
@@ -183,11 +183,27 @@ async function pdfBufferToMatrix(arrayBuffer) {
 
   if (!items.length) return [];
 
+  const candidates = [];
   const anchored = buildMatrixAnchoredByDates(items);
-  if (anchored && countDateHits(anchored) >= 2) return anchored;
+  if (anchored) candidates.push({ matrix: anchored, score: countDateHits(anchored) });
 
-  // One lightweight fallback only (avoids multi-tolerance freeze).
-  return buildMatrixFromItems(items, 12);
+  [8, 12, 16, 20, 24, 30].forEach((tol) => {
+    const matrix = buildMatrixFromItems(items, tol);
+    if (matrix?.length) candidates.push({ matrix, score: countDateHits(matrix) });
+  });
+
+  let best = null;
+  for (const candidate of candidates) {
+    const parsed = parseWeeklyPlanMatrix(candidate.matrix);
+    if (parsed?.tasks?.length) {
+      return candidate.matrix;
+    }
+    if (!best || candidate.score > best.score) {
+      best = candidate;
+    }
+  }
+
+  return best ? best.matrix : [];
 }
 
 export async function parseWeeklyPlanPdfBuffer(arrayBuffer) {
