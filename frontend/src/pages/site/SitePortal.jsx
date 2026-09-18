@@ -1867,7 +1867,7 @@ export function mergeRejectionReason(existing, slot, by, reason) {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function SitePortal() {
   const navigate = useNavigate();
-  const { logout: authLogout, user: authUser } = useAuth();
+  const { logout: authLogout, user: authUser, isAuthenticated } = useAuth();
 const [hoveredNavKey, setHoveredNavKey] = useState(null);
 
 const NAV_COLORS = {
@@ -2114,7 +2114,7 @@ const markLeavesSeen = useCallback(async (u) => {
     };
   }, [sidebarOpen]);
 useEffect(() => {
-    // Prefer unified TaskFlow session (tf_user), then legacy site `user` key
+    // Prefer unified TaskFlow session (tf_user / AuthContext), then legacy site `user` key
     let parsed = null;
     try {
       const tf = localStorage.getItem("tf_user");
@@ -2124,6 +2124,12 @@ useEffect(() => {
         parsed = JSON.parse(localStorage.getItem("user") || "null");
       }
     } catch { /* ignore */ }
+    if (!parsed && authUser) {
+      try {
+        syncSiteUser(authUser);
+        parsed = JSON.parse(localStorage.getItem("user") || "null");
+      } catch { /* ignore */ }
+    }
     if (!parsed) {
       try {
         const stored = localStorage.getItem("user");
@@ -2131,8 +2137,13 @@ useEffect(() => {
       } catch { /* ignore */ }
     }
     if (!parsed) {
-      setUser(null);
-      setUserReady(true);
+      // Only hard-logout UI when Auth also says logged out — avoids flicker
+      if (!isAuthenticated) {
+        setUser(null);
+        setUserReady(true);
+      } else {
+        setUserReady(true);
+      }
       return;
     }
     setUser(parsed);
@@ -2195,7 +2206,17 @@ useEffect(() => {
     onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [fetchSiteReports]);
+  }, [fetchSiteReports, authUser, isAuthenticated]);
+
+  useEffect(() => {
+    if (!user && isAuthenticated && authUser) {
+      syncSiteUser(authUser);
+      try {
+        const rebuilt = JSON.parse(localStorage.getItem("user") || "null");
+        if (rebuilt) setUser(rebuilt);
+      } catch { /* ignore */ }
+    }
+  }, [user, isAuthenticated, authUser]);
 
   useEffect(() => {
     if (!user) return;
@@ -2272,7 +2293,17 @@ useEffect(() => {
       </div>
     );
 
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    if (isAuthenticated) {
+      return (
+        <div className="loading" style={{ minHeight: "100vh" }}>
+          <div className="spinner" />
+          <span>Loading user…</span>
+        </div>
+      );
+    }
+    return <Navigate to="/login" replace />;
+  }
 
   const navUser = {
     ...user,

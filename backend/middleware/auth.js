@@ -45,11 +45,18 @@ function requireAuth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    // Strip jwt meta before re-signing — leftover exp/iat can confuse refresh
+    const {
+      iat: _iat,
+      exp: _exp,
+      nbf: _nbf,
+      ...safeUser
+    } = decoded;
+    req.user = safeUser;
 
     const secondsLeft = decoded.exp - Math.floor(Date.now() / 1000);
     if (secondsLeft < REFRESH_THRESHOLD_SECONDS) {
-      const freshToken = signToken(decoded);
+      const freshToken = signToken(safeUser);
       res.set('X-New-Token', freshToken);
       // Browser JS can only read custom headers if the server explicitly
       // exposes them — needed for res.headers.get('X-New-Token') to work.

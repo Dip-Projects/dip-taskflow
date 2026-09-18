@@ -51,6 +51,89 @@ function colLabel(scope, category, labour, gender, skill) {
   };
 }
 
+const LABOUR_ALIASES = {
+  "carpenter work": "Carpenter",
+  carpenter: "Carpenter",
+  "steel fitter": "Steel Fitter",
+  steelfitter: "Steel Fitter",
+  helper: "Helper",
+  mason: "Mason",
+  "casting & department work": "Casting Work",
+  "casting and department work": "Casting Work",
+};
+
+const SKILL_WORDS = /^(skilled|unskilled)$/i;
+const LABOUR_WORDS =
+  /^(helper|carpenter|carpenter\s*work|mason|steel\s*fitter|fitter|painter|electrician|plumber|welder|bar\s*bender|casting(\s*&\s*|\s+and\s+)?department\s*work)$/i;
+
+/** Clean messy DPR manpower rows so columns align (skill≠labour, aliases). */
+function normalizeMp(mp) {
+  let scope = String(mp.displayScope || mp.scope || "").trim();
+  let category = String(mp.category || "").trim();
+  let labour = String(mp.labour || "").trim();
+  let skill = String(mp.skill || "").trim();
+  let gender = String(mp.gender || "").trim();
+
+  // skill field sometimes filled with labour type (e.g. Carpenter | Helper | MALE)
+  if (skill && LABOUR_WORDS.test(skill) && !SKILL_WORDS.test(skill)) {
+    if (!labour || LABOUR_WORDS.test(labour) === false) labour = skill;
+    else if (/^carpenter$/i.test(labour) && /^helper$/i.test(skill)) {
+      labour = "Helper";
+    }
+    skill = "";
+  }
+
+  // labour aliases
+  const labKey = labour.toLowerCase().replace(/\s+/g, " ").trim();
+  if (LABOUR_ALIASES[labKey]) labour = LABOUR_ALIASES[labKey];
+
+  // gender stuck in skill or vice-versa
+  if (/^(male|female)$/i.test(skill) && !gender) {
+    gender = skill;
+    skill = "";
+  }
+  if (SKILL_WORDS.test(gender) && !skill) {
+    skill = gender;
+    gender = "";
+  }
+
+  // "Mason" duplicated as skill
+  if (skill && labour && skill.toLowerCase() === labour.toLowerCase()) {
+    skill = "Skilled";
+  }
+
+  if (SKILL_WORDS.test(skill)) {
+    skill = skill.charAt(0).toUpperCase() + skill.slice(1).toLowerCase();
+  } else if (!skill) {
+    skill = "—";
+  }
+
+  const g = gender.toUpperCase();
+  if (g === "MALE" || g === "M") gender = "Male";
+  else if (g === "FEMALE" || g === "F") gender = "Female";
+  else if (!gender) gender = "—";
+  else gender = gender.charAt(0).toUpperCase() + gender.slice(1).toLowerCase();
+
+  if (!category) category = "—";
+  if (!labour) labour = "—";
+
+  return {
+    scope,
+    category,
+    labour,
+    skill,
+    gender,
+    count: Number(mp.count) || 0,
+  };
+}
+
+function leafLabel(skill, gender) {
+  const s = skill && skill !== "—" ? skill : "";
+  const g = gender && gender !== "—" ? gender : "";
+  if (s && g) return `${s} · ${g}`;
+  return g || s || "—";
+}
+
 const SCOPE_COLORS = {
   CLIENT:     { bg: "#eff6ff", text: "#1d4ed8", border: "#bfdbfe" },
   PMC:        { bg: "#fef9c3", text: "#854d0e", border: "#fde68a" },
@@ -95,15 +178,30 @@ const CSS = `
   .btn-out:hover{background:#f0ede8;}
   .spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .tbl-outer{overflow-x:auto;border-radius:8px;border:1.5px solid rgba(0,0,0,.1);}
-  .mp-tbl{border-collapse:collapse;min-width:700px;font-size:12.5px;}
+  .tbl-outer{overflow-x:auto;border-radius:8px;border:1.5px solid rgba(0,0,0,.1);scrollbar-width:thin;scrollbar-color:#fbbf7a #fef3c7;max-height:min(70vh,820px);overflow-y:auto;}
+  .tbl-outer::-webkit-scrollbar{height:10px;width:10px;}
+  .tbl-outer::-webkit-scrollbar-track{background:#fef3c7;border-radius:8px;}
+  .tbl-outer::-webkit-scrollbar-thumb{background:#fbbf7a;border-radius:8px;}
+  .tbl-outer::-webkit-scrollbar-thumb:hover{background:#f59e0b;}
+  .mp-tbl{border-collapse:separate;border-spacing:0;min-width:700px;font-size:12.5px;width:max-content;}
   .mp-tbl th,.mp-tbl td{border:1px solid rgba(0,0,0,.1);padding:8px 10px;vertical-align:middle;}
-  .mp-tbl thead th{background:#fef3c7;color:#78350f;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;text-align:center;white-space:nowrap;}
+  .mp-tbl thead th{position:sticky;z-index:3;background:#fef3c7;color:#78350f;font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;text-align:center;white-space:nowrap;}
+  .mp-tbl thead tr:nth-child(1) th{top:0;}
+  .mp-tbl thead tr:nth-child(2) th{top:34px;}
+  .mp-tbl thead tr:nth-child(3) th{top:68px;}
+  .mp-tbl thead tr:nth-child(4) th{top:102px;}
+  .mp-tbl .th-sticky-date,.mp-tbl .td-date{position:sticky;left:0;z-index:4;min-width:96px;max-width:110px;}
+  .mp-tbl .th-sticky-sum,.mp-tbl .td-summary{position:sticky;left:96px;z-index:4;min-width:220px;max-width:280px;}
+  .mp-tbl .th-sticky-total,.mp-tbl .td-daily-total{position:sticky;right:0;z-index:4;}
+  .mp-tbl thead .th-sticky-date,.mp-tbl thead .th-sticky-sum,.mp-tbl thead .th-sticky-total{z-index:5;}
   .mp-tbl tbody tr:hover td{background:#faf9f7;}
   .mp-tbl .td-date{font-weight:700;font-size:12px;white-space:nowrap;background:#fffbeb;color:#78350f;text-align:left;}
-  .mp-tbl .td-summary{font-size:11px;color:#92400e;max-width:200px;line-height:1.5;background:#fffbeb;}
-  .mp-tbl .td-count{text-align:center;font-weight:700;color:#1e3a5f;font-size:13px;}
-  .mp-tbl .td-zero{text-align:center;color:#cbd5e1;font-size:12px;}
+  .mp-tbl .td-summary{font-size:11px;color:#92400e;line-height:1.45;background:#fffbeb;white-space:normal;text-align:left;}
+  .mp-tbl .td-summary ul{margin:0;padding-left:16px;}
+  .mp-tbl .td-summary li{margin:0 0 2px;}
+  .mp-tbl .td-count{text-align:center;font-weight:700;color:#1e3a5f;font-size:13px;background:#fff;min-width:52px;}
+  .mp-tbl .td-zero{text-align:center;color:#cbd5e1;font-size:12px;background:#fff;min-width:52px;}
+  .mp-tbl .td-daily-total{text-align:center;font-weight:800;background:#dbeafe;color:#1e3a5f;min-width:64px;}
   .mp-tbl .tr-month-total td{background:#dbeafe;color:#1e3a5f;font-weight:800;text-align:center;font-size:12.5px;border-top:2px solid #93c5fd;}
   .mp-tbl .tr-month-total .td-month-label{text-align:left;font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#1d4ed8;white-space:nowrap;}
   .mp-tbl .tr-month-total .td-month-count{color:#1e3a5f;font-weight:800;}
@@ -121,12 +219,6 @@ const CSS = `
   .stat-card{flex:1;min-width:100px;border:1.5px solid rgba(0,0,0,.08);border-radius:8px;padding:10px 14px;}
   .stat-val{font-size:22px;font-weight:800;color:#0f172a;}
   .stat-lbl{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
-  .tbl-outer{overflow-x:auto;border-radius:8px;border:1.5px solid rgba(0,0,0,.1);}
-  .tbl-outer::-webkit-scrollbar{height:10px;}
-  .tbl-outer::-webkit-scrollbar-track{background:#fef3c7;border-radius:8px;}
-  .tbl-outer::-webkit-scrollbar-thumb{background:#fbbf7a;border-radius:8px;}
-  .tbl-outer::-webkit-scrollbar-thumb:hover{background:#f59e0b;}
-  .tbl-outer{overflow-x:auto;border-radius:8px;border:1.5px solid rgba(0,0,0,.1);scrollbar-width:thin;scrollbar-color:#fbbf7a #fef3c7;}
   //-------DARK THEME CSS------------
   [data-theme="dark"] .mp-root {
     background:#141210;
@@ -179,19 +271,17 @@ const CSS = `
   [data-theme="dark"] .mp-tbl tbody tr:hover td {
     background:#252320;
   }
-  [data-theme="dark"] .mp-tbl .td-date {
-    background:#2a1f08;
-    color:#fbbf24;
-  }
+  [data-theme="dark"] .mp-tbl .td-date,
   [data-theme="dark"] .mp-tbl .td-summary {
     background:#2a1f08;
-    color:#c4bdb4;
   }
-  [data-theme="dark"] .mp-tbl .td-count {
+  [data-theme="dark"] .mp-tbl .td-daily-total {
+    background:#0c1d38;
     color:#93c5fd;
   }
+  [data-theme="dark"] .mp-tbl .td-count,
   [data-theme="dark"] .mp-tbl .td-zero {
-    color:#3a3733;
+    background:#1e1c19;
   }
   [data-theme="dark"] .mp-tbl .tr-month-total td {
     background:#0c1d38;
@@ -367,22 +457,22 @@ export default function ManpowerReport({ user }) {
         }
 
         for (const mp of mpList) {
-          const scope = (mp.displayScope || mp.scope || "").toString();
-          const key = colKey(scope, mp.category, mp.labour, mp.gender, mp.skill);
+          const n = normalizeMp(mp);
+          const key = colKey(n.scope, n.category, n.labour, n.gender, n.skill);
           if (!colMap.has(key)) {
             colMap.set(key, {
               key,
-              scope:    (scope || "").toUpperCase(),
-              category: mp.category  || "",
-              labour:   mp.labour    || "",
-              gender:   mp.gender    || "",
-              skill:    mp.skill     || "",
-              label:    colLabel(scope, mp.category, mp.labour, mp.gender, mp.skill),
+              scope:    (n.scope || "").toUpperCase(),
+              category: n.category  || "",
+              labour:   n.labour    || "",
+              gender:   n.gender    || "",
+              skill:    n.skill     || "",
+              label:    colLabel(n.scope, n.category, n.labour, n.gender, n.skill),
+              leaf:     leafLabel(n.skill, n.gender),
             });
           }
-          const n = Number(mp.count) || 0;
           // Same report type / same day: sum duplicate labour lines
-          dateEntry.counts.set(key, (dateEntry.counts.get(key) || 0) + n);
+          dateEntry.counts.set(key, (dateEntry.counts.get(key) || 0) + n.count);
         }
       }
 
@@ -527,13 +617,12 @@ export default function ManpowerReport({ user }) {
     const scopeSpans_xl = getSpans(rd.cols, (c) => c.scope);
     const categorySpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}`);
     const labourSpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}||${c.label.labour}`);
-    const skillSpans_xl = getSpans(rd.cols, (c) => `${c.scope}||${c.label.category}||${c.label.labour}||${c.label.skill}`);
 
-    // Row: Scope (+ Date/Summary/Daily Total vertical merge across 5 header rows)
+    // Row: Scope (+ Date/Summary/Daily Total vertical merge across 4 header rows)
     setCell(R, 0, "Date", style(CLR.fixed, { align: { horizontal: "left" } }));
     setCell(R, 1, "Work Summary", style(CLR.fixed, { align: { horizontal: "left" } }));
-    mergeRange(R, 0, R + 4, 0);
-    mergeRange(R, 1, R + 4, 1);
+    mergeRange(R, 0, R + 3, 0);
+    mergeRange(R, 1, R + 3, 1);
     for (const { col, span, idx } of scopeSpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.scope || "—", style(scopeClr(col.scope), { font: { sz: 11, bold: true } }));
@@ -541,10 +630,9 @@ export default function ManpowerReport({ user }) {
       fillRow(R, c + 1, c + span - 1, style(scopeClr(col.scope)));
     }
     setCell(R, totalCol, "Daily Total", style(CLR.daily_total_hdr));
-    mergeRange(R, totalCol, R + 4, totalCol);
+    mergeRange(R, totalCol, R + 3, totalCol);
     R++;
 
-    // Category / Labour / Skill / Gender — pad Date+Summary cells for merge continuity
     for (const { col, span, idx } of categorySpans_xl) {
       const c = idx + 2;
       setCell(R, c, col.label.category || "—", style(CLR.category));
@@ -567,22 +655,9 @@ export default function ManpowerReport({ user }) {
     setCell(R, totalCol, "", style(CLR.daily_total_hdr));
     R++;
 
-    for (const { col, span, idx } of skillSpans_xl) {
-      const c = idx + 2;
-      setCell(R, c, col.label.skill || "—", style(CLR.skill, { font: { sz: 9, bold: false } }));
-      mergeRange(R, c, R, c + span - 1);
-      fillRow(R, c + 1, c + span - 1, style(CLR.skill, { font: { bold: false } }));
-    }
-    setCell(R, 0, "", style(CLR.fixed));
-    setCell(R, 1, "", style(CLR.fixed));
-    setCell(R, totalCol, "", style(CLR.daily_total_hdr));
-    R++;
-
     rd.cols.forEach((col, i) => {
-      const g = col.label.gender
-        ? col.label.gender.charAt(0).toUpperCase() + col.label.gender.slice(1).toLowerCase()
-        : "—";
-      setCell(R, i + 2, g, style(CLR.gender, { font: { sz: 9, bold: false } }));
+      const leaf = col.leaf || leafLabel(col.label.skill, col.label.gender);
+      setCell(R, i + 2, leaf, style(CLR.gender, { font: { sz: 9, bold: false } }));
     });
     setCell(R, 0, "", style(CLR.fixed));
     setCell(R, 1, "", style(CLR.fixed));
@@ -746,7 +821,22 @@ export default function ManpowerReport({ user }) {
   const scopeSpans    = rd ? getSpans(rd.cols, c => c.scope) : [];
   const categorySpans = rd ? getSpans(rd.cols, c => `${c.scope}||${c.label.category}`) : [];
   const labourSpans   = rd ? getSpans(rd.cols, c => `${c.scope}||${c.label.category}||${c.label.labour}`) : [];
-  const skillSpans    = rd ? getSpans(rd.cols, c => `${c.scope}||${c.label.category}||${c.label.labour}||${c.label.skill}`) : [];
+
+  const formatSummaryHtml = (summary) => {
+    const lines = String(summary || "")
+      .split(/\n|(?=\d+\.\s)/)
+      .map((l) => l.replace(/^[•\-\d.]+\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    if (!lines.length) return "—";
+    return (
+      <ul>
+        {lines.map((line, i) => (
+          <li key={i}>{line}</li>
+        ))}
+      </ul>
+    );
+  };
 
   return (
     <>
@@ -829,13 +919,13 @@ export default function ManpowerReport({ user }) {
                   <div className="tbl-outer" ref={printRef}>
                     <table className="mp-tbl">
 
-                      {/* ══ THEAD — 5 rows ══ */}
+                      {/* ══ THEAD — 4 rows: Scope → Category → Labour → Skill·Gender ══ */}
                       <thead>
 
                         {/* Row 1 — Scope */}
                         <tr>
-                          <th rowSpan={5} style={{ background:"#1e3a5f", minWidth:90, textAlign:"left", color:"#e0f2fe", verticalAlign:"middle" }}>Date</th>
-                          <th rowSpan={5} style={{ background:"#1e3a5f", minWidth:160, textAlign:"left", color:"#e0f2fe", verticalAlign:"middle" }}>Work Summary</th>
+                          <th rowSpan={4} className="th-sticky-date" style={{ background:"#1e3a5f", textAlign:"left", color:"#e0f2fe", verticalAlign:"middle" }}>Date</th>
+                          <th rowSpan={4} className="th-sticky-sum" style={{ background:"#1e3a5f", textAlign:"left", color:"#e0f2fe", verticalAlign:"middle" }}>Work Summary</th>
                           {scopeSpans.map(({ col, span, idx }) => {
                             const s = scopeStyle(col.scope);
                             return (
@@ -846,7 +936,7 @@ export default function ManpowerReport({ user }) {
                               </th>
                             );
                           })}
-                          <th rowSpan={5} style={{ background:"#b45309", minWidth:60, color:"#fef3c7", verticalAlign:"middle" }}>Daily Total</th>
+                          <th rowSpan={4} className="th-sticky-total" style={{ background:"#b45309", color:"#fef3c7", verticalAlign:"middle" }}>Daily Total</th>
                         </tr>
 
                         {/* Row 2 — Category */}
@@ -860,7 +950,7 @@ export default function ManpowerReport({ user }) {
                           ))}
                         </tr>
 
-                        {/* Row 3 — Labour / Manpower Type */}
+                        {/* Row 3 — Labour type */}
                         <tr>
                           {labourSpans.map(({ col, span, idx }) => (
                             <th key={`lab-${idx}`} colSpan={span}
@@ -871,27 +961,14 @@ export default function ManpowerReport({ user }) {
                           ))}
                         </tr>
 
-                        {/* Row 4 — Skill */}
-                        <tr>
-                          {skillSpans.map(({ col, span, idx }) => (
-                            <th key={`skill-${idx}`} colSpan={span}
-                              style={{ background:"#fed7aa", color:"#92400e", fontSize:10,
-                                fontWeight:600, textAlign:"center", padding:"5px 8px", whiteSpace:"nowrap" }}>
-                              {col.label.skill || "—"}
-                            </th>
-                          ))}
-                        </tr>
-
-                        {/* Row 5 — Gender (never merged) */}
+                        {/* Row 4 — Skill · Gender (leaf) */}
                         <tr>
                           {rd.cols.map((col, i) => (
-                            <th key={`gen-${i}`}
+                            <th key={`leaf-${i}`}
                               style={{ background:"#fef9c3", color:"#713f12", fontSize:10,
                                 fontWeight:600, textAlign:"center", padding:"5px 6px",
-                                whiteSpace:"nowrap", minWidth:55, borderTop:"1.5px solid #fde68a" }}>
-                              {col.label.gender
-                                ? col.label.gender.charAt(0).toUpperCase() + col.label.gender.slice(1).toLowerCase()
-                                : "—"}
+                                whiteSpace:"nowrap", minWidth:72, borderTop:"1.5px solid #fde68a" }}>
+                              {col.leaf || leafLabel(col.label.skill, col.label.gender)}
                             </th>
                           ))}
                         </tr>
@@ -912,19 +989,18 @@ export default function ManpowerReport({ user }) {
 
                             /* ── Daily rows ── */
                             ...mDates.map((de) => {
-                              const rowTotal     = rd.cols.reduce((s, c) => s + (de.counts.get(c.key) || 0), 0);
-                              const summaryLines = (de.summary || "").split("\n").slice(0, 5).join(", ").replace(/^[•\-]\s*/gm, "").slice(0, 160);
+                              const rowTotal = rd.cols.reduce((s, c) => s + (de.counts.get(c.key) || 0), 0);
                               return (
                                 <tr key={`day-${de.date}`}>
                                   <td className="td-date">{fmtDate(de.date)}</td>
-                                  <td className="td-summary">{summaryLines || "—"}</td>
+                                  <td className="td-summary">{formatSummaryHtml(de.summary)}</td>
                                   {rd.cols.map((col, ci) => {
                                     const cnt = de.counts.get(col.key) || 0;
                                     return cnt > 0
                                       ? <td key={`c-${ci}`} className="td-count">{cnt}</td>
                                       : <td key={`c-${ci}`} className="td-zero">—</td>;
                                   })}
-                                  <td className="td-count" style={{ background: rowTotal > 0 ? "#dbeafe" : undefined, color:"#1e3a5f", fontWeight:800 }}>
+                                  <td className="td-daily-total">
                                     {rowTotal > 0 ? rowTotal : "—"}
                                   </td>
                                 </tr>

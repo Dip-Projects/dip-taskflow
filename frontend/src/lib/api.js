@@ -76,10 +76,16 @@ export async function api(path, options = {}) {
     }
   }
   if (res.status === 401 && path !== '/auth/login') {
-    // Only wipe session on real auth failures — not every stray 401 from
-    // background polls / missing routes (that was logging HR out mid-use).
+    // Only wipe session on proven JWT failures when we actually sent a token.
+    // Do NOT logout on "Please log in to continue" (often a race / missing header)
+    // or soft 401s from background polls — that was kicking Site/HR users out.
     const msg = String(data.error || data.message || '').toLowerCase();
-    const authFail = /session expired|please log in|invalid token|jwt malformed|jwt expired/i.test(msg);
+    const hadToken = !!token;
+    const authFail =
+      hadToken &&
+      /session expired|invalid token|jwt malformed|jwt expired|token expired|jwt must be provided/i.test(
+        msg
+      );
     if (authFail) {
       clearSession();
       try {

@@ -360,8 +360,13 @@ export async function mountTaskflowApp(opts = {}) {
       if (path === '/auth/login') {
         throw new Error(data.error || 'Invalid username or password');
       }
-      logout();
-      throw new Error('Session expired, please log in again');
+      const msg = String(data.error || data.message || '').toLowerCase();
+      // Only hard-logout on proven JWT death — not every 401 (site/HR soft fails)
+      if (/session expired|invalid token|jwt malformed|jwt expired|token expired/i.test(msg)) {
+        logout();
+        throw new Error('Session expired, please log in again');
+      }
+      throw new Error(data.error || data.message || 'Request failed (401)');
     }
     if (!res.ok) {
       const err = new Error(data.message || data.error || 'Something went wrong');
