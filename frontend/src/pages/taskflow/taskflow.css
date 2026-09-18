@@ -3088,6 +3088,35 @@ body.sidebar-open { overflow: hidden; }
   white-space: nowrap;
 }
 .topbar-chip:hover { border-color: var(--primary); background: var(--primary-lt); }
+.topbar-chip--bot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.topbar-bot-dp,
+.view-bot-dp {
+  border-radius: 50%;
+  object-fit: cover;
+  background: #000;
+  flex-shrink: 0;
+}
+.view-title--bot {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.bot-bubble-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bot-bubble-who__dp {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #000;
+}
 .topbar-chip-badge {
   display: inline-flex;
   min-width: 16px;

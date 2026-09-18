@@ -35,7 +35,10 @@ export default function TaskflowDom() {
           <button type="button" id="topChatBtn" className="topbar-chip" title="Team chat">
             💬 Chat <span id="topChatBadge" className="topbar-chip-badge" hidden></span>
           </button>
-          <button type="button" id="topDipBotBtn" className="topbar-chip" hidden title="DIP Bot">🤖 DIP Bot</button>
+          <button type="button" id="topDipBotBtn" className="topbar-chip topbar-chip--bot" hidden title="DIP Bot">
+            <img src="/logo192.png" alt="" className="topbar-bot-dp" width="18" height="18" />
+            DIP Bot
+          </button>
         </div>
         <button id="logoutBtn" className="logout-btn">↩ Log out</button>
       </div>
@@ -508,7 +511,10 @@ export default function TaskflowDom() {
         {/* DIP AI BOT */}
         <section id="view-ai-bot" className="view" hidden={true}>
           <div className="view-heading">
-            <h2 className="view-title">🤖 DIP Bot</h2>
+            <h2 className="view-title view-title--bot">
+              <img src="/logo192.png" alt="" className="view-bot-dp" width="28" height="28" />
+              DIP Bot
+            </h2>
             <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. DIP Bot answers only that.</p>
           </div>
           <div className="bot-shell">

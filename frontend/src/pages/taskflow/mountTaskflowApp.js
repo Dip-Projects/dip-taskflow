@@ -10410,7 +10410,7 @@ export async function mountTaskflowApp(opts = {}) {
     const body = who === 'you'
       ? `<div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`
       : `<div class="bot-bubble-body bot-rich">${renderBotAnswer(text)}</div>`;
-    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : 'DIP Bot'}</div>${body}`;
+    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : '<img src="/logo192.png" alt="" class="bot-bubble-who__dp" width="16" height="16" /> DIP Bot'}</div>${body}`;
     if (who !== 'you' && Array.isArray(downloads) && downloads.length) {
       const bar = document.createElement('div');
       bar.className = 'bot-downloads';
