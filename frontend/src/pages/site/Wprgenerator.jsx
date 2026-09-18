@@ -39,7 +39,6 @@ const zp = (n) => String(parseInt(n) || 1).padStart(2, "0");
 const today = () => new Date().toISOString().split("T")[0];
 
 // ─── HEIC loader (lazy) ──────────────────────────────────────────────────────
-// ─── HEIC loader (lazy) ──────────────────────────────────────────────────────
 let _heic2anyPromise = null;
 function loadHeic2Any() {
   if (_heic2anyPromise) return _heic2anyPromise;
@@ -2369,8 +2368,36 @@ export default function WprGenerator({ user, supabase }) {
   };
 
   const fetchReportNum = useCallback(
-    async (siteName, date) => {
+    async (siteName, date, engineerName = engineer) => {
       if (!siteName || !date || !supabase) return;
+
+      // report_date is stored as en-IN long text (e.g. "14 September 2026")
+      const dateFormatted = new Date(date + "T00:00:00").toLocaleDateString(
+        "en-IN",
+        { day: "2-digit", month: "long", year: "numeric" },
+      );
+
+      // Same site + engineer + date → keep the existing report number (replace, don't bump)
+      let existingQuery = supabase
+        .from("wpr_reports")
+        .select("report_number")
+        .eq("site_name", siteName)
+        .eq("report_date", dateFormatted)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (engineerName) {
+        existingQuery = existingQuery.eq("engineer_name", engineerName);
+      }
+      const { data: existing } = await existingQuery.maybeSingle();
+      if (existing?.report_number != null) {
+        const n = parseInt(existing.report_number, 10);
+        if (Number.isFinite(n) && n > 0 && n < 1000) {
+          setReportNum(n);
+          return;
+        }
+      }
+
+      // New date → next number for this site
       const { data } = await supabase
         .from("wpr_reports")
         .select("report_number")
@@ -2384,12 +2411,12 @@ export default function WprGenerator({ user, supabase }) {
       }, 0);
       setReportNum(last + 1);
     },
-    [supabase],
+    [supabase, engineer],
   );
 
   useEffect(() => {
-    fetchReportNum(site, reportDate);
-  }, [site, reportDate, fetchReportNum]);
+    fetchReportNum(site, reportDate, engineer);
+  }, [site, reportDate, engineer, fetchReportNum]);
   // ── Auto-load site image from site_details when site changes ──
   useEffect(() => {
     if (!site || !supabase) return;
@@ -2749,13 +2776,13 @@ export default function WprGenerator({ user, supabase }) {
       setGenProgress(40);
       setGenStep("Saving report data…");
 
+      // Replace any existing report for this site+engineer+date (keep same number)
       await supabase
         .from("wpr_reports")
         .delete()
         .eq("site_name", site)
         .eq("engineer_name", engineer)
-        .eq("report_date", dateFormatted)
-        .eq("report_number", reportNumStr);
+        .eq("report_date", dateFormatted);
 
       const { data: reportData, error: reportError } = await supabase
         .from("wpr_reports")
@@ -2976,14 +3003,13 @@ export default function WprGenerator({ user, supabase }) {
       setGenProgress(35);
       setGenStep("Saving report record…");
 
-      // Delete any existing report with same site+engineer+date+number (override old entry)
+      // Delete any existing report with same site+engineer+date (override; keep number)
       await supabase
         .from("wpr_reports")
         .delete()
         .eq("site_name", site)
         .eq("engineer_name", engineer)
-        .eq("report_date", dateFormatted)
-        .eq("report_number", reportNum);
+        .eq("report_date", dateFormatted);
 
       const { data: reportData, error: reportError } = await supabase
         .from("wpr_reports")

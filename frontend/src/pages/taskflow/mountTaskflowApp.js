@@ -356,17 +356,12 @@ export async function mountTaskflowApp(opts = {}) {
   const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
       // Login attempt ke liye backend ka asli message dikhao (e.g. "Invalid
-      // username or password"), auto-logout na karo — abhi to login hi nahi hue.
+      // username or password"), do not auto-logout — login has not succeeded yet.
       if (path === '/auth/login') {
         throw new Error(data.error || 'Invalid username or password');
       }
-      // Don't force-logout on every background poll 401 (e.g. after leaving /app
-      // for /hr). Only logout when the token is clearly dead.
-      const msg = String(data.error || data.message || '').toLowerCase();
-      if (/session expired|please log in|invalid token|jwt/i.test(msg) || !state.token) {
-        logout();
-      }
-      throw new Error(data.error || 'Session expired, please log in again');
+      logout();
+      throw new Error('Session expired, please log in again');
     }
     if (!res.ok) {
       const err = new Error(data.message || data.error || 'Something went wrong');
@@ -376,6 +371,12 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return data;
   }
+  function sortByLabel(items, labelKey = 'name') {
+    return [...(items || [])].sort((a, b) =>
+      String(a?.[labelKey] ?? a ?? '').localeCompare(String(b?.[labelKey] ?? b ?? ''), undefined, { sensitivity: 'base' })
+    );
+  }
+
   function fillSelect(select, items, { placeholder, valueKey = 'id', labelKey = 'name', extraOption } = {}) {
     if (!select) return;
     select.innerHTML = '';
@@ -384,7 +385,7 @@ export async function mountTaskflowApp(opts = {}) {
       opt.value = ''; opt.textContent = placeholder;
       select.appendChild(opt);
     }
-    items.forEach((item) => {
+    sortByLabel(items, labelKey).forEach((item) => {
       const opt = document.createElement('option');
       opt.value = item[valueKey]; opt.textContent = item[labelKey];
       select.appendChild(opt);
@@ -443,6 +444,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (n && !names.includes(n)) names.push(n);
     });
     selectedSet.forEach((s) => { if (!names.includes(s)) names.push(s); });
+    names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
     root.innerHTML = `
       <button type="button" class="ms-toggle" id="${root.id}-toggle" aria-expanded="false" aria-haspopup="listbox">
@@ -1410,7 +1412,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
       if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
       if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
-      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Task Report'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
       if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
@@ -1875,16 +1877,16 @@ export async function mountTaskflowApp(opts = {}) {
         api('/master/task-types'),  api('/master/employees')
       ]);
       state.master = {
-        departments,
-        projects,
-        taskTypes,
-        employees: (employees || []).filter((e) => !isClientUserRow(e)),
+        departments: sortByLabel(departments),
+        projects: sortByLabel(projects),
+        taskTypes: sortByLabel(taskTypes),
+        employees: sortByLabel((employees || []).filter((e) => !isClientUserRow(e)), 'full_name'),
       };
-      fillSelect(els.fDepartment, departments, { placeholder: 'Select department' });
-      fillSelect(els.fProject, projects, { placeholder: 'Select project' });
-      fillSelect(els.fTaskType, taskTypes, { placeholder: 'Select task type' });
-      fillSelect(els.filterDepartment, departments, { placeholder: 'All departments' });
-      fillSitePeopleDropdowns(employees);
+      fillSelect(els.fDepartment, state.master.departments, { placeholder: 'Select department' });
+      fillSelect(els.fProject, state.master.projects, { placeholder: 'Select project' });
+      fillSelect(els.fTaskType, state.master.taskTypes, { placeholder: 'Select task type' });
+      fillSelect(els.filterDepartment, state.master.departments, { placeholder: 'All departments' });
+      fillSitePeopleDropdowns(state.master.employees);
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
       syncOverdueEmployeeDropdown();
@@ -1908,7 +1910,10 @@ export async function mountTaskflowApp(opts = {}) {
   
   async function refreshEmployeeDropdowns() {
     try {
-      const employees = (await api('/master/employees')).filter((e) => !isClientUserRow(e));
+      const employees = sortByLabel(
+        (await api('/master/employees')).filter((e) => !isClientUserRow(e)),
+        'full_name'
+      );
       state.master.employees = employees;
       syncTaskEmployeeDropdown();
       syncFilterEmployeeDropdown();
@@ -5805,7 +5810,7 @@ export async function mountTaskflowApp(opts = {}) {
       const taskLines = (item.tasks || [])
         .map((t) => `<li>${escapeHtml((t.description || 'Task').slice(0, 120))} · ${escapeHtml(String(t.target_date || '').slice(0, 10))}</li>`)
         .join('');
-      const assigneeOpts = (item.assignees || [])
+      const assigneeOpts = sortByLabel(item.assignees || [], 'full_name')
         .map((u) => `<option value="${u.id}">${escapeHtml(u.full_name)}</option>`)
         .join('');
       block.innerHTML = `
@@ -5928,7 +5933,7 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const all = await api('/employees');
       // Clients belong only in Manage clients — never here
-      employeesCache = (all || []).filter((e) => !isClientUserRow(e));
+      employeesCache = sortByLabel((all || []).filter((e) => !isClientUserRow(e)), 'full_name');
       fillEmpDepartmentFilter(employeesCache);
       applyEmployeesFilter();
     } catch (err) { showToast(err.message, 'error'); }
@@ -5939,7 +5944,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!sel) return;
     const prev = sel.value;
     const depts = [...new Set((employees || []).map((e) => e.department).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b));
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     sel.innerHTML = '<option value="">All departments</option>';
     depts.forEach((d) => {
       const opt = document.createElement('option');
@@ -6256,109 +6261,616 @@ export async function mountTaskflowApp(opts = {}) {
   // employees are filtered out entirely before the tree is built, so deactivating
   // someone removes them (and, naturally, their own sub-tree moves up as orphans
   // — see buildOrgTree below) from the view immediately.
+  // Enhanced: site-supervisor nesting, peer-row under Chirag, fit-to-view, PDF print.
   async function loadHierarchy() {
     els.hierarchyTreeContainer.innerHTML = `<div class="empty-state">Loading hierarchy…</div>`;
+    ensureHierarchyDownloadButton();
     try {
-      const employees = await api('/employees'); // admin-only, includes is_active + reporting_head_id
-      const active = employees.filter((e) => e.is_active !== false && !isClientUserRow(e));
-      renderOrgTree(active);
+      const [employees, sites] = await Promise.all([
+        api('/employees'),
+        api('/sites').catch(() => []),
+      ]);
+      const active = uniqueHierarchyEmployees(
+        employees.filter((e) => e.is_active !== false && !isClientUserRow(e)),
+      );
+      const siteSupervisorMap = buildSiteSupervisorMap(active, sites);
+      renderOrgTree(active, siteSupervisorMap);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
-  function buildOrgTree(employees) {
-    const byId = new Map(employees.map((e) => [e.id, { ...e, children: [] }]));
-    const roots = [];
-    byId.forEach((node) => {
-      const headId = node.reporting_head_id;
-      // No reporting head, OR reporting head isn't in the active set (e.g. was
-      // deactivated) — treat as a root so nobody silently disappears from the tree.
-      if (headId && byId.has(headId)) {
-        byId.get(headId).children.push(node);
-      } else {
-        roots.push(node);
+
+  function ensureHierarchyDownloadButton() {
+    const view = document.getElementById('view-hierarchy');
+    if (!view || !els.hierarchyTreeContainer) return;
+
+    let btn = document.getElementById('orgDownloadPdfBtn');
+    if (!btn) {
+      const bar = document.createElement('div');
+      bar.id = 'orgDownloadPdfBar';
+      bar.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:12px;';
+      bar.innerHTML = '<button type="button" id="orgDownloadPdfBtn" class="primary-btn primary-btn-inline">Download as PDF</button>';
+      els.hierarchyTreeContainer.parentElement?.insertBefore(bar, els.hierarchyTreeContainer);
+      btn = document.getElementById('orgDownloadPdfBtn');
+    }
+    if (!btn) return;
+
+    // Always re-bind so HMR / remount does not leave a dead click handler.
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      downloadOrgChartPdf();
+    };
+  }
+
+  /**
+   * Pack the org chart into a layout slot, then scale so:
+   * - screen: full chart visible (no clipped leftmost Head)
+   * - print: as large as possible on a single A3 landscape page
+   */
+  function fitOrgChartToView(mode = 'screen') {
+    const wrap = els.hierarchyTreeContainer;
+    if (!wrap) return;
+    let slot = wrap.querySelector('.org-tree-slot');
+    const fit = wrap.querySelector('.org-tree-fit');
+    const treeEl = wrap.querySelector('.org-tree');
+    if (!fit || !treeEl) return;
+
+    if (!slot) {
+      slot = document.createElement('div');
+      slot.className = 'org-tree-slot';
+      fit.parentNode.insertBefore(slot, fit);
+      slot.appendChild(fit);
+    }
+
+    // A3 landscape usable area (~5mm margins) at 96dpi — bigger sheet so
+    // one-page PDF stays readable (A4 forces the chart too small).
+    const pageW = 1540;
+    const pageH = 1060;
+    const containerW = Math.max(wrap.clientWidth - 16, 280);
+
+    fit.style.transform = 'none';
+    fit.style.transformOrigin = 'top left';
+    fit.style.zoom = '';
+    fit.style.marginRight = '0';
+    fit.style.marginBottom = '0';
+    fit.style.width = 'max-content';
+    fit.style.maxWidth = 'none';
+    slot.style.width = 'max-content';
+    slot.style.height = 'auto';
+    slot.style.overflow = 'visible';
+    slot.style.margin = '0 auto';
+    slot.style.maxWidth = 'none';
+
+    void fit.offsetWidth;
+
+    if (typeof window.__drawOrgTreeLines === 'function') {
+      window.__drawOrgTreeLines(treeEl, fit);
+    }
+
+    const natW = Math.max(fit.scrollWidth, fit.offsetWidth, 1);
+    const natH = Math.max(fit.scrollHeight, fit.offsetHeight, 1);
+
+    const availW = mode === 'print' ? pageW : containerW;
+    const availH = mode === 'print'
+      ? pageH
+      : Math.max(window.innerHeight - wrap.getBoundingClientRect().top - 28, 360);
+
+    // Screen: fit width. Print: largest scale that still fits one page (fill the sheet).
+    let scale = Math.min(1, availW / natW);
+    if (mode === 'print') {
+      scale = Math.min(availW / natW, availH / natH);
+    }
+
+    const outW = Math.ceil(natW * scale);
+    const outH = Math.ceil(natH * scale);
+
+    fit.style.transformOrigin = 'top left';
+    if (mode === 'print') {
+      // `zoom` shrinks/grows layout size so print stays on one page.
+      fit.style.transform = 'none';
+      fit.style.zoom = String(Number(scale.toFixed(4)));
+      fit.style.marginRight = '0';
+      fit.style.marginBottom = '0';
+    } else if (scale < 0.999) {
+      fit.style.zoom = '';
+      fit.style.transform = `scale(${scale.toFixed(4)})`;
+      fit.style.marginRight = `${Math.ceil(-natW * (1 - scale))}px`;
+      fit.style.marginBottom = `${Math.ceil(-natH * (1 - scale))}px`;
+    } else {
+      fit.style.zoom = '';
+      fit.style.transform = 'none';
+    }
+
+    slot.style.width = `${outW}px`;
+    slot.style.height = `${outH}px`;
+    slot.style.overflow = 'hidden';
+    slot.style.maxWidth = '100%';
+    slot.style.margin = '0 auto';
+    wrap.scrollLeft = 0;
+    wrap.style.minHeight = `${outH + 8}px`;
+    wrap.style.overflowX = 'hidden';
+
+    if (mode === 'print') {
+      wrap.style.overflow = 'hidden';
+      wrap.style.maxHeight = `${outH + 8}px`;
+      wrap.style.height = `${outH + 8}px`;
+    } else {
+      wrap.style.height = '';
+      wrap.style.maxHeight = '';
+    }
+  }
+
+  function restoreOrgChartAfterPrint() {
+    const wrap = els.hierarchyTreeContainer;
+    const marker = window.__orgPrintMarker;
+    if (wrap && marker && marker.parentNode) {
+      marker.parentNode.insertBefore(wrap, marker);
+      marker.remove();
+    }
+    window.__orgPrintMarker = null;
+    document.body.classList.remove('org-print-mode');
+    if (wrap) {
+      wrap.style.overflow = '';
+      wrap.style.overflowX = 'hidden';
+      wrap.style.maxHeight = '';
+      wrap.style.height = '';
+      const fit = wrap.querySelector('.org-tree-fit');
+      if (fit) fit.style.zoom = '';
+    }
+    const view = document.getElementById('view-hierarchy');
+    if (view) view.style.display = '';
+    fitOrgChartToView('screen');
+  }
+
+  function downloadOrgChartPdf() {
+    try {
+      const wrap = els.hierarchyTreeContainer;
+      if (!wrap || !wrap.querySelector('.org-tree-fit')) {
+        showToast('Open Org Hierarchy first, then download.', 'error');
+        return;
       }
+      // Isolate chart as body child so other UI cannot create phantom print pages.
+      if (!window.__orgPrintMarker) {
+        const marker = document.createComment('org-print-placeholder');
+        wrap.parentNode.insertBefore(marker, wrap);
+        window.__orgPrintMarker = marker;
+        document.body.appendChild(wrap);
+      }
+      document.body.classList.add('org-print-mode');
+      const view = document.getElementById('view-hierarchy');
+      if (view) {
+        view.hidden = false;
+        view.style.display = 'block';
+      }
+      fitOrgChartToView('print');
+      setTimeout(() => {
+        try {
+          fitOrgChartToView('print');
+          window.print();
+        } catch (err) {
+          console.error('[org-chart] print failed', err);
+          restoreOrgChartAfterPrint();
+          showToast(err.message || 'PDF download failed', 'error');
+        }
+      }, 150);
+    } catch (err) {
+      console.error('[org-chart] download failed', err);
+      restoreOrgChartAfterPrint();
+      showToast(err.message || 'PDF download failed', 'error');
+    }
+  }
+
+  function uniqueHierarchyEmployees(employees) {
+    const seenIds = new Set();
+    const seenNames = new Set();
+    const duplicates = [];
+    const unique = employees.filter((employee) => {
+      const nameKey = String(employee.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const isDuplicate = (employee.id && seenIds.has(employee.id)) || (nameKey && seenNames.has(nameKey));
+      if (isDuplicate) {
+        duplicates.push(employee.full_name || employee.id);
+        return false;
+      }
+      if (employee.id) seenIds.add(employee.id);
+      if (nameKey) seenNames.add(nameKey);
+      return true;
     });
-    return roots;
+    if (duplicates.length) console.warn('[org-chart] duplicate employee rows ignored:', duplicates);
+    return unique;
+  }
+
+  function orgRoleRank(employee) {
+    const blob = [employee?.role, employee?.designation, employee?.department]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ')
+      .replace(/[.-]/g, ' ');
+    if (/\badmin\b/.test(String(employee?.role || '').toLowerCase())) return 0;
+    if (employee?.is_head || /\bhead\b|project head|site head/.test(blob)) return 1;
+    if (/co[-\s]*ordinator/.test(blob)) return 2;
+    if (/incharge/.test(blob)) return 3;
+    if (/jr\s+(?:site\s+)?engineer|junior\s+(?:site\s+)?engineer/.test(blob)) return 5;
+    if (/engineer/.test(blob)) return 4;
+    return 6;
+  }
+
+  function orgRoleLabel(rank) {
+    return ['Admin', 'Head', 'Co-ordinator', 'Incharge', 'Engineer', 'Jr. Engineer', 'Other'][rank] || 'Other';
+  }
+
+  function orgNodeMeta(node) {
+    if (node.isOrgDept) return 'Department';
+    if (node.orgRoleRank >= 0 && node.orgRoleRank < 6) return orgRoleLabel(node.orgRoleRank);
+    return String(node.designation || '').trim() || 'Office';
+  }
+
+  function orgNodeSitesLabel(node) {
+    if (!node || node.isOrgDept || node.isOrgGroup) return '';
+    return parseEmployeeSites(node).join(', ');
+  }
+
+  function sortOrgNodes(a, b) {
+    return (a.orgRoleRank - b.orgRoleRank)
+      || String(a.full_name || '').localeCompare(String(b.full_name || ''));
+  }
+
+  function normalizeSiteKey(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function buildSiteSupervisorMap(employees, sites) {
+    const byName = new Map();
+    (sites || []).forEach((s) => {
+      const key = normalizeSiteKey(s.name);
+      if (key) byName.set(key, s);
+    });
+    const byId = new Map(employees.map((e) => [e.id, e]));
+    const map = new Map();
+    const unmatched = [];
+
+    employees.forEach((emp) => {
+      const empSites = parseEmployeeSites(emp);
+      if (!empSites.length) return; // office staff, no site — expected, not a bug
+      let matched = false;
+      for (const name of empSites) {
+        const site = byName.get(normalizeSiteKey(name));
+        if (!site) continue;
+        const coordinatorId = site.coordinator_id && byId.has(site.coordinator_id) ? site.coordinator_id : null;
+        const inchargeId = site.team_leader_id && byId.has(site.team_leader_id) ? site.team_leader_id : null;
+        if (coordinatorId || inchargeId) {
+          map.set(emp.id, { coordinatorId, inchargeId });
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) unmatched.push({ name: emp.full_name, sites: empSites });
+    });
+
+    if (unmatched.length) {
+      console.warn('[org-chart] no site/supervisor match for:', unmatched);
+    }
+    return map;
+  }
+
+  function isCarDriverOrOfficeBoy(node) {
+    const blob = [node?.role, node?.designation, node?.department, node?.full_name]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+    return /car\s*drivers?|office\s*boys?|officeboy/.test(blob);
+  }
+
+  function isHrPerson(node) {
+    const blob = [node?.role, node?.designation, node?.department, node?.full_name]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+    if (node?.isOrgDept) return false;
+    return /\bhr\b|human\s*resources?/.test(blob);
+  }
+
+  function isChiragShah(node) {
+    return String(node?.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'chirag shah';
+  }
+
+  /** Remove matching nodes from a subtree; collect them into `out`. */
+  function detachMatching(node, predicate, out) {
+    if (!node?.children?.length) return;
+    const keep = [];
+    node.children.forEach((child) => {
+      detachMatching(child, predicate, out);
+      if (predicate(child)) out.push(child);
+      else keep.push(child);
+    });
+    node.children = keep;
+  }
+
+  function normalizeHeadBranch(head, byId, siteSupervisorMap) {
+    const branch = [];
+    const visit = (node) => {
+      (node.children || []).forEach((child) => {
+        branch.push(child);
+        visit(child);
+      });
+    };
+    visit(head);
+    branch.forEach((node) => { node.children = []; });
+    head.children = [];
+
+    const byRank = new Map();
+    branch.forEach((node) => {
+      if (!byRank.has(node.orgRoleRank)) byRank.set(node.orgRoleRank, []);
+      byRank.get(node.orgRoleRank).push(node);
+    });
+
+    const TIER_RANKS = [2, 3, 4, 5];
+    let primaryRank = null;
+    for (const r of TIER_RANKS) {
+      if ((byRank.get(r) || []).length) { primaryRank = r; break; }
+    }
+    const primaryTier = primaryRank != null ? (byRank.get(primaryRank) || []) : [];
+    const primaryTierIds = new Set(primaryTier.map((n) => n.id));
+    const placed = new Set();
+    const lifted = [];
+
+    const takeLifted = (node) => {
+      if (isCarDriverOrOfficeBoy(node) || isHrPerson(node)) {
+        lifted.push(node);
+        placed.add(node.id);
+        return true;
+      }
+      return false;
+    };
+
+    if (primaryRank != null) {
+      TIER_RANKS.filter((r) => r > primaryRank).forEach((r) => {
+        (byRank.get(r) || []).forEach((node) => {
+          if (placed.has(node.id)) return;
+          if (takeLifted(node)) return;
+          const sup = siteSupervisorMap.get(node.id);
+          let parent = null;
+          if (sup?.coordinatorId && primaryTierIds.has(sup.coordinatorId)) {
+            parent = byId.get(sup.coordinatorId);
+          } else if (sup?.inchargeId && primaryTierIds.has(sup.inchargeId)) {
+            parent = byId.get(sup.inchargeId);
+          }
+          if (!parent) parent = primaryTier.length === 1 ? primaryTier[0] : head;
+          parent.children.push(node);
+          placed.add(node.id);
+        });
+      });
+    }
+
+    primaryTier.forEach((node) => {
+      if (placed.has(node.id)) return;
+      if (takeLifted(node)) return;
+      head.children.push(node);
+      placed.add(node.id);
+    });
+
+    (byRank.get(6) || []).forEach((node) => {
+      if (placed.has(node.id)) return;
+      if (takeLifted(node)) return;
+      head.children.push(node);
+      placed.add(node.id);
+    });
+
+    branch.forEach((node) => {
+      if (placed.has(node.id)) return;
+      takeLifted(node);
+    });
+
+    return lifted;
   }
   
+  function buildOrgTree(employees, siteSupervisorMap = new Map()) {
+    const nodes = employees.map((employee) => ({
+      ...employee,
+      orgRoleRank: orgRoleRank(employee),
+      children: [],
+    }));
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const roots = [];
+    nodes.forEach((node) => {
+      const parent = node.reporting_head_id ? byId.get(node.reporting_head_id) : null;
+      if (parent && parent.id !== node.id) parent.children.push(node);
+      else roots.push(node);
+    });
+    const chirag = nodes.find((node) => isChiragShah(node));
+    const mainHeads = chirag
+      ? chirag.children.filter((node) => node.orgRoleRank === 0 || node.orgRoleRank === 1)
+      : nodes.filter((node) => {
+        if (node.orgRoleRank !== 1) return false;
+        const parent = node.reporting_head_id ? byId.get(node.reporting_head_id) : null;
+        return parent?.orgRoleRank === 1;
+      });
+
+    const lifted = [];
+    mainHeads.forEach((head) => {
+      head.orgRoleRank = 1;
+      lifted.push(...normalizeHeadBranch(head, byId, siteSupervisorMap));
+    });
+
+    // Under Chirag Shah — ONE level: Heads + HR + Car Driver + Office Boy (same row).
+    if (chirag) {
+      mainHeads.forEach((head) => {
+        detachMatching(head, (n) => isCarDriverOrOfficeBoy(n) || isHrPerson(n), lifted);
+      });
+      detachMatching(chirag, (n) => isCarDriverOrOfficeBoy(n) || isHrPerson(n), lifted);
+
+      for (let i = roots.length - 1; i >= 0; i -= 1) {
+        const node = roots[i];
+        if (node === chirag || node.orgRoleRank <= 1) continue;
+        if (!isHrPerson(node) && !isCarDriverOrOfficeBoy(node)) continue;
+        lifted.push(node);
+        roots.splice(i, 1);
+      }
+
+      const heads = [];
+      chirag.children.forEach((child) => {
+        if (child.isOrgDept) return;
+        if (child.orgRoleRank === 0 || child.orgRoleRank === 1) heads.push(child);
+        else lifted.push(child);
+      });
+
+      const seen = new Set();
+      const uniq = (list) => {
+        const out = [];
+        list.forEach((node) => {
+          const key = node.id || String(node.full_name || '').trim().toLowerCase();
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          out.push(node);
+        });
+        return out;
+      };
+
+      const hrPeople = uniq(lifted.filter((n) => isHrPerson(n)));
+      const drivers = uniq(lifted.filter((n) => {
+        const blob = [n.role, n.designation, n.department].map((v) => String(v || '').toLowerCase()).join(' ');
+        return /car\s*drivers?/.test(blob);
+      }));
+      const officeBoys = uniq(lifted.filter((n) => {
+        const blob = [n.role, n.designation, n.department].map((v) => String(v || '').toLowerCase()).join(' ');
+        return /office\s*boys?|officeboy/.test(blob);
+      }));
+      const otherPeers = uniq(lifted.filter((n) =>
+        !isHrPerson(n) && !isCarDriverOrOfficeBoy(n) && n.orgRoleRank > 1));
+
+      // HR person(s) on the same peer row — not a department with someone hanging below.
+      const hrPeers = hrPeople.length
+        ? hrPeople
+        : [{
+          id: `org-dept-hr-${chirag.id}`,
+          full_name: 'HR',
+          designation: 'Department',
+          department: 'HR',
+          orgRoleRank: 1,
+          isOrgDept: true,
+          children: [],
+        }];
+
+      chirag.children = [
+        ...uniq(heads).sort(sortOrgNodes),
+        ...hrPeers,
+        ...drivers,
+        ...officeBoys,
+        ...otherPeers,
+      ];
+      chirag._orgPeerRow = true;
+    }
+
+    const sortTree = (node) => {
+      if (!node._orgPeerRow) node.children.sort(sortOrgNodes);
+      node.children.forEach(sortTree);
+    };
+    roots.sort(sortOrgNodes).forEach(sortTree);
+    return roots;
+  }
+
   function orgInitials(name) {
     return (name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
   }
-  function renderOrgNode(node, depth = 0) {
+
+  function shouldStackChildren(children, parentNode = null) {
+    if (!children?.length) return false;
+    const allLeaves = children.every((child) => !child.children?.length);
+    // Heads: left spine even when some children have their own nested teams.
+    if (parentNode?.orgRoleRank === 1 && !parentNode?.isOrgDept && children.length >= 1) {
+      return true;
+    }
+    if (allLeaves && children.length >= 2) return true;
+    const leafHeavy = children.filter((child) => !child.children?.length || child.children.length <= 1).length;
+    return children.length >= 4 && leafHeavy >= Math.ceil(children.length * 0.75);
+  }
+
+  function renderOrgNode(node, depth = 0, renderedIds = new Set()) {
+    const nodeKey = node.id || String(node.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (renderedIds.has(nodeKey)) return null;
+    renderedIds.add(nodeKey);
     const branch = document.createElement('div');
     branch.className = 'org-branch';
-  
+
     const nodeEl = document.createElement('div');
     const level = Math.min(depth, 3);
-    nodeEl.className = `org-node org-node-d${level}${depth === 0 ? ' org-node-root' : ''}`;
-    const meta = node.designation || node.role || '';
-    nodeEl.title = meta ? `${node.full_name} — ${meta}` : (node.full_name || '');
-    nodeEl.innerHTML = `
-      <div class="org-node-avatar">${escapeHtml(orgInitials(node.full_name))}</div>
-      <div class="org-node-info">
-        <span class="org-node-name">${escapeHtml(node.full_name)}</span>
-        <span class="org-node-meta">${escapeHtml(node.designation || node.role)}</span>
-      </div>
-    `;
+    if (node.isOrgGroup) {
+      nodeEl.className = 'org-node-group-anchor';
+    } else {
+      const deptClass = node.isOrgDept ? ' org-node-dept' : '';
+      nodeEl.className = `org-node org-node-d${level}${depth === 0 ? ' org-node-root' : ''}${deptClass}`;
+      const meta = orgNodeMeta(node);
+      const sitesLabel = orgNodeSitesLabel(node);
+      const titleParts = [node.full_name, meta, sitesLabel].filter(Boolean);
+      nodeEl.title = titleParts.join(' — ');
+      const avatar = node.isOrgDept ? 'HR' : orgInitials(node.full_name);
+      nodeEl.innerHTML = `
+        <div class="org-node-avatar">${escapeHtml(avatar)}</div>
+        <div class="org-node-info">
+          <span class="org-node-name">${escapeHtml(node.full_name)}</span>
+          <span class="org-node-meta">${escapeHtml(meta)}</span>
+          ${sitesLabel ? `<span class="org-node-sites">${escapeHtml(sitesLabel)}</span>` : ''}
+        </div>
+      `;
+    }
     branch.appendChild(nodeEl);
-  
+
     if (node.children && node.children.length) {
       const childrenWrap = document.createElement('div');
-      const stackLeaves = node.children.every((child) => !child.children?.length);
-      childrenWrap.className = stackLeaves
-        ? 'org-branch-children org-branch-children-stack'
-        : 'org-branch-children';
-      node.children
-        .sort((a, b) => a.full_name.localeCompare(b.full_name))
-        .forEach((child) => childrenWrap.appendChild(renderOrgNode(child, depth + 1)));
+      const peerRow = !!node._orgPeerRow || isChiragShah(node);
+      if (peerRow) {
+        childrenWrap.className = 'org-branch-children org-branch-children-peers';
+      } else {
+        childrenWrap.className = shouldStackChildren(node.children, node)
+          ? 'org-branch-children org-branch-children-stack'
+          : 'org-branch-children';
+      }
+      const kids = peerRow ? node.children : [...node.children].sort(sortOrgNodes);
+      kids.forEach((child) => {
+        const childBranch = renderOrgNode(child, depth + 1, renderedIds);
+        if (childBranch) childrenWrap.appendChild(childBranch);
+      });
+      if (!childrenWrap.children.length) return branch;
       branch.appendChild(childrenWrap);
     }
     return branch;
   }
-  
-  function renderOrgTree(employees) {
-    const roots = buildOrgTree(employees);
+
+  /** Scale chart to container width so the user never needs horizontal scroll. */
+  function renderOrgTree(employees, siteSupervisorMap = new Map()) {
+    const roots = buildOrgTree(employees, siteSupervisorMap);
+
     els.hierarchyTreeContainer.innerHTML = '';
     if (!roots.length) {
       els.hierarchyTreeContainer.innerHTML = `<div class="org-tree-empty">No active employees to show yet.</div>`;
       return;
     }
+    const fitEl = document.createElement('div');
+    fitEl.className = 'org-tree-fit';
     const treeEl = document.createElement('div');
     treeEl.className = 'org-tree';
-    roots
-      .sort((a, b) => a.full_name.localeCompare(b.full_name))
-      .forEach((root) => treeEl.appendChild(renderOrgNode(root, 0)));
-    els.hierarchyTreeContainer.appendChild(treeEl);
-  
+    const renderedIds = new Set();
+    roots.forEach((root) => {
+      const rootBranch = renderOrgNode(root, 0, renderedIds);
+      if (rootBranch) treeEl.appendChild(rootBranch);
+    });
+    fitEl.appendChild(treeEl);
+    els.hierarchyTreeContainer.appendChild(fitEl);
+
     requestAnimationFrame(() => {
-      centerOrgTreeView();
-      drawOrgTreeLines(treeEl);
+      requestAnimationFrame(() => fitOrgChartToView('screen'));
     });
   }
 
-  function centerOrgTreeView() {
-    const wrap = els.hierarchyTreeContainer;
-    if (!wrap) return;
-    const root = wrap.querySelector('.org-node-root') || wrap.querySelector('.org-node');
-    if (!root) return;
-    const extra = (root.getBoundingClientRect().left + root.offsetWidth / 2)
-      - (wrap.getBoundingClientRect().left + wrap.clientWidth / 2);
-    wrap.scrollLeft += extra;
-  }
-  
-  function drawOrgTreeLines(treeEl) {
-    const existing = els.hierarchyTreeContainer.querySelector('.org-tree-svg');
+  function drawOrgTreeLines(treeEl, fitEl = null) {
+    const host = fitEl || treeEl.parentElement || els.hierarchyTreeContainer;
+    const existing = host.querySelector('.org-tree-svg');
     if (existing) existing.remove();
-  
-    const containerRect = els.hierarchyTreeContainer.getBoundingClientRect();
-    const scrollX = els.hierarchyTreeContainer.scrollLeft;
-    const scrollY = els.hierarchyTreeContainer.scrollTop;
+
+    const hostRect = host.getBoundingClientRect();
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('class', 'org-tree-svg');
-    svg.setAttribute('width', els.hierarchyTreeContainer.scrollWidth);
-    svg.setAttribute('height', els.hierarchyTreeContainer.scrollHeight);
-  
+    const width = Math.max(host.scrollWidth, treeEl.scrollWidth, 1);
+    const height = Math.max(host.scrollHeight, treeEl.scrollHeight, 1);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+
     const addLine = (d) => {
       const path = document.createElementNS(svgNS, 'path');
       path.setAttribute('class', 'org-line');
@@ -6367,61 +6879,78 @@ export async function mountTaskflowApp(opts = {}) {
       svg.appendChild(path);
     };
 
+    const curveToChild = (px, py, cx, cy) => {
+      const midY = py + Math.max(8, (cy - py) * 0.42);
+      const bend = Math.min(14, Math.abs(cx - px) * 0.3);
+      if (Math.abs(cx - px) < 2) return `M ${px} ${py} V ${cy}`;
+      return `M ${px} ${py} V ${midY - bend} C ${px} ${midY}, ${cx} ${midY}, ${cx} ${midY + bend} V ${cy}`;
+    };
+
     treeEl.querySelectorAll('.org-branch').forEach((branch) => {
-      const parentNode = branch.querySelector(':scope > .org-node');
+      const parentNode = branch.querySelector(':scope > .org-node, :scope > .org-node-group-anchor');
       const childrenWrap = branch.querySelector(':scope > .org-branch-children');
       if (!parentNode || !childrenWrap) return;
-  
+
       const pRect = parentNode.getBoundingClientRect();
-      const px = pRect.left + pRect.width / 2 - containerRect.left + scrollX;
-      const py = pRect.bottom - containerRect.top + scrollY;
-      const childrenTop = childrenWrap.getBoundingClientRect().top - containerRect.top + scrollY;
-      const midY = py + (childrenTop - py) / 2;
+      const px = pRect.left + pRect.width / 2 - hostRect.left;
+      const py = pRect.bottom - hostRect.top;
       const kids = Array.from(childrenWrap.children)
-        .map((childBranch) => childBranch.querySelector(':scope > .org-node'))
+        .map((childBranch) => childBranch.querySelector(':scope > .org-node, :scope > .org-node-group-anchor'))
         .filter(Boolean);
 
       if (childrenWrap.classList.contains('org-branch-children-stack') && kids.length) {
         const first = kids[0].getBoundingClientRect();
         const last = kids[kids.length - 1].getBoundingClientRect();
-        const spineX = first.left - containerRect.left + scrollX - 10;
-        const lastCy = last.top + last.height / 2 - containerRect.top + scrollY;
-        addLine(`M ${px} ${py} V ${midY} H ${spineX} V ${lastCy}`);
+        const wrapRect = childrenWrap.getBoundingClientRect();
+        // Spine lives inside the stack’s padding gutter — never outside the chart (no clip).
+        const spineX = wrapRect.left - hostRect.left + 8;
+        const elbowY = py + 12;
+        const firstCy = first.top + first.height / 2 - hostRect.top;
+        const lastCy = last.top + last.height / 2 - hostRect.top;
+        const spineBot = Math.max(firstCy, lastCy);
+        addLine(`M ${px} ${py} V ${elbowY} H ${spineX} V ${spineBot}`);
         kids.forEach((childNode) => {
           const cRect = childNode.getBoundingClientRect();
-          const cy = cRect.top + cRect.height / 2 - containerRect.top + scrollY;
-          const cleft = cRect.left - containerRect.left + scrollX;
-          addLine(`M ${spineX} ${cy} H ${cleft}`);
+          const cy = cRect.top + cRect.height / 2 - hostRect.top;
+          const cleft = cRect.left - hostRect.left;
+          addLine(`M ${spineX} ${cy} H ${Math.max(cleft, spineX)}`);
         });
         return;
       }
 
       kids.forEach((childNode) => {
         const cRect = childNode.getBoundingClientRect();
-        const cx = cRect.left + cRect.width / 2 - containerRect.left + scrollX;
-        const cy = cRect.top - containerRect.top + scrollY;
-        addLine(`M ${px} ${py} V ${midY} H ${cx} V ${cy}`);
+        const cx = cRect.left + cRect.width / 2 - hostRect.left;
+        const cy = cRect.top - hostRect.top;
+        addLine(curveToChild(px, py, cx, cy));
       });
     });
-  
-    els.hierarchyTreeContainer.insertBefore(svg, treeEl);
+
+    host.insertBefore(svg, treeEl);
   }
-  
+
+  // Re-bind after drawOrgTreeLines is defined
+  window.__drawOrgTreeLines = drawOrgTreeLines;
+
   let orgTreeResizeTimer = null;
   window.addEventListener('resize', () => {
     if (state.activeView !== 'hierarchy') return;
     clearTimeout(orgTreeResizeTimer);
-    orgTreeResizeTimer = setTimeout(() => {
-      const treeEl = els.hierarchyTreeContainer.querySelector('.org-tree');
-      if (treeEl) drawOrgTreeLines(treeEl);
-    }, 150);
+    orgTreeResizeTimer = setTimeout(() => fitOrgChartToView('screen'), 120);
   });
+  window.addEventListener('afterprint', () => {
+    restoreOrgChartAfterPrint();
+  });
+
   // ─── Permissions (admin only) ──────────────────────────────────────────────────
   async function loadPermissions() {
     els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading employees…</td></tr>`;
     try {
       const employees = (await api('/employees'))
-        .filter((e) => !isClientUserRow(e) && e.is_active !== false);
+        .filter((e) => !isClientUserRow(e) && e.is_active !== false)
+        .sort((a, b) =>
+          String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+        );
       renderPermissionsTable(employees);
     } catch (err) { showToast(err.message, 'error'); }
   }
@@ -6431,7 +6960,10 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
     els.permissionsTableBody.innerHTML = '';
-    employees.forEach((emp) => {
+    const sorted = [...employees].sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+    );
+    sorted.forEach((emp) => {
       const tr = document.createElement('tr');
       const isAdminRow = emp.role === 'admin';
       tr.innerHTML = `
@@ -6499,7 +7031,9 @@ export async function mountTaskflowApp(opts = {}) {
       const data = await api('/master/nav-visibility');
       state.navVis = data.map || {};
       const roles = data.roles || ['admin', 'mis', 'employee', 'site', 'site_head'];
-      const modules = data.modules || [];
+      const modules = [...(data.modules || [])].sort((a, b) =>
+        String(a.label || a.key || '').localeCompare(String(b.label || b.key || ''), undefined, { sensitivity: 'base' })
+      );
       body.innerHTML = '';
       modules.forEach((mod) => {
         const tr = document.createElement('tr');
@@ -6607,12 +7141,13 @@ export async function mountTaskflowApp(opts = {}) {
     } catch (err) { showToast(err.message, 'error'); }
   }
   function renderSimpleNameTable(tbody, items) {
-    if (!items.length) {
+    const sorted = sortByLabel(items);
+    if (!sorted.length) {
       tbody.innerHTML = `<tr><td class="empty-state">None yet — add one above</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
-    items.forEach((item) => {
+    sorted.forEach((item) => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${escapeHtml(item.name)}</td>`;
       tbody.appendChild(tr);
@@ -6638,7 +7173,7 @@ export async function mountTaskflowApp(opts = {}) {
   });
   
   // ─── Manage Sites ─────────────────────────────────────────────────────────────
-  const DEFAULT_SITE_PROJECT_TYPES = ['Residential', 'Commercial', 'Industrial', 'Institutional'];
+  const DEFAULT_SITE_PROJECT_TYPES = ['Commercial', 'Industrial', 'Institutional', 'Residential'];
   let siteProjectTypeOptions = [...DEFAULT_SITE_PROJECT_TYPES];
 
   function mergeSiteProjectTypesFromSites(sites) {
@@ -7048,7 +7583,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!sel) return;
     const prev = sel.value;
     const sites = [...new Set((clients || []).map((c) => c.site_name).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b));
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     sel.innerHTML = '<option value="">All projects</option>';
     sites.forEach((s) => {
       const opt = document.createElement('option');
@@ -7063,7 +7598,8 @@ export async function mountTaskflowApp(opts = {}) {
     const q = (els.clientFilterQ?.value || '').trim().toLowerCase();
     const site = els.clientFilterSite?.value || '';
     const status = els.clientFilterStatus?.value || '';
-    return clientsCache.filter((c) => {
+    return clientsCache
+      .filter((c) => {
       if (site && String(c.site_name || '') !== site) return false;
       if (status === 'active' && c.is_active === false) return false;
       if (status === 'inactive' && c.is_active !== false) return false;
@@ -7076,7 +7612,10 @@ export async function mountTaskflowApp(opts = {}) {
         if (!hay.includes(q)) return false;
       }
       return true;
-    });
+    })
+      .sort((a, b) =>
+        String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+      );
   }
 
   function applyClientsFilter() {
@@ -7227,7 +7766,8 @@ export async function mountTaskflowApp(opts = {}) {
     weeklyField:   () => document.getElementById('weeklyDaysField'),
     monthlyField:  () => document.getElementById('monthlyDayField'),
     monthlyDay:    () => document.getElementById('rec-monthly-day'),
-    monthlyDayTo:  () => document.getElementById('rec-monthly-day-to'),
+    monthlyFrom:   () => document.getElementById('rec-monthly-from'),
+    monthlyTo:     () => document.getElementById('rec-monthly-to'),
     startDate:     () => document.getElementById('rec-start'),
     endDate:       () => document.getElementById('rec-end'),
     checkpointsList: () => document.getElementById('checkpointsList'),
@@ -7239,10 +7779,6 @@ export async function mountTaskflowApp(opts = {}) {
     empList:       () => document.getElementById('employeeRecurringList'),
     adminTable:    () => document.getElementById('recurringTasksTableBody'),
     adminCards:    () => document.getElementById('adminRecurringCards'),
-    filterPanel:   () => document.getElementById('recurringFilterPanel'),
-    filterProject: () => document.getElementById('recurring-filter-project'),
-    filterName:    () => document.getElementById('recurring-filter-name'),
-    clearFilters:  () => document.getElementById('clearRecurringFilters'),
     newTaskTypeRow:    () => document.getElementById('recNewTaskTypeRow'),
     newTaskTypeInput:  () => document.getElementById('recNewTaskTypeInput'),
     newTaskTypeSave:   () => document.getElementById('recNewTaskTypeSave'),
@@ -7251,12 +7787,44 @@ export async function mountTaskflowApp(opts = {}) {
   };
   
   let recurringSelectedFreq = '';
-  let adminRecurringTasksCache = [];
-  let recurringFiltersBound = false;
   
   function syncRecurringFreqFields() {
     if (recEls.weeklyField()) recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
     if (recEls.monthlyField()) recEls.monthlyField().hidden = recurringSelectedFreq !== 'Monthly';
+  }
+
+  function parseMonthlyDuration(raw, fallbackDay = 1) {
+    const text = String(raw || '').trim();
+    const rangeMatch = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+    let from;
+    let to;
+    if (rangeMatch) {
+      from = Number(rangeMatch[1]);
+      to = Number(rangeMatch[2]);
+    } else {
+      const first = Number(text.split(',')[0].trim());
+      from = first;
+      to = first;
+    }
+    if (!Number.isFinite(from) || from < 1 || from > 31) from = fallbackDay;
+    if (!Number.isFinite(to) || to < 1 || to > 31) to = from;
+    from = Math.min(31, Math.max(1, Math.floor(from)));
+    to = Math.min(31, Math.max(1, Math.floor(to)));
+    if (to < from) {
+      const swap = from;
+      from = to;
+      to = swap;
+    }
+    return { from, to };
+  }
+
+  function setMonthlyDurationFields(from, to) {
+    const f = Math.min(31, Math.max(1, Number(from) || 1));
+    let t = Math.min(31, Math.max(1, Number(to) || f));
+    if (t < f) t = f;
+    if (recEls.monthlyDay()) recEls.monthlyDay().value = String(f);
+    if (recEls.monthlyFrom()) recEls.monthlyFrom().value = String(f);
+    if (recEls.monthlyTo()) recEls.monthlyTo().value = String(t);
   }
 
   function initRecurringModal() {
@@ -7267,25 +7835,37 @@ export async function mountTaskflowApp(opts = {}) {
         btn.classList.add('selected');
         recurringSelectedFreq = btn.dataset.freq;
         syncRecurringFreqFields();
-        // Default monthly day from start date if empty/unset
-        if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay() && recEls.startDate()?.value) {
-          const d = Number(String(recEls.startDate().value).slice(8, 10));
-          if (d >= 1 && d <= 31) {
-            recEls.monthlyDay().value = String(d);
-            if (recEls.monthlyDayTo()) recEls.monthlyDayTo().value = String(d);
-          }
+        // Default monthly duration from start date (or keep 1–1)
+        if (recurringSelectedFreq === 'Monthly') {
+          const d = Number(String(recEls.startDate()?.value || '').slice(8, 10));
+          const day = d >= 1 && d <= 31 ? d : Number(recEls.monthlyDay()?.value || 1) || 1;
+          setMonthlyDurationFields(day, day);
         }
       });
     });
     recEls.startDate()?.addEventListener('change', () => {
-      if (recurringSelectedFreq !== 'Monthly' || !recEls.monthlyDay()) return;
+      if (recurringSelectedFreq !== 'Monthly') return;
       const d = Number(String(recEls.startDate().value || '').slice(8, 10));
       if (d >= 1 && d <= 31) {
-        recEls.monthlyDay().value = String(d);
-        if (recEls.monthlyDayTo() && Number(recEls.monthlyDayTo().value) === 1) {
-          recEls.monthlyDayTo().value = String(d);
-        }
+        // Only nudge "from" / day-of-month; keep existing "to" if still valid
+        const to = Number(recEls.monthlyTo()?.value || d);
+        setMonthlyDurationFields(d, Math.max(d, to));
       }
+    });
+    recEls.monthlyDay()?.addEventListener('change', () => {
+      const day = Number(recEls.monthlyDay()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || day);
+      setMonthlyDurationFields(day, Math.max(day, to));
+    });
+    recEls.monthlyFrom()?.addEventListener('change', () => {
+      const from = Number(recEls.monthlyFrom()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      setMonthlyDurationFields(from, Math.max(from, to));
+    });
+    recEls.monthlyTo()?.addEventListener('change', () => {
+      const from = Number(recEls.monthlyFrom()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      setMonthlyDurationFields(from, Math.max(from, to));
     });
   
     // Add checkpoint
@@ -7411,7 +7991,8 @@ export async function mountTaskflowApp(opts = {}) {
     // uncheck all days
     document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => c.checked = false);
     if (recEls.monthlyDay()) recEls.monthlyDay().value = '1';
-    if (recEls.monthlyDayTo()) recEls.monthlyDayTo().value = '1';
+    if (recEls.monthlyFrom()) recEls.monthlyFrom().value = '1';
+    if (recEls.monthlyTo()) recEls.monthlyTo().value = '1';
   
     if (task) {
       // Edit mode
@@ -7437,26 +8018,10 @@ export async function mountTaskflowApp(opts = {}) {
           c.checked = days.includes(Number(c.value));
         });
       }
-      if (recurringSelectedFreq === 'Monthly' && recEls.monthlyDay()) {
-        const raw = String(task.frequency_days || '').trim();
-        const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
-        let from;
-        let to;
-        if (rangeMatch) {
-          from = Number(rangeMatch[1]);
-          to = Number(rangeMatch[2]);
-        } else {
-          from = Number(String(raw).split(',')[0]);
-          to = from;
-        }
-        if (!Number.isFinite(from) || from < 1 || from > 31) {
-          from = Number(String(task.start_date || '').slice(8, 10)) || 1;
-        }
-        if (!Number.isFinite(to) || to < 1 || to > 31) to = from;
-        recEls.monthlyDay().value = String(Math.min(31, Math.max(1, from)));
-        if (recEls.monthlyDayTo()) {
-          recEls.monthlyDayTo().value = String(Math.min(31, Math.max(1, to)));
-        }
+      if (recurringSelectedFreq === 'Monthly') {
+        const fallback = Number(String(task.start_date || '').slice(8, 10)) || 1;
+        const { from, to } = parseMonthlyDuration(task.frequency_days, fallback);
+        setMonthlyDurationFields(from, to);
       }
       // Checkpoints
       (task.checkpoints || [])
@@ -7512,18 +8077,19 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     if (recurringSelectedFreq === 'Monthly') {
-      const from = Number(recEls.monthlyDay()?.value || 0);
-      const to = Number(recEls.monthlyDayTo()?.value || from);
-      if (!Number.isFinite(from) || from < 1 || from > 31) {
-        recEls.formMsg().textContent = 'Please select a valid from day (1–31)';
+      const from = Number(recEls.monthlyFrom()?.value || recEls.monthlyDay()?.value || 0);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      if (!Number.isFinite(from) || from < 1 || from > 31 || !Number.isFinite(to) || to < 1 || to > 31) {
+        recEls.formMsg().textContent = 'Please select a valid duration (from/to days 1–31)';
         recEls.formMsg().hidden = false;
         return;
       }
-      if (!Number.isFinite(to) || to < 1 || to > 31) {
-        recEls.formMsg().textContent = 'Please select a valid to day (1–31)';
+      if (to < from) {
+        recEls.formMsg().textContent = 'Duration "to" must be on or after "from"';
         recEls.formMsg().hidden = false;
         return;
       }
+      // Send [from, to] — backend stores as "14-17" and fires daily in that window
       freqDays.push(from, to);
     }
   
@@ -7573,81 +8139,23 @@ export async function mountTaskflowApp(opts = {}) {
     recEls.openBtn().hidden = !canManageRecurring;
     recEls.adminWrap().hidden = !canManageRecurring;
     recEls.empWrap().hidden = canManageRecurring;
-    if (recEls.filterPanel()) recEls.filterPanel().hidden = !canManageRecurring;
   
     if (canManageRecurring) {
-      bindRecurringFilters();
-      fillRecurringFilterProjects();
       await loadAdminRecurringTasks();
     } else {
       await loadEmployeeRecurringTasks();
     }
   }
   // ─── Admin view ───────────────────────────────────────────────────────────────
-
-  function fillRecurringFilterProjects() {
-    const sel = recEls.filterProject();
-    if (!sel) return;
-    const prev = sel.value;
-    const projects = [...(state.master?.projects || [])].sort((a, b) =>
-      String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })
-    );
-    sel.innerHTML = '<option value="">All projects</option>';
-    projects.forEach((p) => {
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.name || '—';
-      sel.appendChild(opt);
-    });
-    if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
-  }
-
-  function getFilteredAdminRecurringTasks() {
-    const projectId = String(recEls.filterProject()?.value || '').trim();
-    const nameQ = String(recEls.filterName()?.value || '').trim().toLowerCase();
-    return adminRecurringTasksCache.filter((task) => {
-      if (projectId) {
-        const tid = String(task.project_id || task.project?.id || '');
-        if (tid !== projectId) return false;
-      }
-      if (nameQ) {
-        const desc = String(task.description || '').toLowerCase();
-        if (!desc.includes(nameQ)) return false;
-      }
-      return true;
-    });
-  }
-
-  function applyAdminRecurringFilters() {
-    const filtered = getFilteredAdminRecurringTasks();
-    renderAdminRecurringTable(filtered);
-    renderAdminRecurringCards(filtered);
-  }
-
-  function bindRecurringFilters() {
-    if (recurringFiltersBound) return;
-    recurringFiltersBound = true;
-    recEls.filterProject()?.addEventListener('change', applyAdminRecurringFilters);
-    let nameTimer = null;
-    recEls.filterName()?.addEventListener('input', () => {
-      clearTimeout(nameTimer);
-      nameTimer = setTimeout(applyAdminRecurringFilters, 180);
-    });
-    recEls.clearFilters()?.addEventListener('click', () => {
-      if (recEls.filterProject()) recEls.filterProject().value = '';
-      if (recEls.filterName()) recEls.filterName().value = '';
-      applyAdminRecurringFilters();
-    });
-  }
   
   async function loadAdminRecurringTasks() {
     const tbody = recEls.adminTable();
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
     recEls.adminCards().innerHTML = `<div class="empty-state">Loading…</div>`;
     try {
       const tasks = await api('/recurring-tasks/all');
-      adminRecurringTasksCache = Array.isArray(tasks) ? tasks : [];
-      applyAdminRecurringFilters();
+      renderAdminRecurringTable(tasks);
+      renderAdminRecurringCards(tasks);
     } catch (err) { showToast(err.message, 'error'); }
   }
   
@@ -7658,30 +8166,15 @@ export async function mountTaskflowApp(opts = {}) {
       return `Weekly (${days})`;
     }
     if (task.frequency === 'Monthly') {
-      const raw = String(task.frequency_days || '').trim();
-      const rangeMatch = raw.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
-      let from;
-      let to;
-      if (rangeMatch) {
-        from = Number(rangeMatch[1]);
-        to = Number(rangeMatch[2]);
-      } else {
-        from = Number(String(raw).split(',')[0]);
-        to = from;
-      }
-      if (!Number.isFinite(from) || from < 1 || from > 31) {
-        from = Number(String(task.start_date || '').slice(8, 10)) || null;
-        to = from;
-      }
-      if (from) {
-        const suf = (d) =>
-          d === 1 || d === 21 || d === 31 ? 'st'
-            : d === 2 || d === 22 ? 'nd'
-              : d === 3 || d === 23 ? 'rd'
-                : 'th';
-        if (to && to !== from) return `Monthly (${from}${suf(from)}–${to}${suf(to)})`;
-        return `Monthly (${from}${suf(from)})`;
-      }
+      const fallback = Number(String(task.start_date || '').slice(8, 10)) || 1;
+      const { from, to } = parseMonthlyDuration(task.frequency_days, fallback);
+      const suf = (n) =>
+        n === 1 || n === 21 || n === 31 ? 'st'
+          : n === 2 || n === 22 ? 'nd'
+            : n === 3 || n === 23 ? 'rd'
+              : 'th';
+      if (from === to) return `Monthly (${from}${suf(from)})`;
+      return `Monthly (${from}${suf(from)}–${to}${suf(to)})`;
     }
     return task.frequency;
   }
@@ -7689,7 +8182,7 @@ export async function mountTaskflowApp(opts = {}) {
   function renderAdminRecurringTable(tasks) {
     const tbody = recEls.adminTable();
     if (!tasks.length) {
-      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No recurring tasks yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No recurring tasks yet</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -7698,7 +8191,6 @@ export async function mountTaskflowApp(opts = {}) {
       const cpCount = (task.checkpoints || []).length;
       tr.innerHTML = `
         <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
-        <td>${escapeHtml(task.project?.name ?? '—')}</td>
         <td style="max-width:200px">${escapeHtml(task.description?.slice(0,80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
         <td>${escapeHtml(freqLabel(task))}</td>
         <td style="font-size:12px">${escapeHtml(task.start_date ?? '—')} → ${escapeHtml(task.end_date ?? 'ongoing')}</td>
@@ -7733,7 +8225,6 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="task-card-body">
           <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
-          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project?.name ?? '—')}</div>
           <div class="task-detail-line"><span class="task-detail-label">Task:</span> ${escapeHtml(task.description?.slice(0,100) ?? '—')}${task.description?.length>100?'…':''}</div>
           <div class="task-detail-line"><span class="task-detail-label">Period:</span> ${escapeHtml(task.start_date)} → ${escapeHtml(task.end_date ?? 'ongoing')}</div>
           <div class="task-detail-line"><span class="task-detail-label">Checkpoints:</span> ${cpCount ? `${cpCount}` : 'None'}</div>
@@ -8092,7 +8583,6 @@ export async function mountTaskflowApp(opts = {}) {
       extraOption: { value: '__add_new__', label: '+ Add new task type…' }
     });
     fillSelect(recEls.project(), state.master.projects, { placeholder: 'Select Project' });
-    fillRecurringFilterProjects();
     syncRecurringEmployeeDropdown();
     const deptSel = recEls.department();
     if (deptSel && !deptSel.dataset.deptFilterBound) {
@@ -8104,7 +8594,7 @@ export async function mountTaskflowApp(opts = {}) {
   // ─── DRAWINGS MODULE ───────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════
   
-  const DRAWING_CATEGORIES = ['Layout','Presentation','Architectural','Structural','MEP','Others'];
+  const DRAWING_CATEGORIES = ['Architectural', 'Layout', 'MEP', 'Others', 'Presentation', 'Structural'];
   
   // ─── Add Drawing View ────────────────────────────────────────────────
   function renderDrawingAddView() {
@@ -8114,27 +8604,13 @@ export async function mountTaskflowApp(opts = {}) {
     // Load projects for dropdown
     api('/master/projects').then(projects => {
       const projSel = view.querySelector('#drw-project');
-      if (projSel) {
-        projSel.innerHTML = '<option value="">-- Select Project --</option>';
-        (projects || []).forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.id; opt.textContent = p.name;
-          projSel.appendChild(opt);
-        });
-      }
+      if (projSel) fillSelect(projSel, projects || [], { placeholder: '-- Select Project --' });
     }).catch(() => {});
   
     // Load verifiers/heads for dropdown
     api('/master/verifiers').then(users => {
       const headSel = view.querySelector('#drw-head');
-      if (headSel) {
-        headSel.innerHTML = '<option value="">-- Select Head --</option>';
-        (users || []).forEach(u => {
-          const opt = document.createElement('option');
-          opt.value = u.id; opt.textContent = u.full_name;
-          headSel.appendChild(opt);
-        });
-      }
+      if (headSel) fillSelect(headSel, users || [], { placeholder: '-- Select Head --', labelKey: 'full_name' });
     }).catch(() => {});
   
     // Category change → update subcategory
@@ -8987,115 +9463,28 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  /** Shared print → Save as PDF (full multi-page, no scroll clip). */
-  function openReportPrintWindow(reportEl, { title, landscape = true } = {}) {
-    if (!reportEl) return showToast('Generate the report first', 'error');
+  function printWorkDashboardPdf() {
+    const report = document.getElementById('wvdReport');
+    if (!report) return showToast('Generate the dashboard first', 'error');
     const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-
+    if (!win) return showToast('Allow pop-ups to download PDF', 'error');
     const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map((el) => el.outerHTML)
       .join('\n');
-    const pageSize = landscape ? 'A4 landscape' : 'A4';
-
-    win.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8" />
-      <title>${escapeHtml(title || 'Report')}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>Work & Verification Dashboard</title>
       ${styles}
       <style>
-        html, body {
-          background: #fff !important;
-          margin: 0 !important;
-          padding: 16px !important;
-          height: auto !important;
-          max-height: none !important;
-          overflow: visible !important;
-        }
-        .dr-report, .wvd {
-          box-shadow: none !important;
-          border: none !important;
-          max-height: none !important;
-          overflow: visible !important;
-          height: auto !important;
-        }
-        .dr-table-wrap,
-        .wvd-table-wrap,
-        .wvd-emp-grid,
-        .wvd-ver-grid,
-        .wvd-bars,
-        .wvd-corr-list,
-        .table-scroll,
-        .td-sheet-scroll {
-          overflow: visible !important;
-          max-height: none !important;
-          height: auto !important;
-        }
-        .dr-table, .wvd-matrix {
-          min-width: 0 !important;
-          width: 100% !important;
-        }
-        .dr-table th, .dr-table td,
-        .wvd-matrix th, .wvd-matrix td {
-          white-space: normal !important;
-        }
-        thead { display: table-header-group; }
-        tfoot { display: table-footer-group; }
-        tr, .wvd-sec, .wvd-stat, .wvd-emp-col, .wvd-ver-col, .wvd-corr-row {
-          page-break-inside: avoid;
-          break-inside: avoid;
-        }
-        table { page-break-inside: auto; break-inside: auto; }
-        @page { size: ${pageSize}; margin: 8mm; }
+        body { background: #F7F4EE !important; margin: 0; padding: 24px; }
+        .wvd { box-shadow: none !important; border: none !important; }
+        @page { size: A4; margin: 12mm; }
         @media print {
-          html, body {
-            height: auto !important;
-            overflow: visible !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          .dr-table-wrap,
-          .wvd-table-wrap {
-            overflow: visible !important;
-            max-height: none !important;
-          }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       </style>
-    </head><body>${reportEl.outerHTML}
-      <script>
-        (function () {
-          function go() {
-            try { window.focus(); } catch (e) {}
-            setTimeout(function () { window.print(); }, 400);
-          }
-          function waitSheets() {
-            var links = Array.prototype.slice.call(document.querySelectorAll('link[rel="stylesheet"]'));
-            if (!links.length) return Promise.resolve();
-            return Promise.all(links.map(function (l) {
-              return new Promise(function (resolve) {
-                if (l.sheet) return resolve();
-                l.addEventListener('load', resolve);
-                l.addEventListener('error', resolve);
-                setTimeout(resolve, 1500);
-              });
-            }));
-          }
-          function ready() {
-            var fonts = (document.fonts && document.fonts.ready) ? document.fonts.ready : Promise.resolve();
-            Promise.all([waitSheets(), fonts]).then(go).catch(go);
-          }
-          if (document.readyState === 'complete') ready();
-          else window.addEventListener('load', ready);
-        })();
-      <\/script>
+    </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
     </body></html>`);
     win.document.close();
-  }
-
-  function printWorkDashboardPdf() {
-    openReportPrintWindow(document.getElementById('wvdReport'), {
-      title: 'Work & Verification Dashboard',
-      landscape: true,
-    });
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -9405,12 +9794,14 @@ export async function mountTaskflowApp(opts = {}) {
     const personId = personSel?.value || '';
     const dept = deptSel?.value || '';
     if (personSel) {
+      const sortedEmps = sortByLabel(emps, 'name');
       personSel.innerHTML = ['<option value="">All employees</option>']
-        .concat(emps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`)).join('');
+        .concat(sortedEmps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`)).join('');
       personSel.value = personId;
     }
     if (deptSel && !deptSel.dataset.filled) {
-      const depts = [...new Set(emps.map((e) => e.department || e.portfolio?.department).filter(Boolean))].sort();
+      const depts = [...new Set(emps.map((e) => e.department || e.portfolio?.department).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
       deptSel.innerHTML = ['<option value="">All departments</option>']
         .concat(depts.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)).join('');
       deptSel.dataset.filled = '1';
@@ -9504,7 +9895,7 @@ export async function mountTaskflowApp(opts = {}) {
     }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
 
     return `<div class="dr-report" id="drReport">
-      <h1 class="dr-title">Task Report</h1>
+      <h1 class="dr-title">Task Delay Report</h1>
       <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
         · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
         · <span class="dr-ontime">${s.on_time || 0} on time</span>
@@ -9544,7 +9935,7 @@ export async function mountTaskflowApp(opts = {}) {
     await fillDelayEmployees();
     const range = document.getElementById('drRange')?.value || 'month';
     const emp = document.getElementById('drEmployee')?.value || '';
-    body.innerHTML = '<div class="empty-state">Loading Task Report…</div>';
+    body.innerHTML = '<div class="empty-state">Loading Task Delay Report…</div>';
     try {
       const qs = new URLSearchParams({ range });
       if (emp) qs.set('employee_id', emp);
@@ -9661,10 +10052,20 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function printEmpReportPdf() {
-    openReportPrintWindow(document.getElementById('erReport'), {
-      title: 'Emp Report',
-      landscape: true,
-    });
+    const report = document.getElementById('erReport');
+    if (!report) return showToast('Generate the report first', 'error');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((el) => el.outerHTML).join('\n');
+    win.document.write(`<!DOCTYPE html><html><head><title>Emp Report</title>${styles}
+      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
+      @page{size:A4 landscape;margin:10mm}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
+      </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
+      </body></html>`);
+    win.document.close();
   }
 
   async function loadMdoDelayReport() {
@@ -9712,10 +10113,20 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
 
   function printDelayReportPdf() {
-    openReportPrintWindow(document.getElementById('drReport'), {
-      title: 'Task Report',
-      landscape: true,
-    });
+    const report = document.getElementById('drReport');
+    if (!report) return showToast('Generate the report first', 'error');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((el) => el.outerHTML).join('\n');
+    win.document.write(`<!DOCTYPE html><html><head><title>Task Delay Report</title>${styles}
+      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
+      @page{size:A4 landscape;margin:10mm}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
+      </head><body>${report.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
+      </body></html>`);
+    win.document.close();
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
@@ -9728,7 +10139,7 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('erTo')?.addEventListener('change', () => loadEmpReport());
   document.getElementById('erPdfBtn')?.addEventListener('click', () => printEmpReportPdf());
   document.getElementById('drWaBtn')?.addEventListener('click', async () => {
-    if (!confirm('Send last-week Task Report on WhatsApp to each employee + their head now?')) return;
+    if (!confirm('Send last-week Task Delay Report on WhatsApp to each employee + their head now?')) return;
     try {
       showToast('Sending WhatsApp reports…', 'success');
       const result = await api('/delay-report/send-monday-now', { method: 'POST' });
@@ -9789,13 +10200,13 @@ export async function mountTaskflowApp(opts = {}) {
     const perSel = document.getElementById('fmsPerson');
     const uniq = (list) => [...new Map(list.filter((x) => x.id).map((x) => [String(x.id), x])).values()];
     if (projSel && !projSel.dataset.filled) {
-      const projects = uniq(rows.map((r) => ({ id: r.project_id, name: r.project })));
+      const projects = sortByLabel(uniq(rows.map((r) => ({ id: r.project_id, name: r.project }))));
       projSel.innerHTML = ['<option value="">All projects</option>']
         .concat(projects.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
       projSel.dataset.filled = '1';
     }
     if (perSel && !perSel.dataset.filled) {
-      const people = uniq(rows.map((r) => ({ id: r.person_id, name: r.person })));
+      const people = sortByLabel(uniq(rows.map((r) => ({ id: r.person_id, name: r.person }))));
       perSel.innerHTML = ['<option value="">All people</option>']
         .concat(people.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
       perSel.dataset.filled = '1';
@@ -10362,10 +10773,6 @@ export async function mountTaskflowApp(opts = {}) {
       clearInterval(_chatPollTimer);
       _chatPollTimer = null;
     }
-    if (window._chatPollTimer) {
-      clearInterval(window._chatPollTimer);
-      window._chatPollTimer = null;
-    }
   }
 
   function startChatPoll() {
@@ -10385,7 +10792,6 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('team-chat', chatUnread?.total || 0);
       } catch (_) {}
     }, 8000);
-    window._chatPollTimer = _chatPollTimer;
   }
 
   async function loadTeamChatRoomsOnly() {
@@ -10868,16 +11274,10 @@ export async function mountTaskflowApp(opts = {}) {
       if (data.hint) showToast(data.hint, 'error');
       const projects = data.projects || [];
       const members = data.members || [];
-      const fill = (sel, items, ph) => {
+      const fill = (sel, items, ph, labelKey = 'name') => {
         const el = document.getElementById(sel);
         if (!el) return;
-        el.innerHTML = `<option value="">${ph}</option>`;
-        items.forEach((p) => {
-          const opt = document.createElement('option');
-          opt.value = p.id;
-          opt.textContent = p.name || p.full_name;
-          el.appendChild(opt);
-        });
+        fillSelect(el, items, { placeholder: ph, labelKey });
       };
       fill('pmg-project', projects, 'Select project');
       fill('pmg-from', projects, 'From project');
@@ -10885,8 +11285,8 @@ export async function mountTaskflowApp(opts = {}) {
       const emps = state.master.employees?.length
         ? state.master.employees
         : await api('/master/employees').catch(() => []);
-      fill('pmg-employee', emps, 'Select employee');
-      fill('pmg-shift-emp', emps, 'Select employee');
+      fill('pmg-employee', emps, 'Select employee', 'full_name');
+      fill('pmg-shift-emp', emps, 'Select employee', 'full_name');
 
       const box = document.getElementById('pmgMembers');
       if (box) {
@@ -10981,9 +11381,5 @@ export function unmountTaskflowApp() {
   if (window._timerInterval) {
     clearInterval(window._timerInterval);
     window._timerInterval = null;
-  }
-  if (window._chatPollTimer) {
-    clearInterval(window._chatPollTimer);
-    window._chatPollTimer = null;
   }
 }

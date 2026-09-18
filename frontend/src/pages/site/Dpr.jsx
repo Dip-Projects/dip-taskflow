@@ -625,6 +625,10 @@ table tbody tr:nth-child(even) td{background:#f8fafc;}
 .bullet-arrow-sub{color:#c8641a;font-size:9px;}
 .bullet-item.bullet-sub .bullet-text{font-size:14px;color:#334155;}
 .bullet-text{font-size:15px;color:#0f172a;line-height:1.45;}
+.bullet-item.bullet-title{gap:0;padding:8px 0 4px;}
+.bullet-item.bullet-title .bullet-text{
+  font-weight:800;font-size:15.5px;color:#0f172a;letter-spacing:.2px;
+}
 .summary-cat-body{border:1.5px solid #cbd5e1;border-top:none;border-radius:0 0 4px 4px;padding:8px 16px;background:#fff;margin-bottom:10px;}
 .section-wrap{margin-bottom:14px;border:1.5px solid #cbd5e1;page-break-inside:avoid;break-inside:avoid;}
 
@@ -726,13 +730,26 @@ function bulletBlock(txt) {
   const lines = txt.split("\n").filter((l) => l.trim());
   if (!lines.length) return "";
   return `<div class="bullet-list">${lines
-    .map(
-      (l) =>
-        `<div class="bullet-item">
+    .map((l) => {
+      const bulletMatch = l.match(/^(\s*)([•◦\-*])\s*/);
+      if (!bulletMatch) {
+        return `<div class="bullet-item bullet-title">
+      <span class="bullet-text">${esc(l.trim())}</span>
+    </div>`;
+      }
+      const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
+      const text = esc(l.slice(bulletMatch[0].length).trim());
+      if (isSub) {
+        return `<div class="bullet-item bullet-sub">
+      <span class="bullet-arrow bullet-arrow-sub">&#8226;</span>
+      <span class="bullet-text">${text}</span>
+    </div>`;
+      }
+      return `<div class="bullet-item">
       <span class="bullet-arrow">&#9658;</span>
-      <span class="bullet-text">${esc(l.replace(/^[•\-*]\s*/, "").trim())}</span>
-    </div>`,
-    )
+      <span class="bullet-text">${text}</span>
+    </div>`;
+    })
     .join("")}</div>`;
 }
 
@@ -741,22 +758,28 @@ function buildSummaryHtml(summary) {
   const lines = summary.replace(/\n{2,}/g, "\n").split("\n").filter((l) => l.trim());
   let html = "";
   let currentCat = "";
-  let bullets = []; // { text, sub }
+  let bullets = []; // { text, sub, title }
 
   function flush() {
     if (!currentCat && !bullets.length) return;
     const bHtml = bullets
-      .map((b) =>
-        b.sub
-          ? `<div class="bullet-item bullet-sub">
+      .map((b) => {
+        if (b.title) {
+          return `<div class="bullet-item bullet-title">
+              <span class="bullet-text">${esc(b.text)}</span>
+            </div>`;
+        }
+        if (b.sub) {
+          return `<div class="bullet-item bullet-sub">
               <span class="bullet-arrow bullet-arrow-sub">&#8226;</span>
               <span class="bullet-text">${esc(b.text)}</span>
-            </div>`
-          : `<div class="bullet-item">
+            </div>`;
+        }
+        return `<div class="bullet-item">
               <span class="bullet-arrow">&#9658;</span>
               <span class="bullet-text">${esc(b.text)}</span>
-            </div>`,
-      )
+            </div>`;
+      })
       .join("");
     if (currentCat) {
       html += `<div class="summary-cat">${esc(currentCat.replace(/\*/g, "").trim())}</div>
@@ -773,9 +796,15 @@ function buildSummaryHtml(summary) {
       flush();
       currentCat = trimmed;
     } else {
-      const isSub = /^\s*◦/.test(line) || /^ {2,}/.test(line);
-      const cleanText = line.replace(/^\s*[•◦]\s*/, "").trim();
-      bullets.push({ text: cleanText, sub: isSub });
+      // Lines without a bullet mark are titles (bold, no arrow).
+      const bulletMatch = line.match(/^(\s*)([•◦])\s*/);
+      if (!bulletMatch) {
+        bullets.push({ text: trimmed, sub: false, title: true });
+        return;
+      }
+      const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
+      const cleanText = line.slice(bulletMatch[0].length).trim();
+      bullets.push({ text: cleanText, sub: isSub, title: false });
     }
   });
   flush();
@@ -1664,7 +1693,8 @@ async function dbFetch(table, col = "name") {
   return (data || [])
     .map((r) => r[col])
     .filter(Boolean)
-    .map(titleCase);
+    .map(titleCase)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 async function dbInsert(table, payload) {
   const { error } = await supabase.from(table).insert(payload);
@@ -1725,7 +1755,7 @@ async function getManpowerTypesForScope(rawScope) {
         .filter(Boolean)
         .map(titleCase),
     ),
-  ];
+  ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 // REPLACE getManpowerTypesByCategory
@@ -1739,7 +1769,8 @@ async function getManpowerTypesByCategory(category) {
   return (data || [])
     .map((r) => r.manpowertype)
     .filter(Boolean)
-    .map(titleCase);
+    .map(titleCase)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 // REPLACE getAllCategories
@@ -1751,7 +1782,8 @@ async function getAllCategories() {
   return (data || [])
     .map((r) => r.category)
     .filter(Boolean)
-    .map(titleCase);
+    .map(titleCase)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 // REPLACE getEngineersForSite
@@ -1766,7 +1798,7 @@ async function getEngineersForSite(site) {
       return data
         .map((r) => titleCase(r.full_name || r.user_name || ""))
         .filter(Boolean)
-        .sort();
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
     }
   } catch {
     /* table optional */
@@ -1954,6 +1986,9 @@ function AddPopup({
 
 function SelectWithAdd({ value, onChange, options, placeholder, onAdd }) {
   const [showPopup, setShowPopup] = useState(false);
+  const sortedOptions = [...(options || [])].sort((a, b) =>
+    String(a).localeCompare(String(b), undefined, { sensitivity: "base" })
+  );
   return (
     <>
       <select
@@ -1965,7 +2000,7 @@ function SelectWithAdd({ value, onChange, options, placeholder, onAdd }) {
         }}
       >
         <option value="">{placeholder}</option>
-        {options.map((o) => (
+        {sortedOptions.map((o) => (
           <option key={o} value={o}>
             {o}
           </option>
@@ -2799,7 +2834,9 @@ function EquipmentSection({ list, setList }) {
   // Equipment names for selected source
   const srcOpts =
     source && master[source]
-      ? [...new Set(master[source].map((e) => e.name))]
+      ? [...new Set(master[source].map((e) => e.name))].sort((a, b) =>
+          String(a).localeCompare(String(b), undefined, { sensitivity: "base" })
+        )
       : [];
 
   // When equipment name changes, auto-fill unit from master
@@ -4110,7 +4147,11 @@ function DprForm({ user }) {
         setSite(sites[0]);
       }
 
-      setUserSites(sites);
+      setUserSites(
+        [...sites].sort((a, b) =>
+          String(a).localeCompare(String(b), undefined, { sensitivity: "base" })
+        )
+      );
       setLoadingSites(false);
     })();
   }, [user]);
@@ -4456,8 +4497,13 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         .split("\n")
         .filter((l) => l.trim())
         .forEach((l) => {
-          const isSub = /^\s*◦/.test(l) || /^ {2,}/.test(l);
-          const clean = l.replace(/^\s*[•◦]\s*/, "").trim();
+          const bulletMatch = l.match(/^(\s*)([•◦])\s*/);
+          if (!bulletMatch) {
+            msg += `*${l.trim()}*\n`;
+            return;
+          }
+          const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
+          const clean = l.slice(bulletMatch[0].length).trim();
           msg += isSub ? `    ◦ ${clean}\n` : `• ${clean}\n`;
         });
     }

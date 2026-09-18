@@ -118,6 +118,18 @@ const Ico = {
   ),
 };
 
+const NAV = [
+  { key: 'dashboard', label: 'Dashboard', icon: Ico.dashboard },
+  { key: 'employees', label: 'Employees', icon: Ico.users },
+  { key: 'attendance', label: 'Attendance', icon: Ico.clock },
+  { key: 'leaves', label: 'Leaves', icon: Ico.leave },
+  { key: 'recruitment', label: 'Recruitment', icon: Ico.recruit },
+  { key: 'insurance', label: 'Insurance', icon: Ico.shield },
+  { key: 'payroll', label: 'Payroll', icon: Ico.payroll },
+  { key: 'letters', label: 'Letters', icon: Ico.letter },
+  { key: 'documents', label: 'Documents', icon: Ico.docs },
+];
+
 function safePathSeg(s) {
   return (
     String(s || 'unknown')
@@ -148,18 +160,6 @@ async function makeQrDataUrl(text) {
   }
 }
 
-const NAV = [
-  { key: 'dashboard', label: 'Dashboard', icon: Ico.dashboard },
-  { key: 'employees', label: 'Employees', icon: Ico.users },
-  { key: 'attendance', label: 'Attendance', icon: Ico.clock },
-  { key: 'leaves', label: 'Leaves', icon: Ico.leave },
-  { key: 'recruitment', label: 'Recruitment', icon: Ico.recruit },
-  { key: 'insurance', label: 'Insurance', icon: Ico.shield },
-  { key: 'payroll', label: 'Payroll', icon: Ico.payroll },
-  { key: 'letters', label: 'Letters', icon: Ico.letter },
-  { key: 'documents', label: 'Documents', icon: Ico.docs },
-];
-
 const RECRUIT_STATUSES = [
   'Request Received',
   'Post Create',
@@ -175,17 +175,17 @@ const RECRUIT_STATUSES = [
 
 const DOC_TYPES = [
   'Aadhaar',
-  'PAN',
+  'Bank details',
   'CV',
+  'Education certificate',
+  'Experience letter',
+  'Insurance',
+  'Offer letter copy',
+  'Other',
+  'PAN',
+  'PF / ESI',
   'Photo',
   'Salary slip',
-  'Insurance',
-  'PF / ESI',
-  'Bank details',
-  'Offer letter copy',
-  'Experience letter',
-  'Education certificate',
-  'Other',
 ];
 
 function todayISO() {
@@ -375,32 +375,32 @@ function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onS
 }
 
 const HR_DEPARTMENTS_FALLBACK = [
+  'Accounts',
+  'Admin',
   'Engg. Division',
+  'General',
+  'HR',
   'MDO OFFICE',
   'PMC',
   'Sales',
-  'Accounts',
-  'HR',
-  'Admin',
-  'General',
 ];
 
 const HR_DESIGNATIONS_FALLBACK = [
-  'Site Engineer',
-  'Site Incharge',
-  'Site Head',
-  'SITE HEAD',
-  'Team lead',
   'Coordinator',
-  'Office Head',
+  'EA',
   'Estimator',
-  'Sr Estimator',
   'JR.ESTIMATOR',
   'Jr. Estimator',
   'MIS',
-  'EA',
+  'Office Head',
+  'SITE HEAD',
   'Sales Executive',
+  'Site Engineer',
+  'Site Head',
+  'Site Incharge',
+  'Sr Estimator',
   'Staff',
+  'Team lead',
 ];
 
 /** Select + optional custom designation via "+" */
@@ -410,6 +410,7 @@ function DesignationPicker({ value, onChange, designations, required }) {
   ['Estimator', 'Sr Estimator'].forEach((d) => {
     if (!list.includes(d)) list.push(d);
   });
+  list.sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const inList = list.includes(value);
   const [customMode, setCustomMode] = useState(!inList && !!value);
 
@@ -480,8 +481,10 @@ function asEmpShape(s) {
 }
 
 function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, designations }) {
-  const depts = departments?.length ? departments : HR_DEPARTMENTS_FALLBACK;
-  const desigs = designations?.length ? designations : HR_DESIGNATIONS_FALLBACK;
+  const depts = [...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK)]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  const desigs = [...(designations?.length ? designations : HR_DESIGNATIONS_FALLBACK)]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const [busy, setBusy] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [qrModal, setQrModal] = useState(null); // { title, url, qr }
@@ -495,7 +498,8 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
     email: '',
   });
 
-  const filtered = staff.filter((u) => {
+  const filtered = staff
+    .filter((u) => {
     const blob = `${u.department || ''} ${u.designation || ''} ${u.role || ''} ${u.username || ''}`.toLowerCase();
     if (/\bclient\b/.test(blob)) return false;
     const s = q.trim().toLowerCase();
@@ -507,7 +511,10 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
       (u.username || '').toLowerCase().includes(s) ||
       (u.whatsapp_number || '').includes(s)
     );
-  });
+  })
+    .sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+    );
 
   const openOnboardQr = async (emp) => {
     setBusy(true);
@@ -741,8 +748,23 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
                       <td>{u.whatsapp_number || '—'}</td>
                       <td>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          <button type="button" className="hr-btn ghost" disabled={busy} onClick={() => openOnboardQr(u)}>
-                            QR
+                          <button
+                            type="button"
+                            className="hr-btn ghost hr-btn-icon"
+                            disabled={busy}
+                            onClick={() => openOnboardQr(u)}
+                            title="Joining form QR"
+                            aria-label="Joining form QR"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <rect x="3" y="3" width="7" height="7" rx="1" />
+                              <rect x="14" y="3" width="7" height="7" rx="1" />
+                              <rect x="3" y="14" width="7" height="7" rx="1" />
+                              <path d="M14 14h3v3h-3z" />
+                              <path d="M20 14v3" />
+                              <path d="M14 20h3" />
+                              <path d="M20 20h.01" />
+                            </svg>
                           </button>
                           {u.joining_form_submitted_at ? (
                             <button type="button" className="hr-btn ok" disabled={busy} onClick={() => downloadJoiningPdf(u)}>
@@ -760,7 +782,22 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
                       </td>
                       <td>
                         {u.source === 'hr_only' ? (
-                          <button type="button" className="hr-btn ghost" disabled={busy} onClick={() => remove(u.id, u.full_name, u.source)}>Del</button>
+                          <button
+                            type="button"
+                            className="hr-btn ghost hr-btn-icon hr-btn-icon--danger"
+                            disabled={busy}
+                            onClick={() => remove(u.id, u.full_name, u.source)}
+                            title="Delete"
+                            aria-label="Delete"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          </button>
                         ) : '—'}
                       </td>
                     </tr>
@@ -855,16 +892,25 @@ function AttendanceView() {
 
   return (
     <div className="hr-panel">
-      <div className="hr-toolbar">
-        <label>
-          From{' '}
+      <div className="hr-toolbar hr-date-row">
+        <label className="hr-field">
+          <span className="hr-field-label">From</span>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         </label>
-        <label>
-          To{' '}
+        <label className="hr-field">
+          <span className="hr-field-label">To</span>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / site…" />
+        <label className="hr-field hr-field--grow">
+          <span className="hr-field-label">Search</span>
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name / site…"
+            autoComplete="off"
+          />
+        </label>
         <button type="button" className="hr-btn ghost" onClick={load}>Refresh</button>
       </div>
       {error && <div className="hr-error">{error}</div>}
@@ -1201,32 +1247,21 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
 
       {subTab === 'candidates' && (
         <>
-          <div
-            className="hr-apply-qr"
-            style={{
-              display: 'flex',
-              gap: 16,
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              marginBottom: 18,
-              padding: 14,
-              border: '1px solid var(--hr-line, #e2d5c6)',
-              borderRadius: 12,
-              background: '#fffaf5',
-            }}
-          >
-            {applyQr?.qr ? (
-              <img src={applyQr.qr} alt="Apply QR" width={140} height={140} />
-            ) : (
-              <div style={{ width: 140, height: 140, background: '#f5f0eb', borderRadius: 8 }} />
-            )}
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: '1rem' }}>Candidate application QR / link</div>
+          <div className="hr-apply-qr">
+            <div className="hr-apply-qr-code">
+              {applyQr?.qr ? (
+                <img src={applyQr.qr} alt="Apply QR" width={140} height={140} />
+              ) : (
+                <div className="hr-apply-qr-placeholder" />
+              )}
+            </div>
+            <div className="hr-apply-qr-body">
+              <div className="hr-apply-qr-title">Candidate application QR / link</div>
               <p className="hr-sub" style={{ margin: '0 0 8px' }}>
                 Candidate form fill kare → CV / Aadhaar / PAN / Photo Documents me save ho jayenge.
               </p>
-              <div style={{ fontSize: '0.82rem', wordBreak: 'break-all', marginBottom: 8 }}>{applyUrl}</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div className="hr-apply-qr-url">{applyUrl}</div>
+              <div className="hr-apply-qr-actions">
                 <button
                   type="button"
                   className="hr-btn"
@@ -1237,7 +1272,7 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
                 >
                   Copy link
                 </button>
-                <a className="hr-btn ghost" href={applyUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                <a className="hr-btn ghost" href={applyUrl} target="_blank" rel="noreferrer">
                   Open form
                 </a>
               </div>
@@ -1280,15 +1315,52 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
                         <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
                         <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
                         <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            {c.application ? (
-                              <button type="button" className="hr-btn ghost" onClick={() => setDetail(c)}>View form</button>
-                            ) : null}
-                            {docs.map((d) => (
-                              <a key={`${d.label}-${d.url}`} href={d.url} target="_blank" rel="noreferrer">{d.label}</a>
-                            ))}
-                            {!c.application && !docs.length ? '—' : null}
-                          </div>
+                          {(c.application || docs.length) ? (
+                            <div className="hr-cand-docs" role="group" aria-label="Form and documents">
+                              {c.application ? (
+                                <button
+                                  type="button"
+                                  className="hr-cand-doc hr-cand-doc--form"
+                                  onClick={() => setDetail(c)}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <polyline points="14 2 14 8 20 8" />
+                                    <line x1="8" y1="13" x2="16" y2="13" />
+                                    <line x1="8" y1="17" x2="13" y2="17" />
+                                  </svg>
+                                  View form
+                                </button>
+                              ) : null}
+                              {docs.map((d) => (
+                                <a
+                                  key={`${d.label}-${d.url}`}
+                                  className={`hr-cand-doc${d.label === 'CV' ? ' hr-cand-doc--cv' : ''}`}
+                                  href={d.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title={`Open ${d.label}`}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                    {d.label === 'CV' ? (
+                                      <>
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                        <circle cx="12" cy="13" r="2" />
+                                        <path d="M8 18c0-1.5 1.8-2.5 4-2.5s4 1 4 2.5" />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                      </>
+                                    )}
+                                  </svg>
+                                  {d.label}
+                                </a>
+                              ))}
+                            </div>
+                          ) : '—'}
                         </td>
                         <td>
                           <input
@@ -1352,15 +1424,21 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
           <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" style={{ maxWidth: 560, maxHeight: '85vh', overflow: 'auto' }}>
             <h3 style={{ marginTop: 0 }}>{detail.candidate_name}</h3>
             {appDocs(detail).length ? (
-              <div style={{ marginBottom: 12 }}>
+              <div className="hr-cand-docs-modal" style={{ marginBottom: 12 }}>
                 <strong style={{ fontSize: '0.85rem' }}>Documents</strong>
-                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                <div className="hr-cand-docs" style={{ marginTop: 8 }}>
                   {appDocs(detail).map((d) => (
-                    <li key={`${d.label}-${d.url}`}>
-                      <a href={d.url} target="_blank" rel="noreferrer">{d.label}</a>
-                    </li>
+                    <a
+                      key={`${d.label}-${d.url}`}
+                      className={`hr-cand-doc${d.label === 'CV' ? ' hr-cand-doc--cv' : ''}`}
+                      href={d.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {d.label}
+                    </a>
                   ))}
-                </ul>
+                </div>
               </div>
             ) : null}
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.78rem', background: '#f7f1ea', padding: 10, borderRadius: 8 }}>
@@ -1843,7 +1921,25 @@ function DocumentsView({ employees, user }) {
             </select>
           </label>
           <label>Title<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-          <label>File<input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} required /></label>
+          <div className="full hr-file">
+            <span className="hr-field-label">Attach document</span>
+            <div className="hr-file-box">
+              <label className="hr-file-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+                Choose file
+                <input
+                  type="file"
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
+                  required
+                />
+              </label>
+              <span className={`hr-file-name${file ? '' : ' is-empty'}`}>
+                {file ? file.name : 'No file selected — PDF / image / docs'}
+              </span>
+            </div>
+          </div>
           <div className="actions">
             <button type="submit" className="hr-btn" disabled={busy}>{busy ? 'Uploading…' : 'Upload to folder'}</button>
             <button type="button" className="hr-btn ghost" onClick={load}>Refresh folders</button>
@@ -2172,8 +2268,10 @@ function PayrollView({ employees }) {
 }
 
 function LettersView({ employees, onEmployeesReload, departments, designations }) {
-  const depts = departments?.length ? departments : HR_DEPARTMENTS_FALLBACK;
-  const desigs = designations?.length ? designations : HR_DESIGNATIONS_FALLBACK;
+  const depts = [...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK)]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  const desigs = [...(designations?.length ? designations : HR_DESIGNATIONS_FALLBACK)]
+    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const [letterTab, setLetterTab] = useState('exp');
   const [busy, setBusy] = useState(false);
   const [nameMode, setNameMode] = useState('new'); // new | existing
@@ -2200,17 +2298,15 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
     candidateName: '',
     designation: 'SITE HEAD',
     workTimings: '9.00 a.m. to 6.30 p.m.',
-    reportingAt: 'Site',
-    probationSalary: '',
-    revisedSalary: '',
-    includeProbationSalaryRevision: false,
+    probationSalary: '120000',
+    revisedSalary: '125000',
+    includeProbationSalaryRevision: true,
     includeFoodStayByClient: false,
     includeFurtherIncrement: false,
     includeProbationHike: true,
     includeProjectIncentive: true,
     incrementAfterMonths: '',
     incrementAmount: '',
-    incrementSteps: '3',
   });
 
   useEffect(() => {
@@ -2222,21 +2318,16 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
       if (templateId === 'sales') {
         if (!next.designation || next.designation === 'SITE HEAD') next.designation = 'Sales Executive';
         if (!next.workTimings || next.workTimings.startsWith('9.00')) next.workTimings = '9:30 a.m. to 6:30 p.m.';
-        if (!next.reportingAt || next.reportingAt === 'Site') next.reportingAt = 'Office';
-        // Clear site-only sample salaries — never force 120000/125000
-        if (next.probationSalary === '120000' || next.probationSalary === '125000') next.probationSalary = '';
-        if (next.revisedSalary === '125000' || next.revisedSalary === '120000') next.revisedSalary = '';
+        if (!next.probationSalary || next.probationSalary === '120000') next.probationSalary = '40000';
         if (!next.revisedPercent) next.revisedPercent = '10';
         if (!next.projectIncentivePercent) next.projectIncentivePercent = '5';
         if (!next.title || next.title === 'MR') next.title = 'MS';
       } else {
         if (!next.designation || next.designation === 'Sales Executive') next.designation = 'SITE HEAD';
         if (!next.workTimings || next.workTimings.includes('9:30')) next.workTimings = '9.00 a.m. to 6.30 p.m.';
-        if (!next.reportingAt) next.reportingAt = 'Site';
-        // Do not auto-fill revised salary — only what HR types
-        if (next.revisedSalary === '125000') next.revisedSalary = '';
-        if (next.probationSalary === '120000') next.probationSalary = '';
-        if (next.includeProbationSalaryRevision === undefined) next.includeProbationSalaryRevision = false;
+        if (!next.probationSalary || next.probationSalary === '40000') next.probationSalary = '120000';
+        if (!next.revisedSalary) next.revisedSalary = '125000';
+        if (next.includeProbationSalaryRevision === undefined) next.includeProbationSalaryRevision = true;
       }
       return next;
     });
@@ -2484,21 +2575,8 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
             <label>Working hours
               <input value={offerFields.workTimings || ''} onChange={(e) => setOfferFields({ ...offerFields, workTimings: e.target.value })} />
             </label>
-            <label>Reporting at
-              <select
-                value={offerFields.reportingAt || 'Site'}
-                onChange={(e) => setOfferFields({ ...offerFields, reportingAt: e.target.value })}
-              >
-                <option value="Site">Site</option>
-                <option value="Office">Office</option>
-              </select>
-            </label>
-            <label>Starting / probation salary (₹)
-              <input
-                value={offerFields.probationSalary || ''}
-                onChange={(e) => setOfferFields({ ...offerFields, probationSalary: e.target.value })}
-                placeholder="e.g. 18000"
-              />
+            <label>Probation salary (₹)
+              <input value={offerFields.probationSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, probationSalary: e.target.value })} />
             </label>
 
             {templateId === 'sales' ? (
@@ -2535,14 +2613,14 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 <label className="full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <input
                     type="checkbox"
-                    checked={offerFields.includeProbationSalaryRevision === true}
+                    checked={offerFields.includeProbationSalaryRevision !== false}
                     onChange={(e) => setOfferFields({ ...offerFields, includeProbationSalaryRevision: e.target.checked })}
                   />
                   Add probation salary revision (3 months → 4th month amount)
                 </label>
-                {offerFields.includeProbationSalaryRevision === true && (
+                {offerFields.includeProbationSalaryRevision !== false && (
                   <label>Revised salary from 4th month (₹)
-                    <input value={offerFields.revisedSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, revisedSalary: e.target.value })} placeholder="Only if revising after probation" />
+                    <input value={offerFields.revisedSalary || ''} onChange={(e) => setOfferFields({ ...offerFields, revisedSalary: e.target.value })} placeholder="125000" />
                   </label>
                 )}
                 <label className="full" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -2562,44 +2640,24 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
                 checked={!!offerFields.includeFurtherIncrement}
                 onChange={(e) => setOfferFields({ ...offerFields, includeFurtherIncrement: e.target.checked })}
               />
-              Add step-up salary schedule (starting salary → after every X months +₹…)
+              Add further salary increment (every X months, +₹ amount; letter pe cumulative schedule)
             </label>
             {offerFields.includeFurtherIncrement && (
               <>
-                <label>Increment every (months)
+                <label>Every (months)
                   <input
                     value={offerFields.incrementAfterMonths || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAfterMonths: e.target.value })}
-                    placeholder="e.g. 3"
+                    placeholder="e.g. 2"
                   />
                 </label>
-                <label>Increment amount each step (₹)
+                <label>Increment amount each cycle (₹)
                   <input
                     value={offerFields.incrementAmount || ''}
                     onChange={(e) => setOfferFields({ ...offerFields, incrementAmount: e.target.value })}
                     placeholder="e.g. 2000"
                   />
                 </label>
-                <label>How many steps
-                  <input
-                    value={offerFields.incrementSteps || '3'}
-                    onChange={(e) => setOfferFields({ ...offerFields, incrementSteps: e.target.value })}
-                    placeholder="e.g. 3"
-                  />
-                </label>
-                {!!(offerFields.probationSalary && offerFields.incrementAfterMonths && offerFields.incrementAmount) && (
-                  <p className="full" style={{ margin: 0, fontSize: 13, color: '#555' }}>
-                    Letter pe: ₹{Number(String(offerFields.probationSalary).replace(/[^\d.]/g, '') || 0).toLocaleString('en-IN')}/-
-                    {Array.from({ length: Math.min(8, Math.max(1, Number(offerFields.incrementSteps) || 3)) }, (_, i) => {
-                      const start = Number(String(offerFields.probationSalary).replace(/[^\d.]/g, '')) || 0;
-                      const hike = Number(String(offerFields.incrementAmount).replace(/[^\d.]/g, '')) || 0;
-                      const months = offerFields.incrementAfterMonths || '—';
-                      const sal = start + hike * (i + 1);
-                      return `, after ${months} months ₹${sal.toLocaleString('en-IN')}/-`;
-                    }).join('')}
-                    {' '}only
-                  </p>
-                )}
               </>
             )}
 
@@ -2616,6 +2674,7 @@ function LettersView({ employees, onEmployeesReload, departments, designations }
 }
 
 export default function HrPortal({ user, onLogout, onOpenOffice }) {
+  
   const [tab, setTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
@@ -2675,9 +2734,25 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     try {
       const data = await api('/hr/staff');
       const list = (data.staff || []).map(asEmpShape);
-      setEmployees(list);
-      if (data.departments?.length) setDepartments(data.departments);
-      if (data.designations?.length) setDesignations(data.designations);
+      setEmployees(
+        [...list].sort((a, b) =>
+          String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+        )
+      );
+      if (data.departments?.length) {
+        setDepartments(
+          [...data.departments].sort((a, b) =>
+            String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
+          )
+        );
+      }
+      if (data.designations?.length) {
+        setDesignations(
+          [...data.designations].sort((a, b) =>
+            String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })
+          )
+        );
+      }
     } catch (e) {
       setEmpError(e.message || 'Failed to load HR employees');
       setEmployees([]);
@@ -2787,6 +2862,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     run();
     requestAnimationFrame(() => {
       run();
+      // After the new tab paints
       window.setTimeout(run, 40);
     });
   };

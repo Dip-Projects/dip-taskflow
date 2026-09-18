@@ -49,6 +49,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.7;colo
 .bullet-item:last-child{border-bottom:none;}
 .bullet-arrow{color:#800000;font-weight:700;font-size:12px;margin-top:4px;flex-shrink:0;}
 .bullet-text{font-size:15px;color:#0f172a;line-height:1.5;}
+.bullet-item.bullet-title{gap:0;padding:8px 0 4px;}
+.bullet-item.bullet-title .bullet-text{font-weight:800;font-size:15.5px;color:#0f172a;}
 
 /* ── INFO ROWS (visit details) ── */
 .info-row{display:flex;gap:20px;padding:10px 16px;border-bottom:1px solid #cbd5e1;}
@@ -112,8 +114,14 @@ function bulletBlock(txt) {
   if (!lines.length) return "";
 
   return `<div class="bullet-list">${lines.map(l => {
-    const isSub = /^ {2,}/.test(l);
-    const text  = esc(l.replace(/^[\s•◦\-*]+/, "").trim());
+    const bulletMatch = l.match(/^(\s*)([•◦\-*])\s*/);
+    if (!bulletMatch) {
+      return `<div class="bullet-item bullet-title">
+        <span class="bullet-text">${esc(l.trim())}</span>
+      </div>`;
+    }
+    const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
+    const text  = esc(l.slice(bulletMatch[0].length).trim());
 
     if (isSub) {
       return `<div class="bullet-item" style="padding-left:32px;border-bottom:1px solid #f8fafc;">

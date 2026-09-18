@@ -9,11 +9,31 @@ const path    = require('path');
 const express = require('express');
 const cors    = require('cors');
 const app     = express();
+const { supabaseConfigured } = require('./lib/supabaseClient');
 
 app.use(cors({ origin: '*' }));
 // Large enough for multipart fields; prefer FormData uploads (not giant JSON).
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+// Body-parser JSON failures otherwise return an HTML stack page → frontend
+// only shows the generic "Request failed".
+app.use((err, _req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  return next(err);
+});
+
+// Fail closed with a clear JSON error when Vercel env vars were never set.
+app.use((req, res, next) => {
+  if (supabaseConfigured) return next();
+  if (req.path === '/api/health' || req.path === '/config.js') return next();
+  return res.status(503).json({
+    error:
+      'Server misconfigured: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel Environment Variables, then Redeploy.',
+  });
+});
 
 // Runtime config for React build on :4000 (anon key not baked / stale in old builds)
 app.get('/config.js', (_req, res) => {
@@ -51,6 +71,7 @@ app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
 app.use('/api/whatsapp',        require('./routes/whatsapp'));
 app.use('/api/ea-meeting',      require('./routes/ea_meeting'));
+app.use('/api/geocode',         require('./routes/geocode'));
 app.get('/api/health', async (_, res) => {
   const phoneIdRaw = String(process.env.META_PHONE_NUMBER_ID || '').trim();
   const accessTokenRaw = String(process.env.META_ACCESS_TOKEN || '').trim();
@@ -83,11 +104,13 @@ app.get('/api/health', async (_, res) => {
     }
   }
   res.json({
-    status: 'ok',
+    status: supabaseConfigured ? 'ok' : 'misconfigured',
+    supabaseConfigured,
     whatsappConfigured: phoneId && accessToken,
     metaPing,
     botConfigured: true,
     openaiConfigured: !!process.env.OPENAI_API_KEY,
+    jwtConfigured: !!String(process.env.JWT_SECRET || '').trim(),
     whatsappEnv: {
       META_PHONE_NUMBER_ID: phoneId,
       META_ACCESS_TOKEN: accessToken,
@@ -97,6 +120,9 @@ app.get('/api/health', async (_, res) => {
       ),
       WHATSAPP_TASK_DONE_TEMPLATE: !!process.env.WHATSAPP_TASK_DONE_TEMPLATE,
     },
+    hint: supabaseConfigured
+      ? undefined
+      : 'Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (and JWT_SECRET) in Vercel → Settings → Environment Variables, then Redeploy.',
   });
 });
 

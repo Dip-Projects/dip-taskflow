@@ -1105,6 +1105,125 @@ html:has(.hr-shell) body {
   text-decoration: none;
 }
 
+/* Candidates table — Form / docs actions */
+.hr-cand-docs {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 118px;
+  max-width: 148px;
+}
+
+.hr-cand-doc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line2);
+  background: var(--surface);
+  color: var(--ink2);
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+
+.hr-cand-doc svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.hr-cand-doc:hover {
+  background: var(--paper);
+  border-color: var(--ink3);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.hr-cand-doc--form {
+  border-color: #c5d0da;
+  background: #f4f7f9;
+  color: #2a333c;
+}
+
+.hr-cand-doc--form:hover {
+  background: #e8eef3;
+  border-color: #9aabba;
+  color: #1a2229;
+}
+
+.hr-cand-doc--cv {
+  border-color: var(--amber-line);
+  background: var(--amber-bg);
+  color: var(--amber2);
+}
+
+.hr-cand-doc--cv:hover {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+  box-shadow: 0 1px 4px rgba(217, 119, 6, 0.12);
+}
+
+.hr-cand-docs-modal .hr-cand-docs {
+  flex-direction: row;
+  flex-wrap: wrap;
+  max-width: none;
+  min-width: 0;
+}
+
+.hr-cand-docs-modal .hr-cand-doc {
+  width: auto;
+}
+
+[data-theme='dark'] .hr-cand-doc {
+  background: #2f2c28;
+  border-color: #4a4540;
+  color: #d7d0c7;
+}
+
+[data-theme='dark'] .hr-cand-doc:hover {
+  background: #3a3733;
+  border-color: #6b6358;
+  color: #f0ede8;
+}
+
+[data-theme='dark'] .hr-cand-doc--form {
+  background: #2a333c;
+  border-color: #3d4a55;
+  color: #d7dde3;
+}
+
+[data-theme='dark'] .hr-cand-doc--form:hover {
+  background: #34404a;
+  border-color: #5a6a78;
+  color: #eef2f5;
+}
+
+[data-theme='dark'] .hr-cand-doc--cv {
+  background: #2a1f08;
+  border-color: #4a3210;
+  color: #fbbf24;
+}
+
+[data-theme='dark'] .hr-cand-doc--cv:hover {
+  background: #3a2a0c;
+  border-color: #f59e0b;
+  color: #fde68a;
+  box-shadow: none;
+}
+
 [data-theme='dark'] .hr-apply-qr {
   background: #2a2723;
   border-color: #4a4540;
@@ -1130,6 +1249,22 @@ html:has(.hr-shell) body {
 
 [data-theme='dark'] .hr-table td a {
   color: #60a5fa;
+}
+
+[data-theme='dark'] .hr-table td a.hr-cand-doc {
+  color: #d7d0c7;
+}
+
+[data-theme='dark'] .hr-table td a.hr-cand-doc:hover {
+  color: #f0ede8;
+}
+
+[data-theme='dark'] .hr-table td a.hr-cand-doc--cv {
+  color: #fbbf24;
+}
+
+[data-theme='dark'] .hr-table td a.hr-cand-doc--cv:hover {
+  color: #fde68a;
 }
 
 .hr-table-wrap {
