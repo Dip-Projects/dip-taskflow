@@ -1397,6 +1397,137 @@ router.post('/:id/resolve-cover', async (req, res) => {
   }
 });
 
+// ----------------------------- HR: site + MDO + office leave status -----------------------------
+router.get('/hr-status', requireAdminOrHr, async (req, res) => {
+  try {
+    const officeQuery = await supabase
+      .from('leaves')
+      .select(
+        `id, user_id, from_date, to_date, is_half_day, reason, status, buddy_status, created_at,
+         user:users!leaves_user_id_fkey ( id, full_name, username, department )`
+      )
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    let officeRows = officeQuery.data || [];
+    if (officeQuery.error) {
+      // Fallback without buddy_status / nested dept
+      const basic = await selectLeaves((q) =>
+        q.order('created_at', { ascending: false }).limit(500)
+      );
+      officeRows = (basic || []).map((r) => ({
+        ...r,
+        user_id: r.user_id || r.user?.id,
+      }));
+    }
+
+    const [siteRes, usersRes] = await Promise.all([
+      supabase
+        .from('site_leaves')
+        .select(
+          'id, user_name, name, leave_type, from_date, to_date, reason, site_name, status, level_approved, head_approved, level_approver_name, head_approver_name, rejection_reason, created_at'
+        )
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('users')
+        .select('id, full_name, username, department')
+        .limit(3000),
+    ]);
+
+    if (siteRes.error) throw siteRes.error;
+    if (usersRes.error) throw usersRes.error;
+
+    const usersById = new Map((usersRes.data || []).map((u) => [u.id, u]));
+    const isMdoDept = (dept) => {
+      const d = String(dept || '').toLowerCase();
+      return d.includes('mdo');
+    };
+
+    const office = [];
+    const mdo = [];
+    for (const row of officeRows || []) {
+      const u = usersById.get(row.user_id) || row.user || null;
+      const dept = u?.department || row.user?.department || '';
+      const item = {
+        id: row.id,
+        channel: isMdoDept(dept) ? 'mdo' : 'office',
+        employee_name: u?.full_name || row.user?.full_name || '—',
+        username: u?.username || row.user?.username || '',
+        department: dept || '',
+        from_date: row.from_date,
+        to_date: row.to_date,
+        is_half_day: !!row.is_half_day,
+        reason: row.reason || '',
+        status: row.status || 'Pending',
+        buddy_status: row.buddy_status || null,
+        site_name: null,
+        leave_type: null,
+        created_at: row.created_at,
+        can_decide: String(row.status || '').toLowerCase() === 'pending',
+      };
+      if (item.channel === 'mdo') mdo.push(item);
+      else office.push(item);
+    }
+
+    const site = (siteRes.data || []).map((row) => {
+      const level =
+        row.level_approved === true
+          ? 'Approved'
+          : row.level_approved === false
+            ? 'Rejected'
+            : 'Pending';
+      const head =
+        row.head_approved === true
+          ? 'Approved'
+          : row.head_approved === false
+            ? 'Rejected'
+            : row.head_approver_name
+              ? 'Pending'
+              : '—';
+      return {
+        id: row.id,
+        channel: 'site',
+        employee_name: row.name || row.user_name || '—',
+        username: row.user_name || '',
+        department: 'Site',
+        from_date: row.from_date,
+        to_date: row.to_date,
+        is_half_day: false,
+        reason: row.reason || '',
+        status: row.status || 'Pending',
+        buddy_status: null,
+        site_name: row.site_name || '',
+        leave_type: row.leave_type || null,
+        level_status: level,
+        head_status: head,
+        level_approver: row.level_approver_name || null,
+        head_approver: row.head_approver_name || null,
+        rejection_reason: row.rejection_reason || null,
+        created_at: row.created_at,
+        can_decide: false,
+      };
+    });
+
+    res.json({
+      site,
+      mdo,
+      office,
+      counts: {
+        site: site.length,
+        mdo: mdo.length,
+        office: office.length,
+        site_pending: site.filter((r) => String(r.status).toLowerCase() === 'pending').length,
+        mdo_pending: mdo.filter((r) => String(r.status).toLowerCase() === 'pending').length,
+        office_pending: office.filter((r) => String(r.status).toLowerCase() === 'pending').length,
+      },
+    });
+  } catch (err) {
+    console.error('HR leave status error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not load leave status' });
+  }
+});
+
 // ----------------------------- all leave requests (admin) -----------------------------
 router.get('/all', requireAdminOrHr, async (req, res) => {
   try {

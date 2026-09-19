@@ -206,8 +206,11 @@ function statusBadge(status) {
   return '';
 }
 
-function Dashboard({ employees, leaves, attendanceToday, candidates, alerts, onSendWa }) {
-  const pendingLeaves = leaves.filter((l) => String(l.status).toLowerCase() === 'pending').length;
+function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts, onSendWa }) {
+  const pendingLeaves =
+    (leaveBundle?.counts?.site_pending || 0) +
+    (leaveBundle?.counts?.mdo_pending || 0) +
+    (leaveBundle?.counts?.office_pending || 0);
   const active = employees.filter((e) => e.is_active !== false).length;
   const present = attendanceToday.filter((r) => {
     const s = String(r.status || '').toLowerCase();
@@ -955,8 +958,13 @@ function AttendanceView() {
   );
 }
 
-function LeavesView({ leaves, loading, error, onReload }) {
+function LeavesView({ bundle, loading, error, onReload }) {
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState('site'); // site | mdo | office
+
+  const counts = bundle?.counts || {};
+  const rows =
+    tab === 'site' ? bundle?.site || [] : tab === 'mdo' ? bundle?.mdo || [] : bundle?.office || [];
 
   const decide = async (id, decision) => {
     setBusy(true);
@@ -970,11 +978,42 @@ function LeavesView({ leaves, loading, error, onReload }) {
     }
   };
 
+  const tabs = [
+    { key: 'site', label: `Site (${counts.site || 0})`, pending: counts.site_pending || 0 },
+    { key: 'mdo', label: `MDO Office (${counts.mdo || 0})`, pending: counts.mdo_pending || 0 },
+    { key: 'office', label: `Office (${counts.office || 0})`, pending: counts.office_pending || 0 },
+  ];
+
   return (
     <div className="hr-panel">
-      <div className="hr-toolbar">
-        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy}>Refresh</button>
+      <div className="hr-toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={`hr-btn ${tab === t.key ? '' : 'ghost'}`}
+              onClick={() => setTab(t.key)}
+              disabled={busy}
+            >
+              {t.label}
+              {t.pending > 0 ? (
+                <span style={{ marginLeft: 6, opacity: 0.85 }}>({t.pending} pending)</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy}>
+          Refresh
+        </button>
       </div>
+      <p className="hr-sub" style={{ marginTop: 0 }}>
+        {tab === 'site'
+          ? 'Site portal leaves — level / head approval status (view only).'
+          : tab === 'mdo'
+            ? 'MDO OFFICE department leaves from TaskFlow / office leave system.'
+            : 'Other office department leaves (approve / reject when pending).'}
+      </p>
       {error && <div className="hr-error">{error}</div>}
       {loading ? (
         <div className="hr-empty">Loading leaves…</div>
@@ -984,31 +1023,96 @@ function LeavesView({ leaves, loading, error, onReload }) {
             <thead>
               <tr>
                 <th>Employee</th>
+                {tab === 'site' ? <th>Site</th> : <th>Dept</th>}
                 <th>From</th>
                 <th>To</th>
-                <th>Half</th>
+                {tab === 'site' ? <th>Type</th> : <th>Half</th>}
                 <th>Reason</th>
                 <th>Status</th>
+                {tab === 'site' ? (
+                  <>
+                    <th>Level</th>
+                    <th>Head</th>
+                  </>
+                ) : (
+                  <th>Buddy</th>
+                )}
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {!leaves.length ? (
-                <tr><td colSpan={7} className="hr-empty">No leave requests.</td></tr>
+              {!rows.length ? (
+                <tr>
+                  <td colSpan={tab === 'site' ? 10 : 9} className="hr-empty">
+                    No {tab === 'site' ? 'site' : tab === 'mdo' ? 'MDO' : 'office'} leave records.
+                  </td>
+                </tr>
               ) : (
-                leaves.map((l) => (
-                  <tr key={l.id}>
-                    <td>{l.user?.full_name || l.full_name || '—'}</td>
+                rows.map((l) => (
+                  <tr key={`${l.channel}-${l.id}`}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{l.employee_name || '—'}</div>
+                      {l.username ? (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--hr-muted)' }}>{l.username}</div>
+                      ) : null}
+                    </td>
+                    <td>{tab === 'site' ? l.site_name || '—' : l.department || '—'}</td>
                     <td>{l.from_date}</td>
                     <td>{l.to_date}</td>
-                    <td>{l.is_half_day ? 'Yes' : '—'}</td>
-                    <td>{l.reason || '—'}</td>
-                    <td><span className={`hr-badge ${statusBadge(l.status)}`}>{l.status}</span></td>
                     <td>
-                      {String(l.status).toLowerCase() === 'pending' ? (
+                      {tab === 'site'
+                        ? l.leave_type || '—'
+                        : l.is_half_day
+                          ? 'Yes'
+                          : '—'}
+                    </td>
+                    <td>{l.reason || '—'}</td>
+                    <td>
+                      <span className={`hr-badge ${statusBadge(l.status)}`}>{l.status}</span>
+                    </td>
+                    {tab === 'site' ? (
+                      <>
+                        <td>
+                          <span className={`hr-badge ${statusBadge(l.level_status)}`}>
+                            {l.level_status || '—'}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`hr-badge ${statusBadge(l.head_status)}`}>
+                            {l.head_status || '—'}
+                          </span>
+                        </td>
+                      </>
+                    ) : (
+                      <td>
+                        {l.buddy_status ? (
+                          <span className={`hr-badge ${statusBadge(l.buddy_status)}`}>
+                            {l.buddy_status}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    )}
+                    <td>
+                      {l.can_decide ? (
                         <span style={{ display: 'flex', gap: 6 }}>
-                          <button type="button" className="hr-btn ok" disabled={busy} onClick={() => decide(l.id, 'approve')}>Approve</button>
-                          <button type="button" className="hr-btn warn" disabled={busy} onClick={() => decide(l.id, 'reject')}>Reject</button>
+                          <button
+                            type="button"
+                            className="hr-btn ok"
+                            disabled={busy}
+                            onClick={() => decide(l.id, 'approve')}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="hr-btn warn"
+                            disabled={busy}
+                            onClick={() => decide(l.id, 'reject')}
+                          >
+                            Reject
+                          </button>
                         </span>
                       ) : (
                         '—'
@@ -2706,7 +2810,12 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [empQ, setEmpQ] = useState('');
   const [departments, setDepartments] = useState(HR_DEPARTMENTS_FALLBACK);
   const [designations, setDesignations] = useState(HR_DESIGNATIONS_FALLBACK);
-  const [leaves, setLeaves] = useState([]);
+  const [leaveBundle, setLeaveBundle] = useState({
+    site: [],
+    mdo: [],
+    office: [],
+    counts: {},
+  });
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [leaveError, setLeaveError] = useState('');
   const [attendanceToday, setAttendanceToday] = useState([]);
@@ -2768,11 +2877,16 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     setLeaveLoading(true);
     setLeaveError('');
     try {
-      const data = await api('/leaves/all');
-      setLeaves(Array.isArray(data) ? data : data.leaves || []);
+      const data = await api('/leaves/hr-status');
+      setLeaveBundle({
+        site: data.site || [],
+        mdo: data.mdo || [],
+        office: data.office || [],
+        counts: data.counts || {},
+      });
     } catch (e) {
       setLeaveError(e.message || 'Failed to load leaves');
-      setLeaves([]);
+      setLeaveBundle({ site: [], mdo: [], office: [], counts: {} });
     } finally {
       setLeaveLoading(false);
     }
@@ -2953,7 +3067,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             {tab === 'dashboard' && (
               <Dashboard
                 employees={employees}
-                leaves={leaves}
+                leaveBundle={leaveBundle}
                 attendanceToday={attendanceToday}
                 candidates={canManageRecruitment ? recruitments : []}
                 alerts={alerts}
@@ -2974,7 +3088,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             )}
             {tab === 'attendance' && <AttendanceView />}
             {tab === 'leaves' && (
-              <LeavesView leaves={leaves} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
+              <LeavesView bundle={leaveBundle} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
             )}
             {tab === 'recruitment' && canManageRecruitment && (
               <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
