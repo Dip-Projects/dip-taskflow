@@ -477,6 +477,9 @@ function asEmpShape(s) {
     site_name: s.site_name || null,
     site_names: s.site_names || [],
     source: s.source === 'hr_only' || s.source === 'hr_register' ? 'hr_only' : 'system',
+    onboard_token: s.onboard_token || null,
+    joining_form_submitted_at: s.joining_form_submitted_at || null,
+    joining_form_id: s.joining_form_id || null,
   };
 }
 

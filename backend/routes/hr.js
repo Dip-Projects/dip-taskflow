@@ -1352,6 +1352,13 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
     if (uErr) throw uErr;
 
     const profiles = await readJson(PROFILES_PATH, []);
+    const forms = await readJson(JOINING_FORMS_PATH, []);
+    const formByEmployeeId = new Map();
+    const formByStaffId = new Map();
+    for (const f of forms || []) {
+      if (f?.employee_id) formByEmployeeId.set(String(f.employee_id), f);
+      if (f?.staff_id) formByStaffId.set(String(f.staff_id), f);
+    }
 
     const systemNames = new Set();
     const system = (users || [])
@@ -1362,6 +1369,7 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
       const { profile: prof } = findBestProfile(name, u.id, profiles);
       // Token / joining form ONLY from exact employee_id match — never fuzzy (avoids shared Adbhi QR)
       const byId = profiles.find((p) => p.employee_id === u.id);
+      const form = formByEmployeeId.get(String(u.id));
       return {
         id: u.id,
         full_name: name,
@@ -1377,8 +1385,9 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
         joining_date: null,
         source: 'system',
         onboard_token: byId?.onboard_token || null,
-        joining_form_submitted_at: byId?.joining_form_submitted_at || null,
-        joining_form_id: byId?.joining_form_id || null,
+        joining_form_submitted_at:
+          byId?.joining_form_submitted_at || form?.submitted_at || null,
+        joining_form_id: byId?.joining_form_id || form?.id || null,
       };
     });
 
@@ -1396,6 +1405,7 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
       })
       .map((r) => {
         const { profile: prof } = findBestProfile(r.full_name, null, profiles);
+        const form = formByStaffId.get(String(r.id));
         return {
           id: r.id,
           full_name: r.full_name,
@@ -1412,8 +1422,9 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
           email: r.email || '',
           source: 'hr_only',
           onboard_token: r.onboard_token || null,
-          joining_form_submitted_at: r.joining_form_submitted_at || null,
-          joining_form_id: r.joining_form_id || null,
+          joining_form_submitted_at:
+            r.joining_form_submitted_at || form?.submitted_at || null,
+          joining_form_id: r.joining_form_id || form?.id || null,
         };
       });
 
