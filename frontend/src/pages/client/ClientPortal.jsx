@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Navbar from "../../components/Navbar";
 import { api } from "../../lib/api";
 import "./ClientPortal.css";
@@ -8,59 +8,13 @@ import { useAuth } from "../../auth/AuthContext";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDateTime = (iso) => {
   if (!iso) return "—";
-  const s = String(iso).trim();
-  // Date-only values parse as UTC midnight → show 5:30 AM in IST. Format as date only.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    const [y, m, d] = s.split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  }
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return "—";
-  // Midnight UTC timestamps that are really date stamps
-  if (
-    d.getUTCHours() === 0 &&
-    d.getUTCMinutes() === 0 &&
-    d.getUTCSeconds() === 0 &&
-    /^\d{4}-\d{2}-\d{2}T00:00:00(\.0+)?Z?$/i.test(s)
-  ) {
-    return d.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      timeZone: "UTC",
-    });
-  }
-  return d.toLocaleString("en-IN", {
+  return new Date(iso).toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  });
-};
-
-const fmtDateOnly = (iso) => {
-  if (!iso) return "—";
-  const s = String(iso).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    const [y, m, d] = s.slice(0, 10).split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  }
-  const d = new Date(s);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
   });
 };
 
@@ -489,10 +443,10 @@ const IcoDocBars = ({ w = 13, h = 13 }) => (
     <line x1="6" y1="20" x2="6" y2="14" />
   </svg>
 );
-const IcoBluePrint = ({ w = 13, h = 13 }) => (
+const IcoBluePrint = () => (
   <svg
-    width={w}
-    height={h}
+    width="13"
+    height="13"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -747,7 +701,7 @@ function buildDateTree(dates) {
         .map(Number)
         .sort((a, b) => b - a)
         .map((m) => ({
-          key: `${y}-${m}`,
+          key: `${y}-${String(m + 1).padStart(2, "0")}`,
           label: MONTH_NAMES[m],
           total: Object.values(years[y][m]).reduce((s, c) => s + c, 0),
           days: Object.entries(years[y][m])
@@ -764,208 +718,344 @@ function buildDateTree(dates) {
     }));
 }
 
-function DateTreeNodes({
-  years,
-  keyPrefix = "",
-  openYears,
-  setOpenYears,
-  openMonths,
-  setOpenMonths,
-  activeDate,
-  onSelectDate,
-}) {
-  const yKey = (k) => (keyPrefix ? `${keyPrefix}:${k}` : k);
-  if (!years?.length) {
-    return <div className="cp-tree-empty">No dates</div>;
-  }
-  return years.map((y) => (
-    <div key={yKey(y.key)}>
-      <div
-        className="cp-tree-row"
-        onClick={() =>
-          setOpenYears((s) => ({ ...s, [yKey(y.key)]: !s[yKey(y.key)] }))
-        }
-      >
-        <IcoChevron open={!!openYears[yKey(y.key)]} />
-        <span className="cp-tree-label">{y.label}</span>
-        <span className="cp-tree-count">{y.total}</span>
-      </div>
-      {openYears[yKey(y.key)] && (
-        <div className="cp-tree-children">
-          {y.months.map((m) => (
-            <div key={yKey(m.key)}>
-              <div
-                className="cp-tree-row"
-                onClick={() =>
-                  setOpenMonths((s) => ({
-                    ...s,
-                    [yKey(m.key)]: !s[yKey(m.key)],
-                  }))
-                }
-              >
-                <IcoChevron open={!!openMonths[yKey(m.key)]} />
-                <span className="cp-tree-label">{m.label}</span>
-                <span className="cp-tree-count">{m.total}</span>
-              </div>
-              {openMonths[yKey(m.key)] && (
-                <div className="cp-tree-children">
-                  {m.days.map((d) => (
-                    <div
-                      key={d.key}
-                      className={`cp-tree-row${activeDate === d.key ? " act" : ""}`}
-                      onClick={() => onSelectDate(d.key)}
-                    >
-                      <span className="cp-tree-leaf-dot" />
-                      <span className="cp-tree-label">{d.label}</span>
-                      <span className="cp-tree-count">{d.count}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  ));
+function isDrawingRevised(revision) {
+  const r = String(revision || "").trim().toUpperCase();
+  if (!r) return false;
+  if (r === "R0" || r === "0" || r === "REV0" || r === "REV 0" || r === "ORIGINAL") return false;
+  return true;
 }
 
-/**
- * Sidebar library: DPR / WPR / Monthly / Drawings(categories) / Site Photos
- * Reports & photos → year → month → day
- * Drawings → category only (date filter lives in the drawings toolbar)
- */
-function ClientLibraryTree({
-  siteName,
-  activeBranch,
-  activeCategory,
-  activeDate,
-  onSelect,
-}) {
-  const [branches, setBranches] = useState(null);
-  const [openBranches, setOpenBranches] = useState({});
+const MEDIA_TYPE_META = [
+  { key: "dpr", label: "DPR", Icon: IcoDoc },
+  { key: "wpr", label: "WPR", Icon: IcoDocBars },
+  { key: "graphical", label: "Drawings", Icon: IcoBluePrint },
+  { key: "mpr", label: "Monthly Report", Icon: IcoDocCalendar },
+  { key: "photo", label: "Photos", Icon: IcoImg },
+];
+
+/** Year → Month → Type → (Drawings: Category →) Dates */
+function buildBrowseTree(media) {
+  const today = todayYmd();
+  const years = {};
+
+  const bump = (dayKey, type, extra = {}) => {
+    if (!dayKey || dayKey > today) return;
+    const y = Number(dayKey.slice(0, 4));
+    const monthKey = dayKey.slice(0, 7);
+    years[y] = years[y] || {};
+    years[y][monthKey] = years[y][monthKey] || {
+      types: {
+        dpr: {},
+        wpr: {},
+        photo: {},
+        mpr: {},
+        graphical: {},
+      },
+      drawingCats: {},
+    };
+    const bucket = years[y][monthKey];
+    if (type === "graphical") {
+      const cat = extra.category || "General";
+      bucket.drawingCats[cat] = bucket.drawingCats[cat] || {};
+      bucket.drawingCats[cat][dayKey] = (bucket.drawingCats[cat][dayKey] || 0) + (extra.count || 1);
+    }
+    bucket.types[type] = bucket.types[type] || {};
+    bucket.types[type][dayKey] = (bucket.types[type][dayKey] || 0) + (extra.count || 1);
+  };
+
+  (media.dprs || []).forEach((r) => bump(ymdKey(r.date || r.created_at), "dpr"));
+  (media.wprs || []).forEach((r) => bump(ymdKey(r.created_at || r.report_date), "wpr"));
+  (media.photos || [])
+    .filter((p) => p.source !== "drawing" && p.image_type !== "graphical")
+    .forEach((p) => bump(ymdKey(p.actual_created_at || p.created_at), "photo"));
+  (media.monthlies || []).forEach((r) => {
+    const y = Number(r.year);
+    const m = Number(r.month);
+    if (y && m) {
+      const dayKey = `${y}-${String(m).padStart(2, "0")}-01`;
+      bump(dayKey, "mpr");
+    } else {
+      bump(ymdKey(r.created_at), "mpr");
+    }
+  });
+  (media.drawings || []).forEach((d) => {
+    // Always use Add Drawing "Drawing Date" — never upload/created_at
+    const dayKey = ymdKey(d.drawing_date);
+    if (!dayKey) return;
+    let files = d.file_urls;
+    if (typeof files === "string") {
+      try {
+        files = JSON.parse(files);
+      } catch {
+        files = [files];
+      }
+    }
+    if (!Array.isArray(files)) files = [];
+    const n = Math.max(1, files.length);
+    bump(dayKey, "graphical", {
+      category: String(d.category || "General").trim() || "General",
+      count: n,
+    });
+  });
+
+  const currentY = String(new Date().getFullYear());
+
+  return Object.keys(years)
+    .map(Number)
+    .sort((a, b) => b - a)
+    .map((y) => {
+      const yKey = String(y);
+      const months = Object.keys(years[y])
+        .sort((a, b) => b.localeCompare(a))
+        .map((monthKey) => {
+          const node = years[y][monthKey];
+          const types = MEDIA_TYPE_META.map((meta) => {
+            const dayMap = node.types[meta.key] || {};
+            const days = Object.entries(dayMap)
+              .sort((a, b) => b[0].localeCompare(a[0]))
+              .map(([dayKey, count]) => ({
+                key: dayKey,
+                count,
+                label: parseYmd(dayKey).toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                }),
+              }));
+            let categories = null;
+            if (meta.key === "graphical") {
+              categories = Object.keys(node.drawingCats || {})
+                .sort((a, b) => a.localeCompare(b))
+                .map((cat) => {
+                  const cDays = Object.entries(node.drawingCats[cat] || {})
+                    .sort((a, b) => b[0].localeCompare(a[0]))
+                    .map(([dayKey, count]) => ({
+                      key: dayKey,
+                      count,
+                      label: parseYmd(dayKey).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                      }),
+                    }));
+                  return {
+                    key: cat,
+                    label: cat,
+                    total: cDays.reduce((s, d) => s + d.count, 0),
+                    days: cDays,
+                  };
+                });
+            }
+            return {
+              ...meta,
+              total: days.reduce((s, d) => s + d.count, 0),
+              days,
+              categories,
+            };
+          }).filter((t) => t.total > 0 || (t.categories && t.categories.length));
+
+          const [yy, mm] = monthKey.split("-").map(Number);
+          return {
+            key: monthKey,
+            label: MONTH_NAMES[(mm || 1) - 1] || monthKey,
+            total: types.reduce((s, t) => s + t.total, 0),
+            types,
+          };
+        })
+        .filter((m) => m.total > 0);
+
+      return {
+        key: yKey,
+        label: yKey,
+        isActive: yKey === currentY,
+        total: months.reduce((s, m) => s + m.total, 0),
+        months,
+      };
+    })
+    .filter((y) => y.total > 0);
+}
+
+function MediaFolderTree({ siteName, browse, onBrowse }) {
+  const [tree, setTree] = useState(null);
   const [openYears, setOpenYears] = useState({});
   const [openMonths, setOpenMonths] = useState({});
+  const [openTypes, setOpenTypes] = useState({});
+  const [openCats, setOpenCats] = useState({});
 
   useEffect(() => {
     if (!siteName) return;
-    setBranches(null);
+    let cancelled = false;
     (async () => {
       try {
-        const data = await api(
-          `/client/media-tree?site=${encodeURIComponent(siteName)}`,
-        );
-        const list = data.branches || [];
-        setBranches(list);
-        if (!list[0]) return;
-        setOpenBranches({ [list[0].key]: true });
-        if (list[0].key === "drawings") return;
-        const years = buildDateTree(list[0].dates || []);
-        if (years[0]) {
-          setOpenYears({ [`${list[0].key}:${years[0].key}`]: true });
-          if (years[0].months[0]) {
-            setOpenMonths({
-              [`${list[0].key}:${years[0].months[0].key}`]: true,
-            });
-          }
+        const media = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
+        if (cancelled) return;
+        const t = buildBrowseTree(media || {});
+        setTree(t);
+        if (t[0]) {
+          setOpenYears({ [t[0].key]: true });
+          if (t[0].months[0]) setOpenMonths({ [t[0].months[0].key]: true });
         }
-      } catch (_) {
-        setBranches([]);
+      } catch {
+        if (!cancelled) setTree([]);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [siteName]);
 
-  if (!branches) return <div className="cp-tree-empty">Loading…</div>;
-  if (!branches.length)
-    return <div className="cp-tree-empty">No files for this site yet</div>;
+  if (!tree) return <div className="cp-tree-empty">Loading…</div>;
+  if (!tree.length)
+    return <div className="cp-tree-empty">No dated activity yet</div>;
+
+  const isAct = (sel) => {
+    if (!browse || !sel) return false;
+    return (
+      browse.type === sel.type &&
+      (browse.month || "") === (sel.month || "") &&
+      (browse.date || "") === (sel.date || "") &&
+      (browse.drawingCategory || "") === (sel.drawingCategory || "")
+    );
+  };
 
   return (
-    <div className="cp-tree cp-library-tree">
-      {branches.map((branch) => {
-        const branchOpen = !!openBranches[branch.key];
-        const branchAct =
-          activeBranch === branch.key &&
-          !activeDate &&
-          (branch.key !== "drawings" || !activeCategory);
-
-        return (
-          <div key={branch.key} className="cp-lib-branch">
-            <div
-              className={`cp-tree-row cp-lib-branch-row${branchAct ? " act" : ""}`}
-              onClick={() => {
-                setOpenBranches((s) => ({
-                  ...s,
-                  [branch.key]: !s[branch.key],
-                }));
-                onSelect?.({
-                  branch: branch.key,
-                  category: null,
-                  date: null,
-                });
-              }}
-            >
-              <IcoChevron open={branchOpen} />
-              <span className="cp-tree-label">{branch.label}</span>
-              <span className="cp-tree-count">
-                {branch.key === "drawings"
-                  ? (branch.categories || []).reduce(
-                      (n, c) => n + (c.count || 0),
-                      0,
-                    )
-                  : (branch.dates || []).length}
-              </span>
-            </div>
-
-            {branchOpen && branch.key === "drawings" && (
-              <div className="cp-tree-children">
-                {(branch.categories || []).map((cat) => {
-                  const catAct =
-                    activeBranch === "drawings" &&
-                    activeCategory === cat.key;
-                  return (
-                    <div
-                      key={cat.key}
-                      className={`cp-tree-row cp-lib-cat-row${catAct ? " act" : ""}`}
-                      onClick={() =>
-                        onSelect?.({
-                          branch: "drawings",
-                          category: cat.key,
-                          date: null,
-                        })
-                      }
-                    >
-                      <span className="cp-tree-leaf-dot" />
-                      <span className="cp-tree-label">{cat.label}</span>
-                      <span className="cp-tree-count">{cat.count || 0}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {branchOpen && branch.key !== "drawings" && (
-              <div className="cp-tree-children">
-                <DateTreeNodes
-                  years={buildDateTree(branch.dates || [])}
-                  keyPrefix={branch.key}
-                  openYears={openYears}
-                  setOpenYears={setOpenYears}
-                  openMonths={openMonths}
-                  setOpenMonths={setOpenMonths}
-                  activeDate={activeBranch === branch.key ? activeDate : null}
-                  onSelectDate={(dayKey) =>
-                    onSelect?.({
-                      branch: branch.key,
-                      category: null,
-                      date: dayKey,
-                    })
-                  }
-                />
-              </div>
-            )}
+    <div className="cp-tree">
+      <div className="cp-tree-browse-hdr">
+        <IcoFolder />
+        <span>Browse all data</span>
+      </div>
+      {tree.map((y) => (
+        <div key={y.key}>
+          <div
+            className={`cp-tree-row cp-tree-year${y.isActive ? " year-active" : ""}`}
+            onClick={() => setOpenYears((s) => ({ ...s, [y.key]: !s[y.key] }))}
+          >
+            <IcoChevron open={!!openYears[y.key]} />
+            <IcoFolder />
+            <span className="cp-tree-label">{y.label}</span>
+            {y.isActive && <span className="cp-tree-active-pill">✓ Active</span>}
+            <span className="cp-tree-count">{y.total}</span>
           </div>
-        );
-      })}
+          {openYears[y.key] && (
+            <div className="cp-tree-children">
+              {y.months.map((m) => (
+                <div key={m.key}>
+                  <div
+                    className="cp-tree-row"
+                    onClick={() =>
+                      setOpenMonths((s) => ({ ...s, [m.key]: !s[m.key] }))
+                    }
+                  >
+                    <IcoChevron open={!!openMonths[m.key]} />
+                    <IcoFolder />
+                    <span className="cp-tree-label">{m.label}</span>
+                    <span className="cp-tree-count">{m.total}</span>
+                  </div>
+                  {openMonths[m.key] && (
+                    <div className="cp-tree-children">
+                      {m.types.map((t) => {
+                        const typeKey = `${m.key}::${t.key}`;
+                        const Icon = t.Icon || IcoDoc;
+                        return (
+                          <div key={typeKey}>
+                            <div
+                              className={`cp-tree-row${isAct({ type: t.key, month: m.key }) && !browse?.date && !browse?.drawingCategory ? " act" : ""}`}
+                              onClick={() => {
+                                setOpenTypes((s) => ({ ...s, [typeKey]: !s[typeKey] }));
+                                onBrowse?.({
+                                  type: t.key,
+                                  month: m.key,
+                                  date: null,
+                                  drawingCategory: null,
+                                });
+                              }}
+                            >
+                              <IcoChevron open={!!openTypes[typeKey]} />
+                              <Icon />
+                              <span className="cp-tree-label">{t.label}</span>
+                              <span className="cp-tree-count">{t.total}</span>
+                            </div>
+                            {openTypes[typeKey] && (
+                              <div className="cp-tree-children">
+                                {t.key === "graphical" && t.categories?.length
+                                  ? t.categories.map((cat) => {
+                                      const catKey = `${typeKey}::${cat.key}`;
+                                      return (
+                                        <div key={catKey}>
+                                          <div
+                                            className={`cp-tree-row${isAct({ type: "graphical", month: m.key, drawingCategory: cat.key }) && !browse?.date ? " act" : ""}`}
+                                            onClick={() => {
+                                              setOpenCats((s) => ({
+                                                ...s,
+                                                [catKey]: !s[catKey],
+                                              }));
+                                              onBrowse?.({
+                                                type: "graphical",
+                                                month: m.key,
+                                                date: null,
+                                                drawingCategory: cat.key,
+                                              });
+                                            }}
+                                          >
+                                            <IcoChevron open={!!openCats[catKey]} />
+                                            <IcoFolder />
+                                            <span className="cp-tree-label">{cat.label}</span>
+                                            <span className="cp-tree-count">{cat.total}</span>
+                                          </div>
+                                          {openCats[catKey] && (
+                                            <div className="cp-tree-children">
+                                              {cat.days.map((d) => (
+                                                <div
+                                                  key={d.key}
+                                                  className={`cp-tree-row${isAct({ type: "graphical", month: m.key, date: d.key, drawingCategory: cat.key }) ? " act" : ""}`}
+                                                  onClick={() =>
+                                                    onBrowse?.({
+                                                      type: "graphical",
+                                                      month: m.key,
+                                                      date: d.key,
+                                                      drawingCategory: cat.key,
+                                                    })
+                                                  }
+                                                >
+                                                  <span className="cp-tree-leaf-dot" />
+                                                  <span className="cp-tree-label">{d.label}</span>
+                                                  <span className="cp-tree-count">{d.count}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })
+                                  : t.days.map((d) => (
+                                      <div
+                                        key={d.key}
+                                        className={`cp-tree-row${isAct({ type: t.key, month: m.key, date: d.key }) ? " act" : ""}`}
+                                        onClick={() =>
+                                          onBrowse?.({
+                                            type: t.key,
+                                            month: m.key,
+                                            date: d.key,
+                                            drawingCategory: null,
+                                          })
+                                        }
+                                      >
+                                        <span className="cp-tree-leaf-dot" />
+                                        <span className="cp-tree-label">{d.label}</span>
+                                        <span className="cp-tree-count">{d.count}</span>
+                                      </div>
+                                    ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1063,31 +1153,13 @@ function Overview({ siteName, onNavigate }) {
       </div>
 
       <div className="cp-quick-grid">
-        <button
-          className="cp-quick-card"
-          onClick={() => onNavigate("files", { branch: "drawings" })}
-        >
-          <div className="cp-quick-icon">
-            <IcoBluePrint w={18} h={18} />
-          </div>
-          <div className="cp-quick-title">Drawings</div>
-          <div className="cp-quick-sub">
-            Browse by category — structural, architectural, MEP and more.
-          </div>
-          <div className="cp-quick-arrow">
-            Open <IcoArrow />
-          </div>
-        </button>
-        <button
-          className="cp-quick-card"
-          onClick={() => onNavigate("files", { branch: "dpr" })}
-        >
+        <button className="cp-quick-card" onClick={() => onNavigate("media")}>
           <div className="cp-quick-icon">
             <IcoFolder />
           </div>
           <div className="cp-quick-title">Reports &amp; Photos</div>
           <div className="cp-quick-sub">
-            DPR, WPR, monthly reports and site photos by date.
+            Browse daily reports, weekly reports and site photos.
           </div>
           <div className="cp-quick-arrow">
             Open <IcoArrow />
@@ -1173,7 +1245,7 @@ function MaterialRequests({ siteName, userName, onStatsChange }) {
     load();
     loadStats();
   };
-  
+
   const stats = {
     pending: allRows.filter((r) => r.status === "pending").length,
     accepted: allRows.filter((r) => r.status === "received").length,
@@ -1299,9 +1371,14 @@ function officeEmbedPreviewUrl(url) {
 }
 
 function resolveViewUrl(url, isOffice) {
-  if (!isOffice) return url;
-  // Desktop embed preview; mobile full Office viewer
-  return isMobileDevice() ? officeViewerUrl(url) : officeEmbedPreviewUrl(url);
+  if (!url) return url;
+  if (isOffice || isOfficeFile(url)) {
+    return isMobileDevice() ? officeViewerUrl(url) : officeEmbedPreviewUrl(url);
+  }
+  if (isPdfFile(url)) {
+    return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;
+  }
+  return url;
 }
 function ActivityTrendChart({ series, onSelectMonth, selectedMonth }) {
   const W = 960,
@@ -1567,452 +1644,16 @@ function isImageFile(url) {
   const ext = clean.split(".").pop().toLowerCase();
   return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(ext);
 }
+function isPdfFile(url) {
+  if (!url) return false;
+  const clean = url.split("?")[0].split("#")[0];
+  return clean.toLowerCase().endsWith(".pdf");
+}
 function isOfficeFile(url) {
   if (!url) return false;
   const clean = url.split("?")[0].split("#")[0];
   const ext = clean.split(".").pop().toLowerCase();
   return ["ppt", "pptx", "doc", "docx", "xls", "xlsx"].includes(ext);
-}
-
-function isPdfFile(url) {
-  if (!url) return false;
-  const clean = url.split("?")[0].split("#")[0];
-  const ext = clean.split(".").pop().toLowerCase();
-  return ext === "pdf";
-}
-
-function isDwgOrDxf(url) {
-  if (!url) return false;
-  const clean = url.split("?")[0].split("#")[0];
-  const ext = clean.split(".").pop().toLowerCase();
-  return ext === "dwg" || ext === "dxf";
-}
-
-function fileExtLabel(urlOrName) {
-  if (!urlOrName) return "FILE";
-  const clean = String(urlOrName).split("?")[0].split("#")[0];
-  const base = clean.split("/").pop() || clean;
-  const ext = base.includes(".") ? base.split(".").pop() : "";
-  if (!ext || ext.length > 5 || !/^[a-z0-9]+$/i.test(ext)) return "FILE";
-  return ext.toUpperCase();
-}
-
-function drawingFileName(file, fallback = "Drawing") {
-  if (!file) return fallback;
-  if (typeof file === "string") {
-    return decodeURIComponent(file.split("/").pop()?.replace(/^\d+_/, "") || "") || fallback;
-  }
-  return (
-    file.name ||
-    file.fileName ||
-    file.filename ||
-    (file.url || file.publicUrl || file.public_url
-      ? drawingFileName(file.url || file.publicUrl || file.public_url, fallback)
-      : fallback)
-  );
-}
-
-function parseDrawingFiles(raw) {
-  let files = raw;
-  if (typeof files === "string") {
-    try {
-      files = JSON.parse(files);
-    } catch {
-      files = [files];
-    }
-  }
-  if (!Array.isArray(files)) files = files ? [files] : [];
-  return files.filter(Boolean);
-}
-
-function drawingPublicUrl(file) {
-  if (!file) return null;
-  if (typeof file === "string") return file;
-  return file.url || file.publicUrl || file.public_url || null;
-}
-
-function drawingRevision(d) {
-  // Match admin All Drawings: escapeHtml(d.revision ?? 'R0')
-  const raw =
-    d?.revision ??
-    d?.revision_no ??
-    d?.revision_number ??
-    d?.rev ??
-    null;
-  const s = raw != null ? String(raw).trim() : "";
-  return s || "R0";
-}
-
-function drawingDisplayName(d, primaryFile) {
-  // Admin table shows sub_cat_1 (e.g. "UPDATED FLOOR PLAN") as the plan name
-  const fromSubs = [d?.sub_cat_1, d?.sub_cat_2, d?.sub_cat_3]
-    .map((x) => (x != null ? String(x).trim() : ""))
-    .filter(Boolean);
-  if (fromSubs.length) return fromSubs.join(" · ");
-  return drawingFileName(primaryFile, d?.category || "Drawing");
-}
-
-function normalizeClientDrawings(rows) {
-  const out = [];
-  const seenDrawingId = new Set();
-  const seenUrl = new Set();
-  const seenCombo = new Set();
-  const sorted = (rows || []).slice().sort(
-    (a, b) =>
-      new Date(b.created_at || b.drawing_date || 0) -
-      new Date(a.created_at || a.drawing_date || 0),
-  );
-
-  for (const d of sorted) {
-    const drawingKey = d?.id != null ? String(d.id) : "";
-    if (drawingKey && seenDrawingId.has(drawingKey)) continue;
-
-    const files = parseDrawingFiles(d.file_urls);
-    const primary = files.find((f) => drawingPublicUrl(f)) || files[0];
-    const url = drawingPublicUrl(primary);
-    if (!url) continue;
-
-    const urlKey = url.split("?")[0].split("#")[0].toLowerCase();
-    if (seenUrl.has(urlKey)) continue;
-
-    const name = drawingDisplayName(d, primary);
-    const revision = drawingRevision(d);
-    const date = d.drawing_date || d.created_at || d.date;
-    const combo = `${String(name).toLowerCase()}|${String(revision).toLowerCase()}|${ymdKey(date) || ""}`;
-    if (seenCombo.has(combo)) continue;
-
-    if (drawingKey) seenDrawingId.add(drawingKey);
-    seenUrl.add(urlKey);
-    seenCombo.add(combo);
-
-    out.push({
-      id: drawingKey || `url-${urlKey}`,
-      drawingId: d.id,
-      date,
-      name,
-      revision,
-      type: d.category || fileExtLabel(url),
-      url,
-      category: d.category || "",
-      sub_cat_1: d.sub_cat_1 || "",
-      remarks: d.remarks || "",
-    });
-  }
-  return out;
-}
-
-function resolveDrawingViewer(url) {
-  if (!url) return { mode: "unsupported", src: null };
-  if (isImageFile(url)) return { mode: "image", src: url };
-  if (isPdfFile(url)) {
-    return {
-      mode: "pdf",
-      // Google viewer avoids Content-Disposition: attachment downloads in iframe
-      src: `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`,
-    };
-  }
-  if (isOfficeFile(url)) return { mode: "office", src: officeViewerUrl(url) };
-  return { mode: "unsupported", src: url };
-}
-
-// ─── Drawings panel ───────────────────────────────────────────────────────────
-function DrawingsPanel({
-  siteName,
-  category = null,
-}) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [viewer, setViewer] = useState(null);
-  const [revisionQuery, setRevisionQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const lockedCategory = category ? String(category).trim() : "";
-
-  const load = useCallback(async () => {
-    if (!siteName) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setLoadError("");
-    try {
-      const data = await api(`/client/drawings?site=${encodeURIComponent(siteName)}`);
-      setRows(normalizeClientDrawings(data.drawings || []));
-    } catch (err) {
-      console.error("client drawings:", err);
-      setLoadError(err?.message || "Could not load drawings");
-      setRows([]);
-    }
-    setLoading(false);
-  }, [siteName]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    setRevisionQuery("");
-    setDateFilter("");
-    setTypeFilter("all");
-  }, [siteName, lockedCategory]);
-
-  const typeOptions = Array.from(
-    new Set(
-      rows
-        .map((r) => String(r.type || r.category || "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-
-  const filtered = rows
-    .filter((r) => {
-      if (dateFilter && ymdKey(r.date) !== dateFilter) return false;
-      const rowCat = String(r.type || r.category || "").trim();
-      if (lockedCategory) {
-        if (rowCat.toLowerCase() !== lockedCategory.toLowerCase()) return false;
-      } else if (typeFilter !== "all" && rowCat !== typeFilter) {
-        return false;
-      }
-      const q = revisionQuery.trim().toLowerCase();
-      if (q) {
-        const rev = String(r.revision || "").toLowerCase();
-        if (!rev.includes(q)) return false;
-      }
-      return true;
-    })
-    .sort(
-      (a, b) =>
-        new Date(b.date || 0) - new Date(a.date || 0),
-    );
-
-  const hasActiveFilters =
-    Boolean(revisionQuery.trim()) ||
-    Boolean(dateFilter) ||
-    (!lockedCategory && typeFilter !== "all") ||
-    Boolean(lockedCategory);
-
-  const openViewer = (row) => {
-    const resolved = resolveDrawingViewer(row.url);
-    setViewer({
-      title: row.name,
-      url: row.url,
-      mode: resolved.mode,
-      src: resolved.src,
-    });
-  };
-
-  return (
-    <div className="cp-drawings-wrap">
-      {lockedCategory && (
-        <div className="cp-tree-jump-chip">
-          {lockedCategory}
-        </div>
-      )}
-
-      <div className="cp-drawings-toolbar">
-        <div className="cp-drawings-filters">
-          <label className="cp-drawings-filter">
-            <span className="cp-drawings-filter-label">Revision No</span>
-            <input
-              type="search"
-              className="cp-drawings-search"
-              placeholder="Search revision (e.g. R17)"
-              value={revisionQuery}
-              onChange={(e) => setRevisionQuery(e.target.value)}
-              disabled={loading || !rows.length}
-            />
-          </label>
-          <label className="cp-drawings-filter">
-            <span className="cp-drawings-filter-label">Date</span>
-            <input
-              type="date"
-              className="cp-drawings-search cp-drawings-date-input"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              disabled={loading || !rows.length}
-            />
-          </label>
-          <div className="cp-drawings-filter cp-drawings-filter-actions">
-            <span className="cp-drawings-filter-label" aria-hidden="true">
-              &nbsp;
-            </span>
-            <button
-              type="button"
-              className="cp-drawings-clear-btn"
-              onClick={() => {
-                setRevisionQuery("");
-                setDateFilter("");
-              }}
-              disabled={
-                loading || (!revisionQuery.trim() && !dateFilter)
-              }
-              title="Clear revision and date filters"
-            >
-              <IcoX /> Clear
-            </button>
-          </div>
-          {!lockedCategory && (
-            <label className="cp-drawings-filter">
-              <span className="cp-drawings-filter-label">Type</span>
-              <select
-                className="cp-drawings-select"
-                value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
-                disabled={loading || !rows.length}
-              >
-                <option value="all">All types</option>
-                {typeOptions.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        <button type="button" className="cp-refresh-btn" onClick={load}>
-          <IcoRefresh /> Refresh
-        </button>
-      </div>
-
-      {loadError && (
-        <div className="cp-empty" style={{ marginBottom: 16 }}>
-          <div className="cp-empty-title">Could not load drawings</div>
-          <div className="cp-empty-sub">
-            {loadError}. Log out, log in again, then refresh.
-          </div>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="cp-loading">
-          <div className="cp-spinner" /> Loading drawings…
-        </div>
-      ) : !rows.length ? (
-        <div className="cp-empty">
-          <IcoBluePrint w={28} h={28} />
-          <div className="cp-empty-title">No drawings for {siteName}</div>
-          <div className="cp-empty-sub">Nothing uploaded for this site yet.</div>
-        </div>
-      ) : !filtered.length ? (
-        <div className="cp-empty">
-          <IcoBluePrint w={28} h={28} />
-          <div className="cp-empty-title">
-            {lockedCategory
-              ? `No ${lockedCategory} drawings`
-              : "No drawings match your filters"}
-          </div>
-          <div className="cp-empty-sub">
-            {hasActiveFilters
-              ? "Clear revision search or date filter and try again."
-              : "Nothing to show."}
-          </div>
-        </div>
-      ) : (
-        <div className="cp-drawings-table-scroll">
-          <table className="cp-drawings-table">
-            <thead>
-              <tr>
-                <th className="cp-drawings-sr">Sr No</th>
-                <th>Date</th>
-                <th className="cp-drawings-name">Drawing Name</th>
-                <th>Revision No</th>
-                <th className="cp-drawings-type">Type</th>
-                <th className="cp-drawings-actions">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row, idx) => (
-                <tr key={row.id}>
-                  <td className="cp-drawings-sr">{idx + 1}</td>
-                  <td>
-                    <span className="cp-drawings-date">
-                      <IcoClock /> {fmtDateOnly(row.date)}
-                    </span>
-                  </td>
-                  <td className="cp-drawings-name">
-                    <div className="cp-drawings-name-main">{row.name}</div>
-                    {row.category ? (
-                      <div className="cp-drawings-name-sub">{row.category}</div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <span className="cp-drawings-rev">{row.revision}</span>
-                  </td>
-                  <td className="cp-drawings-type">
-                    <span className="cp-drawings-type-pill">{row.type}</span>
-                  </td>
-                  <td className="cp-drawings-actions">
-                    {isPdfFile(row.url) ? (
-                      <button
-                        type="button"
-                        className="cp-media-link"
-                        onClick={() => openViewer(row)}
-                      >
-                        <IcoEye /> View
-                      </button>
-                    ) : null}
-                    {isDwgOrDxf(row.url) || !isPdfFile(row.url) ? (
-                      <button
-                        type="button"
-                        className="cp-media-link dl"
-                        onClick={() => forceDownload(row.url, row.name || "drawing")}
-                      >
-                        <IcoDl /> Download
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {viewer && (
-        <div className="cp-drawing-lightbox" onClick={() => setViewer(null)}>
-          <div
-            className="cp-drawing-viewer-shell"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="cp-drawing-viewer-title">
-              <span>{viewer.title}</span>
-              <button type="button" onClick={() => setViewer(null)}>
-                <IcoX />
-              </button>
-            </div>
-            {viewer.mode === "image" && viewer.src ? (
-              <img src={viewer.src} alt={viewer.title || ""} />
-            ) : viewer.mode === "pdf" || viewer.mode === "office" ? (
-              <iframe
-                className="cp-drawing-viewer-frame"
-                src={viewer.src}
-                title={viewer.title || "Drawing"}
-              />
-            ) : (
-              <div className="cp-drawing-viewer-unsupported">
-                Preview is not available for this file type. Use Download to open
-                it locally.
-                {viewer.url ? (
-                  <button
-                    type="button"
-                    className="cp-media-link dl"
-                    style={{ marginTop: 12 }}
-                    onClick={() =>
-                      forceDownload(viewer.url, viewer.title || "drawing")
-                    }
-                  >
-                    <IcoDl /> Download
-                  </button>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 const MONTHLY_FILE_RE = /\.(pdf|png|jpe?g|webp|gif|bmp|svg|ppt|pptx|doc|docx|xls|xlsx)$/i;
@@ -2046,37 +1687,469 @@ async function loadLatestMonthlyFiles(row) {
     return [];
   }
 }
+
+function drawingTypeLabel(d) {
+  const parts = [d.sub_cat_1, d.sub_cat_2, d.sub_cat_3]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join(" · ");
+  return String(d.category || "Drawing").trim() || "Drawing";
+}
+
+function parseDrawingFiles(d) {
+  let files = d.file_urls;
+  if (typeof files === "string") {
+    try {
+      files = JSON.parse(files);
+    } catch {
+      files = [files];
+    }
+  }
+  if (!Array.isArray(files)) files = [];
+  return files
+    .map((f, i) => {
+      const url =
+        typeof f === "string"
+          ? f
+          : f?.url || f?.publicUrl || f?.public_url || null;
+      if (!url) return null;
+      const name =
+        typeof f === "string"
+          ? f.split("/").pop()?.replace(/^\d+_/, "") || `File ${i + 1}`
+          : f?.name || `File ${i + 1}`;
+      return { url, name, index: i };
+    })
+    .filter(Boolean);
+}
+
+function formatDrawingDate(iso) {
+  const key = ymdKey(iso);
+  if (!key) return "—";
+  return parseYmd(key).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onViewer }) {
+  const [openCat, setOpenCat] = useState(browse?.drawingCategory || null);
+
+  useEffect(() => {
+    setOpenCat(browse?.drawingCategory || null);
+  }, [browse?.drawingCategory, browse?.month, browse?.date]);
+
+  const filtered = useMemo(() => {
+    let rows = (drawings || []).filter((d) => ymdKey(d.drawing_date));
+    if (browse?.month) {
+      rows = rows.filter(
+        (d) => ymdKey(d.drawing_date).slice(0, 7) === browse.month,
+      );
+    }
+    if (browse?.date) {
+      rows = rows.filter((d) => ymdKey(d.drawing_date) === browse.date);
+    }
+    return rows;
+  }, [drawings, browse?.month, browse?.date]);
+
+  const categories = useMemo(() => {
+    const map = {};
+    filtered.forEach((d) => {
+      const cat = String(d.category || "General").trim() || "General";
+      map[cat] = map[cat] || [];
+      map[cat].push(d);
+    });
+    return Object.keys(map)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => ({
+        key,
+        label: key,
+        count: map[key].length,
+        rows: map[key]
+          .slice()
+          .sort((a, b) =>
+            ymdKey(b.drawing_date).localeCompare(ymdKey(a.drawing_date)),
+          ),
+      }));
+  }, [filtered]);
+
+  const activeCat = openCat || browse?.drawingCategory || null;
+  const activeGroup = categories.find((c) => c.key === activeCat) || null;
+
+  if (!filtered.length) {
+    return (
+      <div className="cp-empty">
+        <IcoBluePrint />
+        <div className="cp-empty-title">No drawings for {siteName}</div>
+        <div className="cp-empty-sub">
+          Upload from TaskFlow → Add Drawing. The Drawing Date you select there
+          shows here and in the folder tree.
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeGroup) {
+    return (
+      <div className="cp-draw-folders">
+        <div className="cp-group-hdr">Drawing categories</div>
+        <div className="cp-draw-folder-grid">
+          {categories.map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              className="cp-draw-folder-card"
+              onClick={() => {
+                setOpenCat(c.key);
+                onOpenCategory?.(c.key);
+              }}
+            >
+              <IcoFolder />
+              <span className="cp-draw-folder-name">{c.label}</span>
+              <span className="cp-draw-folder-count">{c.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cp-draw-table-wrap">
+      <div className="cp-draw-table-toolbar">
+        <button
+          type="button"
+          className="cp-draw-back"
+          onClick={() => {
+            setOpenCat(null);
+            onOpenCategory?.(null);
+          }}
+        >
+          ← All categories
+        </button>
+        <div className="cp-group-hdr" style={{ margin: 0 }}>
+          {activeGroup.label}
+          {browse?.date ? ` · ${formatDrawingDate(browse.date)}` : ""}
+        </div>
+      </div>
+      <div className="cp-draw-table-scroll">
+        <table className="cp-draw-table">
+          <thead>
+            <tr>
+              <th>Sr. No</th>
+              <th>Date</th>
+              <th>Type of Drawing</th>
+              <th>Description</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeGroup.rows.map((d, idx) => {
+              const files = parseDrawingFiles(d);
+              const revised = isDrawingRevised(d.revision);
+              return (
+                <tr key={d.id || idx}>
+                  <td>{idx + 1}</td>
+                  <td>{formatDrawingDate(d.drawing_date)}</td>
+                  <td>
+                    <div className="cp-draw-type">{drawingTypeLabel(d)}</div>
+                    {revised && (
+                      <span className="cp-rev-pill">
+                        Revised{d.revision ? ` · ${d.revision}` : ""}
+                      </span>
+                    )}
+                  </td>
+                  <td className="cp-draw-desc">
+                    {String(d.remarks || "").trim() || "—"}
+                  </td>
+                  <td>
+                    {files.length ? (
+                      <div className="cp-draw-actions">
+                        {files.map((f) => (
+                          <div key={f.index} className="cp-draw-file-actions">
+                            {files.length > 1 && (
+                              <span className="cp-draw-file-name">{f.name}</span>
+                            )}
+                            <button
+                              type="button"
+                              className="cp-media-link"
+                              onClick={() =>
+                                openForView(f.url, {
+                                  isImage: isImageFile(f.url),
+                                  onViewer,
+                                })
+                              }
+                            >
+                              <IcoEye /> View
+                            </button>
+                            <button
+                              type="button"
+                              className="cp-media-link dl"
+                              onClick={() =>
+                                forceDownload(
+                                  f.url,
+                                  f.name || drawingTypeLabel(d),
+                                )
+                              }
+                            >
+                              <IcoDl /> Download
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="cp-draw-nofile">No file</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function MonthlyFolderBrowsePanel({ monthlies, browse, siteName, onViewer }) {
+  const [active, setActive] = useState(null);
+  const [path, setPath] = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const filtered = useMemo(() => {
+    let rows = [...(monthlies || [])];
+    if (browse?.month) {
+      const [yy, mm] = browse.month.split("-").map(Number);
+      rows = rows.filter(
+        (r) => Number(r.year) === yy && Number(r.month) === mm,
+      );
+    }
+    return rows.sort(
+      (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
+    );
+  }, [monthlies, browse?.month]);
+
+  async function openPath(folderPath) {
+    if (!folderPath) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const qs = new URLSearchParams({ path: folderPath, bucket: "site-files" });
+      const data = await api(`/storage/list?${qs.toString()}`);
+      setPath(data.path || folderPath);
+      setItems(data.items || []);
+    } catch (e) {
+      setErr(e.message || "Could not open folder");
+      setItems([]);
+    }
+    setLoading(false);
+  }
+
+  function openPack(row) {
+    setActive(row);
+    setPath(row.folder_path || "");
+    setItems([]);
+    if (row.folder_path) openPath(row.folder_path);
+  }
+
+  function goUp() {
+    if (!active?.folder_path || !path) return;
+    if (path === active.folder_path) {
+      setActive(null);
+      setPath("");
+      setItems([]);
+      return;
+    }
+    const parent = path.replace(/\/[^/]+$/, "");
+    if (!parent || parent.length < active.folder_path.length) {
+      openPath(active.folder_path);
+      return;
+    }
+    openPath(parent);
+  }
+
+  if (!filtered.length) {
+    return (
+      <div className="cp-empty">
+        <IcoFolder />
+        <div className="cp-empty-title">No monthly reports for {siteName}</div>
+        <div className="cp-empty-sub">Upload a monthly folder pack from Site portal.</div>
+      </div>
+    );
+  }
+
+  if (!active) {
+    return (
+      <div className="cp-draw-folders">
+        <div className="cp-group-hdr">Monthly report packs</div>
+        <div className="cp-draw-folder-grid">
+          {filtered.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="cp-draw-folder-card"
+              onClick={() => openPack(r)}
+            >
+              <IcoFolder />
+              <span className="cp-draw-folder-name">
+                {MONTH_NAMES[(Number(r.month) || 1) - 1]} {r.year}
+              </span>
+              <span className="cp-draw-folder-count">
+                {r.project_name || siteName}
+                {r.file_count ? ` · ${r.file_count} files` : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const rel =
+    path.replace(active.folder_path || "", "").replace(/^\//, "") ||
+    active.folder_path;
+
+  return (
+    <div className="cp-draw-table-wrap">
+      <div className="cp-draw-table-toolbar">
+        <button type="button" className="cp-draw-back" onClick={goUp}>
+          ← Back
+        </button>
+        <div className="cp-group-hdr" style={{ margin: 0 }}>
+          {MONTH_NAMES[(Number(active.month) || 1) - 1]} {active.year}
+          {rel ? ` · ${rel}` : ""}
+        </div>
+      </div>
+      {loading && <div className="cp-empty">Loading folder…</div>}
+      {err && (
+        <div className="cp-empty" style={{ color: "#dc2626" }}>
+          {err}
+        </div>
+      )}
+      {!loading && !err && (
+        <div className="cp-draw-table-scroll">
+          <table className="cp-draw-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).map((it) => (
+                <tr key={it.path}>
+                  <td>
+                    {it.isFolder ? (
+                      <button
+                        type="button"
+                        className="cp-media-link"
+                        style={{ justifyContent: "flex-start", border: "none", background: "transparent", height: "auto" }}
+                        onClick={() => openPath(it.path)}
+                      >
+                        📁 {it.name}
+                      </button>
+                    ) : (
+                      it.name
+                    )}
+                  </td>
+                  <td>{it.isFolder ? "Folder" : (it.name.split(".").pop() || "file").toUpperCase()}</td>
+                  <td>
+                    {!it.isFolder && it.publicUrl ? (
+                      <div className="cp-draw-file-actions">
+                        <button
+                          type="button"
+                          className="cp-media-link"
+                          onClick={() =>
+                            openForView(it.publicUrl, {
+                              isImage: isImageFile(it.publicUrl),
+                              onViewer,
+                            })
+                          }
+                        >
+                          <IcoEye /> View
+                        </button>
+                        <button
+                          type="button"
+                          className="cp-media-link dl"
+                          onClick={() => forceDownload(it.publicUrl, it.name)}
+                        >
+                          <IcoDl /> Download
+                        </button>
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!items?.length && (
+                <tr>
+                  <td colSpan={3} style={{ color: "var(--ink-faint)" }}>
+                    This folder is empty.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Reports & Photos panel ────────────────────────────────────────────────
-function ReportsAndPhotos({
-  siteName,
-  jumpDate,
-  onClearJump,
-  lockedType = null,
-}) {
+function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
   const [dprs, setDprs] = useState([]);
   const [wprs, setWprs] = useState([]);
   const [monthlies, setMonthlies] = useState([]);
   const [monthlyFiles, setMonthlyFiles] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [officeDrawings, setOfficeDrawings] = useState([]);
+  const [drawingRecords, setDrawingRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [viewMode, setViewMode] = useState("recent"); // recent | day | month | year
-  const [typeFilter, setTypeFilter] = useState(lockedType || "photo");
-  const [tabPicked, setTabPicked] = useState(Boolean(lockedType));
+  const [typeFilter, setTypeFilter] = useState("photo");
+  const [tabPicked, setTabPicked] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState(null);
+  const [viewer, setViewer] = useState(null); // { kind: 'image'|'pdf'|'iframe', src }
+
+  const closeViewer = () => {
+    setViewer((prev) => {
+      if (prev?.src?.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(prev.src);
+        } catch (_) {}
+      }
+      return null;
+    });
+    setLightboxUrl(null);
+  };
+
+  const openViewer = (payload) => {
+    if (!payload?.src) return;
+    setViewer((prev) => {
+      if (prev?.src?.startsWith("blob:") && prev.src !== payload.src) {
+        try {
+          URL.revokeObjectURL(prev.src);
+        } catch (_) {}
+      }
+      return payload;
+    });
+  };
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(null);
-  useEffect(() => {
-    if (jumpDate) setViewMode("day");
-  }, [jumpDate]);
 
   useEffect(() => {
-    if (lockedType) {
-      setTypeFilter(lockedType);
-      setTabPicked(true);
-    }
-  }, [lockedType]);
+    if (!browse?.type) return;
+    setTypeFilter(browse.type);
+    setTabPicked(true);
+    setViewMode(browse.date ? "day" : browse.month ? "month" : "recent");
+  }, [browse]);
 
   const load = useCallback(async () => {
     if (!siteName) {
@@ -2085,18 +2158,69 @@ function ReportsAndPhotos({
     }
     setLoading(true);
     setLoadError("");
-    setTabPicked(Boolean(lockedType));
+    setTabPicked(false);
     try {
       const data = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
       const dprData = data.dprs || [];
       const wprData = data.wprs || [];
+      const drawingData = data.drawings || [];
       setDprs(dprData);
       setWprs(wprData);
+      setDrawingRecords(drawingData);
       const monthlyRows = [...(data.monthlies || [])].sort(
         (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
       );
       setMonthlies(monthlyRows);
       setMonthlyFiles(await loadLatestMonthlyFiles(monthlyRows[0]));
+
+      const drawingPhotoRows = drawingData
+        .slice()
+        .filter((d) => ymdKey(d.drawing_date))
+        .sort((a, b) =>
+          ymdKey(b.drawing_date).localeCompare(ymdKey(a.drawing_date)),
+        )
+        .flatMap((d) => {
+        const files = parseDrawingFiles(d);
+        const category = String(d.category || "General").trim() || "General";
+        const revision = String(d.revision || "").trim();
+        const revised = isDrawingRevised(revision);
+        const day = ymdKey(d.drawing_date);
+        if (!files.length) {
+          return [{
+            id: `drw-${d.id}`,
+            public_url: null,
+            caption: drawingTypeLabel(d),
+            created_at: day,
+            source: "drawing",
+            image_type: "graphical",
+            category,
+            revision,
+            revised,
+            remarks: d.remarks || "",
+            drawing_date: day,
+            sub_cat_1: d.sub_cat_1,
+            sub_cat_2: d.sub_cat_2,
+            sub_cat_3: d.sub_cat_3,
+          }];
+        }
+        return files.map((f) => ({
+            id: `drw-${d.id}-${f.index}`,
+            public_url: f.url,
+            caption: drawingTypeLabel(d),
+            created_at: day,
+            source: "drawing",
+            image_type: "graphical",
+            category,
+            revision,
+            revised,
+            remarks: d.remarks || "",
+            drawing_date: day,
+            sub_cat_1: d.sub_cat_1,
+            sub_cat_2: d.sub_cat_2,
+            sub_cat_3: d.sub_cat_3,
+          }));
+      });
+      setOfficeDrawings(drawingPhotoRows);
       setPhotos((data.photos || []).filter((p) => p.source !== "drawing"));
     } catch (err) {
       console.error("client media:", err);
@@ -2105,10 +2229,12 @@ function ReportsAndPhotos({
       setWprs([]);
       setMonthlies([]);
       setMonthlyFiles([]);
+      setOfficeDrawings([]);
+      setDrawingRecords([]);
       setPhotos([]);
     }
     setLoading(false);
-  }, [siteName, lockedType]);
+  }, [siteName]);
 
   useEffect(() => {
     load();
@@ -2138,7 +2264,10 @@ function ReportsAndPhotos({
     })),
     ...monthlies.map((r) => ({
       type: "mpr",
-      date: r.created_at,
+      date:
+        r.year && r.month
+          ? `${r.year}-${String(r.month).padStart(2, "0")}-01`
+          : r.created_at,
       displayDate: r.created_at,
       title: `Monthly Report — ${MONTH_NAMES[(Number(r.month) || 1) - 1] || ""} ${r.year || ""}`.trim(),
       meta: `${r.submitted_by_name || r.project_name || ""}${r.file_count ? ` · ${r.file_count} files` : ""}`,
@@ -2157,6 +2286,20 @@ function ReportsAndPhotos({
       isOffice: isOfficeFile(f.url),
       openOnly: true,
     })),
+    ...officeDrawings.map((p) => ({
+      type: "graphical",
+      date: p.drawing_date || p.created_at,
+      displayDate: p.drawing_date || p.created_at,
+      title: p.caption || "Drawing",
+      meta: p.category || "Office Drawing",
+      url: p.public_url,
+      kind: isImageFile(p.public_url) ? "image" : "doc",
+      isOffice: isOfficeFile(p.public_url),
+      category: p.category,
+      revision: p.revision,
+      revised: p.revised,
+      remarks: p.remarks,
+    })),
     ...photos.map((p) => ({
       type: "photo",
       date: p.created_at,
@@ -2171,12 +2314,24 @@ function ReportsAndPhotos({
   const ofType = (type) => unified.filter((it) => it.type === type);
 
   const forType = (type) => {
-    const rows = ofType(type);
-    if (jumpDate) {
-      return rows.filter((it) => ymdKey(it.date) === jumpDate);
+    let rows = ofType(type);
+    if (browse?.type) {
+      if (browse.drawingCategory && type === "graphical") {
+        rows = rows.filter(
+          (it) =>
+            String(it.category || "General").trim() === browse.drawingCategory,
+        );
+      }
+      if (browse.date) {
+        return rows.filter((it) => ymdKey(it.date) === browse.date);
+      }
+      if (browse.month) {
+        return rows.filter(
+          (it) => (ymdKey(it.date) || "").slice(0, 7) === browse.month,
+        );
+      }
+      return rows;
     }
-    // Library sidebar branch: show full type list (latest → oldest via unified sort)
-    if (lockedType) return rows;
     const today = todayYmd();
     const yesterday = shiftYmd(today, -1);
     if (type === "photo") {
@@ -2205,11 +2360,12 @@ function ReportsAndPhotos({
     wpr: forType("wpr").length,
     mpr: forType("mpr").length,
     photo: forType("photo").length,
+    graphical: forType("graphical").length,
   };
 
   useEffect(() => {
-    if (loading || tabPicked || lockedType) return;
-    const order = ["photo", "dpr", "wpr", "mpr"];
+    if (loading || tabPicked) return;
+    const order = ["photo", "dpr", "wpr", "mpr", "graphical"];
     if (counts[typeFilter] > 0) {
       setTabPicked(true);
       return;
@@ -2217,7 +2373,7 @@ function ReportsAndPhotos({
     const next = order.find((key) => counts[key] > 0);
     if (next) setTypeFilter(next);
     setTabPicked(true);
-  }, [loading, tabPicked, typeFilter, lockedType, counts.photo, counts.dpr, counts.wpr, counts.mpr]);
+  }, [loading, tabPicked, typeFilter, counts.photo, counts.dpr, counts.wpr, counts.mpr, counts.graphical]);
 
   const scoped = forType(typeFilter).filter((it) => {
     if (viewMode !== "range") return true;
@@ -2259,25 +2415,46 @@ function ReportsAndPhotos({
       cls: "type-mpr",
       icon: <IcoDocCalendar />,
     },
+    {
+      key: "graphical",
+      label: ` Drawings (${counts.graphical})`,
+      cls: "type-graphical",
+      icon: <IcoBluePrint />,
+    },
   ];
-
-  const visibleTypeFilters = lockedType
-    ? TYPE_FILTERS.filter((f) => f.key === lockedType)
-    : TYPE_FILTERS;
 
   const activeTypeLabel =
     TYPE_FILTERS.find((f) => f.key === typeFilter)?.label || "Site Photos";
+
+  const browseLabel = (() => {
+    if (!browse?.type) return null;
+    const typeName =
+      MEDIA_TYPE_META.find((t) => t.key === browse.type)?.label || browse.type;
+    const parts = [];
+    if (browse.month) {
+      const [yy, mm] = browse.month.split("-").map(Number);
+      parts.push(`${MONTH_NAMES[(mm || 1) - 1] || ""} ${yy || ""}`.trim());
+    }
+    parts.push(typeName);
+    if (browse.drawingCategory) parts.push(browse.drawingCategory);
+    if (browse.date) {
+      parts.push(
+        parseYmd(browse.date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        }),
+      );
+    }
+    return parts.filter(Boolean).join(" · ");
+  })();
+
   return (
     <div>
-      {jumpDate && (
+      {browseLabel && (
         <div className="cp-tree-jump-chip">
-          Showing{" "}
-          {new Date(jumpDate).toLocaleDateString("en-IN", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          })}
-          <button onClick={onClearJump}>
+          Showing {browseLabel}
+          <button onClick={onClearBrowse}>
             <IcoX />
           </button>
         </div>
@@ -2286,15 +2463,14 @@ function ReportsAndPhotos({
       <div className="cp-filter-bar">
         <div className="cp-filter-panel open">
           <div className="cp-typefilters">
-            {visibleTypeFilters.map((f) => (
+            {TYPE_FILTERS.map((f) => (
               <button
                 key={f.key}
                 className={`cp-chip${typeFilter === f.key ? " act " + f.cls : ""}`}
                 onClick={() => {
-                  if (lockedType) return;
                   setTypeFilter(f.key);
                   setTabPicked(true);
-                  if (jumpDate) onClearJump?.();
+                  if (browse) onClearBrowse?.();
                   scrollToTop();
                 }}
               >
@@ -2317,6 +2493,34 @@ function ReportsAndPhotos({
 
       {loading ? (
         <MediaSkeletonGrid count={8} />
+      ) : typeFilter === "graphical" ? (
+        <DrawingsBrowsePanel
+          drawings={drawingRecords}
+          browse={
+            browse?.type === "graphical"
+              ? browse
+              : { type: "graphical", month: null, date: null, drawingCategory: null }
+          }
+          siteName={siteName}
+          onViewer={openViewer}
+          onOpenCategory={(cat) => {
+            if (onBrowse) {
+              onBrowse({
+                type: "graphical",
+                month: browse?.month || null,
+                date: browse?.date || null,
+                drawingCategory: cat,
+              });
+            }
+          }}
+        />
+      ) : typeFilter === "mpr" ? (
+        <MonthlyFolderBrowsePanel
+          monthlies={monthlies}
+          browse={browse?.type === "mpr" ? browse : null}
+          siteName={siteName}
+          onViewer={openViewer}
+        />
       ) : !scoped.length ? (
         <div className="cp-empty">
           <IcoBox />
@@ -2324,7 +2528,7 @@ function ReportsAndPhotos({
             {`No ${activeTypeLabel.replace(/\s*\(\d+\)\s*$/, "").trim()} for ${siteName}`}
           </div>
           <div className="cp-empty-sub">
-            {counts.mpr || counts.dpr || counts.wpr || counts.photo
+            {counts.graphical || counts.mpr || counts.dpr || counts.wpr || counts.photo
               ? "This site has files in another tab above."
               : "Nothing uploaded for this site yet."}
           </div>
@@ -2336,7 +2540,17 @@ function ReportsAndPhotos({
               <div className="cp-group-hdr">{label}</div>
             )}
             <div className="cp-media-grid">
-              {grouped[label].map((it, i) => (
+              {grouped[label].map((it, i) => {
+                const canViewDownload = !!(it.url && (it.kind === "doc" || it.kind === "folder" || it.kind === "image"));
+                const isDrawingCard = it.type === "graphical";
+                const openView = () =>
+                  openForView(it.url, {
+                    isOffice: !!it.isOffice,
+                    isImage: it.kind === "image" || isImageFile(it.url),
+                    onViewer: openViewer,
+                    onImage: (u) => openViewer({ kind: "image", src: u }),
+                  });
+                return (
                 <div key={i} className={`cp-media-card type-${it.type}`}>
                   {it.kind === "folder" ? (
                     <div
@@ -2362,7 +2576,7 @@ function ReportsAndPhotos({
                         className="cp-media-photo"
                         src={it.url}
                         alt=""
-                        onClick={() => setLightboxUrl(it.url)}
+                        onClick={openView}
                       />
                     ) : (
                       <div
@@ -2391,9 +2605,7 @@ function ReportsAndPhotos({
                           color: "#0f766e",
                           cursor: "pointer",
                         }}
-                        onClick={() =>
-                          window.open(resolveViewUrl(it.url, it.isOffice), "_blank", "noopener")
-                        }
+                        onClick={openView}
                       >
                         <IcoDocCalendar w={32} h={32} />
                         <span style={{ fontSize: 11, fontWeight: 600 }}>Open</span>
@@ -2411,16 +2623,31 @@ function ReportsAndPhotos({
                           color: "#af3404",
                           cursor: "pointer",
                         }}
-                        onClick={() =>
-                          window.open(
-                            resolveViewUrl(it.url, it.isOffice),
-                            "_blank",
-                          )
-                        }
+                        onClick={openView}
                       >
                         <IcoDocBars w={32} h={32} />
                         <span style={{ fontSize: 11, fontWeight: 600 }}>
                           Open Presentation
+                        </span>
+                      </div>
+                    ) : isDrawingCard || isPdfFile(it.url) ? (
+                      <div
+                        className="cp-media-photo"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: isDrawingCard ? "#fff7ed" : "#f1f5f9",
+                          color: isDrawingCard ? "#c2410c" : "#475569",
+                          cursor: "pointer",
+                        }}
+                        onClick={openView}
+                      >
+                        <IcoBluePrint />
+                        <span style={{ fontSize: 11, fontWeight: 600 }}>
+                          {isDrawingCard ? "View drawing" : "View PDF"}
                         </span>
                       </div>
                     ) : (
@@ -2431,12 +2658,7 @@ function ReportsAndPhotos({
                           overflow: "hidden",
                           cursor: "pointer",
                         }}
-                        onClick={() =>
-                          window.open(
-                            resolveViewUrl(it.url, it.isOffice),
-                            "_blank",
-                          )
-                        }
+                        onClick={openView}
                       >
                         <iframe
                           src={`${it.url}#toolbar=0&navpanel=0&scrollbar=0&view=FitH`}
@@ -2483,34 +2705,42 @@ function ReportsAndPhotos({
                           ? "Weekly Report"
                           : it.type === "mpr"
                             ? "Monthly Report"
-                            : "Site Photo"}
+                            : it.type === "graphical"
+                              ? "Drawing"
+                              : "Site Photo"}
                     </span>
+                    {it.revised && (
+                      <span className="cp-rev-pill" title={it.revision || "Revised"}>
+                        Revised{it.revision ? ` · ${it.revision}` : ""}
+                      </span>
+                    )}
                     <div className="cp-media-title">{it.title}</div>
                     <div className="cp-media-meta">
                       <IcoClock /> {fmtDateTime(it.displayDate || it.date)}
+                      {it.category ? ` · ${it.category}` : ""}
                     </div>
-                    {(it.kind === "doc" || it.kind === "folder") &&
-                      (it.url ? (
+                    {canViewDownload ? (
                         <div className="cp-media-actions">
-                          <a
+                          <button
+                            type="button"
                             className="cp-media-link"
-                            href={resolveViewUrl(it.url, it.isOffice)}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                            onClick={openView}
                           >
                             <IcoEye /> View
-                          </a>
+                          </button>
                           {it.type !== "mpr" && !it.openOnly && (
-                         <button
-  type="button"
-  className="cp-media-link dl"
-  onClick={() => forceDownload(it.url, it.title || "file")}
->
-  <IcoDl /> Download
-</button>
+                            <button
+                              type="button"
+                              className="cp-media-link dl"
+                              onClick={() =>
+                                forceDownload(it.url, it.title || "file")
+                              }
+                            >
+                              <IcoDl /> Download
+                            </button>
                           )}
                         </div>
-                      ) : (
+                      ) : (it.kind === "doc" || it.kind === "folder") ? (
                         <span
                           style={{
                             fontSize: 11,
@@ -2520,24 +2750,42 @@ function ReportsAndPhotos({
                         >
                           No file attached
                         </span>
-                      ))}
+                      ) : null}
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
         ))
       )}
 
-      {lightboxUrl && (
-        <div className="cp-lightbox" onClick={() => setLightboxUrl(null)}>
+      {(viewer || lightboxUrl) && (
+        <div className="cp-lightbox" onClick={closeViewer}>
           <button
             className="cp-lightbox-close"
-            onClick={() => setLightboxUrl(null)}
+            onClick={closeViewer}
+            type="button"
           >
             ✕
           </button>
-          <img src={lightboxUrl} alt="" onClick={(e) => e.stopPropagation()} />
+          {(() => {
+            const kind = viewer?.kind || "image";
+            const src = viewer?.src || lightboxUrl;
+            if (kind === "pdf" || kind === "iframe") {
+              return (
+                <iframe
+                  className="cp-lightbox-frame"
+                  src={src}
+                  title="Document preview"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              );
+            }
+            return (
+              <img src={src} alt="" onClick={(e) => e.stopPropagation()} />
+            );
+          })()}
         </div>
       )}
     </div>
@@ -2545,24 +2793,8 @@ function ReportsAndPhotos({
 }
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
-const BRANCH_TITLES = {
-  dpr: "DPR",
-  wpr: "WPR",
-  mpr: "Monthly Report",
-  drawings: "Drawings",
-  photo: "Site Photos",
-};
-
 const SECTIONS = {
   overview: { title: "Overview", sub: "" },
-  files: {
-    title: "Files",
-    sub: "DPR, WPR, monthly reports, drawings and site photos.",
-  },
-  drawings: {
-    title: "Drawings",
-    sub: "Site drawings with revision history.",
-  },
   media: {
     title: "Reports & Photos",
     sub: "Daily reports, weekly reports and site photos.",
@@ -2591,28 +2823,137 @@ function getExtensionFromUrl(url, fallback = "") {
   return fallback;
 }
 
-async function forceDownload(url, filename) {
-  try {
-    let name = filename || "download";
-    const hasExt = /\.[a-z0-9]{1,5}$/i.test(name);
-    if (!hasExt) {
-      const ext = getExtensionFromUrl(url);
-      if (ext) name = `${name}.${ext}`;
+function guessMimeFromUrl(url) {
+  const ext = getExtensionFromUrl(url, "");
+  const map = {
+    pdf: "application/pdf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+  };
+  return map[ext] || "";
+}
+
+function sanitizeDownloadName(name, url) {
+  const base = String(name || "download")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || "download";
+  const ext = getExtensionFromUrl(url, "");
+  if (!ext) return base;
+  if (base.toLowerCase().endsWith(`.${ext}`)) return base;
+  return `${base}.${ext}`;
+}
+
+function isCadOrArchive(url) {
+  const ext = getExtensionFromUrl(url, "");
+  return ["dwg", "dxf", "zip", "rar", "7z"].includes(ext);
+}
+
+/**
+ * View only — never opens the raw storage URL (that often forces a download).
+ * Prefer in-app viewer via onViewer({ kind, src }).
+ */
+async function openForView(url, { isOffice = false, isImage = false, onViewer, onImage } = {}) {
+  if (!url) return;
+
+  const show = (kind, src) => {
+    if (typeof onViewer === "function") {
+      onViewer({ kind, src });
+      return;
     }
-    const res = await fetch(url);
+    // legacy image callback
+    if (kind === "image" && typeof onImage === "function") {
+      onImage(src);
+      return;
+    }
+    // Never open raw file URLs here — only blob:/viewer URLs
+    if (src && (src.startsWith("blob:") || src.includes("officeapps.live.com") || src.includes("docs.google.com"))) {
+      window.open(src, "_blank", "noopener");
+    }
+  };
+
+  if (isImage || isImageFile(url)) {
+    show("image", url);
+    return;
+  }
+  if (isOffice || isOfficeFile(url)) {
+    show("iframe", officeViewerUrl(url));
+    return;
+  }
+  if (isCadOrArchive(url)) {
+    window.alert("This file type cannot be previewed in the browser. Please use Download.");
+    return;
+  }
+
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    let mime =
+      guessMimeFromUrl(url) ||
+      (res.headers.get("content-type") || "").split(";")[0].trim() ||
+      "application/octet-stream";
+    if (isPdfFile(url) || /pdf/i.test(mime)) mime = "application/pdf";
+    if (mime === "application/octet-stream" && isPdfFile(url)) mime = "application/pdf";
+
+    const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+
+    if (mime === "application/pdf") {
+      show("pdf", blobUrl);
+      return;
+    }
+    if (mime.startsWith("image/")) {
+      show("image", blobUrl);
+      return;
+    }
+
+    // Unknown binary — do not open (would download). Offer Google viewer only for PDFs.
+    URL.revokeObjectURL(blobUrl);
+    window.alert("Preview not available for this file. Please use Download.");
+  } catch {
+    if (isPdfFile(url)) {
+      // CORS fallback: embedded Google viewer (view only, not download)
+      show(
+        "iframe",
+        `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`,
+      );
+      return;
+    }
+    window.alert("Could not open preview. Please use Download.");
+  }
+}
+
+/** Download only when user clicks Download. */
+async function forceDownload(url, filename) {
+  if (!url) return;
+  const name = sanitizeDownloadName(filename, url);
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
     a.download = name;
+    a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(blobUrl);
   } catch (err) {
     console.error("Download failed:", err);
-    // fallback: open in new tab if fetch/blob fails (e.g. CORS)
-    window.open(url, "_blank");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 }
 // ─── Profile panel ─────────────────────────────────────────────────────────
@@ -2926,14 +3267,12 @@ function assignedSitesFromUser(u) {
           ? [primary]
           : [];
   const seen = new Set();
-  return combined
-    .filter((s) => {
-      const key = String(s || "").trim().toLowerCase();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
+  return combined.filter((s) => {
+    const key = String(s || "").trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export default function ClientPortal() {
@@ -2951,9 +3290,7 @@ export default function ClientPortal() {
   }, [theme]);
 
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
-  const [jumpDate, setJumpDate] = useState(null);
-  const [mediaBranch, setMediaBranch] = useState(null);
-  const [drawingCategory, setDrawingCategory] = useState(null);
+  const [browse, setBrowse] = useState(null);
   const navigate = useNavigate();
   const { logout, user: authUser } = useAuth();
 
@@ -2963,60 +3300,16 @@ export default function ClientPortal() {
     navigate("/login", { replace: true });
   };
 
-  const goToSection = (key, opts = {}) => {
-    setSection(key === "drawings" || key === "media" ? "files" : key);
-    setJumpDate(null);
-    if (key === "files" || key === "drawings" || key === "media") {
-      if (opts.branch) {
-        setMediaBranch(opts.branch);
-      } else if (key === "drawings") {
-        setMediaBranch("drawings");
-      } else if (key === "media") {
-        setMediaBranch("dpr");
-      }
-      if (opts.category !== undefined) {
-        setDrawingCategory(opts.category);
-      } else if (opts.branch === "drawings" || key === "drawings") {
-        setDrawingCategory(null);
-      } else if (opts.branch || key === "media") {
-        setDrawingCategory(null);
-      }
-    } else {
-      setMediaBranch(null);
-      setDrawingCategory(null);
-    }
+  const goToSection = (key) => {
+    setSection(key);
     scrollToTop();
   };
 
-  const handleLibrarySelect = ({ branch, category, date }) => {
-    setMediaBranch(branch || null);
-    setDrawingCategory(branch === "drawings" ? category || null : null);
-    setJumpDate(date || null);
-    setSection("files");
+  const handleBrowse = (sel) => {
+    setBrowse(sel);
+    setSection("media");
     scrollToTop();
   };
-
-  useEffect(() => {
-    setJumpDate(null);
-    setMediaBranch(null);
-    setDrawingCategory(null);
-  }, [activeSite]);
-
-  const filesPageTitle = (() => {
-    if (mediaBranch === "drawings") {
-      return drawingCategory || "Drawings";
-    }
-    if (mediaBranch && BRANCH_TITLES[mediaBranch]) {
-      return BRANCH_TITLES[mediaBranch];
-    }
-    return "Files";
-  })();
-
-  const showDrawingsPanel = section === "files" && mediaBranch === "drawings";
-  const showMediaPanel =
-    section === "files" && mediaBranch && mediaBranch !== "drawings";
-  const showFilesPlaceholder =
-    section === "files" && !mediaBranch;
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -3095,7 +3388,7 @@ export default function ClientPortal() {
 
   const NAV_ITEMS = [
     { key: "overview", label: "Overview", icon: IcoHome },
-    { key: "files", label: "Files", icon: IcoFolder },
+    { key: "media", label: "Reports & Photos", icon: IcoFolder },
   ];
 
   return (
@@ -3127,6 +3420,7 @@ export default function ClientPortal() {
                         className={`cp-site-btn${activeSite === s ? " act" : ""}`}
                         onClick={() => {
                           setActiveSite(s);
+                          setBrowse(null);
                           setMobileNavOpen(false);
                         }}
                       >
@@ -3137,36 +3431,32 @@ export default function ClientPortal() {
                 </div>
               )}
 
-              <nav className="cp-nav" style={{ padding: "8px 4px 10px" }}>
+                <nav className="cp-nav" style={{ padding: "8px 4px 10px" }}>
                 {NAV_ITEMS.map((item) => {
                   const Icon = item.icon;
                   return (
-                    <div key={item.key} className="cp-nav-block">
-                      <button
-                        className={`cp-nav-item${section === item.key ? " act" : ""}`}
-                        onClick={() => {
-                          goToSection(item.key);
-                          setMobileNavOpen(false);
-                        }}
-                      >
-                        <Icon />
-                        {item.label}
-                      </button>
-                      {section === "files" && item.key === "files" && (
-                        <ClientLibraryTree
-                          siteName={activeSite}
-                          activeBranch={mediaBranch}
-                          activeCategory={drawingCategory}
-                          activeDate={jumpDate}
-                          onSelect={(sel) => {
-                            handleLibrarySelect(sel);
-                            setMobileNavOpen(false);
-                          }}
-                        />
-                      )}
-                    </div>
+                    <button
+                      key={item.key}
+                      className={`cp-nav-item${section === item.key ? " act" : ""}`}
+                      onClick={() => {
+                        goToSection(item.key);
+                        setMobileNavOpen(false);
+                      }}
+                    >
+                      <Icon />
+                      {item.label}
+                    </button>
                   );
                 })}
+
+                <MediaFolderTree
+                  siteName={activeSite}
+                  browse={browse}
+                  onBrowse={(sel) => {
+                    handleBrowse(sel);
+                    setMobileNavOpen(false);
+                  }}
+                />
               </nav>
             </div>
 
@@ -3199,7 +3489,10 @@ export default function ClientPortal() {
                         <button
                           key={s}
                           className={`cp-site-btn${activeSite === s ? " act" : ""}`}
-                          onClick={() => setActiveSite(s)}
+                          onClick={() => {
+                            setActiveSite(s);
+                            setBrowse(null);
+                          }}
                         >
                           <span className="cp-site-dot" /> {s}
                         </button>
@@ -3212,26 +3505,22 @@ export default function ClientPortal() {
                   {NAV_ITEMS.map((item) => {
                     const Icon = item.icon;
                     return (
-                      <div key={item.key} className="cp-nav-block">
-                        <button
-                          className={`cp-nav-item${section === item.key ? " act" : ""}`}
-                          onClick={() => goToSection(item.key)}
-                        >
-                          <Icon />
-                          {item.label}
-                        </button>
-                        {section === "files" && item.key === "files" && (
-                          <ClientLibraryTree
-                            siteName={activeSite}
-                            activeBranch={mediaBranch}
-                            activeCategory={drawingCategory}
-                            activeDate={jumpDate}
-                            onSelect={handleLibrarySelect}
-                          />
-                        )}
-                      </div>
+                      <button
+                        key={item.key}
+                        className={`cp-nav-item${section === item.key ? " act" : ""}`}
+                        onClick={() => goToSection(item.key)}
+                      >
+                        <Icon />
+                        {item.label}
+                      </button>
                     );
                   })}
+
+                  <MediaFolderTree
+                    siteName={activeSite}
+                    browse={browse}
+                    onBrowse={handleBrowse}
+                  />
                 </nav>
               </div>
 
@@ -3260,9 +3549,7 @@ export default function ClientPortal() {
                   <div className="cp-page-header">
                     <div>
                       <div className="cp-page-title">
-                        {section === "files"
-                          ? filesPageTitle
-                          : SECTIONS[section]?.title || "Portal"}
+                        {SECTIONS[section].title}
                       </div>
                       <div className="cp-page-sub">
                         Active Site: <strong>{activeSite}</strong>
@@ -3276,29 +3563,13 @@ export default function ClientPortal() {
                       onNavigate={goToSection}
                     />
                   )}
-                  {showDrawingsPanel && (
-                    <DrawingsPanel
-                      siteName={activeSite}
-                      category={drawingCategory}
-                    />
-                  )}
-                  {showMediaPanel && (
+                  {section === "media" && (
                     <ReportsAndPhotos
                       siteName={activeSite}
-                      jumpDate={jumpDate}
-                      lockedType={mediaBranch}
-                      onClearJump={() => setJumpDate(null)}
+                      browse={browse}
+                      onClearBrowse={() => setBrowse(null)}
+                      onBrowse={handleBrowse}
                     />
-                  )}
-                  {showFilesPlaceholder && (
-                    <div className="cp-empty">
-                      <IcoFolder />
-                      <div className="cp-empty-title">Browse the library</div>
-                      <div className="cp-empty-sub">
-                        Open DPR, WPR, Monthly Report, Drawings, or Site Photos
-                        in the sidebar, then pick a date.
-                      </div>
-                    </div>
                   )}
                   {section === "profile" && (
                     <ProfilePage
