@@ -1823,37 +1823,16 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
   const activeGroup = categories.find((c) => c.key === activeCat) || null;
   const fromSidebarCat = Boolean(browse?.drawingCategory);
 
-  const dateOptions = useMemo(() => {
-    if (!activeGroup) return [];
-    const set = new Set();
-    activeGroup.rows.forEach((d) => {
-      const k = ymdKey(d.drawing_date);
-      if (k) set.add(k);
-    });
-    return [...set].sort((a, b) => b.localeCompare(a));
-  }, [activeGroup]);
-
-  const revOptions = useMemo(() => {
-    if (!activeGroup) return [];
-    const set = new Set();
-    activeGroup.rows.forEach((d) => {
-      const r = String(d.revision || "").trim();
-      if (r) set.add(r);
-    });
-    return [...set].sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true }),
-    );
-  }, [activeGroup]);
-
   const tableRows = useMemo(() => {
     if (!activeGroup) return [];
     let sr = 0;
     const out = [];
+    const revQ = filterRev.trim().toLowerCase();
     activeGroup.rows.forEach((d) => {
       const day = ymdKey(d.drawing_date);
       if (filterDate && day !== filterDate) return;
       const revRaw = String(d.revision || "").trim();
-      if (filterRev && revRaw !== filterRev) return;
+      if (revQ && !revRaw.toLowerCase().includes(revQ)) return;
       const files = parseDrawingFiles(d);
       const cat = String(d.category || "General").trim() || "General";
       const rev = revRaw || "—";
@@ -1946,31 +1925,22 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
         <div className="cp-draw-filters">
           <label className="cp-draw-filter">
             <span>Date</span>
-            <select
+            <input
+              type="date"
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
-            >
-              <option value="">All dates</option>
-              {dateOptions.map((d) => (
-                <option key={d} value={d}>
-                  {formatDrawingDate(d)}
-                </option>
-              ))}
-            </select>
+              aria-label="Filter by date"
+            />
           </label>
           <label className="cp-draw-filter">
             <span>Rev No</span>
-            <select
+            <input
+              type="search"
               value={filterRev}
               onChange={(e) => setFilterRev(e.target.value)}
-            >
-              <option value="">All revisions</option>
-              {revOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
+              placeholder="Search revision…"
+              aria-label="Search revision number"
+            />
           </label>
           {(filterDate || filterRev) && (
             <button
@@ -2023,8 +1993,12 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
                     {row.fileName}
                   </td>
                   <td className="cp-draw-rev">
-                    <span className="cp-draw-rev-text">{row.rev}</span>
-                    {row.revised && <span className="cp-rev-pill">Revised</span>}
+                    <div className="cp-draw-rev-inner">
+                      <span className="cp-draw-rev-text">{row.rev}</span>
+                      {row.revised && (
+                        <span className="cp-rev-pill">Revised</span>
+                      )}
+                    </div>
                   </td>
                   <td className="cp-draw-actions-cell">
                     {row.url ? (

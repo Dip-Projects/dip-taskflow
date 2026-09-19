@@ -3149,8 +3149,9 @@ html {
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.cp-draw-filter select {
-  min-width: 140px;
+.cp-draw-filter input[type="date"],
+.cp-draw-filter input[type="search"] {
+  min-width: 150px;
   height: 34px;
   border: 1.5px solid var(--border);
   border-radius: var(--r-sm);
@@ -3162,6 +3163,17 @@ html {
   padding: 0 10px;
   text-transform: none;
   letter-spacing: 0;
+  box-sizing: border-box;
+}
+.cp-draw-filter input[type="date"] {
+  min-width: 148px;
+  cursor: pointer;
+}
+.cp-draw-filter input[type="search"] {
+  min-width: 160px;
+}
+.cp-draw-filter input[type="search"]::-webkit-search-cancel-button {
+  cursor: pointer;
 }
 .cp-draw-table-title {
   display: flex;
@@ -3205,9 +3217,10 @@ html {
 .cp-draw-table {
   width: 100%;
   min-width: 640px;
-  border-collapse: separate;
+  border-collapse: collapse;
   border-spacing: 0;
   font-size: 13px;
+  table-layout: fixed;
 }
 .cp-draw-col-sr { width: 48px; }
 .cp-draw-col-date { width: 110px; }
@@ -3226,8 +3239,8 @@ html {
   font-size: 12px;
   max-width: 280px;
 }
-.cp-draw-rev {
-  display: flex;
+.cp-draw-rev-inner {
+  display: inline-flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
@@ -3237,9 +3250,11 @@ html {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-soft);
+  border: none;
 }
 .cp-draw-actions-cell {
   vertical-align: middle;
+  white-space: nowrap;
 }
 .cp-draw-empty-row {
   text-align: center;
@@ -3249,10 +3264,11 @@ html {
 }
 .cp-draw-table th,
 .cp-draw-table td {
-  padding: 12px 14px;
+  padding: 10px 12px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  box-sizing: border-box;
 }
 .cp-draw-table th {
   position: sticky;
@@ -3318,6 +3334,7 @@ html {
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
 }
 .cp-draw-btn {
@@ -3338,8 +3355,9 @@ html {
   white-space: nowrap;
 }
 .cp-draw-btn--icon {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
   flex-shrink: 0;
 }
@@ -3368,7 +3386,7 @@ html {
   font-style: italic;
 }
 .cp-draw-table .cp-rev-pill {
-  margin-top: 0;
+  margin: 0;
 }
 @media (max-width: 700px) {
   .cp-draw-table {
