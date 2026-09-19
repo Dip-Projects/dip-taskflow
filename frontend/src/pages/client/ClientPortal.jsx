@@ -1384,6 +1384,24 @@ function MaterialRequests({ siteName, userName, onStatsChange }) {
 const isMobileDevice = () =>
   /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
+/** Phones + tablets (incl. iPadOS desktop UA) — iframe PDF/Drive often blank here. */
+function isMobileOrTablet() {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPod|Android/i.test(ua)) return true;
+  if (/iPad/i.test(ua)) return true;
+  // iPadOS 13+ can report as Mac
+  if (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1) {
+    return true;
+  }
+  try {
+    if (window.matchMedia("(pointer: coarse)").matches && window.innerWidth <= 1200) {
+      return true;
+    }
+  } catch (_) {}
+  return window.innerWidth <= 900;
+}
+
 function officeViewerUrl(url) {
   if (!url) return url;
   return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(url)}`;
@@ -1397,12 +1415,48 @@ function officeEmbedPreviewUrl(url) {
 function resolveViewUrl(url, isOffice) {
   if (!url) return url;
   if (isOffice || isOfficeFile(url)) {
-    return isMobileDevice() ? officeViewerUrl(url) : officeEmbedPreviewUrl(url);
+    return isMobileOrTablet() ? officeViewerUrl(url) : officeEmbedPreviewUrl(url);
   }
   if (isPdfFile(url)) {
     return `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`;
   }
   return url;
+}
+
+/** Open a tab immediately (keeps user-gesture) then navigate after async work. */
+function openBlankTab() {
+  try {
+    const w = window.open("about:blank", "_blank");
+    if (w) {
+      try {
+        w.document.title = "Loading…";
+      } catch (_) {}
+    }
+    return w;
+  } catch (_) {
+    return null;
+  }
+}
+
+function navigateTab(tab, href) {
+  if (!href) return false;
+  if (tab && !tab.closed) {
+    try {
+      tab.location.href = href;
+      return true;
+    } catch (_) {
+      try {
+        tab.location.replace(href);
+        return true;
+      } catch (_) {}
+    }
+  }
+  try {
+    window.open(href, "_blank", "noopener");
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 function ActivityTrendChart({ series, onSelectMonth, selectedMonth }) {
   const W = 960,
@@ -2931,6 +2985,8 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
                   className="cp-lightbox-frame"
                   src={src}
                   title="Document preview"
+                  allow="fullscreen"
+                  allowFullScreen
                   onClick={(e) => e.stopPropagation()}
                 />
               );
@@ -3010,22 +3066,32 @@ function isCadOrArchive(url) {
 /**
  * View only — never opens the raw storage URL (that often forces a download).
  * Prefer in-app viewer via onViewer({ kind, src }).
+ * On mobile/tablet: open a real browser tab (iframe + Google Drive viewer often blank).
  */
 async function openForView(url, { isOffice = false, isImage = false, onViewer, onImage } = {}) {
   if (!url) return;
 
+  const touch = isMobileOrTablet();
   const show = (kind, src) => {
+    if (touch && (kind === "pdf" || kind === "iframe") && src) {
+      // Prefer top-level tab — mobile iframes for PDF/Drive/Office frequently stay blank.
+      window.open(src, "_blank", "noopener");
+      return;
+    }
     if (typeof onViewer === "function") {
       onViewer({ kind, src });
       return;
     }
-    // legacy image callback
     if (kind === "image" && typeof onImage === "function") {
       onImage(src);
       return;
     }
-    // Never open raw file URLs here — only blob:/viewer URLs
-    if (src && (src.startsWith("blob:") || src.includes("officeapps.live.com") || src.includes("docs.google.com"))) {
+    if (
+      src &&
+      (src.startsWith("blob:") ||
+        src.includes("officeapps.live.com") ||
+        src.includes("docs.google.com"))
+    ) {
       window.open(src, "_blank", "noopener");
     }
   };
@@ -3034,15 +3100,27 @@ async function openForView(url, { isOffice = false, isImage = false, onViewer, o
     show("image", url);
     return;
   }
+
+  // Office (WPR PPTX etc.): open Microsoft viewer in a gesture-safe tab on mobile.
   if (isOffice || isOfficeFile(url)) {
-    show("iframe", officeViewerUrl(url));
-    return;
-  }
-  if (isCadOrArchive(url)) {
-    window.alert("This file type cannot be previewed in the browser. Please use Download.");
+    if (touch) {
+      const tab = openBlankTab();
+      navigateTab(tab, officeViewerUrl(url));
+      return;
+    }
+    show("iframe", officeEmbedPreviewUrl(url));
     return;
   }
 
+  if (isCadOrArchive(url)) {
+    window.alert(
+      "This file type cannot be previewed in the browser. Please use Download.",
+    );
+    return;
+  }
+
+  // PDF / unknown: fetch blob. On mobile open tab first so popup blockers don't kill it.
+  const tab = touch ? openBlankTab() : null;
   try {
     const res = await fetch(url, { mode: "cors" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3052,30 +3130,54 @@ async function openForView(url, { isOffice = false, isImage = false, onViewer, o
       (res.headers.get("content-type") || "").split(";")[0].trim() ||
       "application/octet-stream";
     if (isPdfFile(url) || /pdf/i.test(mime)) mime = "application/pdf";
-    if (mime === "application/octet-stream" && isPdfFile(url)) mime = "application/pdf";
+    if (mime === "application/octet-stream" && isPdfFile(url)) {
+      mime = "application/pdf";
+    }
 
     const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
 
     if (mime === "application/pdf") {
+      if (touch) {
+        if (!navigateTab(tab, blobUrl)) show("pdf", blobUrl);
+        return;
+      }
       show("pdf", blobUrl);
       return;
     }
     if (mime.startsWith("image/")) {
+      if (tab && !tab.closed) {
+        try {
+          tab.close();
+        } catch (_) {}
+      }
       show("image", blobUrl);
       return;
     }
 
-    // Unknown binary — do not open (would download). Offer Google viewer only for PDFs.
     URL.revokeObjectURL(blobUrl);
+    if (tab && !tab.closed) {
+      try {
+        tab.close();
+      } catch (_) {}
+    }
     window.alert("Preview not available for this file. Please use Download.");
   } catch {
-    if (isPdfFile(url)) {
-      // CORS fallback: embedded Google viewer (view only, not download)
+    // CORS / network: open file URL or Office viewer — never blank Google Drive iframe on mobile.
+    if (isPdfFile(url) || /\.pdf(\?|#|$)/i.test(url)) {
+      if (touch) {
+        if (!navigateTab(tab, url)) window.open(url, "_blank", "noopener");
+        return;
+      }
       show(
         "iframe",
         `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`,
       );
       return;
+    }
+    if (tab && !tab.closed) {
+      try {
+        tab.close();
+      } catch (_) {}
     }
     window.alert("Could not open preview. Please use Download.");
   }
@@ -3085,10 +3187,11 @@ async function openForView(url, { isOffice = false, isImage = false, onViewer, o
 async function forceDownload(url, filename) {
   if (!url) return;
   const name = sanitizeDownloadName(filename, url);
-  try {
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
+  const touch = isMobileOrTablet();
+  // Keep gesture for mobile fallback navigation
+  const tab = touch ? openBlankTab() : null;
+
+  const triggerBlobDownload = (blob) => {
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
@@ -3097,13 +3200,75 @@ async function forceDownload(url, filename) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    window.URL.revokeObjectURL(blobUrl);
+    // iOS often ignores download= — open blob tab so user can Share/Save
+    if (touch) {
+      navigateTab(tab, blobUrl);
+      setTimeout(() => {
+        try {
+          window.URL.revokeObjectURL(blobUrl);
+        } catch (_) {}
+      }, 60_000);
+      return;
+    }
+    setTimeout(() => {
+      try {
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (_) {}
+    }, 30_000);
+  };
+
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+
+    if (
+      touch &&
+      typeof navigator !== "undefined" &&
+      navigator.share &&
+      typeof navigator.canShare === "function"
+    ) {
+      try {
+        const file = new File([blob], name, {
+          type: blob.type || guessMimeFromUrl(url) || "application/octet-stream",
+        });
+        if (navigator.canShare({ files: [file] })) {
+          if (tab && !tab.closed) {
+            try {
+              tab.close();
+            } catch (_) {}
+          }
+          await navigator.share({ files: [file], title: name });
+          return;
+        }
+      } catch (shareErr) {
+        // User cancel or unsupported — fall through to blob download
+        if (shareErr?.name === "AbortError") {
+          if (tab && !tab.closed) {
+            try {
+              tab.close();
+            } catch (_) {}
+          }
+          return;
+        }
+      }
+    }
+
+    triggerBlobDownload(blob);
   } catch (err) {
     console.error("Download failed:", err);
+    if (touch) {
+      if (!navigateTab(tab, url)) {
+        window.alert("Download failed. Long-press the file link after it opens, then Save.");
+        window.open(url, "_blank", "noopener");
+      }
+      return;
+    }
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
     a.rel = "noopener";
+    a.target = "_blank";
     document.body.appendChild(a);
     a.click();
     a.remove();

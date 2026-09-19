@@ -1268,6 +1268,23 @@
   border-radius: 10px;
   background: #fff;
 }
+@media (max-width: 900px) {
+  .cp-lightbox {
+    padding: 8px;
+    align-items: stretch;
+  }
+  .cp-lightbox-frame {
+    width: 100%;
+    height: calc(100dvh - 56px);
+    margin-top: 48px;
+    border-radius: 8px;
+  }
+  .cp-lightbox-close {
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+  }
+}
 
 .cp-lightbox-close {
   position: absolute;
