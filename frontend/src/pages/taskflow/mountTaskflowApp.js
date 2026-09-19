@@ -265,6 +265,11 @@ export async function mountTaskflowApp(opts = {}) {
     state.user = null;
   }
 
+  if (!state.token || !state.user?.id) {
+    console.warn('[mountTaskflowApp] skipped — no authenticated user');
+    return;
+  }
+
   // If React remounted the DOM (Strict Mode / HMR), old els are detached — rebind.
   if (_listenersBound && els.navList && els.navList.isConnected) {
     if (state.token && state.user && typeof _enterApp === 'function') await _enterApp();
@@ -1216,9 +1221,17 @@ export async function mountTaskflowApp(opts = {}) {
   
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
+    if (!state.user?.id) {
+      console.warn('[enterApp] skipped — user missing');
+      return;
+    }
     if (els.appScreen) els.appScreen.hidden = false;
-    if (els.userName) els.userName.textContent = state.user.full_name;
-    if (els.userRoleTag) els.userRoleTag.textContent = state.user.is_mis_executive ? 'MIS executive' : state.user.role;
+    if (els.userName) els.userName.textContent = state.user.full_name || state.user.username || '';
+    if (els.userRoleTag) {
+      els.userRoleTag.textContent = state.user.is_mis_executive
+        ? 'MIS executive'
+        : state.user.role || '';
+    }
     try {
       const vis = await api('/master/nav-visibility');
       state.navVis = vis.map || {};

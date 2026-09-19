@@ -118,6 +118,18 @@ async function loadUserById(id) {
   return data;
 }
 
+function dbUnavailableMessage(err) {
+  const msg = String(err?.message || err || '');
+  if (
+    /522|521|520|524|timed?\s*out|fetch failed|ECONNRESET|ENOTFOUND|<!DOCTYPE html>|Cloudflare/i.test(
+      msg
+    )
+  ) {
+    return 'Database is temporarily unreachable (Supabase). Wait a minute and try again, or check the Supabase project is not paused.';
+  }
+  return null;
+}
+
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -131,6 +143,10 @@ router.post('/login', async (req, res) => {
     if (!process.env.JWT_SECRET) {
       console.error('Login error: JWT_SECRET missing');
       return res.status(500).json({ error: 'Server auth not configured. Contact admin.' });
+    }
+
+    if (!supabase.supabaseConfigured) {
+      return res.status(503).json({ error: 'Database not configured. Contact admin.' });
     }
 
     const user = await loadUserByUsername(userName);
@@ -173,8 +189,11 @@ router.post('/login', async (req, res) => {
 
     res.json({ token, user: payload });
   } catch (err) {
-    console.error('Login error:', err.message);
-    res.status(500).json({ error: 'Login failed, please try again' });
+    console.error('Login error:', String(err?.message || err).slice(0, 200));
+    const nice = dbUnavailableMessage(err);
+    res.status(nice ? 503 : 500).json({
+      error: nice || 'Login failed, please try again',
+    });
   }
 });
 
@@ -186,8 +205,11 @@ router.get('/me', requireAuth, async (req, res) => {
     }
     res.json(toPayload(user));
   } catch (err) {
-    console.error('Me error:', err.message);
-    res.status(500).json({ error: 'Could not load profile' });
+    console.error('Me error:', String(err?.message || err).slice(0, 200));
+    const nice = dbUnavailableMessage(err);
+    res.status(nice ? 503 : 500).json({
+      error: nice || 'Could not load profile',
+    });
   }
 });
 
