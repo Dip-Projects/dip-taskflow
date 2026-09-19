@@ -733,38 +733,52 @@ const MEDIA_TYPE_META = [
   { key: "photo", label: "Photos", Icon: IcoImg },
 ];
 
-/** Year → Month → Type → (Drawings: Category →) Dates */
+/** Calendar week-of-month: days 1–7 → W1, 8–14 → W2, … */
+function weekOfMonthNum(dayKey) {
+  const day = Number(String(dayKey || "").slice(8, 10));
+  if (!day) return 0;
+  return Math.ceil(day / 7);
+}
+
+function weekKeyOf(dayKey) {
+  const monthKey = String(dayKey || "").slice(0, 7);
+  const w = weekOfMonthNum(dayKey);
+  if (!/^\d{4}-\d{2}$/.test(monthKey) || !w) return "";
+  return `${monthKey}-W${w}`;
+}
+
+function weekRangeLabel(monthKey, weekNum) {
+  const [yy, mm] = String(monthKey || "").split("-").map(Number);
+  if (!yy || !mm || !weekNum) return `Week ${weekNum || ""}`;
+  const dim = daysInMonth(yy, mm);
+  const start = (weekNum - 1) * 7 + 1;
+  const end = Math.min(weekNum * 7, dim);
+  const mon = (MONTH_NAMES[(mm || 1) - 1] || "").slice(0, 3);
+  return `${start}–${end} ${mon}`;
+}
+
+/** Browse all data → Type → Month → Week → Day */
 function buildBrowseTree(media) {
   const today = todayYmd();
-  const years = {};
+  /** type → monthKey → weekKey → dayKey → count */
+  const root = {};
 
-  const bump = (dayKey, type, extra = {}) => {
-    if (!dayKey || dayKey > today) return;
-    const y = Number(dayKey.slice(0, 4));
+  const bump = (dayKey, type, count = 1) => {
+    if (!dayKey || dayKey > today || !type) return;
     const monthKey = dayKey.slice(0, 7);
-    years[y] = years[y] || {};
-    years[y][monthKey] = years[y][monthKey] || {
-      types: {
-        dpr: {},
-        wpr: {},
-        photo: {},
-        mpr: {},
-        graphical: {},
-      },
-      drawingCats: {},
-    };
-    const bucket = years[y][monthKey];
-    if (type === "graphical") {
-      const cat = extra.category || "General";
-      bucket.drawingCats[cat] = bucket.drawingCats[cat] || {};
-      bucket.drawingCats[cat][dayKey] = (bucket.drawingCats[cat][dayKey] || 0) + (extra.count || 1);
-    }
-    bucket.types[type] = bucket.types[type] || {};
-    bucket.types[type][dayKey] = (bucket.types[type][dayKey] || 0) + (extra.count || 1);
+    const wKey = weekKeyOf(dayKey);
+    if (!monthKey || !wKey) return;
+    root[type] = root[type] || {};
+    root[type][monthKey] = root[type][monthKey] || {};
+    root[type][monthKey][wKey] = root[type][monthKey][wKey] || {};
+    root[type][monthKey][wKey][dayKey] =
+      (root[type][monthKey][wKey][dayKey] || 0) + count;
   };
 
   (media.dprs || []).forEach((r) => bump(ymdKey(r.date || r.created_at), "dpr"));
-  (media.wprs || []).forEach((r) => bump(ymdKey(r.created_at || r.report_date), "wpr"));
+  (media.wprs || []).forEach((r) =>
+    bump(ymdKey(r.created_at || r.report_date), "wpr"),
+  );
   (media.photos || [])
     .filter((p) => p.source !== "drawing" && p.image_type !== "graphical")
     .forEach((p) => bump(ymdKey(p.actual_created_at || p.created_at), "photo"));
@@ -772,14 +786,12 @@ function buildBrowseTree(media) {
     const y = Number(r.year);
     const m = Number(r.month);
     if (y && m) {
-      const dayKey = `${y}-${String(m).padStart(2, "0")}-01`;
-      bump(dayKey, "mpr");
+      bump(`${y}-${String(m).padStart(2, "0")}-01`, "mpr");
     } else {
       bump(ymdKey(r.created_at), "mpr");
     }
   });
   (media.drawings || []).forEach((d) => {
-    // Always use Add Drawing "Drawing Date" — never upload/created_at
     const dayKey = ymdKey(d.drawing_date);
     if (!dayKey) return;
     let files = d.file_urls;
@@ -791,27 +803,21 @@ function buildBrowseTree(media) {
       }
     }
     if (!Array.isArray(files)) files = [];
-    const n = Math.max(1, files.length);
-    bump(dayKey, "graphical", {
-      category: String(d.category || "General").trim() || "General",
-      count: n,
-    });
+    bump(dayKey, "graphical", Math.max(1, files.length));
   });
 
-  const currentY = String(new Date().getFullYear());
-
-  return Object.keys(years)
-    .map(Number)
-    .sort((a, b) => b - a)
-    .map((y) => {
-      const yKey = String(y);
-      const months = Object.keys(years[y])
-        .sort((a, b) => b.localeCompare(a))
-        .map((monthKey) => {
-          const node = years[y][monthKey];
-          const types = MEDIA_TYPE_META.map((meta) => {
-            const dayMap = node.types[meta.key] || {};
-            const days = Object.entries(dayMap)
+  return MEDIA_TYPE_META.map((meta) => {
+    const monthsMap = root[meta.key] || {};
+    const months = Object.keys(monthsMap)
+      .sort((a, b) => b.localeCompare(a))
+      .map((monthKey) => {
+        const [yy, mm] = monthKey.split("-").map(Number);
+        const weeksMap = monthsMap[monthKey] || {};
+        const weeks = Object.keys(weeksMap)
+          .sort((a, b) => b.localeCompare(a))
+          .map((wKey) => {
+            const weekNum = Number(String(wKey).split("-W")[1]) || 0;
+            const days = Object.entries(weeksMap[wKey] || {})
               .sort((a, b) => b[0].localeCompare(a[0]))
               .map(([dayKey, count]) => ({
                 key: dayKey,
@@ -821,77 +827,56 @@ function buildBrowseTree(media) {
                   month: "short",
                 }),
               }));
-            let categories = null;
-            if (meta.key === "graphical") {
-              categories = Object.keys(node.drawingCats || {})
-                .sort((a, b) => a.localeCompare(b))
-                .map((cat) => {
-                  const cDays = Object.entries(node.drawingCats[cat] || {})
-                    .sort((a, b) => b[0].localeCompare(a[0]))
-                    .map(([dayKey, count]) => ({
-                      key: dayKey,
-                      count,
-                      label: parseYmd(dayKey).toLocaleDateString("en-IN", {
-                        day: "2-digit",
-                        month: "short",
-                      }),
-                    }));
-                  return {
-                    key: cat,
-                    label: cat,
-                    total: cDays.reduce((s, d) => s + d.count, 0),
-                    days: cDays,
-                  };
-                });
-            }
             return {
-              ...meta,
+              key: wKey,
+              weekNum,
+              label: `Week ${weekNum}`,
+              range: weekRangeLabel(monthKey, weekNum),
               total: days.reduce((s, d) => s + d.count, 0),
               days,
-              categories,
             };
-          }).filter((t) => t.total > 0 || (t.categories && t.categories.length));
+          })
+          .filter((w) => w.total > 0);
+        return {
+          key: monthKey,
+          label: `${MONTH_NAMES[(mm || 1) - 1] || monthKey} ${yy || ""}`.trim(),
+          total: weeks.reduce((s, w) => s + w.total, 0),
+          weeks,
+        };
+      })
+      .filter((m) => m.total > 0);
 
-          const [yy, mm] = monthKey.split("-").map(Number);
-          return {
-            key: monthKey,
-            label: MONTH_NAMES[(mm || 1) - 1] || monthKey,
-            total: types.reduce((s, t) => s + t.total, 0),
-            types,
-          };
-        })
-        .filter((m) => m.total > 0);
-
-      return {
-        key: yKey,
-        label: yKey,
-        isActive: yKey === currentY,
-        total: months.reduce((s, m) => s + m.total, 0),
-        months,
-      };
-    })
-    .filter((y) => y.total > 0);
+    return {
+      ...meta,
+      total: months.reduce((s, m) => s + m.total, 0),
+      months,
+    };
+  }).filter((t) => t.total > 0);
 }
 
 function MediaFolderTree({ siteName, browse, onBrowse }) {
   const [tree, setTree] = useState(null);
-  const [openYears, setOpenYears] = useState({});
-  const [openMonths, setOpenMonths] = useState({});
   const [openTypes, setOpenTypes] = useState({});
-  const [openCats, setOpenCats] = useState({});
+  const [openMonths, setOpenMonths] = useState({});
+  const [openWeeks, setOpenWeeks] = useState({});
 
   useEffect(() => {
     if (!siteName) return;
     let cancelled = false;
     (async () => {
       try {
-        const media = await api(`/client/media?site=${encodeURIComponent(siteName)}`);
+        const media = await api(
+          `/client/media?site=${encodeURIComponent(siteName)}`,
+        );
         if (cancelled) return;
         const t = buildBrowseTree(media || {});
         setTree(t);
         if (t[0]) {
-          setOpenYears({ [t[0].key]: true });
-          if (t[0].months[0]) setOpenMonths({ [t[0].months[0].key]: true });
+          setOpenTypes({ [t[0].key]: true });
+          if (t[0].months[0]) {
+            const mk = `${t[0].key}::${t[0].months[0].key}`;
+            setOpenMonths({ [mk]: true });
+          }
         }
       } catch {
         if (!cancelled) setTree([]);
@@ -911,6 +896,7 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
     return (
       browse.type === sel.type &&
       (browse.month || "") === (sel.month || "") &&
+      (browse.week || "") === (sel.week || "") &&
       (browse.date || "") === (sel.date || "") &&
       (browse.drawingCategory || "") === (sel.drawingCategory || "")
     );
@@ -922,140 +908,128 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
         <IcoFolder />
         <span>Browse all data</span>
       </div>
-      {tree.map((y) => (
-        <div key={y.key}>
-          <div
-            className={`cp-tree-row cp-tree-year${y.isActive ? " year-active" : ""}`}
-            onClick={() => setOpenYears((s) => ({ ...s, [y.key]: !s[y.key] }))}
-          >
-            <IcoChevron open={!!openYears[y.key]} />
-            <IcoFolder />
-            <span className="cp-tree-label">{y.label}</span>
-            {y.isActive && <span className="cp-tree-active-pill">✓ Active</span>}
-            <span className="cp-tree-count">{y.total}</span>
-          </div>
-          {openYears[y.key] && (
-            <div className="cp-tree-children">
-              {y.months.map((m) => (
-                <div key={m.key}>
-                  <div
-                    className="cp-tree-row"
-                    onClick={() =>
-                      setOpenMonths((s) => ({ ...s, [m.key]: !s[m.key] }))
-                    }
-                  >
-                    <IcoChevron open={!!openMonths[m.key]} />
-                    <IcoFolder />
-                    <span className="cp-tree-label">{m.label}</span>
-                    <span className="cp-tree-count">{m.total}</span>
-                  </div>
-                  {openMonths[m.key] && (
-                    <div className="cp-tree-children">
-                      {m.types.map((t) => {
-                        const typeKey = `${m.key}::${t.key}`;
-                        const Icon = t.Icon || IcoDoc;
-                        return (
-                          <div key={typeKey}>
-                            <div
-                              className={`cp-tree-row${isAct({ type: t.key, month: m.key }) && !browse?.date && !browse?.drawingCategory ? " act" : ""}`}
-                              onClick={() => {
-                                setOpenTypes((s) => ({ ...s, [typeKey]: !s[typeKey] }));
-                                onBrowse?.({
-                                  type: t.key,
-                                  month: m.key,
-                                  date: null,
-                                  drawingCategory: null,
-                                });
-                              }}
-                            >
-                              <IcoChevron open={!!openTypes[typeKey]} />
-                              <Icon />
-                              <span className="cp-tree-label">{t.label}</span>
-                              <span className="cp-tree-count">{t.total}</span>
-                            </div>
-                            {openTypes[typeKey] && (
-                              <div className="cp-tree-children">
-                                {t.key === "graphical" && t.categories?.length
-                                  ? t.categories.map((cat) => {
-                                      const catKey = `${typeKey}::${cat.key}`;
-                                      return (
-                                        <div key={catKey}>
-                                          <div
-                                            className={`cp-tree-row${isAct({ type: "graphical", month: m.key, drawingCategory: cat.key }) && !browse?.date ? " act" : ""}`}
-                                            onClick={() => {
-                                              setOpenCats((s) => ({
-                                                ...s,
-                                                [catKey]: !s[catKey],
-                                              }));
-                                              onBrowse?.({
-                                                type: "graphical",
-                                                month: m.key,
-                                                date: null,
-                                                drawingCategory: cat.key,
-                                              });
-                                            }}
-                                          >
-                                            <IcoChevron open={!!openCats[catKey]} />
-                                            <IcoFolder />
-                                            <span className="cp-tree-label">{cat.label}</span>
-                                            <span className="cp-tree-count">{cat.total}</span>
-                                          </div>
-                                          {openCats[catKey] && (
-                                            <div className="cp-tree-children">
-                                              {cat.days.map((d) => (
-                                                <div
-                                                  key={d.key}
-                                                  className={`cp-tree-row${isAct({ type: "graphical", month: m.key, date: d.key, drawingCategory: cat.key }) ? " act" : ""}`}
-                                                  onClick={() =>
-                                                    onBrowse?.({
-                                                      type: "graphical",
-                                                      month: m.key,
-                                                      date: d.key,
-                                                      drawingCategory: cat.key,
-                                                    })
-                                                  }
-                                                >
-                                                  <span className="cp-tree-leaf-dot" />
-                                                  <span className="cp-tree-label">{d.label}</span>
-                                                  <span className="cp-tree-count">{d.count}</span>
-                                                </div>
-                                              ))}
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })
-                                  : t.days.map((d) => (
+      {tree.map((t) => {
+        const Icon = t.Icon || IcoDoc;
+        return (
+          <div key={t.key}>
+            <div
+              className={`cp-tree-row cp-tree-year${isAct({ type: t.key }) && !browse?.month ? " act" : ""}`}
+              onClick={() => {
+                setOpenTypes((s) => ({ ...s, [t.key]: !s[t.key] }));
+                onBrowse?.({
+                  type: t.key,
+                  month: null,
+                  week: null,
+                  date: null,
+                  drawingCategory: null,
+                });
+              }}
+            >
+              <IcoChevron open={!!openTypes[t.key]} />
+              <Icon />
+              <span className="cp-tree-label">{t.label}</span>
+              <span className="cp-tree-count">{t.total}</span>
+            </div>
+            {openTypes[t.key] && (
+              <div className="cp-tree-children">
+                {t.months.map((m) => {
+                  const monthKey = `${t.key}::${m.key}`;
+                  return (
+                    <div key={monthKey}>
+                      <div
+                        className={`cp-tree-row${isAct({ type: t.key, month: m.key }) && !browse?.week && !browse?.date ? " act" : ""}`}
+                        onClick={() => {
+                          setOpenMonths((s) => ({
+                            ...s,
+                            [monthKey]: !s[monthKey],
+                          }));
+                          onBrowse?.({
+                            type: t.key,
+                            month: m.key,
+                            week: null,
+                            date: null,
+                            drawingCategory: null,
+                          });
+                        }}
+                      >
+                        <IcoChevron open={!!openMonths[monthKey]} />
+                        <IcoFolder />
+                        <span className="cp-tree-label">{m.label}</span>
+                        <span className="cp-tree-count">{m.total}</span>
+                      </div>
+                      {openMonths[monthKey] && (
+                        <div className="cp-tree-children">
+                          {m.weeks.map((w) => {
+                            const weekNodeKey = `${monthKey}::${w.key}`;
+                            return (
+                              <div key={weekNodeKey}>
+                                <div
+                                  className={`cp-tree-row${isAct({ type: t.key, month: m.key, week: w.key }) && !browse?.date ? " act" : ""}`}
+                                  onClick={() => {
+                                    setOpenWeeks((s) => ({
+                                      ...s,
+                                      [weekNodeKey]: !s[weekNodeKey],
+                                    }));
+                                    onBrowse?.({
+                                      type: t.key,
+                                      month: m.key,
+                                      week: w.key,
+                                      date: null,
+                                      drawingCategory: null,
+                                    });
+                                  }}
+                                >
+                                  <IcoChevron open={!!openWeeks[weekNodeKey]} />
+                                  <IcoFolder />
+                                  <span className="cp-tree-label">
+                                    {w.label}
+                                    <span className="cp-tree-week-range">
+                                      {" "}
+                                      · {w.range}
+                                    </span>
+                                  </span>
+                                  <span className="cp-tree-count">{w.total}</span>
+                                </div>
+                                {openWeeks[weekNodeKey] && (
+                                  <div className="cp-tree-children">
+                                    {w.days.map((d) => (
                                       <div
                                         key={d.key}
-                                        className={`cp-tree-row${isAct({ type: t.key, month: m.key, date: d.key }) ? " act" : ""}`}
+                                        className={`cp-tree-row${isAct({ type: t.key, month: m.key, week: w.key, date: d.key }) ? " act" : ""}`}
                                         onClick={() =>
                                           onBrowse?.({
                                             type: t.key,
                                             month: m.key,
+                                            week: w.key,
                                             date: d.key,
                                             drawingCategory: null,
                                           })
                                         }
                                       >
                                         <span className="cp-tree-leaf-dot" />
-                                        <span className="cp-tree-label">{d.label}</span>
-                                        <span className="cp-tree-count">{d.count}</span>
+                                        <span className="cp-tree-label">
+                                          {d.label}
+                                        </span>
+                                        <span className="cp-tree-count">
+                                          {d.count}
+                                        </span>
                                       </div>
                                     ))}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1737,7 +1711,7 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
 
   useEffect(() => {
     setOpenCat(browse?.drawingCategory || null);
-  }, [browse?.drawingCategory, browse?.month, browse?.date]);
+  }, [browse?.drawingCategory, browse?.month, browse?.week, browse?.date]);
 
   const filtered = useMemo(() => {
     let rows = (drawings || []).filter((d) => ymdKey(d.drawing_date));
@@ -1746,11 +1720,14 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
         (d) => ymdKey(d.drawing_date).slice(0, 7) === browse.month,
       );
     }
+    if (browse?.week) {
+      rows = rows.filter((d) => weekKeyOf(ymdKey(d.drawing_date)) === browse.week);
+    }
     if (browse?.date) {
       rows = rows.filter((d) => ymdKey(d.drawing_date) === browse.date);
     }
     return rows;
-  }, [drawings, browse?.month, browse?.date]);
+  }, [drawings, browse?.month, browse?.week, browse?.date]);
 
   const categories = useMemo(() => {
     const map = {};
@@ -2148,7 +2125,9 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
     if (!browse?.type) return;
     setTypeFilter(browse.type);
     setTabPicked(true);
-    setViewMode(browse.date ? "day" : browse.month ? "month" : "recent");
+    setViewMode(
+      browse.date ? "day" : browse.week || browse.month ? "month" : "recent",
+    );
   }, [browse]);
 
   const load = useCallback(async () => {
@@ -2325,6 +2304,11 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
       if (browse.date) {
         return rows.filter((it) => ymdKey(it.date) === browse.date);
       }
+      if (browse.week) {
+        return rows.filter(
+          (it) => weekKeyOf(ymdKey(it.date)) === browse.week,
+        );
+      }
       if (browse.month) {
         return rows.filter(
           (it) => (ymdKey(it.date) || "").slice(0, 7) === browse.month,
@@ -2430,12 +2414,17 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
     if (!browse?.type) return null;
     const typeName =
       MEDIA_TYPE_META.find((t) => t.key === browse.type)?.label || browse.type;
-    const parts = [];
+    const parts = [typeName];
     if (browse.month) {
       const [yy, mm] = browse.month.split("-").map(Number);
       parts.push(`${MONTH_NAMES[(mm || 1) - 1] || ""} ${yy || ""}`.trim());
     }
-    parts.push(typeName);
+    if (browse.week) {
+      const weekNum = Number(String(browse.week).split("-W")[1]) || 0;
+      parts.push(
+        `Week ${weekNum}${browse.month ? ` (${weekRangeLabel(browse.month, weekNum)})` : ""}`,
+      );
+    }
     if (browse.drawingCategory) parts.push(browse.drawingCategory);
     if (browse.date) {
       parts.push(
@@ -2499,7 +2488,7 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
           browse={
             browse?.type === "graphical"
               ? browse
-              : { type: "graphical", month: null, date: null, drawingCategory: null }
+              : { type: "graphical", month: null, week: null, date: null, drawingCategory: null }
           }
           siteName={siteName}
           onViewer={openViewer}
@@ -2508,6 +2497,7 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
               onBrowse({
                 type: "graphical",
                 month: browse?.month || null,
+                week: browse?.week || null,
                 date: browse?.date || null,
                 drawingCategory: cat,
               });

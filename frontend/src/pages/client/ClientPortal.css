@@ -1483,6 +1483,14 @@
   color: var(--ink-faint);
 }
 
+.cp-tree-week-range {
+  font-weight: 500;
+  color: var(--ink-faint);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .cp-tree-row.cp-tree-year.year-active {
   background: #fff4e8;
   color: #9a3412;
