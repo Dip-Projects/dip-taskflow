@@ -1732,7 +1732,7 @@ function formatDrawingDate(iso) {
   });
 }
 
-function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName }) {
+function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onViewer }) {
   const [openCat, setOpenCat] = useState(browse?.drawingCategory || null);
 
   useEffect(() => {
@@ -1876,6 +1876,7 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName }) {
                               onClick={() =>
                                 openForView(f.url, {
                                   isImage: isImageFile(f.url),
+                                  onViewer,
                                 })
                               }
                             >
@@ -1925,6 +1926,31 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
   const [typeFilter, setTypeFilter] = useState("photo");
   const [tabPicked, setTabPicked] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState(null);
+  const [viewer, setViewer] = useState(null); // { kind: 'image'|'pdf'|'iframe', src }
+
+  const closeViewer = () => {
+    setViewer((prev) => {
+      if (prev?.src?.startsWith("blob:")) {
+        try {
+          URL.revokeObjectURL(prev.src);
+        } catch (_) {}
+      }
+      return null;
+    });
+    setLightboxUrl(null);
+  };
+
+  const openViewer = (payload) => {
+    if (!payload?.src) return;
+    setViewer((prev) => {
+      if (prev?.src?.startsWith("blob:") && prev.src !== payload.src) {
+        try {
+          URL.revokeObjectURL(prev.src);
+        } catch (_) {}
+      }
+      return payload;
+    });
+  };
   const [rangeStart, setRangeStart] = useState("");
   const [rangeEnd, setRangeEnd] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(null);
@@ -2287,6 +2313,7 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
               : { type: "graphical", month: null, date: null, drawingCategory: null }
           }
           siteName={siteName}
+          onViewer={openViewer}
           onOpenCategory={(cat) => {
             if (onBrowse) {
               onBrowse({
@@ -2324,7 +2351,8 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
                   openForView(it.url, {
                     isOffice: !!it.isOffice,
                     isImage: it.kind === "image" || isImageFile(it.url),
-                    onImage: (u) => setLightboxUrl(u),
+                    onViewer: openViewer,
+                    onImage: (u) => openViewer({ kind: "image", src: u }),
                   });
                 return (
                 <div key={i} className={`cp-media-card type-${it.type}`}>
@@ -2536,15 +2564,32 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
         ))
       )}
 
-      {lightboxUrl && (
-        <div className="cp-lightbox" onClick={() => setLightboxUrl(null)}>
+      {(viewer || lightboxUrl) && (
+        <div className="cp-lightbox" onClick={closeViewer}>
           <button
             className="cp-lightbox-close"
-            onClick={() => setLightboxUrl(null)}
+            onClick={closeViewer}
+            type="button"
           >
             ✕
           </button>
-          <img src={lightboxUrl} alt="" onClick={(e) => e.stopPropagation()} />
+          {(() => {
+            const kind = viewer?.kind || "image";
+            const src = viewer?.src || lightboxUrl;
+            if (kind === "pdf" || kind === "iframe") {
+              return (
+                <iframe
+                  className="cp-lightbox-frame"
+                  src={src}
+                  title="Document preview"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              );
+            }
+            return (
+              <img src={src} alt="" onClick={(e) => e.stopPropagation()} />
+            );
+          })()}
         </div>
       )}
     </div>
@@ -2608,39 +2653,82 @@ function sanitizeDownloadName(name, url) {
   return `${base}.${ext}`;
 }
 
-/** View only — never uses <a download>. */
-async function openForView(url, { isOffice = false, isImage = false, onImage } = {}) {
+function isCadOrArchive(url) {
+  const ext = getExtensionFromUrl(url, "");
+  return ["dwg", "dxf", "zip", "rar", "7z"].includes(ext);
+}
+
+/**
+ * View only — never opens the raw storage URL (that often forces a download).
+ * Prefer in-app viewer via onViewer({ kind, src }).
+ */
+async function openForView(url, { isOffice = false, isImage = false, onViewer, onImage } = {}) {
   if (!url) return;
+
+  const show = (kind, src) => {
+    if (typeof onViewer === "function") {
+      onViewer({ kind, src });
+      return;
+    }
+    // legacy image callback
+    if (kind === "image" && typeof onImage === "function") {
+      onImage(src);
+      return;
+    }
+    // Never open raw file URLs here — only blob:/viewer URLs
+    if (src && (src.startsWith("blob:") || src.includes("officeapps.live.com") || src.includes("docs.google.com"))) {
+      window.open(src, "_blank", "noopener");
+    }
+  };
+
   if (isImage || isImageFile(url)) {
-    if (typeof onImage === "function") onImage(url);
-    else window.open(url, "_blank", "noopener");
+    show("image", url);
     return;
   }
   if (isOffice || isOfficeFile(url)) {
-    window.open(officeViewerUrl(url), "_blank", "noopener");
+    show("iframe", officeViewerUrl(url));
     return;
   }
-  if (isPdfFile(url)) {
-    window.open(resolveViewUrl(url, false), "_blank", "noopener");
+  if (isCadOrArchive(url)) {
+    window.alert("This file type cannot be previewed in the browser. Please use Download.");
     return;
   }
+
   try {
     const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) throw new Error("fetch failed");
-    const blob = await res.blob();
-    const type =
-      blob.type && blob.type !== "application/octet-stream"
-        ? blob.type
-        : guessMimeFromUrl(url) || blob.type;
-    const viewBlob = type
-      ? new Blob([await blob.arrayBuffer()], { type })
-      : blob;
-    const blobUrl = URL.createObjectURL(viewBlob);
-    const win = window.open(blobUrl, "_blank", "noopener");
-    if (!win) window.open(url, "_blank", "noopener");
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    let mime =
+      guessMimeFromUrl(url) ||
+      (res.headers.get("content-type") || "").split(";")[0].trim() ||
+      "application/octet-stream";
+    if (isPdfFile(url) || /pdf/i.test(mime)) mime = "application/pdf";
+    if (mime === "application/octet-stream" && isPdfFile(url)) mime = "application/pdf";
+
+    const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+
+    if (mime === "application/pdf") {
+      show("pdf", blobUrl);
+      return;
+    }
+    if (mime.startsWith("image/")) {
+      show("image", blobUrl);
+      return;
+    }
+
+    // Unknown binary — do not open (would download). Offer Google viewer only for PDFs.
+    URL.revokeObjectURL(blobUrl);
+    window.alert("Preview not available for this file. Please use Download.");
   } catch {
-    window.open(url, "_blank", "noopener");
+    if (isPdfFile(url)) {
+      // CORS fallback: embedded Google viewer (view only, not download)
+      show(
+        "iframe",
+        `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(url)}`,
+      );
+      return;
+    }
+    window.alert("Could not open preview. Please use Download.");
   }
 }
 
@@ -2663,7 +2751,6 @@ async function forceDownload(url, filename) {
     window.URL.revokeObjectURL(blobUrl);
   } catch (err) {
     console.error("Download failed:", err);
-    // Last resort: anchor with download attr (still user-initiated click path)
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
