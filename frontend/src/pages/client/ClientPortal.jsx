@@ -3599,7 +3599,11 @@ export default function ClientPortal() {
                   browse={browse}
                   onBrowse={(sel) => {
                     handleBrowse(sel);
-                    setMobileNavOpen(false);
+                    // Keep folder tree open while expanding Photos → Month → Week.
+                    // Close drawer only after a concrete day / drawing category pick.
+                    if (sel?.date || sel?.drawingCategory) {
+                      setMobileNavOpen(false);
+                    }
                   }}
                 />
               </nav>
