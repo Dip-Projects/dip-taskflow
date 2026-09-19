@@ -8,8 +8,8 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-const MAX_BYTES = 5 * 1024 * 1024 * 1024;
-const MAX_FILE = 40 * 1024 * 1024;
+const MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB total pack
+const MAX_FILE = 5 * 1024 * 1024 * 1024; // 5 GB per file (bucket limit)
 
 function fmtBytes(n) {
   if (!n) return "0 B";
@@ -17,6 +17,31 @@ function fmtBytes(n) {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/** Keep nested folder paths stable for storage keys. */
+function normalizeRelPath(rel) {
+  return String(rel || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .split("/")
+    .filter((p) => p && p !== "." && p !== "..")
+    .map((p) => p.replace(/[<>:"|?*\u0000-\u001f]/g, "_"))
+    .join("/");
+}
+
+function readAllDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const all = [];
+    const pump = () => {
+      reader.readEntries((ents) => {
+        if (!ents.length) return resolve(all);
+        all.push(...ents);
+        pump();
+      }, reject);
+    };
+    pump();
+  });
 }
 
 function FolderIco({ size = 44 }) {
@@ -121,25 +146,38 @@ export default function MonthlyReport({ user }) {
     const items = e.dataTransfer?.items;
     if (items && items.length && items[0].webkitGetAsEntry) {
       const collected = [];
-      const walk = (entry, prefix) => new Promise((resolve) => {
+      const walk = async (entry, prefix) => {
+        if (!entry) return;
         if (entry.isFile) {
-          entry.file((f) => {
-            Object.defineProperty(f, "webkitRelativePath", { value: `${prefix}${f.name}` });
-            collected.push(f);
-            resolve();
-          }, () => resolve());
-        } else if (entry.isDirectory) {
+          await new Promise((resolve) => {
+            entry.file((f) => {
+              try {
+                Object.defineProperty(f, "webkitRelativePath", {
+                  value: normalizeRelPath(`${prefix}${f.name}`),
+                  configurable: true,
+                });
+              } catch {
+                /* ignore */
+              }
+              collected.push(f);
+              resolve();
+            }, () => resolve());
+          });
+          return;
+        }
+        if (entry.isDirectory) {
           const reader = entry.createReader();
-          reader.readEntries(async (ents) => {
-            for (const ent of ents) await walk(ent, `${prefix}${entry.name}/`);
-            resolve();
-          }, () => resolve());
-        } else resolve();
-      });
-      Promise.all(Array.from(items).map((it) => {
-        const ent = it.webkitGetAsEntry?.();
-        return ent ? walk(ent, "") : Promise.resolve();
-      })).then(() => takeFileList(collected));
+          const ents = await readAllDirectoryEntries(reader);
+          const nextPrefix = `${prefix}${entry.name}/`;
+          for (const ent of ents) await walk(ent, nextPrefix);
+        }
+      };
+      Promise.all(
+        Array.from(items).map((it) => {
+          const ent = it.webkitGetAsEntry?.();
+          return ent ? walk(ent, "") : Promise.resolve();
+        }),
+      ).then(() => takeFileList(collected));
       return;
     }
     takeFileList(e.dataTransfer.files);
@@ -153,7 +191,9 @@ export default function MonthlyReport({ user }) {
     }
     const tooBig = files.filter((f) => f.size > MAX_FILE);
     if (tooBig.length) {
-      setFormErr(`${tooBig.length} file(s) over 40 MB — remove them and try again.`);
+      setFormErr(
+        `${tooBig.length} file(s) over 5 GB — remove them and try again.`,
+      );
       return;
     }
     setUploading(true);
@@ -174,7 +214,8 @@ export default function MonthlyReport({ user }) {
           next += 1;
           const file = queue[i];
           if (!file) return;
-          const rel = (file.webkitRelativePath || file.name).replace(/^\/+/, "");
+          const rel = normalizeRelPath(file.webkitRelativePath || file.name);
+          if (!rel) throw new Error("Empty file path in folder");
           let url;
           try {
             url = await uploadViaApi({
@@ -184,7 +225,13 @@ export default function MonthlyReport({ user }) {
               bucket: SITE_FILES_BUCKET,
             });
           } catch (e) {
-            throw new Error(`${rel}: ${e.message || "upload failed"}`);
+            const msg = String(e.message || "upload failed");
+            if (/maximum allowed size|payload too large|exceeded|too large|413/i.test(msg)) {
+              throw new Error(
+                `${rel}: file too large for storage. Max 5 GB per file. If this keeps failing, ask admin to raise site-files bucket file size limit in Supabase.`,
+              );
+            }
+            throw new Error(`${rel}: ${msg}`);
           }
           if (!firstUrl) firstUrl = url;
           done += file.size;
@@ -217,27 +264,14 @@ export default function MonthlyReport({ user }) {
     setUploading(false);
   }
 
-  async function loadFolder(path, { skipNest = false } = {}) {
+  async function loadFolder(path) {
     setViewerLoading(true);
     setViewerErr("");
     try {
-      let current = path;
-      let items = [];
-      for (let i = 0; i < 8; i += 1) {
-        const q = new URLSearchParams({ path: current, bucket: SITE_FILES_BUCKET });
-        const data = await api(`/storage/list?${q.toString()}`);
-        items = data.items || [];
-        current = data.path || current;
-        const folders = items.filter((it) => it.isFolder);
-        const files = items.filter((it) => !it.isFolder);
-        if (!skipNest && files.length === 0 && folders.length === 1) {
-          current = folders[0].path;
-          continue;
-        }
-        break;
-      }
-      setViewerPath(current);
-      setViewerItems(items);
+      const q = new URLSearchParams({ path, bucket: SITE_FILES_BUCKET });
+      const data = await api(`/storage/list?${q.toString()}`);
+      setViewerPath(data.path || path);
+      setViewerItems(data.items || []);
     } catch (e) {
       setViewerErr(e.message || "Could not open folder");
       setViewerItems([]);
@@ -350,7 +384,7 @@ export default function MonthlyReport({ user }) {
                   <FolderIco />
                   <div className="mr-drop-title">Drag &amp; Drop folder here</div>
                   <div className="mr-drop-sub">Or click to browse folder</div>
-                  <div className="mr-drop-limit">Max total size: 5 GB</div>
+                  <div className="mr-drop-limit">Max total / per file: 5 GB · nested folders kept</div>
                   {files.length > 0 && (
                     <div className="mr-file-summary">{files.length} files · {fmtBytes(totalBytes)}</div>
                   )}
@@ -426,7 +460,7 @@ export default function MonthlyReport({ user }) {
                     <tr key={it.path}>
                       <td>
                         {it.isFolder ? (
-                          <button type="button" className="mr-file-link" onClick={() => loadFolder(it.path, { skipNest: true })}>
+                          <button type="button" className="mr-file-link" onClick={() => loadFolder(it.path)}>
                             📁 {it.name}
                           </button>
                         ) : (

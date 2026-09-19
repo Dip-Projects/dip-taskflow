@@ -1911,6 +1911,195 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
   );
 }
 
+function MonthlyFolderBrowsePanel({ monthlies, browse, siteName, onViewer }) {
+  const [active, setActive] = useState(null);
+  const [path, setPath] = useState("");
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  const filtered = useMemo(() => {
+    let rows = [...(monthlies || [])];
+    if (browse?.month) {
+      const [yy, mm] = browse.month.split("-").map(Number);
+      rows = rows.filter(
+        (r) => Number(r.year) === yy && Number(r.month) === mm,
+      );
+    }
+    return rows.sort(
+      (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
+    );
+  }, [monthlies, browse?.month]);
+
+  async function openPath(folderPath) {
+    if (!folderPath) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const qs = new URLSearchParams({ path: folderPath, bucket: "site-files" });
+      const data = await api(`/storage/list?${qs.toString()}`);
+      setPath(data.path || folderPath);
+      setItems(data.items || []);
+    } catch (e) {
+      setErr(e.message || "Could not open folder");
+      setItems([]);
+    }
+    setLoading(false);
+  }
+
+  function openPack(row) {
+    setActive(row);
+    setPath(row.folder_path || "");
+    setItems([]);
+    if (row.folder_path) openPath(row.folder_path);
+  }
+
+  function goUp() {
+    if (!active?.folder_path || !path) return;
+    if (path === active.folder_path) {
+      setActive(null);
+      setPath("");
+      setItems([]);
+      return;
+    }
+    const parent = path.replace(/\/[^/]+$/, "");
+    if (!parent || parent.length < active.folder_path.length) {
+      openPath(active.folder_path);
+      return;
+    }
+    openPath(parent);
+  }
+
+  if (!filtered.length) {
+    return (
+      <div className="cp-empty">
+        <IcoFolder />
+        <div className="cp-empty-title">No monthly reports for {siteName}</div>
+        <div className="cp-empty-sub">Upload a monthly folder pack from Site portal.</div>
+      </div>
+    );
+  }
+
+  if (!active) {
+    return (
+      <div className="cp-draw-folders">
+        <div className="cp-group-hdr">Monthly report packs</div>
+        <div className="cp-draw-folder-grid">
+          {filtered.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              className="cp-draw-folder-card"
+              onClick={() => openPack(r)}
+            >
+              <IcoFolder />
+              <span className="cp-draw-folder-name">
+                {MONTH_NAMES[(Number(r.month) || 1) - 1]} {r.year}
+              </span>
+              <span className="cp-draw-folder-count">
+                {r.project_name || siteName}
+                {r.file_count ? ` · ${r.file_count} files` : ""}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const rel =
+    path.replace(active.folder_path || "", "").replace(/^\//, "") ||
+    active.folder_path;
+
+  return (
+    <div className="cp-draw-table-wrap">
+      <div className="cp-draw-table-toolbar">
+        <button type="button" className="cp-draw-back" onClick={goUp}>
+          ← Back
+        </button>
+        <div className="cp-group-hdr" style={{ margin: 0 }}>
+          {MONTH_NAMES[(Number(active.month) || 1) - 1]} {active.year}
+          {rel ? ` · ${rel}` : ""}
+        </div>
+      </div>
+      {loading && <div className="cp-empty">Loading folder…</div>}
+      {err && (
+        <div className="cp-empty" style={{ color: "#dc2626" }}>
+          {err}
+        </div>
+      )}
+      {!loading && !err && (
+        <div className="cp-draw-table-scroll">
+          <table className="cp-draw-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(items || []).map((it) => (
+                <tr key={it.path}>
+                  <td>
+                    {it.isFolder ? (
+                      <button
+                        type="button"
+                        className="cp-media-link"
+                        style={{ justifyContent: "flex-start", border: "none", background: "transparent", height: "auto" }}
+                        onClick={() => openPath(it.path)}
+                      >
+                        📁 {it.name}
+                      </button>
+                    ) : (
+                      it.name
+                    )}
+                  </td>
+                  <td>{it.isFolder ? "Folder" : (it.name.split(".").pop() || "file").toUpperCase()}</td>
+                  <td>
+                    {!it.isFolder && it.publicUrl ? (
+                      <div className="cp-draw-file-actions">
+                        <button
+                          type="button"
+                          className="cp-media-link"
+                          onClick={() =>
+                            openForView(it.publicUrl, {
+                              isImage: isImageFile(it.publicUrl),
+                              onViewer,
+                            })
+                          }
+                        >
+                          <IcoEye /> View
+                        </button>
+                        <button
+                          type="button"
+                          className="cp-media-link dl"
+                          onClick={() => forceDownload(it.publicUrl, it.name)}
+                        >
+                          <IcoDl /> Download
+                        </button>
+                      </div>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!items?.length && (
+                <tr>
+                  <td colSpan={3} style={{ color: "var(--ink-faint)" }}>
+                    This folder is empty.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Reports & Photos panel ────────────────────────────────────────────────
 function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
   const [dprs, setDprs] = useState([]);
@@ -2324,6 +2513,13 @@ function ReportsAndPhotos({ siteName, browse, onClearBrowse, onBrowse }) {
               });
             }
           }}
+        />
+      ) : typeFilter === "mpr" ? (
+        <MonthlyFolderBrowsePanel
+          monthlies={monthlies}
+          browse={browse?.type === "mpr" ? browse : null}
+          siteName={siteName}
+          onViewer={openViewer}
         />
       ) : !scoped.length ? (
         <div className="cp-empty">

@@ -4,17 +4,29 @@ const supabase = require('../lib/supabaseClient');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const SHARED_BUCKET = 'site-files';
+/** Match product copy: monthly packs up to 5 GB (per-file + bucket). */
+const BUCKET_FILE_SIZE_LIMIT = '5GB';
 
 async function ensurePublicBucket(bucketName) {
   const { data: existing } = await supabase.storage.getBucket(bucketName);
-  if (existing) return { bucket: bucketName, created: false };
+  if (existing) {
+    try {
+      await supabase.storage.updateBucket(bucketName, {
+        public: true,
+        fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
+      });
+    } catch {
+      /* older projects may reject limit change — ignore */
+    }
+    return { bucket: bucketName, created: false };
+  }
 
   const { error: createErr } = await supabase.storage.createBucket(bucketName, {
     public: true,
-    fileSizeLimit: '50MB',
+    fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
   });
 
   if (createErr && !/already exists/i.test(createErr.message || '')) {
@@ -22,7 +34,10 @@ async function ensurePublicBucket(bucketName) {
   }
 
   try {
-    await supabase.storage.updateBucket(bucketName, { public: true });
+    await supabase.storage.updateBucket(bucketName, {
+      public: true,
+      fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
+    });
   } catch {
     /* ignore */
   }
