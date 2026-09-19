@@ -7,41 +7,50 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const SHARED_BUCKET = 'site-files';
-/** Match product copy: monthly packs up to 5 GB (per-file + bucket). */
-const BUCKET_FILE_SIZE_LIMIT = '5GB';
+/** Preferred per-file limit (requires project global Storage limit ≥ this). */
+const BUCKET_FILE_SIZE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GiB
+/** Hosted projects default global cap is often 50 MB — use as fallback. */
+const BUCKET_FILE_SIZE_FALLBACK = 50 * 1024 * 1024;
+
+async function applyBucketFileSizeLimit(bucketName) {
+  const attempts = [BUCKET_FILE_SIZE_LIMIT, BUCKET_FILE_SIZE_FALLBACK];
+  let lastErr = null;
+  for (const limit of attempts) {
+    const { error } = await supabase.storage.updateBucket(bucketName, {
+      public: true,
+      fileSizeLimit: limit,
+    });
+    if (!error) {
+      if (limit < BUCKET_FILE_SIZE_LIMIT) {
+        console.warn(
+          `[storage] ${bucketName}: fileSizeLimit set to ${limit} bytes (project global cap blocks 5GB). Raise Storage → Global file size limit in Supabase Dashboard, then re-run ensure-bucket.`
+        );
+      }
+      return limit;
+    }
+    lastErr = error;
+  }
+  console.warn(`[storage] ${bucketName}: could not set fileSizeLimit:`, lastErr?.message || lastErr);
+  return null;
+}
 
 async function ensurePublicBucket(bucketName) {
   const { data: existing } = await supabase.storage.getBucket(bucketName);
   if (existing) {
-    try {
-      await supabase.storage.updateBucket(bucketName, {
-        public: true,
-        fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
-      });
-    } catch {
-      /* older projects may reject limit change — ignore */
-    }
+    await applyBucketFileSizeLimit(bucketName);
     return { bucket: bucketName, created: false };
   }
 
   const { error: createErr } = await supabase.storage.createBucket(bucketName, {
     public: true,
-    fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
+    fileSizeLimit: BUCKET_FILE_SIZE_FALLBACK,
   });
 
   if (createErr && !/already exists/i.test(createErr.message || '')) {
     throw new Error(createErr.message);
   }
 
-  try {
-    await supabase.storage.updateBucket(bucketName, {
-      public: true,
-      fileSizeLimit: BUCKET_FILE_SIZE_LIMIT,
-    });
-  } catch {
-    /* ignore */
-  }
-
+  await applyBucketFileSizeLimit(bucketName);
   return { bucket: bucketName, created: true };
 }
 
@@ -88,7 +97,15 @@ router.post('/ensure-bucket', requireAuth, async (req, res) => {
     const result = await ensurePublicBucket(SHARED_BUCKET);
     await ensurePublicBucket('attendance-photos').catch(() => null);
     await ensurePublicBucket('documents').catch(() => null);
-    res.json(result);
+    const { data: bucketMeta } = await supabase.storage.getBucket(SHARED_BUCKET);
+    res.json({
+      ...result,
+      fileSizeLimit: bucketMeta?.file_size_limit ?? null,
+      fileSizeLimitHint:
+        bucketMeta?.file_size_limit && bucketMeta.file_size_limit < BUCKET_FILE_SIZE_LIMIT
+          ? 'Project global Storage file size limit is below 5GB. Set it in Supabase → Project Settings → Storage, then upload again.'
+          : null,
+    });
   } catch (err) {
     console.error('ensure-bucket error:', err.message);
     res.status(500).json({ error: err.message || 'Could not provision bucket' });
