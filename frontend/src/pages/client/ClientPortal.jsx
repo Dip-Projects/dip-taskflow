@@ -886,6 +886,13 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
   const [openMonths, setOpenMonths] = useState({});
   const [openWeeks, setOpenWeeks] = useState({});
 
+  const drawingsOnly = browse?.type === "graphical";
+  const visibleTree = useMemo(() => {
+    if (!tree) return null;
+    if (!drawingsOnly) return tree;
+    return tree.filter((t) => t.key === "graphical");
+  }, [tree, drawingsOnly]);
+
   useEffect(() => {
     if (!siteName) return;
     let cancelled = false;
@@ -897,10 +904,12 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
         if (cancelled) return;
         const t = buildBrowseTree(media || {});
         setTree(t);
-        if (t[0]) {
-          setOpenTypes({ [t[0].key]: true });
-          if (t[0].months[0]) {
-            const mk = `${t[0].key}::${t[0].months[0].key}`;
+        const drawingsNode = t.find((n) => n.key === "graphical");
+        const first = drawingsNode || t[0];
+        if (first) {
+          setOpenTypes({ [first.key]: true });
+          if (!first.byCategory && first.months?.[0]) {
+            const mk = `${first.key}::${first.months[0].key}`;
             setOpenMonths({ [mk]: true });
           }
         }
@@ -913,9 +922,21 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
     };
   }, [siteName]);
 
-  if (!tree) return <div className="cp-tree-empty">Loading…</div>;
-  if (!tree.length)
-    return <div className="cp-tree-empty">No dated activity yet</div>;
+  useEffect(() => {
+    if (browse?.type === "graphical") {
+      setOpenTypes({ graphical: true });
+      setOpenMonths({});
+      setOpenWeeks({});
+    }
+  }, [browse?.type]);
+
+  if (!visibleTree) return <div className="cp-tree-empty">Loading…</div>;
+  if (!visibleTree.length)
+    return (
+      <div className="cp-tree-empty">
+        {drawingsOnly ? "No drawing categories yet" : "No dated activity yet"}
+      </div>
+    );
 
   const isAct = (sel) => {
     if (!browse || !sel) return false;
@@ -929,15 +950,19 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
   };
 
   return (
-    <div className="cp-tree">
-      {tree.map((t) => {
+    <div className={`cp-tree${drawingsOnly ? " cp-tree--drawings" : ""}`}>
+      {visibleTree.map((t) => {
         const Icon = t.Icon || IcoDoc;
+        const forceOpen = drawingsOnly && t.key === "graphical";
+        const typeOpen = forceOpen || !!openTypes[t.key];
         return (
           <div key={t.key}>
             <div
               className={`cp-tree-row cp-tree-year${isAct({ type: t.key }) && !browse?.month && !browse?.drawingCategory ? " act" : ""}`}
               onClick={() => {
-                setOpenTypes((s) => ({ ...s, [t.key]: !s[t.key] }));
+                if (!forceOpen) {
+                  setOpenTypes((s) => ({ ...s, [t.key]: !s[t.key] }));
+                }
                 onBrowse?.({
                   type: t.key,
                   month: null,
@@ -947,12 +972,12 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
                 });
               }}
             >
-              <IcoChevron open={!!openTypes[t.key]} />
+              <IcoChevron open={typeOpen} />
               <Icon />
               <span className="cp-tree-label">{t.label}</span>
               <span className="cp-tree-count">{t.total}</span>
             </div>
-            {openTypes[t.key] && (
+            {typeOpen && (
               <div className="cp-tree-children">
                 {t.byCategory
                   ? (t.categories || []).map((cat) => (
@@ -1769,8 +1794,20 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
     if (browse?.date) {
       rows = rows.filter((d) => ymdKey(d.drawing_date) === browse.date);
     }
+    if (browse?.drawingCategory) {
+      rows = rows.filter(
+        (d) =>
+          String(d.category || "General").trim() === browse.drawingCategory,
+      );
+    }
     return rows;
-  }, [drawings, browse?.month, browse?.week, browse?.date]);
+  }, [
+    drawings,
+    browse?.month,
+    browse?.week,
+    browse?.date,
+    browse?.drawingCategory,
+  ]);
 
   const categories = useMemo(() => {
     const map = {};
@@ -1795,6 +1832,7 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
 
   const activeCat = openCat || browse?.drawingCategory || null;
   const activeGroup = categories.find((c) => c.key === activeCat) || null;
+  const fromSidebarCat = Boolean(browse?.drawingCategory);
 
   if (!filtered.length) {
     return (
@@ -1824,9 +1862,13 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
                 onOpenCategory?.(c.key);
               }}
             >
-              <IcoFolder />
+              <span className="cp-draw-folder-ico" aria-hidden>
+                <IcoFolder />
+              </span>
               <span className="cp-draw-folder-name">{c.label}</span>
-              <span className="cp-draw-folder-count">{c.count}</span>
+              <span className="cp-draw-folder-count">
+                {c.count} drawing{c.count === 1 ? "" : "s"}
+              </span>
             </button>
           ))}
         </div>
@@ -1837,26 +1879,38 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
   return (
     <div className="cp-draw-table-wrap">
       <div className="cp-draw-table-toolbar">
-        <button
-          type="button"
-          className="cp-draw-back"
-          onClick={() => {
-            setOpenCat(null);
-            onOpenCategory?.(null);
-          }}
-        >
-          ← All categories
-        </button>
-        <div className="cp-group-hdr" style={{ margin: 0 }}>
-          {activeGroup.label}
-          {browse?.date ? ` · ${formatDrawingDate(browse.date)}` : ""}
+        {!fromSidebarCat && (
+          <button
+            type="button"
+            className="cp-draw-back"
+            onClick={() => {
+              setOpenCat(null);
+              onOpenCategory?.(null);
+            }}
+          >
+            ← All categories
+          </button>
+        )}
+        <div className="cp-draw-table-title">
+          <span className="cp-draw-table-title-main">{activeGroup.label}</span>
+          <span className="cp-draw-table-title-meta">
+            {activeGroup.count} drawing{activeGroup.count === 1 ? "" : "s"}
+            {browse?.date ? ` · ${formatDrawingDate(browse.date)}` : ""}
+          </span>
         </div>
       </div>
       <div className="cp-draw-table-scroll">
         <table className="cp-draw-table">
+          <colgroup>
+            <col className="cp-draw-col-sr" />
+            <col className="cp-draw-col-date" />
+            <col className="cp-draw-col-type" />
+            <col className="cp-draw-col-desc" />
+            <col className="cp-draw-col-actions" />
+          </colgroup>
           <thead>
             <tr>
-              <th>Sr. No</th>
+              <th>Sr.</th>
               <th>Date</th>
               <th>Type of Drawing</th>
               <th>Description</th>
@@ -1869,8 +1923,8 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
               const revised = isDrawingRevised(d.revision);
               return (
                 <tr key={d.id || idx}>
-                  <td>{idx + 1}</td>
-                  <td>{formatDrawingDate(d.drawing_date)}</td>
+                  <td className="cp-draw-sr">{idx + 1}</td>
+                  <td className="cp-draw-date">{formatDrawingDate(d.drawing_date)}</td>
                   <td>
                     <div className="cp-draw-type">{drawingTypeLabel(d)}</div>
                     {revised && (
@@ -1888,32 +1942,36 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
                         {files.map((f) => (
                           <div key={f.index} className="cp-draw-file-actions">
                             {files.length > 1 && (
-                              <span className="cp-draw-file-name">{f.name}</span>
+                              <span className="cp-draw-file-name" title={f.name}>
+                                {f.name}
+                              </span>
                             )}
-                            <button
-                              type="button"
-                              className="cp-media-link"
-                              onClick={() =>
-                                openForView(f.url, {
-                                  isImage: isImageFile(f.url),
-                                  onViewer,
-                                })
-                              }
-                            >
-                              <IcoEye /> View
-                            </button>
-                            <button
-                              type="button"
-                              className="cp-media-link dl"
-                              onClick={() =>
-                                forceDownload(
-                                  f.url,
-                                  f.name || drawingTypeLabel(d),
-                                )
-                              }
-                            >
-                              <IcoDl /> Download
-                            </button>
+                            <div className="cp-draw-btn-row">
+                              <button
+                                type="button"
+                                className="cp-draw-btn"
+                                onClick={() =>
+                                  openForView(f.url, {
+                                    isImage: isImageFile(f.url),
+                                    onViewer,
+                                  })
+                                }
+                              >
+                                <IcoEye /> View
+                              </button>
+                              <button
+                                type="button"
+                                className="cp-draw-btn cp-draw-btn--dl"
+                                onClick={() =>
+                                  forceDownload(
+                                    f.url,
+                                    f.name || drawingTypeLabel(d),
+                                  )
+                                }
+                              >
+                                <IcoDl /> Download
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
