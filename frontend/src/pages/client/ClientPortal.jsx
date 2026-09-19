@@ -1758,10 +1758,17 @@ function formatDrawingDate(iso) {
 
 function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onViewer }) {
   const [openCat, setOpenCat] = useState(browse?.drawingCategory || null);
+  const [filterDate, setFilterDate] = useState("");
+  const [filterRev, setFilterRev] = useState("");
 
   useEffect(() => {
     setOpenCat(browse?.drawingCategory || null);
   }, [browse?.drawingCategory, browse?.month, browse?.week, browse?.date]);
+
+  useEffect(() => {
+    setFilterDate("");
+    setFilterRev("");
+  }, [browse?.drawingCategory, openCat]);
 
   const filtered = useMemo(() => {
     let rows = (drawings || []).filter((d) => ymdKey(d.drawing_date));
@@ -1815,6 +1822,62 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
   const activeCat = openCat || browse?.drawingCategory || null;
   const activeGroup = categories.find((c) => c.key === activeCat) || null;
   const fromSidebarCat = Boolean(browse?.drawingCategory);
+
+  const dateOptions = useMemo(() => {
+    if (!activeGroup) return [];
+    const set = new Set();
+    activeGroup.rows.forEach((d) => {
+      const k = ymdKey(d.drawing_date);
+      if (k) set.add(k);
+    });
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [activeGroup]);
+
+  const revOptions = useMemo(() => {
+    if (!activeGroup) return [];
+    const set = new Set();
+    activeGroup.rows.forEach((d) => {
+      const r = String(d.revision || "").trim();
+      if (r) set.add(r);
+    });
+    return [...set].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+  }, [activeGroup]);
+
+  const tableRows = useMemo(() => {
+    if (!activeGroup) return [];
+    let sr = 0;
+    const out = [];
+    activeGroup.rows.forEach((d) => {
+      const day = ymdKey(d.drawing_date);
+      if (filterDate && day !== filterDate) return;
+      const revRaw = String(d.revision || "").trim();
+      if (filterRev && revRaw !== filterRev) return;
+      const files = parseDrawingFiles(d);
+      const cat = String(d.category || "General").trim() || "General";
+      const rev = revRaw || "—";
+      const revised = isDrawingRevised(d.revision);
+      const fileList = files.length
+        ? files
+        : [{ index: 0, name: "—", url: null }];
+      fileList.forEach((f) => {
+        sr += 1;
+        out.push({
+          key: `${d.id || "d"}-${f.index}-${sr}`,
+          sr,
+          date: formatDrawingDate(d.drawing_date),
+          cat,
+          fileName: f.name || "—",
+          rev,
+          revised,
+          url: f.url,
+          downloadName: f.name || drawingTypeLabel(d),
+        });
+      });
+    });
+    return out;
+  }, [activeGroup, filterDate, filterRev]);
 
   if (!filtered.length) {
     return (
@@ -1876,9 +1939,51 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
         <div className="cp-draw-table-title">
           <span className="cp-draw-table-title-main">{activeGroup.label}</span>
           <span className="cp-draw-table-title-meta">
-            {activeGroup.count} drawing{activeGroup.count === 1 ? "" : "s"}
+            {tableRows.length} file{tableRows.length === 1 ? "" : "s"}
             {browse?.date ? ` · ${formatDrawingDate(browse.date)}` : ""}
           </span>
+        </div>
+        <div className="cp-draw-filters">
+          <label className="cp-draw-filter">
+            <span>Date</span>
+            <select
+              value={filterDate}
+              onChange={(e) => setFilterDate(e.target.value)}
+            >
+              <option value="">All dates</option>
+              {dateOptions.map((d) => (
+                <option key={d} value={d}>
+                  {formatDrawingDate(d)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="cp-draw-filter">
+            <span>Rev No</span>
+            <select
+              value={filterRev}
+              onChange={(e) => setFilterRev(e.target.value)}
+            >
+              <option value="">All revisions</option>
+              {revOptions.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          {(filterDate || filterRev) && (
+            <button
+              type="button"
+              className="cp-draw-back"
+              onClick={() => {
+                setFilterDate("");
+                setFilterRev("");
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
       <div className="cp-draw-table-scroll">
@@ -1902,70 +2007,61 @@ function DrawingsBrowsePanel({ drawings, browse, onOpenCategory, siteName, onVie
             </tr>
           </thead>
           <tbody>
-            {(() => {
-              let sr = 0;
-              return activeGroup.rows.flatMap((d) => {
-                const files = parseDrawingFiles(d);
-                const cat =
-                  String(d.category || "General").trim() || "General";
-                const rev = String(d.revision || "").trim() || "—";
-                const revised = isDrawingRevised(d.revision);
-                const fileList = files.length
-                  ? files
-                  : [{ index: 0, name: "—", url: null }];
-                return fileList.map((f) => {
-                  sr += 1;
-                  return (
-                    <tr key={`${d.id || "d"}-${f.index}`}>
-                      <td className="cp-draw-sr">{sr}</td>
-                      <td className="cp-draw-date">
-                        {formatDrawingDate(d.drawing_date)}
-                      </td>
-                      <td className="cp-draw-cat">{cat}</td>
-                      <td className="cp-draw-filename" title={f.name || ""}>
-                        {f.name || "—"}
-                      </td>
-                      <td className="cp-draw-rev">
-                        <span className="cp-draw-rev-text">{rev}</span>
-                        {revised && <span className="cp-rev-pill">Revised</span>}
-                      </td>
-                      <td>
-                        {f.url ? (
-                          <div className="cp-draw-btn-row">
-                            <button
-                              type="button"
-                              className="cp-draw-btn"
-                              onClick={() =>
-                                openForView(f.url, {
-                                  isImage: isImageFile(f.url),
-                                  onViewer,
-                                })
-                              }
-                            >
-                              <IcoEye /> View
-                            </button>
-                            <button
-                              type="button"
-                              className="cp-draw-btn cp-draw-btn--dl"
-                              onClick={() =>
-                                forceDownload(
-                                  f.url,
-                                  f.name || drawingTypeLabel(d),
-                                )
-                              }
-                            >
-                              <IcoDl /> Download
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="cp-draw-nofile">No file</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                });
-              });
-            })()}
+            {!tableRows.length ? (
+              <tr>
+                <td colSpan={6} className="cp-draw-empty-row">
+                  No drawings match these filters.
+                </td>
+              </tr>
+            ) : (
+              tableRows.map((row) => (
+                <tr key={row.key}>
+                  <td className="cp-draw-sr">{row.sr}</td>
+                  <td className="cp-draw-date">{row.date}</td>
+                  <td className="cp-draw-cat">{row.cat}</td>
+                  <td className="cp-draw-filename" title={row.fileName}>
+                    {row.fileName}
+                  </td>
+                  <td className="cp-draw-rev">
+                    <span className="cp-draw-rev-text">{row.rev}</span>
+                    {row.revised && <span className="cp-rev-pill">Revised</span>}
+                  </td>
+                  <td className="cp-draw-actions-cell">
+                    {row.url ? (
+                      <div className="cp-draw-btn-row">
+                        <button
+                          type="button"
+                          className="cp-draw-btn cp-draw-btn--icon"
+                          title="View"
+                          aria-label="View"
+                          onClick={() =>
+                            openForView(row.url, {
+                              isImage: isImageFile(row.url),
+                              onViewer,
+                            })
+                          }
+                        >
+                          <IcoEye />
+                        </button>
+                        <button
+                          type="button"
+                          className="cp-draw-btn cp-draw-btn--dl cp-draw-btn--icon"
+                          title="Download"
+                          aria-label="Download"
+                          onClick={() =>
+                            forceDownload(row.url, row.downloadName)
+                          }
+                        >
+                          <IcoDl />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="cp-draw-nofile">No file</span>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

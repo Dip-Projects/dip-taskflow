@@ -3132,6 +3132,37 @@ html {
   gap: 12px;
   flex-wrap: wrap;
 }
+.cp-draw-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.cp-draw-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.cp-draw-filter select {
+  min-width: 140px;
+  height: 34px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
 .cp-draw-table-title {
   display: flex;
   flex-direction: column;
@@ -3183,7 +3214,7 @@ html {
 .cp-draw-col-cat { width: 140px; }
 .cp-draw-col-file { width: auto; }
 .cp-draw-col-rev { width: 110px; }
-.cp-draw-col-actions { width: 200px; }
+.cp-draw-col-actions { width: 96px; }
 .cp-draw-cat {
   font-weight: 650;
   color: var(--ink);
@@ -3197,14 +3228,24 @@ html {
 }
 .cp-draw-rev {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 .cp-draw-rev-text {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-soft);
+}
+.cp-draw-actions-cell {
+  vertical-align: middle;
+}
+.cp-draw-empty-row {
+  text-align: center;
+  color: var(--ink-faint);
+  padding: 28px 14px !important;
+  font-style: italic;
 }
 .cp-draw-table th,
 .cp-draw-table td {
@@ -3273,8 +3314,10 @@ html {
   max-width: 190px;
 }
 .cp-draw-btn-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 6px;
 }
 .cp-draw-btn {
@@ -3293,6 +3336,16 @@ html {
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
+}
+.cp-draw-btn--icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.cp-draw-btn--icon svg {
+  width: 16px;
+  height: 16px;
 }
 .cp-draw-btn:hover {
   border-color: var(--accent);
@@ -3315,11 +3368,15 @@ html {
   font-style: italic;
 }
 .cp-draw-table .cp-rev-pill {
-  margin-top: 6px;
+  margin-top: 0;
 }
 @media (max-width: 700px) {
   .cp-draw-table {
     min-width: 640px;
   }
-  .cp-draw-col-actions { width: 180px; }
+  .cp-draw-filters {
+    margin-left: 0;
+    width: 100%;
+  }
+  .cp-draw-col-actions { width: 88px; }
 }
