@@ -930,10 +930,6 @@ function MediaFolderTree({ siteName, browse, onBrowse }) {
 
   return (
     <div className="cp-tree">
-      <div className="cp-tree-browse-hdr">
-        <IcoFolder />
-        <span>Browse all data</span>
-      </div>
       {tree.map((t) => {
         const Icon = t.Icon || IcoDoc;
         return (
