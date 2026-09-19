@@ -185,4 +185,4 @@ export async function uploadViaApi({
   throw lastErr || new Error('Upload failed');
 }
 
-export { sanitizeBucketName, sanitizeStorageKey };
+export { sanitizeBucketName };
