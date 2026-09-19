@@ -19,6 +19,17 @@ function fmtBytes(n) {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+/** Sort "1. …", "10. …", "2. …" as 1, 2, 10 (folders first). */
+function sortFolderItems(items) {
+  return [...(items || [])].sort((a, b) => {
+    if (!!a.isFolder !== !!b.isFolder) return a.isFolder ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+
 /** Keep nested folder paths S3/Supabase-safe (ASCII, no accents). */
 function normalizeRelPath(rel) {
   return sanitizeStorageKey(rel);
@@ -271,7 +282,7 @@ export default function MonthlyReport({ user }) {
       const q = new URLSearchParams({ path, bucket: SITE_FILES_BUCKET });
       const data = await api(`/storage/list?${q.toString()}`);
       setViewerPath(data.path || path);
-      setViewerItems(data.items || []);
+      setViewerItems(sortFolderItems(data.items || []));
     } catch (e) {
       setViewerErr(e.message || "Could not open folder");
       setViewerItems([]);
@@ -452,7 +463,6 @@ export default function MonthlyReport({ user }) {
                   <tr>
                     <th>Name</th>
                     <th>Type</th>
-                    <th>Size</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -470,7 +480,6 @@ export default function MonthlyReport({ user }) {
                         )}
                       </td>
                       <td>{it.isFolder ? "Folder" : (it.name.split(".").pop() || "file").toUpperCase()}</td>
-                      <td>{it.isFolder ? "—" : fmtBytes(it.size)}</td>
                     </tr>
                   ))}
                 </tbody>

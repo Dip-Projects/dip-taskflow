@@ -2071,7 +2071,15 @@ function MonthlyFolderBrowsePanel({ monthlies, browse, siteName, onViewer }) {
       const qs = new URLSearchParams({ path: folderPath, bucket: "site-files" });
       const data = await api(`/storage/list?${qs.toString()}`);
       setPath(data.path || folderPath);
-      setItems(data.items || []);
+      setItems(
+        [...(data.items || [])].sort((a, b) => {
+          if (!!a.isFolder !== !!b.isFolder) return a.isFolder ? -1 : 1;
+          return String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+            numeric: true,
+            sensitivity: "base",
+          });
+        }),
+      );
     } catch (e) {
       setErr(e.message || "Could not open folder");
       setItems([]);
