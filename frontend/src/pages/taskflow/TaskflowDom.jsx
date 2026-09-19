@@ -1,4 +1,5 @@
 /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
+import { useLayoutEffect } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
 
 function OfficeMonthlyReport() {
@@ -7,7 +8,28 @@ function OfficeMonthlyReport() {
   return <MonthlyReport user={user} />;
 }
 
+/** Re-apply sidebar open/overlay after React re-renders (MonthlyReport etc. wipe className). */
+function restoreSidebarDom() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  const open = document.body.classList.contains('sidebar-open');
+  if (sidebar) sidebar.classList.toggle('open', open);
+  if (overlay) {
+    if (open && window.matchMedia('(max-width: 768px)').matches) {
+      overlay.hidden = false;
+      overlay.removeAttribute('hidden');
+    } else {
+      overlay.hidden = true;
+      overlay.setAttribute('hidden', '');
+    }
+  }
+}
+
 export default function TaskflowDom() {
+  useLayoutEffect(() => {
+    restoreSidebarDom();
+  });
+
   return (
     <>
 {/* APP SHELL */}
@@ -45,10 +67,29 @@ export default function TaskflowDom() {
     </header>
 
     <div className="app-body">
-      <aside id="sidebar" className="sidebar">
+      <aside
+        id="sidebar"
+        className="sidebar"
+        ref={(node) => {
+          if (!node) return;
+          node.classList.toggle('open', document.body.classList.contains('sidebar-open'));
+        }}
+      >
         <nav id="navList" className="nav-list"></nav>
       </aside>
-      <div id="sidebarOverlay" className="sidebar-overlay" hidden></div>
+      <div
+        id="sidebarOverlay"
+        className="sidebar-overlay"
+        ref={(node) => {
+          if (!node) return;
+          const open =
+            document.body.classList.contains('sidebar-open') &&
+            window.matchMedia('(max-width: 768px)').matches;
+          node.hidden = !open;
+          if (open) node.removeAttribute('hidden');
+          else node.setAttribute('hidden', '');
+        }}
+      />
 
       <main id="mainContent" className="main-content">
 

@@ -12,6 +12,25 @@ const BUCKET_FILE_SIZE_LIMIT = 5 * 1024 * 1024 * 1024; // 5 GiB
 /** Hosted projects default global cap is often 50 MB — use as fallback. */
 const BUCKET_FILE_SIZE_FALLBACK = 50 * 1024 * 1024;
 
+/** Match Supabase Storage isValidKey (ASCII / S3-safe). */
+function sanitizeStorageKey(path) {
+  return String(path || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter((p) => p && p !== '.' && p !== '..')
+    .map((seg) => {
+      const cleaned = seg
+        .replace(/[^\w!.\-*'() &$@=;:+,?]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^[_ .]+|[_ .]+$/g, '');
+      return cleaned || 'file';
+    })
+    .join('/');
+}
+
 async function applyBucketFileSizeLimit(bucketName) {
   const attempts = [BUCKET_FILE_SIZE_LIMIT, BUCKET_FILE_SIZE_FALLBACK];
   let lastErr = null;
@@ -119,7 +138,7 @@ router.post('/ensure-bucket', requireAuth, async (req, res) => {
  */
 router.post('/signed-upload', requireAuth, async (req, res) => {
   try {
-    const path = String(req.body.path || '').replace(/^\/+/, '');
+    const path = sanitizeStorageKey(req.body.path || '');
     if (!path) return res.status(400).json({ error: 'Missing path' });
 
     const bucket = req.body.bucket || SHARED_BUCKET;
@@ -158,7 +177,7 @@ router.post('/upload', requireAuth, upload.single('file'), async (req, res) => {
 
     let buffer;
     let contentType = req.body.contentType || 'application/octet-stream';
-    let path = (req.body.path || '').replace(/^\/+/, '');
+    let path = sanitizeStorageKey(req.body.path || '');
 
     if (!path) {
       return res.status(400).json({ error: 'Missing path' });

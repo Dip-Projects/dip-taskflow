@@ -22,6 +22,29 @@ function sanitizeBucketName(site) {
   );
 }
 
+/**
+ * Supabase Storage keys must match S3-safe ASCII only
+ * (see isValidKey in supabase/storage). Strip accents and
+ * replace any other illegal character so deep folder packs upload.
+ */
+export function sanitizeStorageKey(path) {
+  return String(path || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter((p) => p && p !== '.' && p !== '..')
+    .map((seg) => {
+      const cleaned = seg
+        .replace(/[^\w!.\-*'() &$@=;:+,?]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^[_ .]+|[_ .]+$/g, '');
+      return cleaned || 'file';
+    })
+    .join('/');
+}
+
 let _sharedReady = false;
 
 async function sleep(ms) {
@@ -107,7 +130,10 @@ export async function uploadViaApi({
   const token = getToken();
   if (!token) throw new Error('Please log in again — missing session for file upload.');
 
-  await ensureSiteBucket(path.split('/')[0] || 'site');
+  const safePath = sanitizeStorageKey(path);
+  if (!safePath) throw new Error('Invalid upload path');
+
+  await ensureSiteBucket(safePath.split('/')[0] || 'site');
 
   let fileBlob = blob;
   let type = contentType || 'application/octet-stream';
@@ -119,17 +145,17 @@ export async function uploadViaApi({
   if (!fileBlob) throw new Error('uploadViaApi: need dataUrl or blob');
 
   if (fileBlob.size > PROXY_MAX_BYTES) {
-    return uploadViaSignedUrl({ path, blob: fileBlob, contentType: type, bucket });
+    return uploadViaSignedUrl({ path: safePath, blob: fileBlob, contentType: type, bucket });
   }
 
-  const fileName = path.split('/').pop() || 'file';
+  const fileName = safePath.split('/').pop() || 'file';
   let lastErr;
 
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     try {
       const fd = new FormData();
       fd.append('file', fileBlob, fileName);
-      fd.append('path', path);
+      fd.append('path', safePath);
       fd.append('bucket', bucket);
       if (type) fd.append('contentType', type);
 
@@ -159,4 +185,4 @@ export async function uploadViaApi({
   throw lastErr || new Error('Upload failed');
 }
 
-export { sanitizeBucketName };
+export { sanitizeBucketName, sanitizeStorageKey };

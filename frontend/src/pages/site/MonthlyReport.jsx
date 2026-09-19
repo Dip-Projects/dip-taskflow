@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { api } from "../../lib/api";
-import { ensureSiteBucket, sanitizeBucketName, SITE_FILES_BUCKET, uploadViaApi } from "../../lib/ensureBucket";
+import { ensureSiteBucket, sanitizeBucketName, sanitizeStorageKey, SITE_FILES_BUCKET, uploadViaApi } from "../../lib/ensureBucket";
 import "./MonthlyReport.css";
 
 const MONTHS = [
@@ -19,15 +19,9 @@ function fmtBytes(n) {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-/** Keep nested folder paths stable for storage keys. */
+/** Keep nested folder paths S3/Supabase-safe (ASCII, no accents). */
 function normalizeRelPath(rel) {
-  return String(rel || "")
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "")
-    .split("/")
-    .filter((p) => p && p !== "." && p !== "..")
-    .map((p) => p.replace(/[<>:"|?*\u0000-\u001f]/g, "_"))
-    .join("/");
+  return sanitizeStorageKey(rel);
 }
 
 function readAllDirectoryEntries(reader) {
@@ -216,10 +210,11 @@ export default function MonthlyReport({ user }) {
           if (!file) return;
           const rel = normalizeRelPath(file.webkitRelativePath || file.name);
           if (!rel) throw new Error("Empty file path in folder");
+          const storagePath = sanitizeStorageKey(`${folderPath}/${rel}`);
           let url;
           try {
             url = await uploadViaApi({
-              path: `${folderPath}/${rel}`,
+              path: storagePath,
               blob: file,
               contentType: file.type || "application/octet-stream",
               bucket: SITE_FILES_BUCKET,
@@ -229,6 +224,11 @@ export default function MonthlyReport({ user }) {
             if (/maximum allowed size|payload too large|exceeded|too large|413/i.test(msg)) {
               throw new Error(
                 `${rel}: file too large for storage. Max 5 GB per file. If this keeps failing, ask admin to raise site-files bucket file size limit in Supabase.`,
+              );
+            }
+            if (/invalid key/i.test(msg)) {
+              throw new Error(
+                `${rel}: storage rejected the file path. Try again — special characters are now sanitized automatically.`,
               );
             }
             throw new Error(`${rel}: ${msg}`);
