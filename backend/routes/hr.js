@@ -33,9 +33,11 @@ const CV_ROLES = [
   'Senior Estimator',
   'Jr Estimator',
   'Sales Executive',
+  'QC Engineer',
 ];
 
 const CV_LOCATIONS = ['Surat', 'Out of Surat', 'Out of State'];
+const CV_EXPERIENCE = ['Fresher', 'Experience'];
 
 const DOC_FIELD_NAMES = [
   'cv',
@@ -852,6 +854,7 @@ router.post('/public/cv-submit', async (req, res) => {
     const mobile = String(body.mobile || '').replace(/\D/g, '');
     const role = String(body.role || '').trim();
     const location = String(body.location || '').trim();
+    const experience = String(body.experience || '').trim();
     const cv = body.cv && typeof body.cv === 'object' ? body.cv : null;
     const photos = Array.isArray(body.photos)
       ? body.photos.filter((p) => p && p.url && p.path)
@@ -862,6 +865,9 @@ router.post('/public/cv-submit', async (req, res) => {
     }
     if (!location || !CV_LOCATIONS.includes(location)) {
       return res.status(400).json({ error: 'Please select Surat, Out of Surat, or Out of State' });
+    }
+    if (!experience || !CV_EXPERIENCE.includes(experience)) {
+      return res.status(400).json({ error: 'Please select Fresher or Experience' });
     }
     if (!cv?.url || !cv?.path) {
       return res.status(400).json({ error: 'CV file is required (PDF or photos converted to PDF)' });
@@ -877,6 +883,7 @@ router.post('/public/cv-submit', async (req, res) => {
       mobile: mobile || null,
       role,
       location,
+      experience,
       cv_url: String(cv.url),
       cv_path: String(cv.path),
       cv_name: String(cv.name || 'CV.pdf'),
@@ -1001,6 +1008,7 @@ router.get('/cvs', async (req, res) => {
       cvs,
       roles: CV_ROLES,
       locations: CV_LOCATIONS,
+      experience_levels: CV_EXPERIENCE,
       count: cvs.length,
     });
   } catch (err) {

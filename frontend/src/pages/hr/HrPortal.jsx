@@ -155,7 +155,10 @@ const CV_ROLES = [
   'Senior Estimator',
   'Jr Estimator',
   'Sales Executive',
+  'QC Engineer',
 ];
+
+const CV_EXPERIENCE = ['Fresher', 'Experience'];
 
 function safePathSeg(s) {
   return (
@@ -1952,6 +1955,7 @@ function CvsView() {
   const [roles, setRoles] = useState(CV_ROLES);
   const [roleFilter, setRoleFilter] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
+  const [experienceFilter, setExperienceFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1996,9 +2000,10 @@ function CvsView() {
     return rows.filter((r) => {
       if (roleFilter && r.role !== roleFilter) return false;
       if (locationFilter && r.location !== locationFilter) return false;
+      if (experienceFilter && r.experience !== experienceFilter) return false;
       return true;
     });
-  }, [rows, roleFilter, locationFilter]);
+  }, [rows, roleFilter, locationFilter, experienceFilter]);
 
   const remove = async (id) => {
     if (!window.confirm('Delete this CV entry?')) return;
@@ -2030,7 +2035,7 @@ function CvsView() {
         <div className="hr-apply-qr-body">
           <div className="hr-apply-qr-title">CV upload QR / link</div>
           <p className="hr-sub" style={{ margin: '0 0 8px' }}>
-            Scan karke form khulega — role, Surat / Out of Surat / Out of State, PDF/DOC ya photos (max 6) → auto PDF.
+            Scan karke form khulega — role, Fresher/Experience, location, PDF/DOC ya photos (max 6) → auto PDF.
           </p>
           <div className="hr-apply-qr-url">{cvUrl}</div>
           <div className="hr-apply-qr-actions">
@@ -2075,13 +2080,25 @@ function CvsView() {
             <option value="Out of State">Out of State</option>
           </select>
         </label>
-        {(roleFilter || locationFilter) ? (
+        <label className="hr-field" style={{ minWidth: 150 }}>
+          <span>Fresher / Experience</span>
+          <select value={experienceFilter} onChange={(e) => setExperienceFilter(e.target.value)}>
+            <option value="">All</option>
+            {CV_EXPERIENCE.map((ex) => (
+              <option key={ex} value={ex}>
+                {ex}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(roleFilter || locationFilter || experienceFilter) ? (
           <button
             type="button"
             className="hr-btn ghost"
             onClick={() => {
               setRoleFilter('');
               setLocationFilter('');
+              setExperienceFilter('');
             }}
           >
             Clear filters
@@ -2119,6 +2136,7 @@ function CvsView() {
                 <th>Name</th>
                 <th>CV</th>
                 <th>Role</th>
+                <th>Fresher / Exp.</th>
                 <th>Location</th>
                 <th>Submitted</th>
                 <th style={{ width: 90 }}>Action</th>
@@ -2127,7 +2145,7 @@ function CvsView() {
             <tbody>
               {!filtered.length ? (
                 <tr>
-                  <td colSpan={7} className="hr-empty">
+                  <td colSpan={8} className="hr-empty">
                     {rows.length
                       ? 'No CVs match these filters.'
                       : 'No CVs yet. Share the QR / link above, then tap Refresh.'}
@@ -2158,6 +2176,7 @@ function CvsView() {
                       ) : null}
                     </td>
                     <td>{row.role || '—'}</td>
+                    <td>{row.experience || '—'}</td>
                     <td>{row.location || '—'}</td>
                     <td>
                       {row.created_at

@@ -19,9 +19,11 @@ export const CV_ROLES = [
   'Senior Estimator',
   'Jr Estimator',
   'Sales Executive',
+  'QC Engineer',
 ];
 
 export const CV_LOCATIONS = ['Surat', 'Out of Surat', 'Out of State'];
+export const CV_EXPERIENCE = ['Fresher', 'Experience'];
 
 const MAX_PHOTOS = 6;
 const DRAFT_KEY = 'tf_cv_upload_draft_v1';
@@ -347,6 +349,7 @@ export default function CvUploadPage() {
   const [mobile, setMobile] = useState('');
   const [role, setRole] = useState('');
   const [location, setLocation] = useState('');
+  const [experience, setExperience] = useState('');
   const [cvFile, setCvFile] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [fileKey, setFileKey] = useState(0);
@@ -388,6 +391,7 @@ export default function CvUploadPage() {
       if (d.mobile) setMobile(String(d.mobile));
       if (d.role) setRole(String(d.role));
       if (d.location) setLocation(String(d.location));
+      if (d.experience) setExperience(String(d.experience));
       if (Array.isArray(d.photos) && d.photos.length) {
         const files = [];
         d.photos.forEach((p, i) => {
@@ -423,6 +427,7 @@ export default function CvUploadPage() {
         mobile: mobile.trim(),
         role,
         location,
+        experience,
         photos: photoPayload,
         savedAt: new Date().toISOString(),
       };
@@ -482,6 +487,7 @@ export default function CvUploadPage() {
     setInfo('');
     if (!role) return setError('Please select a role');
     if (!location) return setError('Please select Surat, Out of Surat, or Out of State');
+    if (!experience) return setError('Please select Fresher or Experience');
     if (!cvFile && photos.length === 0) {
       return setError(`Upload a CV file or add 1–${MAX_PHOTOS} photos of the CV`);
     }
@@ -518,6 +524,7 @@ export default function CvUploadPage() {
           mobile: mobile.trim(),
           role,
           location,
+          experience,
           cv: cvMeta,
           photos: photoMetas,
         }),
@@ -542,6 +549,7 @@ export default function CvUploadPage() {
     setMobile('');
     setRole('');
     setLocation('');
+    setExperience('');
     setCvFile(null);
     setPhotos([]);
     setFileKey((k) => k + 1);
@@ -642,6 +650,17 @@ export default function CvUploadPage() {
               {CV_LOCATIONS.map((loc) => (
                 <option key={loc} value={loc}>
                   {loc}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pf-field full">
+            Fresher / Experience <span className="pf-req">*</span>
+            <select value={experience} onChange={(e) => setExperience(e.target.value)} required>
+              <option value="">Select</option>
+              {CV_EXPERIENCE.map((ex) => (
+                <option key={ex} value={ex}>
+                  {ex}
                 </option>
               ))}
             </select>
