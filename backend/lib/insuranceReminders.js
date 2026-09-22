@@ -179,6 +179,87 @@ async function runInsuranceRenewReminders(opts = {}) {
   return { ok: true, sent, skipped, hr_whatsapp: hrWa ? 'set' : 'missing' };
 }
 
+function daysUntilNextBirthday(dobStr, today = new Date()) {
+  if (!dobStr) return null;
+  const dob = new Date(dobStr);
+  if (Number.isNaN(dob.getTime())) return null;
+  const y = today.getFullYear();
+  let next = new Date(y, dob.getMonth(), dob.getDate());
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (next < start) next = new Date(y + 1, dob.getMonth(), dob.getDate());
+  return Math.round((next - start) / 86400000);
+}
+
+/**
+ * Birthday reminders (next 7 days) → fixed HR WhatsApp only.
+ * @param {{ force?: boolean, now?: Date }} opts
+ */
+async function runBirthdayReminders(opts = {}) {
+  const now = opts.now || new Date();
+  const todayKey = istTodayKey(now);
+  const profiles = await readJson(PROFILES_PATH, []);
+  const log = await readJson(REMINDER_LOG_PATH, {});
+  const hrWa = await resolveHrWhatsApp();
+  const sent = [];
+  const skipped = [];
+
+  if (!hrWa) {
+    return { ok: false, sent, skipped: [{ reason: 'no_whatsapp' }], hr_whatsapp: 'missing' };
+  }
+
+  for (const p of profiles) {
+    const days = daysUntilNextBirthday(p.dob, now);
+    if (days == null || days < 0 || days > 7) continue;
+    const key = `bday:${p.employee_id || p.id}:${todayKey}:${days}`;
+    if (!opts.force && log[key]) {
+      skipped.push({ name: p.employee_name || p.name, reason: 'already_sent_today' });
+      continue;
+    }
+    const when = days === 0 ? 'today' : `in ${days} day(s)`;
+    const name = p.employee_name || p.name || 'Employee';
+    const detail = `Birthday of ${name} is ${when} (${p.dob || '—'}). Please wish / arrange accordingly.`;
+    try {
+      const result = await sendHrAlertWhatsApp(hrWa, {
+        title: 'HR · Birthday reminder',
+        detail,
+        dueLabel: when,
+        priority: days <= 1 ? 'Urgent' : 'High',
+      });
+      if (result?.ok) {
+        log[key] = new Date().toISOString();
+        sent.push({ type: 'birthday', to: hrWa, name, via: result.via || 'whatsapp' });
+      } else {
+        skipped.push({
+          name,
+          reason: result?.error || result?.reason || 'send_failed',
+        });
+      }
+    } catch (e) {
+      skipped.push({ name, reason: e.message });
+    }
+  }
+
+  await writeJson(REMINDER_LOG_PATH, log);
+  return { ok: true, sent, skipped, hr_whatsapp: hrWa ? 'set' : 'missing' };
+}
+
+/**
+ * Full HR alert blast: birthdays + insurance renew (no click needed for cron/auto).
+ * @param {{ force?: boolean, now?: Date }} opts
+ */
+async function runHrAlertReminders(opts = {}) {
+  const bday = await runBirthdayReminders(opts);
+  const ins = await runInsuranceRenewReminders(opts);
+  return {
+    ok: true,
+    hr_whatsapp: (await resolveHrWhatsApp()) || null,
+    sent: [...(bday.sent || []), ...(ins.sent || [])],
+    skipped: [...(bday.skipped || []), ...(ins.skipped || [])],
+    birthday: bday,
+    insurance: ins,
+  };
+}
+
 function withinInsuranceMorningWindow(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
@@ -191,15 +272,18 @@ function withinInsuranceMorningWindow(now = new Date()) {
   const weekday = get('weekday');
   if (weekday === 'Sun') return false;
   const minutes = Number(get('hour')) * 60 + Number(get('minute'));
-  // ~7:50 – 8:40 IST
-  return minutes >= 7 * 60 + 50 && minutes <= 8 * 60 + 40;
+  // ~7:45 – 9:30 IST — cron at 8:00 + first portal open of morning
+  return minutes >= 7 * 60 + 45 && minutes <= 9 * 60 + 30;
 }
 
 module.exports = {
   runInsuranceRenewReminders,
+  runBirthdayReminders,
+  runHrAlertReminders,
   withinInsuranceMorningWindow,
   buildRenewMessage,
   daysUntilDate,
+  daysUntilNextBirthday,
   resolveHrWhatsApp,
   istTodayKey,
   DEFAULT_HR_WHATSAPP,

@@ -381,11 +381,12 @@ function cronAuthorized(req) {
 async function handleInsuranceCron(req, res) {
   try {
     if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
-    const { runInsuranceRenewReminders } = require('../lib/insuranceReminders');
-    const result = await runInsuranceRenewReminders();
+    const { runHrAlertReminders } = require('../lib/insuranceReminders');
+    // Daily auto: birthday + insurance → HR WhatsApp (no button click)
+    const result = await runHrAlertReminders({ force: false });
     res.json(result);
   } catch (err) {
-    console.error('Insurance WA cron:', err.message);
+    console.error('HR alerts WA cron:', err.message);
     res.status(500).json({ error: err.message || 'Cron failed' });
   }
 }
@@ -1398,78 +1399,35 @@ router.get('/alerts', requireAdminOrHr, async (req, res) => {
 });
 
 /** Send WhatsApp for birthday (7d) + insurance renew (≤4d) — ONLY to fixed HR number.
- * Manual click always force-resends current alerts (auto via Meta API / template).
+ * Manual button can force-resend; cron/auto uses force:false (once per day).
  */
 router.post('/alerts/send-whatsapp', requireAdminOrHr, async (req, res) => {
   try {
-    const { sendHrAlertWhatsApp } = require('../lib/whatsapp');
-    const { runInsuranceRenewReminders, resolveHrWhatsApp, istTodayKey } = require('../lib/insuranceReminders');
-    const profiles = await readJson(PROFILES_PATH, []);
-    const log = await readJson(REMINDER_LOG_PATH, {});
-    const force = req.body?.force !== false; // default true for button click
-    const todayKey = typeof istTodayKey === 'function' ? istTodayKey() : new Date().toISOString().slice(0, 10);
-    const hrWa = await resolveHrWhatsApp();
-    const sent = [];
-    const failed = [];
-
-    if (!hrWa) {
-      return res.status(400).json({ error: 'HR WhatsApp number not configured' });
-    }
-
-    for (const p of profiles) {
-      const days = daysUntilNextBirthday(p.dob);
-      if (days == null || days < 0 || days > 7) continue;
-      const key = `bday:${p.employee_id || p.id}:${todayKey}:${days}`;
-      if (!force && log[key]) continue;
-      const when = days === 0 ? 'today' : `in ${days} day(s)`;
-      const name = p.employee_name || p.name || 'Employee';
-      const detail = `Birthday of ${name} is ${when} (${p.dob || '—'}). Please wish / arrange accordingly.`;
-      try {
-        const result = await sendHrAlertWhatsApp(hrWa, {
-          title: 'HR · Birthday reminder',
-          detail,
-          dueLabel: when,
-          priority: days <= 1 ? 'Urgent' : 'High',
-        });
-        if (!result?.ok) {
-          failed.push({
-            type: 'birthday',
-            name,
-            error: result?.error || result?.reason || 'send_failed',
-          });
-          continue;
-        }
-        log[key] = new Date().toISOString();
-        sent.push({ type: 'birthday', to: hrWa, name, via: result.via || 'whatsapp' });
-      } catch (e) {
-        console.warn('bday wa fail', e.message);
-        failed.push({ type: 'birthday', name, error: e.message });
-      }
-    }
-    await writeJson(REMINDER_LOG_PATH, log);
-
-    const ins = await runInsuranceRenewReminders({ force });
-    const allSent = [...sent, ...(ins.sent || [])];
-    const allFailed = [
-      ...failed,
-      ...(ins.skipped || []).filter((s) => s.reason && s.reason !== 'already_sent_today'),
-    ];
+    const { runHrAlertReminders } = require('../lib/insuranceReminders');
+    const force = req.body?.force === true;
+    const result = await runHrAlertReminders({ force });
+    const allSent = result.sent || [];
+    const allFailed = (result.skipped || []).filter(
+      (s) => s.reason && s.reason !== 'already_sent_today'
+    );
 
     if (!allSent.length && allFailed.length) {
       return res.status(502).json({
         ok: false,
-        error: allFailed[0]?.error || 'WhatsApp send failed',
+        error: allFailed[0]?.error || allFailed[0]?.reason || 'WhatsApp send failed',
         failed: allFailed,
-        hr_whatsapp: hrWa,
+        hr_whatsapp: result.hr_whatsapp,
       });
     }
 
     res.json({
       ok: true,
-      hr_whatsapp: hrWa,
+      hr_whatsapp: result.hr_whatsapp,
       sent: allSent,
       failed: allFailed,
-      insurance: ins,
+      skipped: result.skipped || [],
+      insurance: result.insurance,
+      birthday: result.birthday,
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'WhatsApp send failed' });

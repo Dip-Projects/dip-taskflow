@@ -59,7 +59,7 @@ function maybeSweep() {
 function maybeInsuranceMorning() {
   const now = new Date();
   if (insuranceSweeping) return;
-  const { withinInsuranceMorningWindow, runInsuranceRenewReminders } = require('../lib/insuranceReminders');
+  const { withinInsuranceMorningWindow, runHrAlertReminders } = require('../lib/insuranceReminders');
   if (!withinInsuranceMorningWindow(now)) return;
   const { dayKey } = istParts(now);
   if (lastInsuranceDay === dayKey) return;
@@ -67,14 +67,14 @@ function maybeInsuranceMorning() {
   insuranceSweeping = true;
   lastInsuranceDay = dayKey;
   Promise.resolve()
-    .then(() => runInsuranceRenewReminders({ now }))
+    .then(() => runHrAlertReminders({ now, force: false }))
     .then((r) => {
-      if (r?.sent?.length) console.log('insurance renew WA sent', r.sent.length);
-      else console.log('insurance renew sweep', r?.skipped?.length || 0, 'skipped, hr=', r?.hr_whatsapp);
+      if (r?.sent?.length) console.log('HR alerts WA auto-sent', r.sent.length);
+      else console.log('HR alerts sweep skipped', r?.skipped?.length || 0, 'hr=', r?.hr_whatsapp);
     })
     .catch((err) => {
       lastInsuranceDay = ''; // allow retry
-      console.warn('insurance renew sweep:', err.message);
+      console.warn('HR alerts sweep:', err.message);
     })
     .finally(() => { insuranceSweeping = false; });
 }

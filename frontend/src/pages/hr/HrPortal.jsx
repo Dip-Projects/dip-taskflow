@@ -333,7 +333,7 @@ function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22l-4-9-9-4 20-7z" />
             </svg>
-            {alerts?.sendingWa ? 'Sending…' : 'Send WhatsApp reminders'}
+            {alerts?.sendingWa ? 'Sending…' : 'Resend WhatsApp'}
           </button>
         </div>
 
@@ -3206,6 +3206,45 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
       setAlerts({ birthdays: [], insuranceDue: [] });
     }
   }, []);
+
+  /** Once per day: auto-send alerts to HR WhatsApp without button click. */
+  useEffect(() => {
+    const has =
+      (alerts.birthdays && alerts.birthdays.length > 0) ||
+      (alerts.insuranceDue && alerts.insuranceDue.length > 0);
+    if (!has) return;
+    let dayKey = '';
+    try {
+      dayKey = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+    } catch {
+      dayKey = new Date().toISOString().slice(0, 10);
+    }
+    const storageKey = `tf_hr_wa_auto_${dayKey}`;
+    try {
+      if (localStorage.getItem(storageKey)) return;
+      localStorage.setItem(storageKey, '1');
+    } catch {
+      return;
+    }
+    api('/hr/alerts/send-whatsapp', { method: 'POST', body: { force: false } })
+      .then((data) => {
+        if (data?.sent?.length) {
+          console.log('HR WhatsApp auto-sent', data.sent.length);
+        }
+      })
+      .catch(() => {
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {
+          /* ignore */
+        }
+      });
+  }, [alerts.birthdays, alerts.insuranceDue]);
 
   const sendWaReminders = useCallback(async () => {
     setAlerts((a) => ({ ...a, sendingWa: true }));
