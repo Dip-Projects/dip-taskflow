@@ -21,7 +21,7 @@ export const CV_ROLES = [
   'Sales Executive',
 ];
 
-export const CV_LOCATIONS = ['Surat', 'Out of Surat'];
+export const CV_LOCATIONS = ['Surat', 'Out of Surat', 'Out of State'];
 
 const MAX_PHOTOS = 6;
 const DRAFT_KEY = 'tf_cv_upload_draft_v1';
@@ -481,7 +481,7 @@ export default function CvUploadPage() {
     setError('');
     setInfo('');
     if (!role) return setError('Please select a role');
-    if (!location) return setError('Please select Surat or Out of Surat');
+    if (!location) return setError('Please select Surat, Out of Surat, or Out of State');
     if (!cvFile && photos.length === 0) {
       return setError(`Upload a CV file or add 1–${MAX_PHOTOS} photos of the CV`);
     }

@@ -2030,7 +2030,7 @@ function CvsView() {
         <div className="hr-apply-qr-body">
           <div className="hr-apply-qr-title">CV upload QR / link</div>
           <p className="hr-sub" style={{ margin: '0 0 8px' }}>
-            Scan karke form khulega — role, Surat / Out of Surat, PDF/DOC ya photos (max 6) → auto PDF.
+            Scan karke form khulega — role, Surat / Out of Surat / Out of State, PDF/DOC ya photos (max 6) → auto PDF.
           </p>
           <div className="hr-apply-qr-url">{cvUrl}</div>
           <div className="hr-apply-qr-actions">
@@ -2072,6 +2072,7 @@ function CvsView() {
             <option value="">All locations</option>
             <option value="Surat">Surat</option>
             <option value="Out of Surat">Out of Surat</option>
+            <option value="Out of State">Out of State</option>
           </select>
         </label>
         {(roleFilter || locationFilter) ? (

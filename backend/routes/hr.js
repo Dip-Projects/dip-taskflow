@@ -35,7 +35,7 @@ const CV_ROLES = [
   'Sales Executive',
 ];
 
-const CV_LOCATIONS = ['Surat', 'Out of Surat'];
+const CV_LOCATIONS = ['Surat', 'Out of Surat', 'Out of State'];
 
 const DOC_FIELD_NAMES = [
   'cv',
@@ -861,7 +861,7 @@ router.post('/public/cv-submit', async (req, res) => {
       return res.status(400).json({ error: 'Please select a valid role' });
     }
     if (!location || !CV_LOCATIONS.includes(location)) {
-      return res.status(400).json({ error: 'Please select Surat or Out of Surat' });
+      return res.status(400).json({ error: 'Please select Surat, Out of Surat, or Out of State' });
     }
     if (!cv?.url || !cv?.path) {
       return res.status(400).json({ error: 'CV file is required (PDF or photos converted to PDF)' });
