@@ -75,12 +75,14 @@ async function photosToPdfFile(photos, baseName = 'CV') {
 export default function CvUploadPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [lastRole, setLastRole] = useState('');
   const [error, setError] = useState('');
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('');
   const [role, setRole] = useState('');
   const [cvFile, setCvFile] = useState(null);
   const [photos, setPhotos] = useState([]);
+  const [fileKey, setFileKey] = useState(0);
 
   const photoPreview = useMemo(
     () =>
@@ -139,12 +141,25 @@ export default function CvUploadPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Submit failed');
+      setLastRole(role);
       setDone(true);
     } catch (err) {
       setError(err.message || 'Could not submit CV');
     } finally {
       setBusy(false);
     }
+  };
+
+  const startAnother = () => {
+    setDone(false);
+    setError('');
+    setFullName('');
+    setMobile('');
+    setRole('');
+    setCvFile(null);
+    setPhotos([]);
+    setFileKey((k) => k + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   if (done) {
@@ -154,8 +169,16 @@ export default function CvUploadPage() {
           <h2>CV submitted</h2>
           <p>
             Thank you{fullName.trim() ? `, ${fullName.trim()}` : ''}. HR has received your CV for{' '}
-            <strong>{role}</strong>. You may close this page.
+            <strong>{lastRole || role}</strong>.
           </p>
+          <p style={{ marginTop: 12 }}>
+            Aur ek CV add karni hai? Form yahin se dubara bhar sakte ho — QR scan ki zaroorat nahi.
+          </p>
+          <div className="pf-actions" style={{ marginTop: 16 }}>
+            <button type="button" className="pf-btn" onClick={startAnother}>
+              Add another CV
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -207,6 +230,7 @@ export default function CvUploadPage() {
           <label className="pf-field full">
             CV file (PDF / DOC / DOCX)
             <input
+              key={`cv-file-${fileKey}`}
               type="file"
               accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               onChange={(e) => {
@@ -218,6 +242,7 @@ export default function CvUploadPage() {
           <label className="pf-field full">
             Or CV photos (max 3) — camera / gallery → auto PDF
             <input
+              key={`cv-photos-${fileKey}`}
               type="file"
               accept="image/*"
               capture="environment"
