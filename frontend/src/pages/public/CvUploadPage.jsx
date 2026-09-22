@@ -23,7 +23,7 @@ export const CV_ROLES = [
 
 export const CV_LOCATIONS = ['Surat', 'Out of Surat'];
 
-const MAX_PHOTOS = 3;
+const MAX_PHOTOS = 6;
 
 function readAsDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -91,7 +91,7 @@ async function fileToJpegDataUrl(file, maxEdge = 2000) {
   };
 }
 
-/** Convert 1–3 CV photos into a multi-page A4 PDF (one photo per page, no stretch). */
+/** Convert CV photos into a multi-page A4 PDF (one photo per page, no stretch). */
 async function photosToPdfFile(photos, baseName = 'CV') {
   if (!photos?.length) throw new Error('No photos to convert');
 
@@ -189,7 +189,7 @@ export default function CvUploadPage() {
     if (!role) return setError('Please select a role');
     if (!location) return setError('Please select Surat or Out of Surat');
     if (!cvFile && photos.length === 0) {
-      return setError('Upload a CV file or add 1–3 photos of the CV');
+      return setError(`Upload a CV file or add 1–${MAX_PHOTOS} photos of the CV`);
     }
 
     setBusy(true);
