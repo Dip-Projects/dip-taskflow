@@ -1397,16 +1397,20 @@ router.get('/alerts', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Send WhatsApp for birthday (7d) + insurance renew (≤4d) — ONLY to fixed HR number */
+/** Send WhatsApp for birthday (7d) + insurance renew (≤4d) — ONLY to fixed HR number.
+ * Manual click always force-resends current alerts (auto via Meta API / template).
+ */
 router.post('/alerts/send-whatsapp', requireAdminOrHr, async (req, res) => {
   try {
-    const { sendWhatsAppText } = require('../lib/whatsapp');
-    const { runInsuranceRenewReminders, resolveHrWhatsApp } = require('../lib/insuranceReminders');
+    const { sendHrAlertWhatsApp } = require('../lib/whatsapp');
+    const { runInsuranceRenewReminders, resolveHrWhatsApp, istTodayKey } = require('../lib/insuranceReminders');
     const profiles = await readJson(PROFILES_PATH, []);
     const log = await readJson(REMINDER_LOG_PATH, {});
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const force = req.body?.force !== false; // default true for button click
+    const todayKey = typeof istTodayKey === 'function' ? istTodayKey() : new Date().toISOString().slice(0, 10);
     const hrWa = await resolveHrWhatsApp();
     const sent = [];
+    const failed = [];
 
     if (!hrWa) {
       return res.status(400).json({ error: 'HR WhatsApp number not configured' });
@@ -1416,26 +1420,55 @@ router.post('/alerts/send-whatsapp', requireAdminOrHr, async (req, res) => {
       const days = daysUntilNextBirthday(p.dob);
       if (days == null || days < 0 || days > 7) continue;
       const key = `bday:${p.employee_id || p.id}:${todayKey}:${days}`;
-      if (log[key]) continue;
+      if (!force && log[key]) continue;
       const when = days === 0 ? 'today' : `in ${days} day(s)`;
-      const msg =
-        `DIP HR Reminder: Birthday of ${p.employee_name || p.name} is ${when} (${p.dob}). Please wish / arrange accordingly.`;
+      const name = p.employee_name || p.name || 'Employee';
+      const detail = `Birthday of ${name} is ${when} (${p.dob || '—'}). Please wish / arrange accordingly.`;
       try {
-        const result = await sendWhatsAppText(hrWa, msg);
-        if (!result?.ok) continue;
+        const result = await sendHrAlertWhatsApp(hrWa, {
+          title: 'HR · Birthday reminder',
+          detail,
+          dueLabel: when,
+          priority: days <= 1 ? 'Urgent' : 'High',
+        });
+        if (!result?.ok) {
+          failed.push({
+            type: 'birthday',
+            name,
+            error: result?.error || result?.reason || 'send_failed',
+          });
+          continue;
+        }
         log[key] = new Date().toISOString();
-        sent.push({ type: 'birthday', to: hrWa, name: p.employee_name });
+        sent.push({ type: 'birthday', to: hrWa, name, via: result.via || 'whatsapp' });
       } catch (e) {
         console.warn('bday wa fail', e.message);
+        failed.push({ type: 'birthday', name, error: e.message });
       }
     }
     await writeJson(REMINDER_LOG_PATH, log);
 
-    const ins = await runInsuranceRenewReminders({ force: !!req.body?.force });
+    const ins = await runInsuranceRenewReminders({ force });
+    const allSent = [...sent, ...(ins.sent || [])];
+    const allFailed = [
+      ...failed,
+      ...(ins.skipped || []).filter((s) => s.reason && s.reason !== 'already_sent_today'),
+    ];
+
+    if (!allSent.length && allFailed.length) {
+      return res.status(502).json({
+        ok: false,
+        error: allFailed[0]?.error || 'WhatsApp send failed',
+        failed: allFailed,
+        hr_whatsapp: hrWa,
+      });
+    }
+
     res.json({
       ok: true,
       hr_whatsapp: hrWa,
-      sent: [...sent, ...(ins.sent || [])],
+      sent: allSent,
+      failed: allFailed,
       insurance: ins,
     });
   } catch (err) {

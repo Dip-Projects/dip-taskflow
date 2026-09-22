@@ -328,12 +328,12 @@ function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts
             </span>
             Alerts
           </h3>
-          <button type="button" className="hr-btn ghost" onClick={onSendWa}>
+          <button type="button" className="hr-btn ghost" onClick={onSendWa} disabled={!!alerts?.sendingWa}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M22 2L11 13" />
               <path d="M22 2L15 22l-4-9-9-4 20-7z" />
             </svg>
-            Send WhatsApp reminders
+            {alerts?.sendingWa ? 'Sending…' : 'Send WhatsApp reminders'}
           </button>
         </div>
 
@@ -3208,13 +3208,29 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   }, []);
 
   const sendWaReminders = useCallback(async () => {
+    setAlerts((a) => ({ ...a, sendingWa: true }));
     try {
-      const data = await api('/hr/alerts/send-whatsapp', { method: 'POST', body: '{}' });
+      const data = await api('/hr/alerts/send-whatsapp', {
+        method: 'POST',
+        body: { force: true },
+      });
       const n = (data.sent || []).length;
-      alert(n ? `WhatsApp sent: ${n} reminder(s)` : 'No new reminders to send (missing numbers, or already sent today).');
+      const to = data.hr_whatsapp ? ` → ${data.hr_whatsapp}` : '';
+      if (n) {
+        const names = (data.sent || [])
+          .map((s) => s.name || s.type)
+          .filter(Boolean)
+          .slice(0, 5)
+          .join(', ');
+        alert(`WhatsApp auto-sent: ${n} reminder(s)${to}\n${names}${n > 5 ? '…' : ''}`);
+      } else {
+        alert('No alerts to send right now (no birthdays in 7 days / insurance due).');
+      }
       await loadAlerts();
     } catch (e) {
       alert(e.message || 'WhatsApp send failed');
+    } finally {
+      setAlerts((a) => ({ ...a, sendingWa: false }));
     }
   }, [loadAlerts]);
 

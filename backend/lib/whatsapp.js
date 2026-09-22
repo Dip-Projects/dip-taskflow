@@ -220,6 +220,47 @@ async function sendWhatsAppText(toNumber, text) {
 }
 
 /**
+ * HR alerts (birthday / insurance): try free text (24h session), else
+ * approved utility template so click → message actually delivers.
+ */
+async function sendHrAlertWhatsApp(toNumber, opts = {}) {
+  const {
+    title = 'HR Alert',
+    detail = '',
+    dueLabel = '—',
+    priority = 'High',
+  } = opts;
+  const to = normalizeWhatsAppNumber(toNumber);
+  if (!to) return { ok: false, reason: 'no_number' };
+
+  const fullText = [title, detail].filter(Boolean).join('\n').slice(0, 4000);
+  const textResult = await sendWhatsAppText(to, fullText);
+  if (textResult?.ok) return { ...textResult, via: 'text' };
+
+  // Outside 24h window Meta rejects free text — use utility template.
+  const tmpl =
+    process.env.WHATSAPP_HR_ALERT_TEMPLATE ||
+    process.env.WHATSAPP_TASK_LIST_TEMPLATE ||
+    'task_notification_v2';
+  const tmplResult = await sendWhatsAppTemplate(to, tmpl, [
+    'HR Team',
+    String(detail || title).slice(0, 500),
+    String(title).slice(0, 80),
+    String(dueLabel || '—').slice(0, 40),
+    String(priority || 'High').slice(0, 20),
+  ]);
+  if (tmplResult?.ok) return { ...tmplResult, via: 'template' };
+
+  return {
+    ok: false,
+    reason: tmplResult?.reason || textResult?.reason || 'api_error',
+    error: tmplResult?.error || textResult?.error || 'WhatsApp send failed',
+    text: textResult,
+    template: tmplResult,
+  };
+}
+
+/**
  * Interactive list picker (session / 24h window).
  * rows: [{ id, title, description? }] — max 10 rows total across sections.
  */
@@ -348,6 +389,7 @@ module.exports = {
   sendWhatsAppInteractiveButtons,
   sendWhatsAppInteractiveList,
   sendWhatsAppText,
+  sendHrAlertWhatsApp,
   notifyTaskAssignedWithDone,
   normalizeWhatsAppNumber,
   sendLeaveAlertTemplate,

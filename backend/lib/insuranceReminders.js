@@ -3,7 +3,7 @@
  * Message includes POST-sheet style details so HR can renew.
  */
 const supabase = require('./supabaseClient');
-const { sendWhatsAppText } = require('./whatsapp');
+const { sendHrAlertWhatsApp } = require('./whatsapp');
 
 const BUCKET = 'documents';
 const INSURANCE_PATH = 'hr/_meta/insurances.json';
@@ -138,23 +138,38 @@ async function runInsuranceRenewReminders(opts = {}) {
     const targets = [{ to: hrWa, kind: 'hr' }];
 
     const msg = buildRenewMessage(enriched, days);
+    const whenLabel =
+      days < 0 ? `OVERDUE ${Math.abs(days)}d` : days === 0 ? 'TODAY' : `${days}d`;
     let okAny = false;
+    let lastErr = null;
     for (const t of targets) {
       try {
-        const result = await sendWhatsAppText(t.to, msg);
+        const result = await sendHrAlertWhatsApp(t.to, {
+          title: 'HR · Insurance renew',
+          detail: msg,
+          dueLabel: whenLabel,
+          priority: days <= 0 ? 'Urgent' : 'High',
+        });
         if (result?.ok) {
           okAny = true;
           sent.push({
             type: 'insurance_renew',
             to: t.to,
-            via: t.kind,
+            via: result.via || t.kind,
             name: row.employee_name,
             renew_date: row.renew_date,
             days_until: days,
           });
+        } else {
+          lastErr = result?.error || result?.reason || 'send_failed';
+          skipped.push({
+            name: row.employee_name,
+            reason: lastErr,
+          });
         }
       } catch (e) {
         console.warn('insurance WA fail', row.employee_name, e.message);
+        skipped.push({ name: row.employee_name, reason: e.message });
       }
     }
     if (okAny) log[key] = new Date().toISOString();
@@ -186,6 +201,7 @@ module.exports = {
   buildRenewMessage,
   daysUntilDate,
   resolveHrWhatsApp,
+  istTodayKey,
   DEFAULT_HR_WHATSAPP,
   RENEW_WINDOW_DAYS,
 };
