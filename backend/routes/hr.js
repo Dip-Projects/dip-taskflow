@@ -16,6 +16,7 @@ const REMINDER_LOG_PATH = 'hr/_meta/reminder_log.json';
 const HR_STAFF_PATH = 'hr/_meta/hr_employees.json';
 const JOINING_FORMS_PATH = 'hr/_meta/joining_forms.json';
 const CVS_PATH = 'hr/_meta/cvs.json';
+const CANDIDATES_PATH = 'hr/_meta/candidate_applications.json';
 
 const CV_ROLES = [
   'Site Engineer',
@@ -103,6 +104,40 @@ const RECRUIT_STATUSES = [
   'Hired',
   'Rejected',
 ];
+
+function isWalkInCandidate(row) {
+  if (!row || typeof row !== 'object') return false;
+  if (row.kind === 'requirement' || row.source === 'office_requirement') return false;
+  if (row.source === 'public_qr' || row.application) return true;
+  return false;
+}
+
+/** Move legacy walk-in rows out of recruitments.json into candidate_applications.json. */
+async function migrateWalkInCandidates() {
+  const recruitRaw = await readJson(RECRUIT_PATH, []);
+  const recruitList = Array.isArray(recruitRaw) ? recruitRaw : [];
+  const walkIns = recruitList.filter(isWalkInCandidate);
+  if (!walkIns.length) {
+    const existing = await readJson(CANDIDATES_PATH, []);
+    return Array.isArray(existing) ? existing : [];
+  }
+
+  const candRaw = await readJson(CANDIDATES_PATH, []);
+  const candidates = Array.isArray(candRaw) ? candRaw : [];
+  const ids = new Set(candidates.map((c) => c.id));
+  for (const row of walkIns) {
+    if (!ids.has(row.id)) {
+      candidates.push(row);
+      ids.add(row.id);
+    }
+  }
+  candidates.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  await writeJson(CANDIDATES_PATH, candidates);
+
+  const requirements = recruitList.filter((r) => !isWalkInCandidate(r));
+  await writeJson(RECRUIT_PATH, requirements);
+  return candidates;
+}
 
 function isHead(user) {
   if (!user) return false;
@@ -569,9 +604,17 @@ router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
       updated_at: new Date().toISOString(),
     };
 
-    const list = await readJson(RECRUIT_PATH, []);
-    list.unshift(row);
-    await writeJson(RECRUIT_PATH, list);
+    const list = await readJson(CANDIDATES_PATH, []);
+    const candidates = Array.isArray(list) ? list : [];
+    candidates.unshift(row);
+    await writeJson(CANDIDATES_PATH, candidates);
+
+    // Also strip any legacy copy from recruitments if id somehow overlaps
+    try {
+      await migrateWalkInCandidates();
+    } catch (_) {
+      /* non-fatal */
+    }
 
     // Mirror all apply-form docs into HR Documents vault:
     // Recruitment → Role → Candidate name
@@ -981,10 +1024,12 @@ router.get('/attendance', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Heads see own submissions; admin + HR see full recruitment pipeline. */
+/** Heads see own submissions; admin + HR see hiring requirements only (not walk-in forms). */
 router.get('/recruitments', async (req, res) => {
   try {
-    const list = await readJson(RECRUIT_PATH, []);
+    await migrateWalkInCandidates();
+    const raw = await readJson(RECRUIT_PATH, []);
+    const list = (Array.isArray(raw) ? raw : []).filter((r) => !isWalkInCandidate(r));
     if (canHrOrAdmin(req.user)) return res.json({ recruitments: list });
     if (!isHead(req.user)) {
       return res.status(403).json({ error: 'Only admin or HR can view all recruitments' });
@@ -994,6 +1039,67 @@ router.get('/recruitments', async (req, res) => {
     res.json({ recruitments: mine });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load recruitments' });
+  }
+});
+
+/** Walk-in / QR candidate application forms — separate from hiring requirements. */
+router.get('/candidate-applications', requireAdminOrHr, async (_req, res) => {
+  try {
+    const apps = await migrateWalkInCandidates();
+    res.json({ applications: apps, count: apps.length });
+  } catch (err) {
+    console.error('candidate-applications list:', err.message || err);
+    res.status(500).json({ error: err.message || 'Could not load applications' });
+  }
+});
+
+router.patch('/candidate-applications/:id', requireAdminOrHr, async (req, res) => {
+  try {
+    await migrateWalkInCandidates();
+    const raw = await readJson(CANDIDATES_PATH, []);
+    const fresh = Array.isArray(raw) ? [...raw] : [];
+    const idx = fresh.findIndex((r) => r.id === req.params.id);
+    if (idx < 0) return res.status(404).json({ error: 'Not found' });
+
+    const prev = fresh[idx];
+    const history = ensureStatusHistory({ ...prev }, req.user);
+    const prevStatus = String(prev.status || 'Request Received');
+    const allowed = ['status', 'interview_at', 'interview_notes', 'notes', 'role_applied'];
+    allowed.forEach((k) => {
+      if (req.body[k] !== undefined) fresh[idx][k] = req.body[k];
+    });
+    const nextStatus = String(fresh[idx].status || prevStatus);
+    if (req.body.status !== undefined && nextStatus !== prevStatus) {
+      history.push(
+        statusHistoryEntry({
+          from: prevStatus,
+          to: nextStatus,
+          by: req.user.id,
+          by_name: req.user.full_name || req.user.username || 'HR',
+          note: String(req.body.status_note || '').trim(),
+        })
+      );
+    }
+    fresh[idx].status_history = history;
+    fresh[idx].pipeline_step = nextStatus;
+    fresh[idx].updated_at = new Date().toISOString();
+    await writeJson(CANDIDATES_PATH, fresh);
+    res.json({ application: fresh[idx] });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Update failed' });
+  }
+});
+
+router.delete('/candidate-applications/:id', requireAdminOrHr, async (req, res) => {
+  try {
+    await migrateWalkInCandidates();
+    const raw = await readJson(CANDIDATES_PATH, []);
+    const list = Array.isArray(raw) ? raw : [];
+    const next = list.filter((r) => r.id !== req.params.id);
+    await writeJson(CANDIDATES_PATH, next);
+    res.json({ ok: true, count: next.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Delete failed' });
   }
 });
 

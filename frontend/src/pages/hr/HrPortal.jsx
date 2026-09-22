@@ -1222,22 +1222,43 @@ function lastStatusChange(row) {
   return hist[hist.length - 1];
 }
 
-function RecruitmentView({ apiCandidates, onReload, busySet }) {
+function applicationFieldRows(app = {}) {
+  return [
+    ['Form date', app.form_date],
+    ['Full name', app.full_name],
+    ["Father's name", app.father_name],
+    ['Position applied', app.position_applied],
+    ['Date of birth', app.dob],
+    ['Gender', app.gender],
+    ['Marital status', app.marital_status],
+    ['Native place', app.native_place],
+    ['Mobile', app.mobile],
+    ['Alternate number', app.alternate_number],
+    ['Email', app.email],
+    ['Aadhaar', app.aadhaar],
+    ['PAN', app.pan],
+    ['Current address', app.current_address],
+    ['Permanent address', app.permanent_address],
+    ['Sources', Array.isArray(app.sources) ? app.sources.join(', ') : app.sources],
+    ['Source (other)', app.source_other],
+    ['Current organization', app.current_organization],
+    ['Current designation', app.current_designation],
+    ['Total experience', app.total_experience],
+    ['Current CTC', app.current_ctc],
+    ['Expected CTC', app.expected_ctc],
+    ['Notice period', app.notice_period],
+    ['Reason for change', app.reason_for_change],
+  ].filter(([, v]) => v != null && String(v).trim() !== '');
+}
+
+function RecruitmentView({ requirements = [], walkInApps = [], onReload, busySet }) {
   const [busy, setBusy] = useState(false);
-  const [subTab, setSubTab] = useState('requirements'); // requirements | candidates
+  const [subTab, setSubTab] = useState('requirements'); // requirements | walkins
   const [applyQr, setApplyQr] = useState(null);
   const [detail, setDetail] = useState(null);
   const [historyRow, setHistoryRow] = useState(null);
   const statuses = RECRUIT_STATUSES;
   const applyUrl = `${publicOrigin()}/apply`;
-
-  const isRequirement = (c) =>
-    c?.kind === 'requirement' ||
-    c?.source === 'office_requirement' ||
-    (!!c?.designation && !!c?.experience_required && !c?.application && c?.source !== 'public_qr');
-
-  const requirements = (apiCandidates || []).filter(isRequirement);
-  const candidates = (apiCandidates || []).filter((c) => !isRequirement(c));
 
   useEffect(() => {
     let cancelled = false;
@@ -1250,7 +1271,7 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
     };
   }, [applyUrl]);
 
-  const update = async (id, patch) => {
+  const updateRequirement = async (id, patch) => {
     setBusy(true);
     busySet?.(true);
     try {
@@ -1261,6 +1282,33 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
     } finally {
       setBusy(false);
       busySet?.(false);
+    }
+  };
+
+  const updateWalkIn = async (id, patch) => {
+    setBusy(true);
+    busySet?.(true);
+    try {
+      await api(`/hr/candidate-applications/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+      await onReload();
+    } catch (e) {
+      alert(e.message || 'Update failed');
+    } finally {
+      setBusy(false);
+      busySet?.(false);
+    }
+  };
+
+  const removeWalkIn = async (id, name) => {
+    if (!window.confirm(`Delete application for ${name || 'this candidate'}?`)) return;
+    setBusy(true);
+    try {
+      await api(`/hr/candidate-applications/${id}`, { method: 'DELETE' });
+      await onReload();
+    } catch (e) {
+      alert(e.message || 'Delete failed');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1283,9 +1331,8 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
   return (
     <div className="hr-panel">
       <p className="hr-sub" style={{ marginTop: 0 }}>
-        Office hiring requirements aur candidate applications alag tabs me.
-        Apply form ke saare documents <strong>Documents</strong> section me
-        Recruitment → Role → Candidate folder structure me save hote hain.
+        <strong>Hiring requirements</strong> = Office se aayi openings.
+        <strong> Walk-in applications</strong> = on-spot / QR form se jo candidate fill karta hai — alag table me poora form data.
       </p>
 
       <div className="hr-tabs" role="tablist" aria-label="Recruitment sections">
@@ -1299,11 +1346,11 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
         </button>
         <button
           type="button"
-          className={`hr-tab${subTab === 'candidates' ? ' on' : ''}`}
-          onClick={() => setSubTab('candidates')}
+          className={`hr-tab${subTab === 'walkins' ? ' on' : ''}`}
+          onClick={() => setSubTab('walkins')}
         >
-          Candidates
-          <span className="hr-badge" style={{ marginLeft: 8 }}>{candidates.length}</span>
+          Walk-in applications
+          <span className="hr-badge" style={{ marginLeft: 8 }}>{walkInApps.length}</span>
         </button>
         <button type="button" className="hr-btn ghost" onClick={onReload} disabled={busy} style={{ marginLeft: 'auto' }}>
           Refresh
@@ -1352,7 +1399,7 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
                           <select
                             value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
                             disabled={busy}
-                            onChange={(e) => update(c.id, { status: e.target.value })}
+                            onChange={(e) => updateRequirement(c.id, { status: e.target.value })}
                           >
                             {!statuses.includes(c.status) && c.status ? (
                               <option value={c.status}>{c.status}</option>
@@ -1382,7 +1429,7 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
         </>
       )}
 
-      {subTab === 'candidates' && (
+      {subTab === 'walkins' && (
         <>
           <div className="hr-apply-qr">
             <div className="hr-apply-qr-code">
@@ -1393,9 +1440,9 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
               )}
             </div>
             <div className="hr-apply-qr-body">
-              <div className="hr-apply-qr-title">Candidate application QR / link</div>
+              <div className="hr-apply-qr-title">Walk-in / on-spot application QR</div>
               <p className="hr-sub" style={{ margin: '0 0 8px' }}>
-                Candidate form fill kare → CV / Aadhaar / PAN / Photo Documents me save ho jayenge.
+                Candidate form fill kare → saara data is table me save hota hai (requirements se alag).
               </p>
               <div className="hr-apply-qr-url">{applyUrl}</div>
               <div className="hr-apply-qr-actions">
@@ -1416,135 +1463,121 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
             </div>
           </div>
 
-          <h3 style={{ margin: '4px 0 8px', fontSize: '1.05rem' }}>Candidates (apply / walk-in)</h3>
+          <h3 style={{ margin: '12px 0 8px', fontSize: '1.05rem' }}>Walk-in application forms</h3>
           <p className="hr-sub">
-            Pipeline: Request → Post Create → Post Live → Shortlist → Interview Lined Up → Interview Done → Offer → Approved / Hired / Rejected.
+            Form ke saare fields yahan dikhte hain. Poora form dekhne ke liye <b>View details</b> dabao.
           </p>
           <div className="hr-table-wrap">
-            <table className="hr-table">
+            <table className="hr-table hr-table--walkin">
               <thead>
                 <tr>
-                  <th>Candidate</th>
-                  <th>Role</th>
-                  <th>Contact</th>
-                  <th>From</th>
-                  <th>Form / docs</th>
-                  <th>Interview</th>
+                  <th>Sr.</th>
+                  <th>Name</th>
+                  <th>Position</th>
+                  <th>Mobile</th>
+                  <th>Aadhaar</th>
+                  <th>Experience</th>
+                  <th>CTC (cur / exp)</th>
+                  <th>Notice</th>
+                  <th>Submitted</th>
+                  <th>Docs</th>
                   <th>Status</th>
-                  <th>Notes</th>
-                  <th>History</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {!candidates.length ? (
-                  <tr><td colSpan={9} className="hr-empty">No candidate applications yet.</td></tr>
+                {!walkInApps.length ? (
+                  <tr>
+                    <td colSpan={12} className="hr-empty">
+                      No walk-in forms yet. Share the QR / link above.
+                    </td>
+                  </tr>
                 ) : (
-                  candidates.map((c) => {
-                    const last = lastStatusChange(c);
+                  walkInApps.map((c, i) => {
+                    const app = c.application || {};
                     const docs = appDocs(c);
                     return (
                       <tr key={c.id}>
+                        <td>{i + 1}</td>
                         <td>
-                          {c.candidate_name}
-                          {c.aadhaar ? <div style={{ fontSize: '0.72rem', opacity: 0.65 }}>Aadhaar: {c.aadhaar}</div> : null}
+                          <strong>{c.candidate_name || app.full_name || '—'}</strong>
+                          {app.father_name ? (
+                            <div style={{ fontSize: '0.72rem', opacity: 0.7 }}>S/o {app.father_name}</div>
+                          ) : null}
+                          {app.email ? (
+                            <div style={{ fontSize: '0.7rem', opacity: 0.65 }}>{app.email}</div>
+                          ) : null}
                         </td>
-                        <td>{c.role_applied || c.application?.position_applied || '—'}</td>
-                        <td>{[c.phone, c.email].filter(Boolean).join(' · ') || '—'}</td>
-                        <td>{c.submitted_by_name || (c.source === 'public_qr' ? 'QR Apply' : '—')}</td>
-                        <td>
-                          {(c.application || docs.length) ? (
-                            <div className="hr-cand-docs" role="group" aria-label="Form and documents">
-                              {c.application ? (
-                                <button
-                                  type="button"
-                                  className="hr-cand-doc hr-cand-doc--form"
-                                  onClick={() => setDetail(c)}
-                                >
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                    <polyline points="14 2 14 8 20 8" />
-                                    <line x1="8" y1="13" x2="16" y2="13" />
-                                    <line x1="8" y1="17" x2="13" y2="17" />
-                                  </svg>
-                                  View form
-                                </button>
-                              ) : null}
-                              {docs.map((d) => (
-                                <a
-                                  key={`${d.label}-${d.url}`}
-                                  className={`hr-cand-doc${d.label === 'CV' ? ' hr-cand-doc--cv' : ''}`}
-                                  href={d.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  title={`Open ${d.label}`}
-                                >
-                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                    {d.label === 'CV' ? (
-                                      <>
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                        <circle cx="12" cy="13" r="2" />
-                                        <path d="M8 18c0-1.5 1.8-2.5 4-2.5s4 1 4 2.5" />
-                                      </>
-                                    ) : (
-                                      <>
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                      </>
-                                    )}
-                                  </svg>
-                                  {d.label}
-                                </a>
-                              ))}
-                            </div>
-                          ) : '—'}
+                        <td>{c.role_applied || app.position_applied || '—'}</td>
+                        <td>{c.phone || app.mobile || '—'}</td>
+                        <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
+                          {c.aadhaar || app.aadhaar || '—'}
+                        </td>
+                        <td>{app.total_experience || '—'}</td>
+                        <td style={{ fontSize: '0.78rem' }}>
+                          {[app.current_ctc || '—', app.expected_ctc || '—'].join(' / ')}
+                        </td>
+                        <td>{app.notice_period || '—'}</td>
+                        <td style={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                          {c.created_at
+                            ? new Date(c.created_at).toLocaleString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : app.form_date || '—'}
                         </td>
                         <td>
-                          <input
-                            type="datetime-local"
-                            value={c.interview_at ? String(c.interview_at).slice(0, 16) : ''}
-                            disabled={busy}
-                            onChange={(e) => update(c.id, {
-                              interview_at: e.target.value ? new Date(e.target.value).toISOString() : null,
-                              status: e.target.value ? 'Interview Lined Up' : c.status,
-                            })}
-                          />
+                          <div className="hr-cand-docs">
+                            {docs.slice(0, 3).map((d) => (
+                              <a
+                                key={`${d.label}-${d.url}`}
+                                className={`hr-cand-doc${d.label === 'CV' ? ' hr-cand-doc--cv' : ''}`}
+                                href={d.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {d.label}
+                              </a>
+                            ))}
+                            {docs.length > 3 ? (
+                              <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>+{docs.length - 3}</span>
+                            ) : null}
+                          </div>
                         </td>
                         <td>
                           <select
                             value={statuses.includes(c.status) ? c.status : (c.status || 'Request Received')}
                             disabled={busy}
-                            onChange={(e) => update(c.id, { status: e.target.value })}
+                            onChange={(e) => updateWalkIn(c.id, { status: e.target.value })}
                           >
                             {!statuses.includes(c.status) && c.status ? (
                               <option value={c.status}>{c.status}</option>
                             ) : null}
-                            {statuses.map((s) => <option key={s}>{s}</option>)}
+                            {statuses.map((s) => (
+                              <option key={s}>{s}</option>
+                            ))}
                           </select>
-                          {last ? (
-                            <div style={{ fontSize: '0.68rem', opacity: 0.7, marginTop: 4, maxWidth: 140 }}>
-                              {last.from ? `${last.from} → ` : ''}{last.to}
-                              <br />
-                              {formatStatusAt(last.at)}
-                            </div>
-                          ) : null}
                         </td>
                         <td>
-                          <input
-                            defaultValue={c.interview_notes || c.notes || ''}
-                            placeholder="Interview / process notes"
-                            disabled={busy}
-                            onBlur={(e) => {
-                              if (e.target.value !== (c.interview_notes || c.notes || '')) {
-                                update(c.id, { interview_notes: e.target.value });
-                              }
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
-                            History
-                          </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <button type="button" className="hr-btn" onClick={() => setDetail(c)}>
+                              View details
+                            </button>
+                            <button type="button" className="hr-btn ghost" onClick={() => setHistoryRow(c)}>
+                              History
+                            </button>
+                            <button
+                              type="button"
+                              className="hr-btn ghost"
+                              disabled={busy}
+                              onClick={() => removeWalkIn(c.id, c.candidate_name)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1558,10 +1591,24 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
 
       {detail ? (
         <div className="hr-modal-backdrop" onClick={() => setDetail(null)} role="presentation">
-          <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" style={{ maxWidth: 560, maxHeight: '85vh', overflow: 'auto' }}>
-            <h3 style={{ marginTop: 0 }}>{detail.candidate_name}</h3>
+          <div
+            className="hr-modal hr-modal--wide"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            style={{ maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }}
+          >
+            <h3 style={{ marginTop: 0 }}>
+              {detail.candidate_name || detail.application?.full_name || 'Application'}
+            </h3>
+            <p className="hr-sub" style={{ marginTop: 0 }}>
+              Walk-in / QR form ·{' '}
+              {detail.created_at
+                ? new Date(detail.created_at).toLocaleString('en-IN')
+                : detail.application?.form_date || ''}
+            </p>
+
             {appDocs(detail).length ? (
-              <div className="hr-cand-docs-modal" style={{ marginBottom: 12 }}>
+              <div className="hr-cand-docs-modal" style={{ marginBottom: 14 }}>
                 <strong style={{ fontSize: '0.85rem' }}>Documents</strong>
                 <div className="hr-cand-docs" style={{ marginTop: 8 }}>
                   {appDocs(detail).map((d) => (
@@ -1578,10 +1625,53 @@ function RecruitmentView({ apiCandidates, onReload, busySet }) {
                 </div>
               </div>
             ) : null}
-            <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.78rem', background: '#f7f1ea', padding: 10, borderRadius: 8 }}>
-              {JSON.stringify(detail.application || detail, null, 2)}
-            </pre>
-            <button type="button" className="hr-btn ghost" onClick={() => setDetail(null)}>Close</button>
+
+            <div className="hr-app-detail-grid">
+              {applicationFieldRows(detail.application || {}).map(([label, value]) => (
+                <div key={label} className="hr-app-detail-row">
+                  <div className="hr-app-detail-label">{label}</div>
+                  <div className="hr-app-detail-value">{String(value)}</div>
+                </div>
+              ))}
+            </div>
+
+            {Array.isArray(detail.application?.education) && detail.application.education.some((e) => e.year || e.percentage || e.degree || e.board) ? (
+              <div style={{ marginTop: 14 }}>
+                <strong style={{ fontSize: '0.85rem' }}>Education</strong>
+                <div className="hr-table-wrap" style={{ marginTop: 8 }}>
+                  <table className="hr-table">
+                    <thead>
+                      <tr>
+                        <th>Level</th>
+                        <th>Degree</th>
+                        <th>Board</th>
+                        <th>Year</th>
+                        <th>%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.application.education
+                        .filter((e) => e.year || e.percentage || e.degree || e.board)
+                        .map((e) => (
+                          <tr key={e.qualification}>
+                            <td>{e.qualification || '—'}</td>
+                            <td>{e.degree || '—'}</td>
+                            <td>{e.board || '—'}</td>
+                            <td>{e.year || '—'}</td>
+                            <td>{e.percentage || '—'}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="hr-btn ghost" onClick={() => setDetail(null)}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -3110,6 +3200,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const [leaveError, setLeaveError] = useState('');
   const [attendanceToday, setAttendanceToday] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
+  const [walkInApps, setWalkInApps] = useState([]);
   const [alerts, setAlerts] = useState({ birthdays: [], insuranceDue: [] });
   const [scrollToAlerts, setScrollToAlerts] = useState(false);
 
@@ -3185,13 +3276,19 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
   const loadRecruitments = useCallback(async () => {
     if (!canManageRecruitment) {
       setRecruitments([]);
+      setWalkInApps([]);
       return;
     }
     try {
-      const data = await api('/hr/recruitments');
-      setRecruitments(data.recruitments || []);
+      const [reqData, candData] = await Promise.all([
+        api('/hr/recruitments'),
+        api('/hr/candidate-applications'),
+      ]);
+      setRecruitments(reqData.recruitments || []);
+      setWalkInApps(candData.applications || []);
     } catch {
       setRecruitments([]);
+      setWalkInApps([]);
     }
   }, [canManageRecruitment]);
 
@@ -3414,7 +3511,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
                 employees={employees}
                 leaveBundle={leaveBundle}
                 attendanceToday={attendanceToday}
-                candidates={canManageRecruitment ? recruitments : []}
+                candidates={canManageRecruitment ? [...recruitments, ...walkInApps] : []}
                 alerts={alerts}
                 onSendWa={sendWaReminders}
               />
@@ -3436,7 +3533,11 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
               <LeavesView bundle={leaveBundle} loading={leaveLoading} error={leaveError} onReload={loadLeaves} />
             )}
             {tab === 'recruitment' && canManageRecruitment && (
-              <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
+              <RecruitmentView
+                requirements={recruitments}
+                walkInApps={walkInApps}
+                onReload={loadRecruitments}
+              />
             )}
             {tab === 'cvs' && <CvsView />}
             {tab === 'insurance' && <InsuranceView employees={employees} />}

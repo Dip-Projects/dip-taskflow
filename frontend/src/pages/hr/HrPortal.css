@@ -1448,6 +1448,56 @@ html:has(.hr-shell) body {
   color: var(--ink);
 }
 
+.hr-modal--wide {
+  width: min(720px, 100%);
+}
+
+.hr-app-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.hr-app-detail-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 38%) 1fr;
+  gap: 8px 12px;
+  padding: 8px 10px;
+  background: #faf6f1;
+  border-radius: 8px;
+  border: 1px solid #efe4d8;
+}
+
+.hr-app-detail-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #8a6a4a;
+}
+
+.hr-app-detail-value {
+  font-size: 0.88rem;
+  color: var(--ink);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.hr-table--walkin th,
+.hr-table--walkin td {
+  font-size: 0.8rem;
+  vertical-align: top;
+}
+
+[data-theme='dark'] .hr-app-detail-row {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .hr-app-detail-label {
+  color: #c4a882;
+}
+
 .hr-sb-backdrop {
   display: none;
 }
