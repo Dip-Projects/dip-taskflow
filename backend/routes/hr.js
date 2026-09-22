@@ -150,10 +150,37 @@ async function ensureBucket() {
 
 async function readJson(path, fallback) {
   await ensureBucket();
+  // Authenticated fetch with no-store — public CDN was serving a stale empty cvs.json.
+  try {
+    const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '';
+    if (base && key) {
+      const url = `${base}/storage/v1/object/${BUCKET}/${path.split('/').map(encodeURIComponent).join('/')}?t=${Date.now()}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          apikey: key,
+          'Cache-Control': 'no-cache',
+        },
+        cache: 'no-store',
+      });
+      if (res.status === 404) return fallback;
+      if (res.ok) {
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          /* fall through */
+        }
+      }
+    }
+  } catch {
+    /* fall through */
+  }
   const { data, error } = await supabase.storage.from(BUCKET).download(path);
   if (error) {
     if (/not found|404/i.test(error.message || '')) return fallback;
-    // empty / missing
     return fallback;
   }
   const text = await data.text();
@@ -170,6 +197,7 @@ async function writeJson(path, value) {
   const { error } = await supabase.storage.from(BUCKET).upload(path, body, {
     contentType: 'application/json',
     upsert: true,
+    cacheControl: '0',
   });
   if (error) throw error;
 }
@@ -861,7 +889,8 @@ router.post('/public/cv-submit', async (req, res) => {
       created_at: now,
     };
 
-    const list = await readJson(CVS_PATH, []);
+    const raw = await readJson(CVS_PATH, []);
+    const list = Array.isArray(raw) ? raw : [];
     list.unshift(row);
     await writeJson(CVS_PATH, list);
 
@@ -961,21 +990,32 @@ router.get('/recruitments', async (req, res) => {
 });
 
 /** HR/admin: list walk-in / QR CV drops. */
-router.get('/cvs', requireAdminOrHr, async (req, res) => {
+router.get('/cvs', async (req, res) => {
   try {
-    const list = await readJson(CVS_PATH, []);
-    res.json({ cvs: list, roles: CV_ROLES, locations: CV_LOCATIONS });
+    if (!canHrOrAdmin(req.user)) {
+      return res.status(403).json({ error: 'Only admin or HR can view CVs' });
+    }
+    const raw = await readJson(CVS_PATH, []);
+    const cvs = Array.isArray(raw) ? raw : [];
+    res.json({
+      cvs,
+      roles: CV_ROLES,
+      locations: CV_LOCATIONS,
+      count: cvs.length,
+    });
   } catch (err) {
+    console.error('hr cvs list:', err.message || err);
     res.status(500).json({ error: err.message || 'Could not load CVs' });
   }
 });
 
 router.delete('/cvs/:id', requireAdminOrHr, async (req, res) => {
   try {
-    const list = await readJson(CVS_PATH, []);
+    const raw = await readJson(CVS_PATH, []);
+    const list = Array.isArray(raw) ? raw : [];
     const next = list.filter((r) => r.id !== req.params.id);
     await writeJson(CVS_PATH, next);
-    res.json({ ok: true });
+    res.json({ ok: true, count: next.length });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not delete CV' });
   }

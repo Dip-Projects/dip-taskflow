@@ -1963,8 +1963,12 @@ function CvsView() {
     setError('');
     try {
       const data = await api('/hr/cvs');
-      setRows(data.cvs || []);
+      const list = Array.isArray(data.cvs) ? data.cvs : [];
+      setRows(list);
       if (data.roles?.length) setRoles(data.roles);
+      if (!list.length && data.count === 0) {
+        /* empty is fine */
+      }
     } catch (e) {
       setError(e.message || 'Could not load CVs');
       setRows([]);
@@ -2087,8 +2091,23 @@ function CvsView() {
         </span>
       </div>
 
-      {error ? <div className="hr-error">{error}</div> : null}
+      {error ? (
+        <div className="hr-error" style={{ marginBottom: 12 }}>
+          {error}
+          <button type="button" className="hr-btn ghost" style={{ marginLeft: 8 }} onClick={load}>
+            Retry
+          </button>
+        </div>
+      ) : null}
       {loading ? <div className="hr-empty">Loading CVs…</div> : null}
+
+      {!loading && !error && (
+        <p className="hr-sub" style={{ margin: '0 0 8px' }}>
+          Showing <strong>{filtered.length}</strong> of <strong>{rows.length}</strong> saved CV
+          {rows.length === 1 ? '' : 's'}
+          {rows.length === 0 ? ' — submit from the QR form, then tap Refresh.' : '.'}
+        </p>
+      )}
 
       {!loading && (
         <div className="hr-table-wrap">
@@ -2108,7 +2127,9 @@ function CvsView() {
               {!filtered.length ? (
                 <tr>
                   <td colSpan={7} className="hr-empty">
-                    No CVs yet. Share the QR / link above.
+                    {rows.length
+                      ? 'No CVs match these filters.'
+                      : 'No CVs yet. Share the QR / link above, then tap Refresh.'}
                   </td>
                 </tr>
               ) : (
