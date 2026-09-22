@@ -239,9 +239,14 @@ export default function CandidateApplyPage() {
             <tbody>
               {education.map((row, i) => (
                 <tr key={row.qualification}>
-                  <td>{row.qualification}</td>
-                  {['degree', 'board', 'year', 'percentage'].map((k) => (
-                    <td key={k}>
+                  <td data-label="Qualification">{row.qualification}</td>
+                  {[
+                    ['degree', 'Degree'],
+                    ['board', 'Board / University'],
+                    ['year', 'Year'],
+                    ['percentage', '% / CGPA'],
+                  ].map(([k, label]) => (
+                    <td key={k} data-label={label}>
                       <input
                         value={row[k]}
                         onChange={(e) => {
@@ -249,6 +254,8 @@ export default function CandidateApplyPage() {
                           next[i] = { ...next[i], [k]: e.target.value };
                           setEducation(next);
                         }}
+                        inputMode={k === 'year' || k === 'percentage' ? 'decimal' : undefined}
+                        autoComplete="off"
                       />
                     </td>
                   ))}

@@ -8,9 +8,13 @@
   color: #2a1a10;
   font-family: 'Segoe UI', Calibri, Arial, sans-serif;
   padding: 12px 12px 28px;
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
   padding-bottom: max(28px, env(safe-area-inset-bottom));
   box-sizing: border-box;
   -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overflow-x: hidden;
 }
 
 .pf-card {
@@ -92,17 +96,35 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  min-height: 46px;
+  min-height: 48px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.pf-field select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%235a3210' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
 }
 
 .pf-field input[type='file'] {
   font-size: 0.85rem;
   padding: 10px;
+  min-height: 52px;
+  background: #fff;
+  border-style: dashed;
+}
+
+.pf-field input[type='date'],
+.pf-field input[type='tel'],
+.pf-field input[type='email'],
+.pf-field input[type='number'] {
   min-height: 48px;
 }
 
 .pf-field textarea {
-  min-height: 88px;
+  min-height: 96px;
   resize: vertical;
 }
 
@@ -126,18 +148,23 @@
   align-items: flex-start;
   gap: 10px;
   line-height: 1.35;
+  padding: 10px 12px;
+  border: 1px solid #eadfce;
+  border-radius: 10px;
+  background: #fffcf9;
+  min-height: 48px;
 }
 
 .pf-check-grid input[type='checkbox'] {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   margin-top: 2px;
   flex-shrink: 0;
+  accent-color: #3d1f00;
 }
 
 .pf-edu {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow-x: visible;
   margin-bottom: 8px;
 }
 
@@ -145,7 +172,6 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 0.75rem;
-  min-width: 480px;
 }
 
 .pf-edu th,
@@ -163,10 +189,12 @@
   width: 100%;
   box-sizing: border-box;
   border: 1px solid #ddd;
-  padding: 8px;
-  border-radius: 4px;
+  padding: 10px;
+  border-radius: 8px;
   font-size: 16px;
-  min-height: 40px;
+  min-height: 44px;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .pf-req {
@@ -186,8 +214,9 @@
   gap: 8px;
   position: sticky;
   bottom: 0;
-  padding-top: 8px;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  z-index: 5;
+  padding-top: 10px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0));
   background: linear-gradient(180deg, transparent, #fff 28%);
 }
 
@@ -204,6 +233,7 @@
   width: 100%;
   min-height: 52px;
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .pf-btn:disabled {
@@ -238,16 +268,17 @@
 }
 
 .pf-photo-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  align-items: center;
+  align-items: stretch;
   margin: 12px 0 4px;
 }
 
 .pf-photo-thumb {
-  width: 72px;
-  height: 72px;
+  width: 100%;
+  aspect-ratio: 1;
+  height: auto;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid #e2d5c6;
@@ -264,24 +295,25 @@
 }
 
 .pf-photo-thumb--with-x {
-  width: 88px;
-  height: 88px;
+  width: 100%;
+  height: auto;
 }
 
 .pf-photo-remove {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 26px;
-  height: 26px;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
   border: none;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  touch-action: manipulation;
 }
 
 .pf-photo-num {
@@ -298,10 +330,16 @@
 
 .pf-photo-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
   margin: 8px 0 4px;
+}
+
+.pf-photo-actions .pf-btn.ghost {
+  width: 100%;
+  min-height: 48px;
+  font-size: 0.95rem;
 }
 
 .pf-btn.ghost {
@@ -309,9 +347,9 @@
   color: #5a3210;
   border: 1.5px solid #d4c4b2;
   width: auto;
-  min-height: 40px;
-  padding: 8px 14px;
-  font-size: 0.85rem;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
 }
 
 .pf-info {
@@ -326,35 +364,42 @@
 }
 
 .pf-actions--split {
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 8px;
-  justify-content: flex-start;
+  justify-content: stretch;
 }
 
 .pf-actions--split .pf-btn {
-  width: auto;
-  flex: 0 0 auto;
+  width: 100%;
+  flex: none;
 }
 
 .pf-crop-overlay {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(20, 12, 4, 0.72);
+  background: rgba(20, 12, 4, 0.78);
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  padding: 16px;
+  padding: 0;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .pf-crop-card {
   background: #fffaf4;
-  border-radius: 14px;
-  padding: 14px 14px 16px;
-  width: min(520px, 100%);
-  max-height: 92vh;
+  border-radius: 0;
+  padding: 12px 12px 16px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 100dvh;
   overflow: auto;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .pf-crop-title {
@@ -366,6 +411,8 @@
 .pf-crop-stage {
   position: relative;
   width: 100%;
+  flex: 1;
+  min-height: 42vh;
   max-height: 58vh;
   overflow: hidden;
   border-radius: 10px;
@@ -377,7 +424,7 @@
 .pf-crop-stage img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
   max-height: 58vh;
   object-fit: contain;
   margin: 0 auto;
@@ -394,20 +441,34 @@
 
 .pf-crop-handle {
   position: absolute;
-  right: -8px;
-  bottom: -8px;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
+  right: -10px;
+  bottom: -10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   background: #fff;
   border: 2px solid #5a3210;
   cursor: nwse-resize;
   touch-action: none;
 }
 
-@media (max-width: 640px) {
+.pf-crop-card .pf-actions {
+  flex-direction: column;
+  position: static;
+  background: transparent;
+  padding-bottom: 0;
+}
+
+.pf-crop-card .pf-actions .pf-btn {
+  width: 100%;
+}
+
+/* —— Mobile-first tweaks (phones + small tablets) —— */
+@media (max-width: 720px) {
   .pf-page {
-    padding: 8px 8px 24px;
+    padding: 6px 6px 20px;
+    padding-left: max(6px, env(safe-area-inset-left));
+    padding-right: max(6px, env(safe-area-inset-right));
   }
 
   .pf-card {
@@ -415,6 +476,15 @@
     padding: 14px 12px 18px;
     box-shadow: none;
     border-color: #e8ddd0;
+    max-width: 100%;
+  }
+
+  .pf-brand {
+    font-size: 1.15rem;
+  }
+
+  .pf-title {
+    font-size: 1.05rem;
   }
 
   .pf-grid {
@@ -425,7 +495,108 @@
     grid-template-columns: 1fr;
   }
 
-  .pf-edu table {
-    min-width: 100%;
+  .pf-photo-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Education: stack each row as a card (no sideways scroll) */
+  .pf-edu table,
+  .pf-edu thead,
+  .pf-edu tbody,
+  .pf-edu th,
+  .pf-edu td,
+  .pf-edu tr {
+    display: block;
+    width: 100%;
+  }
+
+  .pf-edu thead {
+    display: none;
+  }
+
+  .pf-edu tr {
+    border: 1px solid #e0d3c4;
+    border-radius: 12px;
+    padding: 10px 10px 6px;
+    margin-bottom: 10px;
+    background: #fffcf9;
+  }
+
+  .pf-edu td {
+    border: none;
+    padding: 6px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pf-edu td::before {
+    content: attr(data-label);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #7a6352;
+  }
+
+  .pf-edu td:first-child {
+    font-weight: 700;
+    color: #3d1f00;
+    font-size: 0.9rem;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed #eadfce;
+    margin-bottom: 4px;
+  }
+
+  .pf-edu td:first-child::before {
+    content: none;
+  }
+}
+
+@media (min-width: 721px) {
+  .pf-actions--split {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .pf-actions--split .pf-btn {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+
+  .pf-actions--split .pf-btn:last-child {
+    flex: 1.4 1 auto;
+  }
+
+  .pf-photo-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pf-photo-actions .pf-btn.ghost {
+    width: auto;
+  }
+
+  .pf-photo-grid {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .pf-photo-thumb,
+  .pf-photo-thumb--with-x {
+    width: 96px;
+    height: 96px;
+    aspect-ratio: auto;
+  }
+
+  .pf-crop-overlay {
+    align-items: center;
+    padding: 16px;
+  }
+
+  .pf-crop-card {
+    border-radius: 14px;
+    max-height: 92vh;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
   }
 }
