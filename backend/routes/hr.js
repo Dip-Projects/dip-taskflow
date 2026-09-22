@@ -15,6 +15,25 @@ const PROFILES_PATH = 'hr/_meta/employee_profiles.json';
 const REMINDER_LOG_PATH = 'hr/_meta/reminder_log.json';
 const HR_STAFF_PATH = 'hr/_meta/hr_employees.json';
 const JOINING_FORMS_PATH = 'hr/_meta/joining_forms.json';
+const CVS_PATH = 'hr/_meta/cvs.json';
+
+const CV_ROLES = [
+  'Site Engineer',
+  'Coordinator',
+  'Head',
+  'Site Incharge',
+  'Jr Site Engineer',
+  'Senior Site Engineer',
+  'Jr Interior',
+  'Sr Interior',
+  'MIS',
+  'PC',
+  'EA',
+  'Estimator',
+  'Senior Estimator',
+  'Jr Estimator',
+  'Sales Executive',
+];
 
 const DOC_FIELD_NAMES = [
   'cv',
@@ -346,12 +365,12 @@ router.get('/cron/insurance-whatsapp', handleInsuranceCron);
 /**
  * Public signed upload (apply / onboard) — browser PUTs file to Supabase,
  * so Vercel body limit does not block CVs / scans.
- * Only paths under hr/applications/ or hr/joining/ are allowed.
+ * Only paths under hr/applications/, hr/joining/, or hr/cvs/ are allowed.
  */
 router.post('/public/signed-upload', async (req, res) => {
   try {
     const path = String(req.body?.path || '').replace(/^\/+/, '');
-    if (!path || !/^hr\/(applications|joining)\//.test(path)) {
+    if (!path || !/^hr\/(applications|joining|cvs)\//.test(path)) {
       return res.status(400).json({ error: 'Invalid upload path' });
     }
     if (path.includes('..') || path.includes('\\')) {
@@ -788,6 +807,64 @@ router.post('/public/onboard/:token', publicDocsUploadMaybe, async (req, res) =>
   }
 });
 
+/** Public: roles list for CV upload form (no auth). */
+router.get('/public/cv-roles', (_req, res) => {
+  res.json({ roles: CV_ROLES });
+});
+
+/**
+ * Public CV drop (QR form) — name + role + CV PDF/file meta from signed upload.
+ */
+router.post('/public/cv-submit', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const full_name = String(body.full_name || '').trim();
+    const mobile = String(body.mobile || '').replace(/\D/g, '');
+    const role = String(body.role || '').trim();
+    const cv = body.cv && typeof body.cv === 'object' ? body.cv : null;
+    const photos = Array.isArray(body.photos)
+      ? body.photos.filter((p) => p && p.url && p.path)
+      : [];
+
+    if (!role || !CV_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Please select a valid role' });
+    }
+    if (!cv?.url || !cv?.path) {
+      return res.status(400).json({ error: 'CV file is required (PDF or photos converted to PDF)' });
+    }
+    if (!String(cv.path).startsWith('hr/cvs/')) {
+      return res.status(400).json({ error: 'Invalid CV path' });
+    }
+
+    const now = new Date().toISOString();
+    const row = {
+      id: crypto.randomUUID(),
+      full_name: full_name || '—',
+      mobile: mobile || null,
+      role,
+      cv_url: String(cv.url),
+      cv_path: String(cv.path),
+      cv_name: String(cv.name || 'CV.pdf'),
+      photos: photos.map((p) => ({
+        path: String(p.path),
+        url: String(p.url),
+        name: String(p.name || 'photo'),
+      })),
+      source: 'qr',
+      created_at: now,
+    };
+
+    const list = await readJson(CVS_PATH, []);
+    list.unshift(row);
+    await writeJson(CVS_PATH, list);
+
+    res.status(201).json({ ok: true, id: row.id, message: 'CV submitted successfully' });
+  } catch (err) {
+    console.error('public cv-submit:', err.message);
+    res.status(500).json({ error: err.message || 'Could not submit CV' });
+  }
+});
+
 router.use(requireAuth);
 
 /**
@@ -873,6 +950,27 @@ router.get('/recruitments', async (req, res) => {
     res.json({ recruitments: mine });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load recruitments' });
+  }
+});
+
+/** HR/admin: list walk-in / QR CV drops. */
+router.get('/cvs', requireAdminOrHr, async (req, res) => {
+  try {
+    const list = await readJson(CVS_PATH, []);
+    res.json({ cvs: list, roles: CV_ROLES });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load CVs' });
+  }
+});
+
+router.delete('/cvs/:id', requireAdminOrHr, async (req, res) => {
+  try {
+    const list = await readJson(CVS_PATH, []);
+    const next = list.filter((r) => r.id !== req.params.id);
+    await writeJson(CVS_PATH, next);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not delete CV' });
   }
 });
 

@@ -932,6 +932,15 @@ html:has(.hr-shell) body {
   color: var(--ink);
 }
 
+.hr-link {
+  color: #0d9488;
+  font-weight: 650;
+  text-decoration: none;
+}
+.hr-link:hover {
+  text-decoration: underline;
+}
+
 .hr-btn.warn {
   background: #fef2f2;
   color: var(--red);

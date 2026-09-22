@@ -85,6 +85,14 @@ const Ico = {
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   ),
+  cv: (
+    <svg {...svgProps} stroke="#0d9488">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <circle cx="10" cy="13" r="2" />
+      <path d="M8 18c0-1.1 1.8-2 4-2s4 .9 4 2" />
+    </svg>
+  ),
   office: (
     <svg {...svgProps} stroke="#2563eb">
       <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -124,10 +132,29 @@ const NAV = [
   { key: 'attendance', label: 'Attendance', icon: Ico.clock },
   { key: 'leaves', label: 'Leaves', icon: Ico.leave },
   { key: 'recruitment', label: 'Recruitment', icon: Ico.recruit },
+  { key: 'cvs', label: 'CV', icon: Ico.cv },
   { key: 'insurance', label: 'Insurance', icon: Ico.shield },
   { key: 'payroll', label: 'Payroll', icon: Ico.payroll },
   { key: 'letters', label: 'Letters', icon: Ico.letter },
   { key: 'documents', label: 'Documents', icon: Ico.docs },
+];
+
+const CV_ROLES = [
+  'Site Engineer',
+  'Coordinator',
+  'Head',
+  'Site Incharge',
+  'Jr Site Engineer',
+  'Senior Site Engineer',
+  'Jr Interior',
+  'Sr Interior',
+  'MIS',
+  'PC',
+  'EA',
+  'Estimator',
+  'Senior Estimator',
+  'Jr Estimator',
+  'Sales Executive',
 ];
 
 function safePathSeg(s) {
@@ -1920,6 +1947,207 @@ function InsuranceView({ employees }) {
   );
 }
 
+function CvsView() {
+  const [rows, setRows] = useState([]);
+  const [roles, setRoles] = useState(CV_ROLES);
+  const [roleFilter, setRoleFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [qr, setQr] = useState(null);
+  const cvUrl = `${publicOrigin()}/cv-upload`;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await api('/hr/cvs');
+      setRows(data.cvs || []);
+      if (data.roles?.length) setRoles(data.roles);
+    } catch (e) {
+      setError(e.message || 'Could not load CVs');
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const dataUrl = await makeQrDataUrl(cvUrl);
+      if (!cancelled) setQr({ url: cvUrl, qr: dataUrl });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cvUrl]);
+
+  const filtered = useMemo(() => {
+    if (!roleFilter) return rows;
+    return rows.filter((r) => r.role === roleFilter);
+  }, [rows, roleFilter]);
+
+  const remove = async (id) => {
+    if (!window.confirm('Delete this CV entry?')) return;
+    setBusy(true);
+    try {
+      await api(`/hr/cvs/${id}`, { method: 'DELETE' });
+      await load();
+    } catch (e) {
+      alert(e.message || 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="hr-panel">
+      <p className="hr-sub" style={{ marginTop: 0 }}>
+        Walk-in / QR se aaye CVs yahan list hote hain. Role filter se specific designation ke CVs dekh sakte ho.
+      </p>
+
+      <div className="hr-apply-qr">
+        <div className="hr-apply-qr-code">
+          {qr?.qr ? (
+            <img src={qr.qr} alt="CV upload QR" width={140} height={140} />
+          ) : (
+            <div className="hr-apply-qr-placeholder" />
+          )}
+        </div>
+        <div className="hr-apply-qr-body">
+          <div className="hr-apply-qr-title">CV upload QR / link</div>
+          <p className="hr-sub" style={{ margin: '0 0 8px' }}>
+            Scan karke form khulega — role select + PDF/DOC upload, ya 2–3 photos jo auto PDF ban jayenge.
+          </p>
+          <div className="hr-apply-qr-url">{cvUrl}</div>
+          <div className="hr-apply-qr-actions">
+            <button
+              type="button"
+              className="hr-btn"
+              onClick={() => {
+                navigator.clipboard?.writeText(cvUrl);
+                alert('CV upload link copied');
+              }}
+            >
+              Copy link
+            </button>
+            <a className="hr-btn ghost" href={cvUrl} target="_blank" rel="noreferrer">
+              Open form
+            </a>
+            <button type="button" className="hr-btn ghost" onClick={load} disabled={loading || busy}>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="hr-filters" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end', margin: '12px 0' }}>
+        <label className="hr-field" style={{ minWidth: 200 }}>
+          <span>Filter by role</span>
+          <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+            <option value="">All roles</option>
+            {roles.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </label>
+        {roleFilter ? (
+          <button type="button" className="hr-btn ghost" onClick={() => setRoleFilter('')}>
+            Clear filter
+          </button>
+        ) : null}
+        <span className="hr-sub" style={{ marginLeft: 'auto' }}>
+          {filtered.length} of {rows.length} CV{rows.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {error ? <div className="hr-error">{error}</div> : null}
+      {loading ? <div className="hr-empty">Loading CVs…</div> : null}
+
+      {!loading && (
+        <div className="hr-table-wrap">
+          <table className="hr-table">
+            <thead>
+              <tr>
+                <th style={{ width: 56 }}>Sr.</th>
+                <th>Name</th>
+                <th>CV</th>
+                <th>Role</th>
+                <th>Submitted</th>
+                <th style={{ width: 90 }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!filtered.length ? (
+                <tr>
+                  <td colSpan={6} className="hr-empty">
+                    No CVs yet. Share the QR / link above.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((row, i) => (
+                  <tr key={row.id}>
+                    <td>{i + 1}</td>
+                    <td>
+                      {row.full_name || '—'}
+                      {row.mobile ? (
+                        <div style={{ fontSize: '0.72rem', opacity: 0.7 }}>{row.mobile}</div>
+                      ) : null}
+                    </td>
+                    <td>
+                      {row.cv_url ? (
+                        <a href={row.cv_url} target="_blank" rel="noreferrer" className="hr-link">
+                          {row.cv_name || 'Open CV'}
+                        </a>
+                      ) : (
+                        '—'
+                      )}
+                      {row.photos?.length ? (
+                        <div style={{ fontSize: '0.7rem', opacity: 0.65, marginTop: 2 }}>
+                          {row.photos.length} photo{row.photos.length === 1 ? '' : 's'} → PDF
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{row.role || '—'}</td>
+                    <td>
+                      {row.created_at
+                        ? new Date(row.created_at).toLocaleString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : '—'}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="hr-btn ghost"
+                        disabled={busy}
+                        onClick={() => remove(row.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DocumentsView({ employees, user }) {
   const [tree, setTree] = useState({});
   const [error, setError] = useState('');
@@ -3093,6 +3321,7 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             {tab === 'recruitment' && canManageRecruitment && (
               <RecruitmentView apiCandidates={recruitments} onReload={loadRecruitments} />
             )}
+            {tab === 'cvs' && <CvsView />}
             {tab === 'insurance' && <InsuranceView employees={employees} />}
             {tab === 'payroll' && <PayrollView employees={employees} />}
             {tab === 'letters' && (

@@ -32,6 +32,7 @@ const MdoApp = lazyChunk(() => import('./pages/MdoApp'));
 const ClientApp = lazyChunk(() => import('./pages/ClientApp'));
 const HrApp = lazyChunk(() => import('./pages/HrApp'));
 const CandidateApplyPage = lazyChunk(() => import('./pages/public/CandidateApplyPage'));
+const CvUploadPage = lazyChunk(() => import('./pages/public/CvUploadPage'));
 const EmployeeOnboardPage = lazyChunk(() => import('./pages/public/EmployeeOnboardPage'));
 
 function RequireAuth({ children }) {
@@ -80,6 +81,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/apply" element={<CandidateApplyPage />} />
+            <Route path="/cv-upload" element={<CvUploadPage />} />
             <Route path="/onboard/:token" element={<EmployeeOnboardPage />} />
             <Route
               path="/app/*"
