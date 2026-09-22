@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { jsPDF } from 'jspdf';
 import { uploadPublicHrFile } from '../../lib/publicHrUpload';
 import './publicForms.css';
@@ -23,6 +23,8 @@ export const CV_ROLES = [
 
 export const CV_LOCATIONS = ['Surat', 'Out of Surat'];
 
+const MAX_PHOTOS = 3;
+
 function readAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -41,30 +43,78 @@ function loadImage(dataUrl) {
   });
 }
 
-/** Convert 1–3 CV photos into a multi-page A4 PDF blob. */
+/**
+ * Decode image → canvas JPEG (keeps aspect ratio, avoids stretch / HEIC quirks).
+ */
+async function fileToJpegDataUrl(file, maxEdge = 2000) {
+  let width;
+  let height;
+  let source;
+
+  try {
+    if (typeof createImageBitmap === 'function') {
+      const bitmap = await createImageBitmap(file);
+      width = bitmap.width;
+      height = bitmap.height;
+      source = bitmap;
+    }
+  } catch {
+    source = null;
+  }
+
+  if (!source) {
+    const dataUrl = await readAsDataURL(file);
+    const img = await loadImage(dataUrl);
+    width = img.naturalWidth || img.width;
+    height = img.naturalHeight || img.height;
+    source = img;
+  }
+
+  if (!width || !height) throw new Error('Invalid photo');
+
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const cw = Math.max(1, Math.round(width * scale));
+  const ch = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(source, 0, 0, cw, ch);
+  if (typeof source.close === 'function') source.close();
+
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.92),
+    width: cw,
+    height: ch,
+  };
+}
+
+/** Convert 1–3 CV photos into a multi-page A4 PDF (one photo per page, no stretch). */
 async function photosToPdfFile(photos, baseName = 'CV') {
+  if (!photos?.length) throw new Error('No photos to convert');
+
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 8;
+  const margin = 10;
+  const maxW = pageW - margin * 2;
+  const maxH = pageH - margin * 2;
 
   for (let i = 0; i < photos.length; i += 1) {
     if (i > 0) pdf.addPage();
-    const file = photos[i];
-    const dataUrl = await readAsDataURL(file);
-    const img = await loadImage(dataUrl);
-    const format = /png/i.test(file.type) ? 'PNG' : 'JPEG';
-    const maxW = pageW - margin * 2;
-    const maxH = pageH - margin * 2;
+    const { dataUrl, width, height } = await fileToJpegDataUrl(photos[i]);
+    const aspect = height / width;
     let w = maxW;
-    let h = (img.naturalHeight / img.naturalWidth) * w;
+    let h = w * aspect;
     if (h > maxH) {
       h = maxH;
-      w = (img.naturalWidth / img.naturalHeight) * h;
+      w = h / aspect;
     }
     const x = (pageW - w) / 2;
     const y = (pageH - h) / 2;
-    pdf.addImage(dataUrl, format, x, y, w, h, undefined, 'FAST');
+    pdf.addImage(dataUrl, 'JPEG', x, y, w, h, undefined, 'MEDIUM');
   }
 
   const blob = pdf.output('blob');
@@ -72,6 +122,12 @@ async function photosToPdfFile(photos, baseName = 'CV') {
     .replace(/[^\w.\-]+/g, '_')
     .slice(0, 40);
   return new File([blob], `${safe || 'CV'}_photos.pdf`, { type: 'application/pdf' });
+}
+
+function isImageFile(file) {
+  if (!file) return false;
+  if (file.type && /^image\//i.test(file.type)) return true;
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(file.name || '');
 }
 
 export default function CvUploadPage() {
@@ -86,21 +142,45 @@ export default function CvUploadPage() {
   const [cvFile, setCvFile] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [fileKey, setFileKey] = useState(0);
+  const [photoInputKey, setPhotoInputKey] = useState(0);
+  const photoInputRef = useRef(null);
 
   const photoPreview = useMemo(
     () =>
       photos.map((f, i) => ({
-        key: `${f.name}-${i}`,
-        name: f.name,
+        key: `${f.name}-${f.size}-${f.lastModified}-${i}`,
+        name: f.name || `Photo ${i + 1}`,
         url: URL.createObjectURL(f),
       })),
     [photos],
   );
 
-  const onPhotos = (list) => {
-    const next = [...(list || [])].filter((f) => f && /^image\//i.test(f.type)).slice(0, 3);
-    setPhotos(next);
+  useEffect(() => {
+    return () => {
+      photoPreview.forEach((p) => {
+        try {
+          URL.revokeObjectURL(p.url);
+        } catch (_) {}
+      });
+    };
+  }, [photoPreview]);
+
+  const addOnePhoto = (file) => {
+    if (!file || !isImageFile(file)) {
+      setError('Please choose a photo (JPG / PNG)');
+      return;
+    }
+    setPhotos((prev) => {
+      if (prev.length >= MAX_PHOTOS) return prev;
+      return [...prev, file];
+    });
     setError('');
+    setPhotoInputKey((k) => k + 1);
+  };
+
+  const removePhoto = (index) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setPhotoInputKey((k) => k + 1);
   };
 
   const submit = async (e) => {
@@ -109,7 +189,7 @@ export default function CvUploadPage() {
     if (!role) return setError('Please select a role');
     if (!location) return setError('Please select Surat or Out of Surat');
     if (!cvFile && photos.length === 0) {
-      return setError('Upload a CV file or take/add 1–3 photos of the CV');
+      return setError('Upload a CV file or add 1–3 photos of the CV');
     }
 
     setBusy(true);
@@ -121,11 +201,16 @@ export default function CvUploadPage() {
       const photoMetas = [];
 
       if (photos.length) {
-        for (const p of photos) {
-          photoMetas.push(await uploadPublicHrFile(p, folder));
-        }
+        // Build multi-page PDF from ALL photos first (primary CV file)
         const pdfFile = await photosToPdfFile(photos, fullName.trim() || role || 'CV');
         cvMeta = await uploadPublicHrFile(pdfFile, folder);
+        for (const p of photos) {
+          try {
+            photoMetas.push(await uploadPublicHrFile(p, folder));
+          } catch {
+            /* originals optional if phone format fails upload */
+          }
+        }
       } else if (cvFile) {
         cvMeta = await uploadPublicHrFile(cvFile, folder);
       }
@@ -165,6 +250,7 @@ export default function CvUploadPage() {
     setCvFile(null);
     setPhotos([]);
     setFileKey((k) => k + 1);
+    setPhotoInputKey((k) => k + 1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -196,8 +282,8 @@ export default function CvUploadPage() {
         <p className="pf-brand">DIP PROJECTS</p>
         <h1 className="pf-title">CV upload</h1>
         <p className="pf-sub">
-          Select role, then upload a PDF/DOC <b>or</b> take up to 3 photos of your CV. Photos are
-          automatically combined into one PDF.
+          Select role &amp; location, then upload a PDF/DOC <b>or</b> add photos one by one (max{' '}
+          {MAX_PHOTOS}). Har photo PDF ki alag page banegi — stretch nahi hoga.
         </p>
 
         {error ? <div className="pf-error">{error}</div> : null}
@@ -256,31 +342,72 @@ export default function CvUploadPage() {
               }}
             />
           </label>
-          <label className="pf-field full">
-            Or CV photos (max 3) — camera / gallery → auto PDF
-            <input
-              key={`cv-photos-${fileKey}`}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              multiple
-              onChange={(e) => onPhotos(e.target.files)}
-            />
-          </label>
         </div>
+
+        <div className="pf-section">CV photos (optional if file uploaded)</div>
+        <p className="pf-hint" style={{ marginTop: 0 }}>
+          Ek photo add karo → phir <b>Add another photo</b>. Max {MAX_PHOTOS} photos → 1 PDF.
+        </p>
+
+        <input
+          key={`cv-photo-one-${photoInputKey}`}
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) addOnePhoto(f);
+            e.target.value = '';
+          }}
+        />
 
         {photoPreview.length > 0 && (
           <div className="pf-photo-grid">
-            {photoPreview.map((p) => (
-              <div key={p.key} className="pf-photo-thumb">
+            {photoPreview.map((p, i) => (
+              <div key={p.key} className="pf-photo-thumb pf-photo-thumb--with-x">
                 <img src={p.url} alt={p.name} />
+                <button
+                  type="button"
+                  className="pf-photo-remove"
+                  aria-label={`Remove photo ${i + 1}`}
+                  onClick={() => removePhoto(i)}
+                >
+                  ×
+                </button>
+                <span className="pf-photo-num">{i + 1}</span>
               </div>
             ))}
-            <button type="button" className="pf-btn ghost" onClick={() => setPhotos([])}>
-              Clear photos
-            </button>
           </div>
         )}
+
+        <div className="pf-photo-actions">
+          {photos.length < MAX_PHOTOS ? (
+            <button
+              type="button"
+              className="pf-btn ghost"
+              onClick={() => photoInputRef.current?.click()}
+            >
+              {photos.length === 0 ? 'Add photo' : 'Add another photo'}
+              {photos.length > 0 ? ` (${photos.length}/${MAX_PHOTOS})` : ''}
+            </button>
+          ) : (
+            <span className="pf-hint">{MAX_PHOTOS} photos added — ready to submit</span>
+          )}
+          {photos.length > 0 ? (
+            <button
+              type="button"
+              className="pf-btn ghost"
+              onClick={() => {
+                setPhotos([]);
+                setPhotoInputKey((k) => k + 1);
+              }}
+            >
+              Clear photos
+            </button>
+          ) : null}
+        </div>
 
         <div className="pf-actions">
           <button type="submit" className="pf-btn" disabled={busy}>
