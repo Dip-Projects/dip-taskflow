@@ -55,60 +55,32 @@ function dataUrlToFile(dataUrl, name = 'photo.jpg') {
 }
 
 /**
- * Phone CV photos often look grey on print (underexposed paper).
- * Stretch luminance toward pure white + force opaque pixels.
+ * Decode image → canvas JPEG (white bg, high quality — avoids grey print pages).
  */
-function whitenPaperForPrint(ctx, w, h) {
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const d = imageData.data;
-  const samples = [];
-  const step = Math.max(4, Math.floor((w * h) / 25000) * 4);
-  for (let i = 0; i < d.length; i += step) {
-    samples.push(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-  }
-  samples.sort((a, b) => a - b);
-  const pLow = samples[Math.floor(samples.length * 0.02)] ?? 0;
-  const pHigh = samples[Math.floor(samples.length * 0.97)] ?? 255;
-  const range = Math.max(18, pHigh - pLow);
-  for (let i = 0; i < d.length; i += 4) {
-    let r = ((d[i] - pLow) / range) * 255;
-    let g = ((d[i + 1] - pLow) / range) * 255;
-    let b = ((d[i + 2] - pLow) / range) * 255;
-    // Extra lift so paper reads as white when printed
-    r = Math.min(255, Math.max(0, r * 1.06 + 8));
-    g = Math.min(255, Math.max(0, g * 1.06 + 8));
-    b = Math.min(255, Math.max(0, b * 1.06 + 8));
-    d[i] = r;
-    d[i + 1] = g;
-    d[i + 2] = b;
-    d[i + 3] = 255;
-  }
-  ctx.putImageData(imageData, 0, 0);
-}
+async function fileToJpegDataUrl(file, maxEdge = 2200, quality = 0.95) {
+  let width;
+  let height;
+  let source;
 
-async function decodeImageSource(file) {
   try {
     if (typeof createImageBitmap === 'function') {
       const bitmap = await createImageBitmap(file);
-      return { source: bitmap, width: bitmap.width, height: bitmap.height };
+      width = bitmap.width;
+      height = bitmap.height;
+      source = bitmap;
     }
   } catch {
-    /* fallback below */
+    source = null;
   }
-  const dataUrl = await readAsDataURL(file);
-  const img = await loadImage(dataUrl);
-  return {
-    source: img,
-    width: img.naturalWidth || img.width,
-    height: img.naturalHeight || img.height,
-  };
-}
 
-/**
- * Decode image → canvas (white bg, whitened paper, print-safe PNG/JPEG).
- */
-async function fileToPrintDataUrl(file, maxEdge = 2200, { format = 'jpeg', quality = 0.92, whiten = true } = {}) {
-  const { source, width, height } = await decodeImageSource(file);
+  if (!source) {
+    const dataUrl = await readAsDataURL(file);
+    const img = await loadImage(dataUrl);
+    width = img.naturalWidth || img.width;
+    height = img.naturalHeight || img.height;
+    source = img;
+  }
+
   if (!width || !height) throw new Error('Invalid photo');
 
   const scale = Math.min(1, maxEdge / Math.max(width, height));
@@ -117,54 +89,37 @@ async function fileToPrintDataUrl(file, maxEdge = 2200, { format = 'jpeg', quali
   const canvas = document.createElement('canvas');
   canvas.width = cw;
   canvas.height = ch;
-  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+  const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, cw, ch);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(source, 0, 0, cw, ch);
   if (typeof source.close === 'function') source.close();
-  if (whiten) whitenPaperForPrint(ctx, cw, ch);
 
-  const mime = format === 'png' ? 'image/png' : 'image/jpeg';
-  const dataUrl =
-    format === 'png' ? canvas.toDataURL(mime) : canvas.toDataURL(mime, quality);
-  return { dataUrl, width: cw, height: ch, format: format === 'png' ? 'PNG' : 'JPEG' };
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', quality),
+    width: cw,
+    height: ch,
+  };
 }
 
-/** Alias for draft/crop paths that expect JPEG. */
-async function fileToJpegDataUrl(file, maxEdge = 2200, quality = 0.92) {
-  return fileToPrintDataUrl(file, maxEdge, { format: 'jpeg', quality, whiten: false });
-}
-
-/** Convert CV photos into multi-page A4 PDF — pure white pages, whitened images. */
+/** Convert CV photos into a multi-page A4 PDF (white pages, no stretch, print-safe). */
 async function photosToPdfFile(photos, baseName = 'CV') {
   if (!photos?.length) throw new Error('No photos to convert');
 
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-    compress: false,
-  });
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 5;
+  const margin = 8;
   const maxW = pageW - margin * 2;
   const maxH = pageH - margin * 2;
 
   for (let i = 0; i < photos.length; i += 1) {
     if (i > 0) pdf.addPage();
-    // Pure white page (printers grey empty / transparent PDF backgrounds)
+    // Solid white page — printers often render empty PDF bg as grey
     pdf.setFillColor(255, 255, 255);
     pdf.rect(0, 0, pageW, pageH, 'F');
 
-    // Whiten underexposed paper, then high-quality JPEG (PNG was too heavy on phones)
-    const { dataUrl, width, height, format } = await fileToPrintDataUrl(photos[i], 2200, {
-      format: 'jpeg',
-      quality: 0.94,
-      whiten: true,
-    });
+    const { dataUrl, width, height } = await fileToJpegDataUrl(photos[i], 2400, 0.96);
     const aspect = height / width;
     let w = maxW;
     let h = w * aspect;
@@ -174,13 +129,7 @@ async function photosToPdfFile(photos, baseName = 'CV') {
     }
     const x = (pageW - w) / 2;
     const y = (pageH - h) / 2;
-    pdf.addImage(dataUrl, format, x, y, w, h, undefined, 'NONE');
-    // Re-paint white margin frame so no grey edge leaks from image
-    pdf.setFillColor(255, 255, 255);
-    pdf.rect(0, 0, pageW, Math.max(0, y), 'F');
-    pdf.rect(0, y + h, pageW, Math.max(0, pageH - (y + h)), 'F');
-    pdf.rect(0, 0, Math.max(0, x), pageH, 'F');
-    pdf.rect(x + w, 0, Math.max(0, pageW - (x + w)), pageH, 'F');
+    pdf.addImage(dataUrl, 'JPEG', x, y, w, h, undefined, 'NONE');
   }
 
   const blob = pdf.output('blob');
@@ -196,13 +145,15 @@ function isImageFile(file) {
   return /\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(file.name || '');
 }
 
-/** Simple drag-rect crop modal */
+/** Simple drag-rect crop modal with 90° rotate (phones often save sideways). */
 function CropModal({ src, fileName, onCancel, onDone }) {
   const imgRef = useRef(null);
   const boxRef = useRef(null);
   const drag = useRef(null);
+  const [workingSrc, setWorkingSrc] = useState(src);
   const [natural, setNatural] = useState({ w: 0, h: 0 });
-  const [crop, setCrop] = useState({ x: 8, y: 8, w: 80, h: 80 }); // % of display box
+  const [crop, setCrop] = useState({ x: 5, y: 5, w: 90, h: 90 }); // % of display box
+  const [rotating, setRotating] = useState(false);
 
   const onImgLoad = () => {
     const img = imgRef.current;
@@ -210,7 +161,6 @@ function CropModal({ src, fileName, onCancel, onDone }) {
     const nw = img.naturalWidth || 1;
     const nh = img.naturalHeight || 1;
     setNatural({ w: nw, h: nh });
-    // Start with ~90% centered crop
     setCrop({ x: 5, y: 5, w: 90, h: 90 });
   };
 
@@ -254,6 +204,33 @@ function CropModal({ src, fileName, onCancel, onDone }) {
     drag.current = null;
   };
 
+  /** Bake ±90° into a new image so crop stays upright and simple. */
+  const rotateBy = (degrees) => {
+    const img = imgRef.current;
+    if (!img || !natural.w || rotating) return;
+    setRotating(true);
+    try {
+      const deg = ((degrees % 360) + 360) % 360;
+      const swap = deg === 90 || deg === 270;
+      const cw = swap ? natural.h : natural.w;
+      const ch = swap ? natural.w : natural.h;
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.translate(cw / 2, ch / 2);
+      ctx.rotate((deg * Math.PI) / 180);
+      ctx.drawImage(img, -natural.w / 2, -natural.h / 2);
+      setWorkingSrc(canvas.toDataURL('image/jpeg', 0.95));
+      setNatural({ w: cw, h: ch });
+      setCrop({ x: 5, y: 5, w: 90, h: 90 });
+    } finally {
+      setRotating(false);
+    }
+  };
+
   const applyCrop = async (full = false) => {
     const img = imgRef.current;
     if (!img || !natural.w) return;
@@ -277,12 +254,11 @@ function CropModal({ src, fileName, onCancel, onDone }) {
     const canvas = document.createElement('canvas');
     canvas.width = cw;
     canvas.height = ch;
-    const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+    const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, cw, ch);
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
-    whitenPaperForPrint(ctx, cw, ch);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.94);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     const base = String(fileName || 'photo').replace(/\.[^.]+$/, '') || 'photo';
     onDone(dataUrlToFile(dataUrl, `${base}_crop.jpg`));
   };
@@ -292,8 +268,28 @@ function CropModal({ src, fileName, onCancel, onDone }) {
       <div className="pf-crop-card">
         <h3 className="pf-crop-title">Crop photo</h3>
         <p className="pf-hint" style={{ marginTop: 0 }}>
-          Drag the box to move · corner to resize · or use full photo.
+          Rotate if sideways · drag box to crop · or use full photo.
         </p>
+        <div className="pf-crop-rotate">
+          <button
+            type="button"
+            className="pf-btn ghost"
+            disabled={rotating || !natural.w}
+            onClick={() => rotateBy(-90)}
+            aria-label="Rotate left"
+          >
+            ↺ Rotate left
+          </button>
+          <button
+            type="button"
+            className="pf-btn ghost"
+            disabled={rotating || !natural.w}
+            onClick={() => rotateBy(90)}
+            aria-label="Rotate right"
+          >
+            Rotate right ↻
+          </button>
+        </div>
         <div
           className="pf-crop-stage"
           ref={boxRef}
@@ -301,7 +297,14 @@ function CropModal({ src, fileName, onCancel, onDone }) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <img ref={imgRef} src={src} alt="Crop" onLoad={onImgLoad} draggable={false} />
+          <img
+            key={workingSrc}
+            ref={imgRef}
+            src={workingSrc}
+            alt="Crop"
+            onLoad={onImgLoad}
+            draggable={false}
+          />
           <div
             className="pf-crop-rect"
             style={{
