@@ -1951,6 +1951,7 @@ function CvsView() {
   const [rows, setRows] = useState([]);
   const [roles, setRoles] = useState(CV_ROLES);
   const [roleFilter, setRoleFilter] = useState('');
+  const [locationFilter, setLocationFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1988,9 +1989,12 @@ function CvsView() {
   }, [cvUrl]);
 
   const filtered = useMemo(() => {
-    if (!roleFilter) return rows;
-    return rows.filter((r) => r.role === roleFilter);
-  }, [rows, roleFilter]);
+    return rows.filter((r) => {
+      if (roleFilter && r.role !== roleFilter) return false;
+      if (locationFilter && r.location !== locationFilter) return false;
+      return true;
+    });
+  }, [rows, roleFilter, locationFilter]);
 
   const remove = async (id) => {
     if (!window.confirm('Delete this CV entry?')) return;
@@ -2008,7 +2012,7 @@ function CvsView() {
   return (
     <div className="hr-panel">
       <p className="hr-sub" style={{ marginTop: 0 }}>
-        Walk-in / QR se aaye CVs yahan list hote hain. Role filter se specific designation ke CVs dekh sakte ho.
+        Walk-in / QR se aaye CVs yahan list hote hain. Role / location filter se filter kar sakte ho.
       </p>
 
       <div className="hr-apply-qr">
@@ -2022,7 +2026,7 @@ function CvsView() {
         <div className="hr-apply-qr-body">
           <div className="hr-apply-qr-title">CV upload QR / link</div>
           <p className="hr-sub" style={{ margin: '0 0 8px' }}>
-            Scan karke form khulega — role select + PDF/DOC upload, ya 2–3 photos jo auto PDF ban jayenge.
+            Scan karke form khulega — role, Surat / Out of Surat, PDF/DOC ya 2–3 photos → auto PDF.
           </p>
           <div className="hr-apply-qr-url">{cvUrl}</div>
           <div className="hr-apply-qr-actions">
@@ -2047,7 +2051,7 @@ function CvsView() {
       </div>
 
       <div className="hr-filters" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'end', margin: '12px 0' }}>
-        <label className="hr-field" style={{ minWidth: 200 }}>
+        <label className="hr-field" style={{ minWidth: 180 }}>
           <span>Filter by role</span>
           <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
             <option value="">All roles</option>
@@ -2058,9 +2062,24 @@ function CvsView() {
             ))}
           </select>
         </label>
-        {roleFilter ? (
-          <button type="button" className="hr-btn ghost" onClick={() => setRoleFilter('')}>
-            Clear filter
+        <label className="hr-field" style={{ minWidth: 160 }}>
+          <span>Filter by location</span>
+          <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)}>
+            <option value="">All locations</option>
+            <option value="Surat">Surat</option>
+            <option value="Out of Surat">Out of Surat</option>
+          </select>
+        </label>
+        {(roleFilter || locationFilter) ? (
+          <button
+            type="button"
+            className="hr-btn ghost"
+            onClick={() => {
+              setRoleFilter('');
+              setLocationFilter('');
+            }}
+          >
+            Clear filters
           </button>
         ) : null}
         <span className="hr-sub" style={{ marginLeft: 'auto' }}>
@@ -2080,6 +2099,7 @@ function CvsView() {
                 <th>Name</th>
                 <th>CV</th>
                 <th>Role</th>
+                <th>Location</th>
                 <th>Submitted</th>
                 <th style={{ width: 90 }}>Action</th>
               </tr>
@@ -2087,7 +2107,7 @@ function CvsView() {
             <tbody>
               {!filtered.length ? (
                 <tr>
-                  <td colSpan={6} className="hr-empty">
+                  <td colSpan={7} className="hr-empty">
                     No CVs yet. Share the QR / link above.
                   </td>
                 </tr>
@@ -2116,6 +2136,7 @@ function CvsView() {
                       ) : null}
                     </td>
                     <td>{row.role || '—'}</td>
+                    <td>{row.location || '—'}</td>
                     <td>
                       {row.created_at
                         ? new Date(row.created_at).toLocaleString('en-IN', {

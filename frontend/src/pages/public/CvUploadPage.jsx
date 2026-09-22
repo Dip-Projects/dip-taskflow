@@ -21,6 +21,8 @@ export const CV_ROLES = [
   'Sales Executive',
 ];
 
+export const CV_LOCATIONS = ['Surat', 'Out of Surat'];
+
 function readAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -80,6 +82,7 @@ export default function CvUploadPage() {
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('');
   const [role, setRole] = useState('');
+  const [location, setLocation] = useState('');
   const [cvFile, setCvFile] = useState(null);
   const [photos, setPhotos] = useState([]);
   const [fileKey, setFileKey] = useState(0);
@@ -104,6 +107,7 @@ export default function CvUploadPage() {
     e.preventDefault();
     setError('');
     if (!role) return setError('Please select a role');
+    if (!location) return setError('Please select Surat or Out of Surat');
     if (!cvFile && photos.length === 0) {
       return setError('Upload a CV file or take/add 1–3 photos of the CV');
     }
@@ -135,6 +139,7 @@ export default function CvUploadPage() {
           full_name: fullName.trim(),
           mobile: mobile.trim(),
           role,
+          location,
           cv: cvMeta,
           photos: photoMetas,
         }),
@@ -156,6 +161,7 @@ export default function CvUploadPage() {
     setFullName('');
     setMobile('');
     setRole('');
+    setLocation('');
     setCvFile(null);
     setPhotos([]);
     setFileKey((k) => k + 1);
@@ -223,6 +229,17 @@ export default function CvUploadPage() {
               {CV_ROLES.map((r) => (
                 <option key={r} value={r}>
                   {r}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="pf-field full">
+            Location <span className="pf-req">*</span>
+            <select value={location} onChange={(e) => setLocation(e.target.value)} required>
+              <option value="">Select location</option>
+              {CV_LOCATIONS.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
                 </option>
               ))}
             </select>

@@ -35,6 +35,8 @@ const CV_ROLES = [
   'Sales Executive',
 ];
 
+const CV_LOCATIONS = ['Surat', 'Out of Surat'];
+
 const DOC_FIELD_NAMES = [
   'cv',
   'aadhaar_file',
@@ -821,6 +823,7 @@ router.post('/public/cv-submit', async (req, res) => {
     const full_name = String(body.full_name || '').trim();
     const mobile = String(body.mobile || '').replace(/\D/g, '');
     const role = String(body.role || '').trim();
+    const location = String(body.location || '').trim();
     const cv = body.cv && typeof body.cv === 'object' ? body.cv : null;
     const photos = Array.isArray(body.photos)
       ? body.photos.filter((p) => p && p.url && p.path)
@@ -828,6 +831,9 @@ router.post('/public/cv-submit', async (req, res) => {
 
     if (!role || !CV_ROLES.includes(role)) {
       return res.status(400).json({ error: 'Please select a valid role' });
+    }
+    if (!location || !CV_LOCATIONS.includes(location)) {
+      return res.status(400).json({ error: 'Please select Surat or Out of Surat' });
     }
     if (!cv?.url || !cv?.path) {
       return res.status(400).json({ error: 'CV file is required (PDF or photos converted to PDF)' });
@@ -842,6 +848,7 @@ router.post('/public/cv-submit', async (req, res) => {
       full_name: full_name || '—',
       mobile: mobile || null,
       role,
+      location,
       cv_url: String(cv.url),
       cv_path: String(cv.path),
       cv_name: String(cv.name || 'CV.pdf'),
@@ -957,7 +964,7 @@ router.get('/recruitments', async (req, res) => {
 router.get('/cvs', requireAdminOrHr, async (req, res) => {
   try {
     const list = await readJson(CVS_PATH, []);
-    res.json({ cvs: list, roles: CV_ROLES });
+    res.json({ cvs: list, roles: CV_ROLES, locations: CV_LOCATIONS });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load CVs' });
   }
