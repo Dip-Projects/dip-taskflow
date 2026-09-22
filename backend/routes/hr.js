@@ -1024,19 +1024,36 @@ router.get('/attendance', requireAdminOrHr, async (req, res) => {
   }
 });
 
-/** Heads see own submissions; admin + HR see hiring requirements only (not walk-in forms). */
+/** Heads see own submissions; admin + HR see hiring requirements.
+ * Also returns `applications` (walk-in forms). For older cached UIs, walk-ins
+ * are included in `recruitments` so the Candidates tab is not empty.
+ */
 router.get('/recruitments', async (req, res) => {
   try {
-    await migrateWalkInCandidates();
+    const apps = await migrateWalkInCandidates();
     const raw = await readJson(RECRUIT_PATH, []);
-    const list = (Array.isArray(raw) ? raw : []).filter((r) => !isWalkInCandidate(r));
-    if (canHrOrAdmin(req.user)) return res.json({ recruitments: list });
+    const requirements = (Array.isArray(raw) ? raw : []).filter((r) => !isWalkInCandidate(r));
+    if (canHrOrAdmin(req.user)) {
+      return res.json({
+        recruitments: [...requirements, ...apps],
+        applications: apps,
+        requirements,
+        count_requirements: requirements.length,
+        count_applications: apps.length,
+      });
+    }
     if (!isHead(req.user)) {
       return res.status(403).json({ error: 'Only admin or HR can view all recruitments' });
     }
     const uid = String(req.user.id || '');
-    const mine = list.filter((r) => String(r.submitted_by || '') === uid);
-    res.json({ recruitments: mine });
+    const mine = requirements.filter((r) => String(r.submitted_by || '') === uid);
+    res.json({
+      recruitments: mine,
+      applications: [],
+      requirements: mine,
+      count_requirements: mine.length,
+      count_applications: 0,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Could not load recruitments' });
   }

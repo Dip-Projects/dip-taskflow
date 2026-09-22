@@ -3282,10 +3282,23 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
     try {
       const [reqData, candData] = await Promise.all([
         api('/hr/recruitments'),
-        api('/hr/candidate-applications'),
+        api('/hr/candidate-applications').catch(() => ({ applications: [] })),
       ]);
-      setRecruitments(reqData.recruitments || []);
-      setWalkInApps(candData.applications || []);
+      const isWalkIn = (r) =>
+        r?.source === 'public_qr' || !!r?.application;
+      const fromRecruit = Array.isArray(reqData.recruitments) ? reqData.recruitments : [];
+      const requirements =
+        Array.isArray(reqData.requirements) && reqData.requirements.length
+          ? reqData.requirements
+          : fromRecruit.filter((r) => !isWalkIn(r));
+      const fromApps =
+        (Array.isArray(candData.applications) && candData.applications.length
+          ? candData.applications
+          : null) ||
+        (Array.isArray(reqData.applications) ? reqData.applications : null) ||
+        fromRecruit.filter(isWalkIn);
+      setRecruitments(requirements);
+      setWalkInApps(fromApps);
     } catch {
       setRecruitments([]);
       setWalkInApps([]);
