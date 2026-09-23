@@ -68,6 +68,8 @@ export const CLOCK_CSS = `
 .cal-cell.on-time .cal-dn{color:#15803d;}
 .cal-cell.late-in{background:#fef9c3;border-color:#fde047;}
 .cal-cell.late-in .cal-dn{color:#854d0e;}
+.cal-cell.early-in{background:#fff7ed;border-color:#fdba74;}
+.cal-cell.early-in .cal-dn{color:#c2410c;}
 .cal-cell.absent-day{background:#fef2f2;border-color:#fca5a5;}
 .cal-cell.absent-day .cal-dn{color:#b91c1c;}
 .cal-cell.leave-day{background:#f5f3ff;border-color:#c4b5fd;}
@@ -227,7 +229,9 @@ function calcClockInStatus(clockInISO) {
   const ciMins = ci.getHours() * 60 + ci.getMinutes();
   const shiftMins = getShiftMinutes(SHIFT_START);
   const diff = ciMins - shiftMins;
-  if (diff <= 0) return { label: "On Time", type: "ontime", diff: 0 };
+  // Before shift start → Early In (same style as Early Out)
+  if (diff < 0) return { label: `Early by ${diffLabel(diff)}`, type: "early", diff };
+  if (diff === 0) return { label: "On Time", type: "ontime", diff: 0 };
   return { label: `Late by ${diffLabel(diff)}`, type: "late", diff };
 }
 function calcClockOutStatus(clockOutISO) {
@@ -912,7 +916,9 @@ const { data, error } = await supabase.from("attendance").insert({
       ciStatus.type === "ontime" ? "success" : "warn",
       ciStatus.type === "ontime"
         ? "✓ Clocked in — On Time!"
-        : `⚠ Clocked in — ${ciStatus.label}`
+        : ciStatus.type === "early"
+          ? `⚠ Clocked in — Early In · ${ciStatus.label.replace(/^Early by /, "")}`
+          : `⚠ Clocked in — ${ciStatus.label}`
     );
     await fetchData();
   };
@@ -1018,7 +1024,7 @@ const { error } = await supabase.from("attendance").update({
                       ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
                       : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                     }
-                    {ciStatus.label}
+                    {ciStatus.type === "early" ? `Early In · ${ciStatus.label.replace(/^Early by /, "")}` : ciStatus.label}
                   </span>
                 </div>
               )}
@@ -1086,8 +1092,16 @@ const { error } = await supabase.from("attendance").update({
                     <span>Out: {fmtTime(r.clock_out)}</span>
                   </div>
                   <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                    {ci && <span className={`punch-status punch-${ci.type}`} style={{ fontSize:10 }}>{ci.label}</span>}
-                    {co && <span className={`punch-status punch-${co.type}`} style={{ fontSize:10 }}>{co.label}</span>}
+                    {ci && (
+                      <span className={`punch-status punch-${ci.type}`} style={{ fontSize:10 }}>
+                        {ci.type === "early" ? `Early In · ${ci.label.replace(/^Early by /, "")}` : ci.label}
+                      </span>
+                    )}
+                    {co && (
+                      <span className={`punch-status punch-${co.type}`} style={{ fontSize:10 }}>
+                        {co.type === "early" ? `Early Out · ${co.label.replace(/^Early by /, "")}` : co.label}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -1216,12 +1230,13 @@ leaves.forEach(lv => {
   };
 
   const getCellClass = (rec, ds) => {
-    if (leaveMap[ds])                   return "leave-day";
-    if (!rec)                           return isAbsent(ds) ? "absent-day" : "";
-    if (rec.status === "absent")        return "absent-day";
-    if (rec.clock_in_status === "late") return "late-in";
-    if (rec.clock_in && rec.clock_out)  return "on-time";
-    if (rec.clock_in && !rec.clock_out) return "half-day";
+    if (leaveMap[ds])                    return "leave-day";
+    if (!rec)                            return isAbsent(ds) ? "absent-day" : "";
+    if (rec.status === "absent")         return "absent-day";
+    if (rec.clock_in_status === "late")  return "late-in";
+    if (rec.clock_in_status === "early") return "early-in";
+    if (rec.clock_in && rec.clock_out)   return "on-time";
+    if (rec.clock_in && !rec.clock_out)  return "half-day";
     return "";
   };
 
@@ -1315,7 +1330,7 @@ leaves.forEach(lv => {
                 )}
                 {!leaveMap[ds] && rec && (
                   <div className="att-dot-row">
-                    {rec.clock_in  && <div className="att-dot" style={{ background: rec.clock_in_status === "late" ? "#d97706" : "#16a34a" }}/>}
+                    {rec.clock_in  && <div className="att-dot" style={{ background: rec.clock_in_status === "late" ? "#d97706" : rec.clock_in_status === "early" ? "#f59e0b" : "#16a34a" }}/>}
                     {rec.clock_out && <div className="att-dot" style={{ background: rec.clock_out_status === "early" ? "#f59e0b" : rec.clock_out_status === "overtime" ? "#2563eb" : "#16a34a" }}/>}
                   </div>
                 )}
@@ -1328,11 +1343,12 @@ leaves.forEach(lv => {
       {/* Legend */}
       <div className="cal-legend">
         {[
-          ["On Time", "#16a34a"],
-          ["Late In", "#d97706"],
-          ["Absent",  "#dc2626"],
-          ["Leave",   "#7c3aed"],
-          ["Partial", "#f59e0b"],
+          ["On Time",  "#16a34a"],
+          ["Early In", "#f59e0b"],
+          ["Late In",  "#d97706"],
+          ["Absent",   "#dc2626"],
+          ["Leave",    "#7c3aed"],
+          ["Partial",  "#f59e0b"],
         ].map(([l,c]) => (
           <div key={l} className="cal-leg-item">
             <div className="cal-leg-dot" style={{ background:c }}/>
@@ -1372,14 +1388,19 @@ leaves.forEach(lv => {
               <span>Clock In: <strong>{fmtTime(selRecord.clock_in)}</strong>
                 {selRecord.clock_in_status && (
                   <span className={`punch-status punch-${selRecord.clock_in_status}`} style={{ marginLeft:8, fontSize:10 }}>
-                    {selRecord.clock_in_status === "late" ? "Late" : "On Time"}
+                    {selRecord.clock_in_status === "late"  ? "Late"
+                      : selRecord.clock_in_status === "early" ? "Early In"
+                      : "On Time"}
                   </span>
                 )}
               </span>
               <span>Clock Out: <strong>{fmtTime(selRecord.clock_out)}</strong>
                 {selRecord.clock_out_status && (
                   <span className={`punch-status punch-${selRecord.clock_out_status}`} style={{ marginLeft:8, fontSize:10 }}>
-                    {selRecord.clock_out_status}
+                    {selRecord.clock_out_status === "early"    ? "Early Out"
+                      : selRecord.clock_out_status === "overtime" ? "Overtime"
+                      : selRecord.clock_out_status === "ontime"   ? "On Time"
+                      : selRecord.clock_out_status}
                   </span>
                 )}
               </span>
