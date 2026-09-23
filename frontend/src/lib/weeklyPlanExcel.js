@@ -33,10 +33,9 @@ function cellText(v) {
 
 function toYmd(d) {
   if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  // Always calendar day in IST — Excel/SheetJS UTC-midnight dates otherwise
+  // shift ±1 day depending on the browser/server timezone.
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 }
 
 function parseDateLoose(raw) {
@@ -256,6 +255,53 @@ function sheetToMatrix(sheet) {
 //   }
 //   return dayCols;
 // }
+const WEEKDAY_TO_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+function ymdAddDays(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00+05:30`);
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function weekdayIndexFromYmd(ymd) {
+  if (!ymd) return null;
+  const d = new Date(`${ymd}T12:00:00+05:30`);
+  return d.getDay();
+}
+
+/** Snap a parsed ymd onto the weekday label shown in the sheet (fixes duplicate Thu / Fri→Thu). */
+function alignYmdToWeekdayLabel(ymd, weekdayLabel) {
+  if (!ymd || !weekdayLabel) return ymd;
+  const want = WEEKDAY_TO_INDEX[String(weekdayLabel).trim().toLowerCase()];
+  if (want == null) return ymd;
+  const have = weekdayIndexFromYmd(ymd);
+  if (have == null) return ymd;
+  let diff = want - have;
+  if (diff > 3) diff -= 7;
+  if (diff < -3) diff += 7;
+  return diff === 0 ? ymd : ymdAddDays(ymd, diff);
+}
+
+function findWeekdayLabelNear(matrix, dateHeaderRow, col) {
+  const start = Math.max(0, (dateHeaderRow ?? 0) - 1);
+  const end = Math.min(matrix.length, (dateHeaderRow ?? 0) + 4);
+  for (let r = start; r < end; r += 1) {
+    const t = cellText(matrix[r]?.[col]).toUpperCase();
+    if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) {
+      return t;
+    }
+  }
+  return null;
+}
+
 function isFirstHalfLabel(text) {
   return /1ST\s*HALF|FIRST\s*HALF/i.test(String(text || ""));
 }
@@ -302,14 +348,17 @@ function findDateColumns(matrix) {
   const hasHalfLayout = halfRow != null;
 
   if (!hasHalfLayout) {
-    return best.dates.map((cur) => ({
-      ymd: cur.ymd,
-      firstCol: cur.col,
-      secondCol: null,
-      timeCol: cur.col,
-      statusCol: cur.col,
-      layout: "daily",
-    }));
+    return best.dates.map((cur) => {
+      const label = findWeekdayLabelNear(matrix, best.row, cur.col);
+      return {
+        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+        firstCol: cur.col,
+        secondCol: null,
+        timeCol: cur.col,
+        statusCol: cur.col,
+        layout: "daily",
+      };
+    });
   }
 
   // Prefer the *real* 1st half / 2nd half sub-header columns when present,
@@ -330,8 +379,11 @@ function findDateColumns(matrix) {
       const cur = best.dates[i];
       const firstCol = firstHalfCols[i];
       const secondCol = secondHalfCols[i];
+      const label =
+        findWeekdayLabelNear(matrix, best.row, firstCol) ||
+        findWeekdayLabelNear(matrix, best.row, cur.col);
       dayCols.push({
-        ymd: cur.ymd,
+        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
         firstCol,
         secondCol,
         timeCol: firstCol,
@@ -344,21 +396,34 @@ function findDateColumns(matrix) {
 
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
+    const prev = best.dates[i - 1];
     const next = best.dates[i + 1];
-    const rangeEnd = next ? next.col : Infinity;
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : Math.max(0, cur.col - 1);
+    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
 
-    let firstCol = firstHalfCols.find((c) => c >= cur.col && c < rangeEnd);
-    let secondCol = secondHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+    let secondCol = secondHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
 
     if (firstCol == null || secondCol == null) {
       // Fallback to the old spacing heuristic only if labels weren't found.
       const span = next ? Math.max(1, next.col - cur.col) : 2;
-      firstCol = cur.col;
-      secondCol = span >= 4 ? cur.col + 2 : span >= 2 ? cur.col + 1 : null;
+      firstCol = firstCol != null ? firstCol : cur.col;
+      secondCol =
+        secondCol != null
+          ? secondCol
+          : span >= 4
+            ? cur.col + 2
+            : span >= 2
+              ? cur.col + 1
+              : null;
     }
 
     dayCols.push({
-      ymd: cur.ymd,
+      ymd: alignYmdToWeekdayLabel(
+        cur.ymd,
+        findWeekdayLabelNear(matrix, best.row, firstCol) ||
+          findWeekdayLabelNear(matrix, best.row, cur.col)
+      ),
       firstCol,
       secondCol,
       timeCol: firstCol,

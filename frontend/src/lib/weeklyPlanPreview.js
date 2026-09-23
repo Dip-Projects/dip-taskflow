@@ -40,7 +40,29 @@ export function formatWeekDate(value) {
 function cellDisplay(matrix, r, c) {
   const cell = matrix?.[r]?.[c];
   if (cell == null) return "";
-  if (typeof cell === "object") return String(cell.display ?? "").trim();
+  if (cell instanceof Date && !Number.isNaN(cell.getTime())) {
+    return cell.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Asia/Kolkata",
+    });
+  }
+  if (typeof cell === "object") {
+    const display = String(cell.display ?? "").trim();
+    if (/GMT[+-]\d{4}/i.test(display) || /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.+\d{4}/i.test(display)) {
+      const d = new Date(display);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "Asia/Kolkata",
+        });
+      }
+    }
+    return display;
+  }
   return String(cell).trim();
 }
 

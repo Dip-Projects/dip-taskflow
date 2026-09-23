@@ -1700,6 +1700,40 @@ async function dbInsert(table, payload) {
   const { error } = await supabase.from(table).insert(payload);
   return !error;
 }
+
+/**
+ * dpr_reports.id is a SERIAL integer. After restores/manual inserts the
+ * sequence can lag behind MAX(id), so bare inserts hit dpr_reports_pkey.
+ * Always allocate the next free id (with a short retry on race).
+ */
+async function insertDprReport(row) {
+  const attempt = async (payload) => {
+    const { data, error } = await supabase
+      .from("dpr_reports")
+      .insert(payload)
+      .select("id")
+      .maybeSingle();
+    return { data, error };
+  };
+
+  let lastError = null;
+  for (let i = 0; i < 6; i++) {
+    const { data: top } = await supabase
+      .from("dpr_reports")
+      .select("id")
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextId = (Number(top?.id) || 0) + 1;
+    const { data, error } = await attempt({ ...row, id: nextId });
+    if (!error) return { data, error: null };
+    lastError = error;
+    if (!/duplicate key|dpr_reports_pkey/i.test(error.message || "")) {
+      return { data: null, error };
+    }
+  }
+  return { data: null, error: lastError };
+}
 async function submitMaterialRequirements(list, site, engineer) {
   if (!list?.length) return;
   const payload = list.map((r) => ({
@@ -4331,7 +4365,7 @@ function DprForm({ user }) {
         .eq("report_type", "morning")
         .eq("date", date);
 
-      const { error } = await supabase.from("dpr_reports").insert({
+      const { error } = await insertDprReport({
         site,
         engineer,
         report_type: "morning",
@@ -4435,7 +4469,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         .eq("report_type", "evening")
         .eq("date", date);
 
-      const { error: insertErr } = await supabase.from("dpr_reports").insert({
+      const { error: insertErr } = await insertDprReport({
         site,
         engineer,
         report_type: "evening",
@@ -4653,7 +4687,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         .eq("report_type", "morning")
         .eq("date", date);
 
-      const { error } = await supabase.from("dpr_reports").insert({
+      const { error } = await insertDprReport({
         site,
         engineer,
         report_type: "morning",

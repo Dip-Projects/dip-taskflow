@@ -52,7 +52,29 @@ function preparePreviewSheet(sheet) {
 function sheetCellText(matrix, r, c) {
   const cell = matrix?.[r]?.[c];
   if (cell == null) return "";
-  if (typeof cell === "object") return String(cell.display ?? "").trim();
+  if (cell instanceof Date && !Number.isNaN(cell.getTime())) {
+    return cell.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Asia/Kolkata",
+    });
+  }
+  if (typeof cell === "object") {
+    const display = String(cell.display ?? "").trim();
+    if (/GMT[+-]\d{4}/i.test(display) || /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.+\d{4}/i.test(display)) {
+      const d = new Date(display);
+      if (!Number.isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "Asia/Kolkata",
+        });
+      }
+    }
+    return display;
+  }
   return String(cell).trim();
 }
 
@@ -87,6 +109,8 @@ export function WeeklyPlanAttachmentPreview({
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [note, setNote] = useState("");
+  const [waSending, setWaSending] = useState(false);
+  const [waNote, setWaNote] = useState("");
   const [fromPdf, setFromPdf] = useState(false);
   const [cellStatus, setCellStatus] = useState(() => ({}));
   const cancelledRef = useRef(false);
@@ -158,6 +182,31 @@ export function WeeklyPlanAttachmentPreview({
     },
     [eaId, loadTasks, sourceFile]
   );
+
+  const sendWhatsAppList = useCallback(async () => {
+    if (!eaId || waSending) return;
+    setWaSending(true);
+    setWaNote("");
+    try {
+      const data = await api(`/ea-meeting/${eaId}/send-day-list`, { method: "POST", body: {} });
+      if (data?.ok) {
+        setWaNote(
+          `WhatsApp list sent (${data?.whatsapp?.via || "ok"}) · ${data?.whatsapp?.openCount ?? 0} open · to ${data?.to || "number"}`
+        );
+      } else {
+        setWaNote(
+          data?.error ||
+            data?.whatsapp?.error ||
+            data?.whatsapp?.reason ||
+            "Could not send WhatsApp list"
+        );
+      }
+    } catch (err) {
+      setWaNote(err.message || "Could not send WhatsApp list");
+    } finally {
+      setWaSending(false);
+    }
+  }, [eaId, waSending]);
 
   const load = useCallback(async () => {
     cancelledRef.current = false;
@@ -471,6 +520,18 @@ export function WeeklyPlanAttachmentPreview({
           >
             Refresh
           </button>
+          {eaId ? (
+            <button
+              type="button"
+              className="smt-excel-preview__link"
+              onClick={sendWhatsAppList}
+              disabled={waSending || loading}
+              style={{ background: "none", border: 0, cursor: "pointer", padding: 0, color: "#128C7E" }}
+              title="Send today's open tasks + pending earlier days to WhatsApp"
+            >
+              {waSending ? "Sending WhatsApp…" : "Send WhatsApp list"}
+            </button>
+          ) : null}
           {fileUrl ? (
             <a href={fileUrl} target="_blank" rel="noreferrer" className="smt-excel-preview__link">
               Open file
@@ -478,6 +539,15 @@ export function WeeklyPlanAttachmentPreview({
           ) : null}
         </div>
       </div>
+
+      {waNote ? (
+        <div
+          className="smt-excel-preview__msg"
+          style={{ color: waNote.includes("sent") ? "#166534" : "#9a3412" }}
+        >
+          {waNote}
+        </div>
+      ) : null}
 
       {note ? <div className="smt-excel-preview__msg smt-excel-preview__msg--err">{note}</div> : null}
 

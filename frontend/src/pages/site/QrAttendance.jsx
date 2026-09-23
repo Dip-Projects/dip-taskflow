@@ -587,9 +587,16 @@ export default function QrAttendance() {
         } else if (notifyRes?.reason === "no_whatsapp" || notifyRes?.weeklyPlan?.whatsapp?.reason === "no_whatsapp") {
           setWaNote("No WhatsApp: set whatsapp_number on your user profile.");
         } else {
-          setWaNote(
-            `WhatsApp issue: ${note || notifyRes?.weeklyPlan?.whatsapp?.reason || notifyRes?.error || "check Meta / table setup"}`
-          );
+          const wa = notifyRes?.weeklyPlan?.whatsapp || {};
+          const detail =
+            wa?.error ||
+            wa?.templateError?.error ||
+            wa?.textError?.error ||
+            note ||
+            wa?.reason ||
+            notifyRes?.error ||
+            "check Meta / table setup";
+          setWaNote(`WhatsApp issue: ${detail}`);
         }
       } catch (waErr) {
         console.warn("EM upload WhatsApp skip:", waErr.message);

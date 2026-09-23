@@ -538,6 +538,7 @@ function buildNav(user, visMap) {
   const reportChildren = [
     { key: "daily-report", label: "Daily Report (DPR)", icon: Ico.report },
     { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
+    { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
     { key: "site-report", label: "Site Visit Report", icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
@@ -551,9 +552,6 @@ function buildNav(user, visMap) {
   }
 
   const showChat = visAllows(visMap, "team-chat", user);
-  const role = String(user?.role || "").toLowerCase();
-  const isAdmin = role === "admin";
-  const showMyTasks = !isAdmin;
   const showEaReport = isBeenaOrPcUser(user) || isBeenaOrPcUser({
     ...user,
     full_name: user?.name,
@@ -561,12 +559,9 @@ function buildNav(user, visMap) {
   });
 
   return [
-    ...(showMyTasks ? [{ key: "my-tasks", label: "My Tasks", icon: Ico.tasks }] : []),
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
-    // Top-level so Weekly Plan is visible without expanding Reports
-    { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -1878,9 +1873,9 @@ const NAV_COLORS = {
   "leave-approvals": "#7c3aed",
   "daily-report": "#db2777",
   "wpr-generator": "#db2777",
+  "weekly-plan": "#db2777",
   "site-report": "#db2777",
   "my-reports": "#16a34a",
-  "weekly-plan": "#16a34a",
   "monthly-report": "#7c3aed",
   "manpower-reports": "#16a34a",
   "report-submissions": "#0891b2",
@@ -2233,6 +2228,11 @@ useEffect(() => {
       OFFICE_SITE_TABS.has(tab) ? tab : "report-submissions",
     );
   }, [user, authUser]);
+
+  // My Tasks removed from sidebar — old links land on Weekly Plan
+  useEffect(() => {
+    if (activeTab === "my-tasks") setActiveTab("weekly-plan");
+  }, [activeTab]);
 
   useEffect(() => {
     if (!user?.user_name) return;

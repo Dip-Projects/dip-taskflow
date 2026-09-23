@@ -116,12 +116,12 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   // Preserve portal/whatsapp completions across re-parse.
   const prevRes = await supabase
     .from('weekly_plan_tasks')
-    .select('task_date, task_name, sr_no, status, completed_at, completed_via')
+    .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via')
     .eq('ea_attendance_id', eaId)
     .eq('source_file', sourceFile);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}`;
+    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}|${String(t.time_slot || '').trim().toLowerCase()}`;
     prevMap.set(key, t);
   });
 
@@ -140,7 +140,7 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   if (!parsedTasks.length) return { inserted: 0 };
 
   const rows = parsedTasks.map((t) => {
-    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}`;
+    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}|${String(t.time_slot || '').trim().toLowerCase()}`;
     const prev = prevMap.get(key);
     const keepDone = prev && String(prev.status) === 'Completed';
     return {
@@ -155,6 +155,7 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
       task_name: t.task_name,
       time_slot: t.time_slot,
       sr_no: t.sr_no,
+      half: Number.isFinite(Number(t.half)) ? Number(t.half) : 0,
       source_file: sourceFile,
       status: keepDone ? 'Completed' : (t.status === 'Cancelled' ? 'Cancelled' : 'Pending'),
       completed_at: keepDone ? prev.completed_at : null,

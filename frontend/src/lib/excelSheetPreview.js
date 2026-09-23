@@ -184,19 +184,49 @@ function formatDateValue(value) {
 
 function excelJsCellDisplay(cell) {
   if (!cell) return "";
-  if (cell.text != null && String(cell.text).trim() !== "") return String(cell.text);
-  if (cell.value == null || cell.value === "") return "";
   const value = cell.value;
-  if (typeof value === "object") {
+
+  // Prefer real Date values — ExcelJS often puts Date.toString() into cell.text.
+  if (value instanceof Date) return formatDateValue(value);
+  if (typeof value === "object" && value) {
+    if (value.result instanceof Date) return formatDateValue(value.result);
     if (value.richText) return value.richText.map((p) => p.text || "").join("");
-    if (value.text) return String(value.text);
+    if (value.text != null && String(value.text).trim() !== "") {
+      const t = String(value.text);
+      if (/GMT[+-]\d{4}/i.test(t) || /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.+\d{4}/i.test(t)) {
+        const d = new Date(t);
+        if (!Number.isNaN(d.getTime())) return formatDateValue(d);
+      }
+      return t;
+    }
     if (value.result != null) return String(value.result);
-    if (value instanceof Date) return formatDateValue(value);
-    if (Array.isArray(value.formula) || value.formula) {
+    if (value.formula) {
       return value.result != null ? String(value.result) : "";
     }
   }
-  if (value instanceof Date) return formatDateValue(value);
+  if (cell.text != null && String(cell.text).trim() !== "") {
+    const t = String(cell.text);
+    if (/GMT[+-]\d{4}/i.test(t) || /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.+\d{4}/i.test(t)) {
+      const d = new Date(t);
+      if (!Number.isNaN(d.getTime())) return formatDateValue(d);
+    }
+    return t;
+  }
+  if (value == null || value === "") return "";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Excel serial date (approx)
+    if (value > 20000 && value < 80000) {
+      try {
+        const d = XLSX.SSF.parse_date_code(value);
+        if (d) {
+          return formatDateValue(new Date(Date.UTC(d.y, d.m - 1, d.d, 12)));
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    return String(value);
+  }
   return String(value);
 }
 

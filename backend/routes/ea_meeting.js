@@ -1056,6 +1056,59 @@ router.get('/:id/tasks', async (req, res) => {
 });
 
 /**
+ * POST /api/ea-meeting/:id/send-day-list
+ * Resend today's weekly-plan WhatsApp list to the plan owner.
+ */
+router.post('/:id/send-day-list', async (req, res) => {
+  try {
+    const eaId = String(req.params.id || '').trim();
+    const ea = await loadEaAttendanceById(eaId);
+    if (!ea) return res.status(404).json({ ok: false, error: 'EM attendance not found' });
+    if (!(await viewerCanAccessEaRow(req.user, ea))) {
+      return res.status(403).json({ ok: false, error: 'Not allowed' });
+    }
+
+    const username = String(ea.employee_username || '').trim();
+    if (!username) {
+      return res.status(400).json({ ok: false, error: 'No employee_username on this attendance row' });
+    }
+
+    const { data: owner } = await supabase
+      .from('users')
+      .select('id, username, full_name, whatsapp_number, role, is_active')
+      .ilike('username', username)
+      .maybeSingle();
+
+    const toNumber = owner?.whatsapp_number;
+    if (!normalizeWhatsAppNumber(toNumber)) {
+      return res.status(400).json({
+        ok: false,
+        reason: 'no_whatsapp',
+        error: `No WhatsApp number for ${username}. Set it in Admin → Employees.`,
+      });
+    }
+
+    const whatsapp = await notifyWeeklyPlanAfterUpload({
+      username,
+      user: owner,
+      toNumber,
+      fullName: owner?.full_name || ea.employee_name || username,
+      dayYmd: weeklyPlanIstYmd(),
+    });
+
+    res.json({
+      ok: !!whatsapp?.ok,
+      to: normalizeWhatsAppNumber(toNumber),
+      username,
+      whatsapp,
+    });
+  } catch (err) {
+    console.error('EM send-day-list:', err.message);
+    res.status(500).json({ ok: false, error: err.message || 'Send failed' });
+  }
+});
+
+/**
  * POST /api/ea-meeting/:id/ingest
  * Body: { clientParsed: [{ source_file, tasks: [...], meta? }] }
  * Saves browser-parsed plan cells into weekly_plan_tasks (deduped).
@@ -1077,7 +1130,48 @@ router.post('/:id/ingest', async (req, res) => {
     if (result.ok === false && result.error) {
       return res.status(500).json(result);
     }
-    res.json(result);
+
+    // First time tasks are saved (or explicit notify), send today's WhatsApp list.
+    let whatsapp = null;
+    const wantNotify =
+      Number(result.inserted || 0) > 0 ||
+      req.body?.notifyWhatsApp === true ||
+      req.query?.notify === '1';
+    if (wantNotify) {
+      try {
+        const username = String(ea.employee_username || req.user?.username || '').trim();
+        const profile = await loadUserProfile(req.user);
+        let toNumber = profile?.whatsapp_number;
+        let fullName = profile?.full_name || username;
+        if (
+          username &&
+          profile?.username &&
+          username.toLowerCase() !== String(profile.username).toLowerCase()
+        ) {
+          const { data: owner } = await supabase
+            .from('users')
+            .select('full_name, whatsapp_number, username')
+            .ilike('username', username)
+            .maybeSingle();
+          if (owner?.whatsapp_number) {
+            toNumber = owner.whatsapp_number;
+            fullName = owner.full_name || fullName;
+          }
+        }
+        whatsapp = await notifyWeeklyPlanAfterUpload({
+          username,
+          user: profile,
+          toNumber,
+          fullName,
+          dayYmd: weeklyPlanIstYmd(),
+        });
+      } catch (waErr) {
+        console.error('EM ingest WhatsApp:', waErr.message);
+        whatsapp = { ok: false, reason: 'exception', error: waErr.message };
+      }
+    }
+
+    res.json({ ...result, whatsapp });
   } catch (err) {
     console.error('EM ingest:', err.message);
     res.status(500).json({ ok: false, inserted: 0, error: err.message || 'Ingest failed' });

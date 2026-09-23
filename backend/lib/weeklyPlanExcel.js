@@ -40,10 +40,9 @@ function cellText(v) {
 
 function toYmd(d) {
   if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  // Always calendar day in IST — Excel/SheetJS often gives UTC midnight which
+  // shifts ±1 day when using local getDate() on non-IST servers.
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 function parseDateLoose(raw) {
@@ -148,22 +147,87 @@ function findDateColumns(matrix) {
   }
   if (!best) return [];
 
+  // Prefer explicit 1st/2nd half label columns (same as frontend parser).
+  let halfRow = null;
+  for (let r = best.row; r < Math.min(matrix.length, best.row + 8); r += 1) {
+    const row = matrix[r] || [];
+    let firstHits = 0;
+    let secondHits = 0;
+    for (let c = 0; c < row.length; c += 1) {
+      const t = cellText(row[c]).toUpperCase();
+      if (/1ST\s*HALF|FIRST\s*HALF/.test(t)) firstHits += 1;
+      else if (/2ND\s*HALF|SECOND\s*HALF/.test(t)) secondHits += 1;
+    }
+    if (firstHits >= 1 && secondHits >= 1) {
+      halfRow = r;
+      break;
+    }
+  }
+
+  const firstHalfCols = [];
+  const secondHalfCols = [];
+  if (halfRow != null) {
+    const row = matrix[halfRow] || [];
+    for (let c = 0; c < row.length; c += 1) {
+      const t = cellText(row[c]).toUpperCase();
+      if (/1ST\s*HALF|FIRST\s*HALF/.test(t)) firstHalfCols.push(c);
+      else if (/2ND\s*HALF|SECOND\s*HALF/.test(t)) secondHalfCols.push(c);
+    }
+  }
+
   const dayCols = [];
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
+    const prev = best.dates[i - 1];
     const next = best.dates[i + 1];
-    const span = next ? Math.max(1, next.col - cur.col) : 2;
-    let firstCol = cur.col;
-    let secondCol = null;
-    if (span >= 4) {
-      firstCol = cur.col;
-      secondCol = cur.col + 2;
-    } else if (span >= 2) {
-      firstCol = cur.col;
-      secondCol = cur.col + 1;
+    // Day owns columns from midpoint after previous date → midpoint before next date.
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : Math.max(0, cur.col - 1);
+    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
+
+    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+    let secondCol = secondHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+
+    if (firstCol == null && firstHalfCols.length) {
+      // Date often sits in the middle of a merged header — pick nearest 1st-half col.
+      firstCol = firstHalfCols.reduce((bestCol, c) =>
+        bestCol == null || Math.abs(c - cur.col) < Math.abs(bestCol - cur.col) ? c : bestCol
+      , null);
+      if (firstCol != null) {
+        const idx = firstHalfCols.indexOf(firstCol);
+        secondCol = secondHalfCols[idx] != null ? secondHalfCols[idx] : secondCol;
+      }
     }
+
+    if (firstCol == null) {
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
+      firstCol = cur.col;
+      secondCol = span >= 4 ? cur.col + 2 : span >= 2 ? cur.col + 1 : null;
+    }
+
     dayCols.push({
-      ymd: cur.ymd,
+      ymd: (() => {
+        // Align date to nearby weekday label (fixes Fri column showing Thu date).
+        const WEEKDAY = {
+          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+          thursday: 4, friday: 5, saturday: 6,
+        };
+        let ymd = cur.ymd;
+        for (let r = Math.max(0, best.row - 1); r < Math.min(matrix.length, best.row + 4); r += 1) {
+          const t = cellText(matrix[r]?.[firstCol] || matrix[r]?.[cur.col]).toUpperCase();
+          if (!/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) continue;
+          const want = WEEKDAY[t.toLowerCase()];
+          const d = new Date(`${ymd}T12:00:00+05:30`);
+          let diff = want - d.getDay();
+          if (diff > 3) diff -= 7;
+          if (diff < -3) diff += 7;
+          if (diff) {
+            d.setDate(d.getDate() + diff);
+            ymd = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+          }
+          break;
+        }
+        return ymd;
+      })(),
       firstCol,
       secondCol,
       timeCol: firstCol,

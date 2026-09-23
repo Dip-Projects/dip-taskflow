@@ -18,9 +18,12 @@ const {
   parseWeeklyPlanReply,
   sendWeeklyPlanDayList,
   completeWeeklyPlanByIndexes,
+  completeWeeklyPlanByNumbersForPhone,
   formatWeeklyPlanMessage,
   loadWeeklyPlanDayBundle,
   runWeeklyPlanDayListCron,
+  resolveWeeklyPlanUserForPhone,
+  rememberWhatsAppSession,
 } = require('../lib/weeklyPlanDayList');
 const { requireAuth } = require('../middleware/auth');
 
@@ -75,24 +78,49 @@ function extractInbound(body) {
   return out;
 }
 
-async function findUserByWhatsApp(fromRaw) {
+/** All users sharing this WhatsApp number (many seed rows reuse one test number). */
+async function findUsersByWhatsApp(fromRaw) {
   const normalized = normalizeWhatsAppNumber(fromRaw);
-  if (!normalized) return null;
+  if (!normalized) return [];
 
-  const { data: users, error } = await supabase
+  const local10 =
+    normalized.length >= 12 && normalized.startsWith('91')
+      ? normalized.slice(-10)
+      : normalized.length === 10
+        ? normalized
+        : null;
+  const variants = [...new Set(
+    [normalized, local10, local10 ? `91${local10}` : null, normalized ? `+${normalized}` : null].filter(Boolean)
+  )];
+
+  let { data: users, error } = await supabase
     .from('users')
-    .select('id, full_name, whatsapp_number, username')
-    .not('whatsapp_number', 'is', null);
+    .select('id, full_name, whatsapp_number, username, role, is_active')
+    .in('whatsapp_number', variants);
 
-  if (error) {
-    console.error('WA user lookup failed:', error.message);
-    return null;
+  if (error || !(users || []).length) {
+    // Fallback: scan stored numbers (handles spaces / odd formatting)
+    const res = await supabase
+      .from('users')
+      .select('id, full_name, whatsapp_number, username, role, is_active')
+      .not('whatsapp_number', 'is', null);
+    if (res.error) {
+      console.error('WA user lookup failed:', res.error.message);
+      return [];
+    }
+    users = (res.data || []).filter(
+      (u) => normalizeWhatsAppNumber(u.whatsapp_number) === normalized
+    );
   }
 
-  return (
-    (users || []).find((u) => normalizeWhatsAppNumber(u.whatsapp_number) === normalized) ||
-    null
-  );
+  return users || [];
+}
+
+async function findUserByWhatsApp(fromRaw) {
+  const matches = await findUsersByWhatsApp(fromRaw);
+  if (!matches.length) return null;
+  if (matches.length === 1) return matches[0];
+  return resolveWeeklyPlanUserForPhone(fromRaw, matches);
 }
 
 async function completeTaskFromWhatsApp(taskId, user) {
@@ -173,18 +201,35 @@ function parseNumberReply(text, openTasks) {
 }
 
 router.post('/webhook', async (req, res) => {
-  // Always ack quickly so Meta does not retry.
-  res.sendStatus(200);
-
+  // IMPORTANT (Vercel): do NOT ack before processing.
+  // Sending 200 first freezes the serverless function and drops reply handling.
+  const t0 = Date.now();
   try {
     const inbound = extractInbound(req.body);
+    console.log('WA webhook inbound', inbound.length, 'msg(s)');
     for (const msg of inbound) {
       const payload = String(msg.buttonPayload || '').trim();
       const text = String(msg.text || '').trim();
-      const user = await findUserByWhatsApp(msg.from);
+      if (!payload && !text) continue;
+
+      const candidates = await findUsersByWhatsApp(msg.from);
+      const user = candidates.length === 1
+        ? candidates[0]
+        : candidates.length
+          ? await resolveWeeklyPlanUserForPhone(msg.from, candidates)
+          : null;
       if (!user) {
-        if (payload || text) console.warn('WA: unknown number', msg.from);
+        console.warn('WA: unknown number', msg.from, 'text=', text.slice(0, 40));
         continue;
+      }
+      if (candidates.length > 1) {
+        console.log(
+          'WA shared number',
+          msg.from,
+          '→',
+          user.username,
+          `(${candidates.length} accounts)`
+        );
       }
 
       // EA upload reminder from list
@@ -201,7 +246,7 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
-      // List / button: Mark ALL done (today + overdue only)
+      // List / button: Mark ALL done (today + overdue only) — portal tasks
       if (payload === 'tf_done_all' || /^ALL$/i.test(text)) {
         const dayYmd = istYmd();
         const { done, total } = await completeAllOpenTasksForUser(user, { dayYmd });
@@ -221,56 +266,92 @@ router.post('/webhook', async (req, res) => {
         continue;
       }
 
-      // Weekly plan list / complete: PLAN | WP | PLAN 1,3
+      // Weekly plan list / complete: PLAN | WP | 1 | 1,3 | PLAN 1,3
       if (text) {
         const wpParsed = parseWeeklyPlanReply(text);
         if (wpParsed) {
           const dayYmd = istYmd();
-          const username = user.username;
           if (wpParsed.list) {
-            const result = await sendWeeklyPlanDayList(username, {
-              user,
+            const planUser =
+              (await resolveWeeklyPlanUserForPhone(msg.from, candidates)) || user;
+            rememberWhatsAppSession(msg.from, planUser.username);
+            const result = await sendWeeklyPlanDayList(planUser.username, {
+              user: planUser,
               toNumber: msg.from,
-              fullName: user.full_name || user.username,
+              fullName: planUser.full_name || planUser.username,
               dayYmd,
               sayEmpty: true,
               force: true,
             });
             if (!result.ok && result.reason === 'missing_table') {
-              await sendWhatsAppText(msg.from, 'Weekly plan table is not set up yet. Ask admin to run weekly_plan_tasks.sql.');
+              await sendWhatsAppText(
+                msg.from,
+                'Weekly plan table is not set up yet. Ask admin to run weekly_plan_tasks.sql.'
+              );
+            } else if (!result.ok) {
+              console.warn('WA PLAN send failed', planUser.username, result.reason || result);
             }
             continue;
           }
           if (wpParsed.all) {
+            const planUser =
+              (await resolveWeeklyPlanUserForPhone(msg.from, candidates)) || user;
+            const username = planUser.username;
             const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
             const idxs = (bundle.openOrdered || []).map((_, i) => i);
-            const { done, bundle: refreshed } = await completeWeeklyPlanByIndexes(username, idxs, dayYmd);
+            const { done, bundle: refreshed } = await completeWeeklyPlanByIndexes(
+              username,
+              idxs,
+              dayYmd
+            );
+            rememberWhatsAppSession(msg.from, username);
             await sendWhatsAppText(
               msg.from,
               `✅ Marked ${done} weekly-plan task(s) complete.\n\n${formatWeeklyPlanMessage(refreshed, {
-                fullName: user.full_name || user.username,
+                fullName: planUser.full_name || planUser.username,
               })}`
             );
             continue;
           }
-          if (wpParsed.indexes) {
-            const { done, lastName, bundle } = await completeWeeklyPlanByIndexes(
-              username,
-              wpParsed.indexes,
+          if (wpParsed.numbers) {
+            const result = await completeWeeklyPlanByNumbersForPhone(
+              msg.from,
+              candidates,
+              wpParsed.numbers,
               dayYmd
             );
-            await sendWhatsAppText(
-              msg.from,
-              `✅ Done: ${done === 1 ? lastName || 'task' : `${done} tasks`}\n\n${formatWeeklyPlanMessage(bundle, {
-                fullName: user.full_name || user.username,
-              })}`
-            );
-            continue;
+            const planUser = result.user || user;
+            const bundle =
+              result.bundle ||
+              (await loadWeeklyPlanDayBundle(planUser.username, dayYmd));
+            const hasWeeklyContext =
+              result.matched ||
+              wpParsed.prefixed ||
+              (bundle.openOrdered || []).length > 0 ||
+              (bundle.today || []).length > 0;
+
+            if (hasWeeklyContext) {
+              await sendWhatsAppText(
+                msg.from,
+                result.matched
+                  ? `✅ Done: ${
+                      result.done === 1
+                        ? result.lastName || 'task'
+                        : `${result.done} tasks`
+                    } (${result.username || planUser.username})\n\n${formatWeeklyPlanMessage(bundle, {
+                      fullName: planUser.full_name || planUser.username,
+                    })}`
+                  : `No weekly-plan task matched those list numbers.\n\n${formatWeeklyPlanMessage(bundle, {
+                      fullName: planUser.full_name || planUser.username,
+                    })}`
+              );
+              continue;
+            }
           }
         }
       }
 
-      // Text commands: LIST / ALL / 1,3 — scoped to today (+ overdue)
+      // Text commands: LIST / ALL / 1,3 — portal tasks (today + overdue)
       if (text) {
         const dayYmd = istYmd();
         const open = await loadOpenTasksForUser(user.id, { dayYmd });
@@ -322,7 +403,10 @@ router.post('/webhook', async (req, res) => {
       }
     }
   } catch (err) {
-    console.error('WhatsApp webhook handler error:', err.message);
+    console.error('WhatsApp webhook handler error:', err.message || err);
+  } finally {
+    if (!res.headersSent) res.sendStatus(200);
+    console.log('WA webhook finished in', Date.now() - t0, 'ms');
   }
 });
 
@@ -363,6 +447,55 @@ async function handleWeeklyPlanDayListCron(req, res) {
 
 router.post('/cron/weekly-plan-day-list', handleWeeklyPlanDayListCron);
 router.get('/cron/weekly-plan-day-list', handleWeeklyPlanDayListCron);
+
+/**
+ * Test weekly-plan WhatsApp for the logged-in user (or admin override `to`).
+ * Returns full Meta error so we can see why delivery failed.
+ */
+router.post('/test-weekly-plan', requireAuth, async (req, res) => {
+  try {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('id, username, full_name, whatsapp_number, role')
+      .eq('id', req.user.id)
+      .maybeSingle();
+
+    const role = String(req.user?.role || profile?.role || '').toLowerCase();
+    const isAdmin = role === 'admin' || !!req.user?.is_mis_executive;
+    const toOverride = isAdmin ? String(req.body?.to || '').trim() : '';
+    const toNumber = toOverride || profile?.whatsapp_number || req.user?.whatsapp_number;
+
+    if (!normalizeWhatsAppNumber(toNumber)) {
+      return res.status(400).json({
+        ok: false,
+        reason: 'no_whatsapp',
+        hint: 'Set WhatsApp number on your user in Admin → Employees (91xxxxxxxxxx).',
+      });
+    }
+
+    const username = profile?.username || req.user?.username;
+    const result = await sendWeeklyPlanDayList(username, {
+      user: profile || req.user,
+      toNumber,
+      fullName: profile?.full_name || req.user?.full_name || username,
+      sayEmpty: true,
+      force: true,
+    });
+
+    res.json({
+      ok: !!result?.ok,
+      to: normalizeWhatsAppNumber(toNumber),
+      username,
+      ...result,
+      hint: result?.ok
+        ? 'Check WhatsApp on that phone. If only a short template arrived, reply PLAN for the full list.'
+        : 'See reason / textError / templateError. Common: template not Approved, wrong param count, or number not allowed in Meta test mode.',
+    });
+  } catch (err) {
+    console.error('test-weekly-plan:', err.message);
+    res.status(500).json({ ok: false, error: err.message || 'Test send failed' });
+  }
+});
 
 /** Admin / MIS / Beena: send today's WhatsApp list to Beena now. */
 router.post('/send-day-list-now', requireAuth, async (req, res) => {

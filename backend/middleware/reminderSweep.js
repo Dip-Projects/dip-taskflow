@@ -105,6 +105,10 @@ function maybeWeeklyPlanMorning() {
 }
 
 module.exports = function reminderSweep(req, res, next) {
+  // Don't piggyback heavy sweeps onto WhatsApp webhook (Meta needs a fast reply handler).
+  const p = String(req.path || '');
+  if (p.includes('/whatsapp/webhook')) return next();
+
   res.on('finish', () => {
     try {
       maybeSweep();

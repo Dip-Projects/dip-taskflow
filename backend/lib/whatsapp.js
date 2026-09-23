@@ -62,29 +62,42 @@ async function metaSend(body) {
 /**
  * Send a Meta WhatsApp Cloud API template message.
  * Best-effort: missing config / number / API errors are logged, never thrown.
+ * opts.headerParams — text params for HEADER variables ({{1}} in header), in order.
+ * opts.language — template language code (default en).
  */
-async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = []) {
+async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = [], opts = {}) {
   const to = normalizeWhatsAppNumber(toNumber);
   if (!to) {
     console.warn('WhatsApp skip — no valid number for', templateName);
     return { ok: false, reason: 'no_number' };
   }
 
+  const components = [];
+  const headerParams = Array.isArray(opts.headerParams) ? opts.headerParams : [];
+  if (headerParams.length) {
+    components.push({
+      type: 'header',
+      parameters: headerParams.map((text) => ({
+        type: 'text',
+        text: sanitizeWaParam(text).slice(0, 60),
+      })),
+    });
+  }
+  components.push({
+    type: 'body',
+    parameters: bodyParams.map((text) => ({
+      type: 'text',
+      text: sanitizeWaParam(text),
+    })),
+  });
+
   const result = await metaSend({
     to,
     type: 'template',
     template: {
       name: templateName,
-      language: { code: 'en' },
-      components: [
-        {
-          type: 'body',
-          parameters: bodyParams.map((text) => ({
-            type: 'text',
-            text: sanitizeWaParam(text),
-          })),
-        },
-      ],
+      language: { code: opts.language || process.env.WHATSAPP_TEMPLATE_LANG || 'en' },
+      components,
     },
   });
   if (result.ok) console.log('WhatsApp sent to', to, '-', templateName);
