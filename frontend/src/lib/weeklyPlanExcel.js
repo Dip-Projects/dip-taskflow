@@ -127,16 +127,6 @@ function normalizeStatus(raw) {
   return "Pending";
 }
 
-function splitCellTasks(raw) {
-  const text = cellText(raw);
-  if (!text) return [];
-  const candidates = text
-    .split(/\n|\s*\/\s*|\s*•\s*|\s*;\s*/)
-    .map((part) => part.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  return candidates.length ? candidates : [text];
-}
-
 function isHeaderTaskName(name) {
   const t = String(name || "").replace(/\s+/g, " ").trim().toUpperCase();
   if (!t) return true;
@@ -479,26 +469,22 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
   if (!text || isSkipPlanCellText(text)) return;
 
-  const items = splitCellTasks(text);
-  if (!items.length) return;
+  // One Excel cell → one task (matches the UI grid 1:1).
+  // Do NOT split on "/" or newlines — that created dozens of phantom WA items
+  // that did not match the sheet cells, so WhatsApp Done ≠ UI Completed.
+  const maybeStatus = normalizeStatus(text);
+  const isPureStatus =
+    maybeStatus !== "Pending" ||
+    /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
 
-  for (const item of items) {
-    const itemText = cellText(item);
-    if (!itemText || isSkipPlanCellText(itemText)) continue;
-
-    const maybeStatus = normalizeStatus(itemText);
-    const isPureStatus =
-      maybeStatus !== "Pending" || /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(itemText);
-
-    tasks.push({
-      task_date: ymd,
-      task_name: taskName,
-      time_slot: itemText,
-      status: isPureStatus ? maybeStatus : "Pending",
-      sr_no: srNo,
-      half,
-    });
-  }
+  tasks.push({
+    task_date: ymd,
+    task_name: taskName,
+    time_slot: isPureStatus && maybeStatus !== "Pending" ? "" : text,
+    status: isPureStatus ? maybeStatus : "Pending",
+    sr_no: srNo,
+    half,
+  });
 }
 
 export function parseWeeklyPlanMatrix(matrix) {

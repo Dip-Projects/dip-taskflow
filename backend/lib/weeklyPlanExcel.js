@@ -264,15 +264,15 @@ function findDataStartRow(matrix, dateHeaderRow) {
 function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
   if (!text || isHalfOrTimeHeader(text)) return;
-  const halfLabel = half === 1 ? '1st half' : '2nd half';
   const maybeStatus = normalizeStatus(text);
   const isPureStatus =
     maybeStatus !== 'Pending' ||
     /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
+  // One cell → one task (keep UI ↔ WhatsApp numbering in sync).
   tasks.push({
     task_date: ymd,
-    task_name: `${taskName} · ${halfLabel}`,
-    time_slot: isPureStatus && maybeStatus !== 'Pending' ? halfLabel : text,
+    task_name: taskName,
+    time_slot: isPureStatus && maybeStatus !== 'Pending' ? '' : text,
     status: isPureStatus ? maybeStatus : 'Pending',
     sr_no: srNo,
     half,

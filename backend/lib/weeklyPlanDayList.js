@@ -262,36 +262,34 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
   };
 }
 
-function formatTaskLine(task, index) {
-  const slot = String(task.time_slot || '').trim();
+function workLabel(task) {
+  const slot = String(task?.time_slot || '').trim();
   const halfOnly = /^(1st half|2nd half)$/i.test(slot);
-  const work = !halfOnly && slot ? slot : String(task.task_name || 'Task').trim();
+  if (slot && !halfOnly) return slot;
+  return String(task?.task_name || 'Task').replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '').trim() || 'Task';
+}
+
+function formatTaskLine(task, index) {
+  const work = workLabel(task);
   const cat = String(task.task_name || '')
     .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '')
     .trim();
   const half =
-    Number(task.half) === 1 ? '1st half' : Number(task.half) === 2 ? '2nd half' : null;
-  const done = !isOpenWeeklyStatus(task.status);
-
-  const lines = [];
-  lines.push(`${index}) ${clip(work, 100)}${done ? ' ✅' : ''}`);
-  const meta = [half, cat && cat.toUpperCase() !== work.toUpperCase() ? clip(cat, 36) : null]
-    .filter(Boolean)
-    .join(' · ');
-  if (meta) lines.push(`    ${meta}`);
-  return lines.join('\n');
+    Number(task.half) === 1 ? '1H' : Number(task.half) === 2 ? '2H' : null;
+  const bits = [
+    `${index}) ${clip(work, 72)}`,
+    half,
+    cat && cat.toUpperCase() !== work.toUpperCase() ? clip(cat, 28) : null,
+  ].filter(Boolean);
+  return bits.join(' · ');
 }
 
-function formatWeeklyPlanMessage(bundle, opts = {}) {
+/** Build full day-list text, then split into WhatsApp-safe chunks (keep numbering intact). */
+function formatWeeklyPlanMessageParts(bundle, opts = {}) {
   const fullName = opts.fullName || bundle.employeeName || 'Team member';
   const dayYmd = bundle.dayYmd || istYmd();
   const label = dayLabel(dayYmd);
-  const lines = [];
-
-  lines.push('📋 *Weekly Plan*');
-  lines.push(`📅 ${label}`);
-  lines.push(`Hi ${clip(fullName, 40)},`);
-  lines.push('');
+  const CHUNK = 3500;
 
   const todayOpen = (bundle.today || []).filter((t) => isOpenWeeklyStatus(t.status));
   const todayDone = (bundle.today || []).filter((t) => !isOpenWeeklyStatus(t.status));
@@ -299,61 +297,85 @@ function formatWeeklyPlanMessage(bundle, opts = {}) {
   const open = bundle.openOrdered || [];
   const idToNum = new Map(open.map((t, i) => [t.id, i + 1]));
 
+  const header = [
+    '📋 *Weekly Plan*',
+    `📅 ${label}`,
+    `Hi ${clip(fullName, 40)},`,
+    '',
+  ];
+
   if (!todayOpen.length && !todayDone.length && !prior.length) {
-    lines.push('_No tasks for today, and nothing pending from earlier this week._');
-    lines.push('');
-    lines.push('Reply *PLAN* anytime to refresh.');
-    return lines.join('\n');
+    return [
+      [...header, '_No tasks for today, and nothing pending from earlier this week._', '', 'Reply *PLAN* anytime to refresh.'].join(
+        '\n'
+      ),
+    ];
   }
 
-  lines.push(`—— *TODAY* · ${shortDay(dayYmd)} ——`);
+  const bodyLines = [];
+  bodyLines.push(`—— *TODAY* · ${shortDay(dayYmd)} (${todayOpen.length} open) ——`);
   if (!todayOpen.length && !todayDone.length) {
-    lines.push('_No tasks scheduled for today._');
+    bodyLines.push('_No tasks scheduled for today._');
   } else {
     for (const t of todayOpen) {
       const n = idToNum.get(t.id);
       if (n == null) continue;
-      lines.push(formatTaskLine(t, n));
-      lines.push('');
+      bodyLines.push(formatTaskLine(t, n));
     }
     if (todayDone.length) {
-      lines.push(`_Done today: ${todayDone.length}_`);
-      for (const t of todayDone.slice(0, 5)) {
-        const slot = String(t.time_slot || '').trim();
-        const halfOnly = /^(1st half|2nd half)$/i.test(slot);
-        const work = !halfOnly && slot ? slot : t.task_name || 'Task';
-        lines.push(`✅ ${clip(work, 80)}`);
+      bodyLines.push(`_Done today: ${todayDone.length}_`);
+      for (const t of todayDone.slice(0, 8)) {
+        bodyLines.push(`✅ ${clip(workLabel(t), 70)}`);
       }
-      if (todayDone.length > 5) lines.push(`… +${todayDone.length - 5} more done`);
-      lines.push('');
+      if (todayDone.length > 8) bodyLines.push(`… +${todayDone.length - 8} more done`);
     }
-    while (lines[lines.length - 1] === '') lines.pop();
   }
 
   if (prior.length) {
-    lines.push('');
-    lines.push('—— *PENDING from earlier* ——');
+    bodyLines.push('');
+    bodyLines.push(`—— *PENDING earlier* (${prior.length}) ——`);
     for (const t of prior) {
       const n = idToNum.get(t.id);
       if (n == null) continue;
       const when = shortDay(ymdOf(t.task_date) || '');
-      const slot = String(t.time_slot || '').trim();
-      const halfOnly = /^(1st half|2nd half)$/i.test(slot);
-      const work = !halfOnly && slot ? slot : t.task_name || 'Task';
-      lines.push(`${n}) [${when}] ${clip(work, 80)}`);
+      bodyLines.push(`${n}) [${when}] ${clip(workLabel(t), 60)}`);
     }
   }
 
-  lines.push('');
-  lines.push('————————');
-  if (open.length) {
-    lines.push(`Open: *${open.length}*  ·  Reply *1* or *1,3* to mark done`);
-  } else {
-    lines.push('All caught up for this list ✅');
-  }
-  lines.push('Reply *PLAN* to see this list again');
+  const footer = [
+    '',
+    '————————',
+    open.length
+      ? `Open: *${open.length}*  ·  Reply *1* or *1,3* to mark done`
+      : 'All caught up for this list ✅',
+    'Reply *PLAN* to refresh',
+  ];
 
-  return lines.join('\n').slice(0, 4000);
+  // Pack lines into chunks under WhatsApp limit (never cut a line mid-way).
+  const parts = [];
+  let cur = header.join('\n');
+  const pushLine = (line) => {
+    const next = cur ? `${cur}\n${line}` : line;
+    if (next.length <= CHUNK) {
+      cur = next;
+      return;
+    }
+    if (cur) parts.push(cur);
+    // Start continuation parts without repeating the long header.
+    cur = parts.length ? `(cont.)\n${line}` : line;
+    if (cur.length > CHUNK) {
+      parts.push(cur.slice(0, CHUNK));
+      cur = '';
+    }
+  };
+  for (const line of bodyLines) pushLine(line);
+  for (const line of footer) pushLine(line);
+  if (cur) parts.push(cur);
+  return parts.length ? parts : [header.join('\n')];
+}
+
+function formatWeeklyPlanMessage(bundle, opts = {}) {
+  return formatWeeklyPlanMessageParts(bundle, opts).join('\n\n').slice(0, 3500);
 }
 
 /**
@@ -519,14 +541,19 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
   }
 
   const fullName = opts.fullName || user?.full_name || bundle.employeeName || employeeUsername;
-  const text = formatWeeklyPlanMessage(bundle, { fullName });
-  const textResult = await sendWhatsAppText(toNumber, text);
+  const parts = formatWeeklyPlanMessageParts(bundle, { fullName });
+  let textResult = null;
+  for (let i = 0; i < parts.length; i += 1) {
+    textResult = await sendWhatsAppText(toNumber, parts[i]);
+    if (!textResult?.ok) break;
+  }
   if (textResult?.ok) {
     markSentToday(employeeUsername, dayYmd);
     rememberWhatsAppSession(toNumber, employeeUsername);
     return {
       ok: true,
       via: 'text',
+      parts: parts.length,
       openCount,
       todayCount: (bundle.today || []).length,
       priorPendingCount: (bundle.priorPending || []).length,
@@ -538,7 +565,7 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
   // Outside 24h session window — approved Utility template only.
   const preview = (bundle.openOrdered || [])
     .slice(0, 3)
-    .map((t, i) => `${i + 1}) ${clip(t.task_name, 40)}`)
+    .map((t, i) => `${i + 1}) ${clip(workLabel(t), 40)}`)
     .join('; ');
   const label = dayLabel(dayYmd);
   const tmplResult = await sendWeeklyPlanUtilityTemplate(toNumber, {
@@ -631,7 +658,7 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
     .from('weekly_plan_tasks')
     .update(patch)
     .eq('id', taskId)
-    .select('id, task_name, status')
+    .select('id, task_name, time_slot, half, status')
     .maybeSingle();
 
   if (error && /completed_at|completed_via/i.test(error.message || '')) {
@@ -639,7 +666,7 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
       .from('weekly_plan_tasks')
       .update({ status: 'Completed', updated_at: now })
       .eq('id', taskId)
-      .select('id, task_name, status')
+      .select('id, task_name, time_slot, half, status')
       .maybeSingle();
     data = retry.data;
     error = retry.error;
@@ -659,7 +686,7 @@ async function completeWeeklyPlanByIndexes(employeeUsername, indexes, dayYmd = i
     const r = await completeWeeklyPlanTask(t.id);
     if (r.ok) {
       done += 1;
-      lastName = t.task_name || lastName;
+      lastName = workLabel(r.task || t) || lastName;
     }
   }
   const refreshed = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
@@ -824,6 +851,7 @@ module.exports = {
   isOpenWeeklyStatus,
   loadWeeklyPlanDayBundle,
   formatWeeklyPlanMessage,
+  formatWeeklyPlanMessageParts,
   sendWeeklyPlanDayList,
   sendWeeklyPlanUtilityTemplate,
   notifyWeeklyPlanAfterUpload,

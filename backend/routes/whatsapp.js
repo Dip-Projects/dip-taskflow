@@ -19,7 +19,7 @@ const {
   sendWeeklyPlanDayList,
   completeWeeklyPlanByIndexes,
   completeWeeklyPlanByNumbersForPhone,
-  formatWeeklyPlanMessage,
+  formatWeeklyPlanMessageParts,
   loadWeeklyPlanDayBundle,
   runWeeklyPlanDayListCron,
   resolveWeeklyPlanUserForPhone,
@@ -307,10 +307,14 @@ router.post('/webhook', async (req, res) => {
             rememberWhatsAppSession(msg.from, username);
             await sendWhatsAppText(
               msg.from,
-              `✅ Marked ${done} weekly-plan task(s) complete.\n\n${formatWeeklyPlanMessage(refreshed, {
-                fullName: planUser.full_name || planUser.username,
-              })}`
+              `✅ Marked ${done} weekly-plan task(s) complete.`
             );
+            const parts = formatWeeklyPlanMessageParts(refreshed, {
+              fullName: planUser.full_name || planUser.username,
+            });
+            for (const part of parts) {
+              await sendWhatsAppText(msg.from, part);
+            }
             continue;
           }
           if (wpParsed.numbers) {
@@ -331,20 +335,20 @@ router.post('/webhook', async (req, res) => {
               (bundle.today || []).length > 0;
 
             if (hasWeeklyContext) {
-              await sendWhatsAppText(
-                msg.from,
-                result.matched
-                  ? `✅ Done: ${
-                      result.done === 1
-                        ? result.lastName || 'task'
-                        : `${result.done} tasks`
-                    } (${result.username || planUser.username})\n\n${formatWeeklyPlanMessage(bundle, {
-                      fullName: planUser.full_name || planUser.username,
-                    })}`
-                  : `No weekly-plan task matched those list numbers.\n\n${formatWeeklyPlanMessage(bundle, {
-                      fullName: planUser.full_name || planUser.username,
-                    })}`
-              );
+              const doneLine = result.matched
+                ? `✅ Done: ${
+                    result.done === 1
+                      ? result.lastName || 'task'
+                      : `${result.done} tasks`
+                  } (${result.username || planUser.username})`
+                : 'No weekly-plan task matched those list numbers.';
+              await sendWhatsAppText(msg.from, doneLine);
+              const parts = formatWeeklyPlanMessageParts(bundle, {
+                fullName: planUser.full_name || planUser.username,
+              });
+              for (const part of parts) {
+                await sendWhatsAppText(msg.from, part);
+              }
               continue;
             }
           }
