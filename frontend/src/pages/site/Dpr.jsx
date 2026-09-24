@@ -1702,37 +1702,111 @@ async function dbInsert(table, payload) {
 }
 
 /**
- * dpr_reports.id is a SERIAL integer. After restores/manual inserts the
- * sequence can lag behind MAX(id), so bare inserts hit dpr_reports_pkey.
- * Always allocate the next free id (with a short retry on race).
+ * Save DPR so regenerating the same site+engineer+date+type overrides the
+ * existing row (update-by-id).
+ *
+ * Live `dpr_reports.id` is int4/serial. If the sequence is behind MAX(id),
+ * plain inserts hit `dpr_reports_pkey` even when no row exists for that engineer.
+ * New rows therefore use explicit next id = MAX(id)+1 (with race retries).
  */
-async function insertDprReport(row) {
-  const attempt = async (payload) => {
-    const { data, error } = await supabase
-      .from("dpr_reports")
-      .insert(payload)
-      .select("id")
-      .maybeSingle();
-    return { data, error };
+async function saveDprReport({
+  site,
+  engineer,
+  report_type,
+  date,
+  payload,
+  pdf_url = null,
+  photo_folder = null,
+}) {
+  const row = {
+    site,
+    engineer,
+    report_type,
+    date,
+    payload,
+    pdf_url,
+    photo_folder,
   };
+  const created_at = new Date().toISOString();
 
-  let lastError = null;
-  for (let i = 0; i < 6; i++) {
+  const { data: existingRows, error: findErr } = await supabase
+    .from("dpr_reports")
+    .select("id")
+    .eq("site", site)
+    .eq("engineer", engineer)
+    .eq("report_type", report_type)
+    .eq("date", date)
+    .order("id", { ascending: false })
+    .limit(20);
+
+  if (findErr) {
+    throw new Error(`DB lookup failed: ${findErr.message}`);
+  }
+
+  const ids = (existingRows || []).map((r) => r.id).filter((id) => id != null);
+  if (ids.length) {
+    const keepId = ids[0];
+    const { error: updErr } = await supabase
+      .from("dpr_reports")
+      .update(row)
+      .eq("id", keepId);
+    if (updErr) throw new Error(`DB update failed: ${updErr.message}`);
+
+    const extras = ids.slice(1);
+    if (extras.length) {
+      await supabase.from("dpr_reports").delete().in("id", extras);
+    }
+    return { id: keepId, replaced: true };
+  }
+
+  // New row — pick next free int id (sequence is often stale after imports/manual inserts)
+  let lastErr = null;
+  for (let attempt = 0; attempt < 20; attempt++) {
     const { data: top } = await supabase
       .from("dpr_reports")
       .select("id")
       .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const nextId = (Number(top?.id) || 0) + 1;
-    const { data, error } = await attempt({ ...row, id: nextId });
-    if (!error) return { data, error: null };
-    lastError = error;
-    if (!/duplicate key|dpr_reports_pkey/i.test(error.message || "")) {
-      return { data: null, error };
+      .limit(1);
+    const nextId = (top?.[0]?.id != null ? Number(top[0].id) : 0) + 1;
+
+    const { data: inserted, error: insErr } = await supabase
+      .from("dpr_reports")
+      .insert({ id: nextId, ...row, created_at })
+      .select("id")
+      .single();
+
+    if (!insErr) {
+      return { id: inserted?.id ?? nextId, replaced: false };
     }
+    lastErr = insErr;
+
+    // IDENTITY ALWAYS tables reject explicit id — fall back to default + retries
+    if (/generated|identity|overriding/i.test(insErr.message || "")) {
+      for (let r = 0; r < 30; r++) {
+        const { data: d2, error: e2 } = await supabase
+          .from("dpr_reports")
+          .insert({ ...row, created_at })
+          .select("id")
+          .single();
+        if (!e2) return { id: d2?.id, replaced: false };
+        if (!/dpr_reports_pkey|duplicate key/i.test(e2.message || "")) {
+          throw new Error(`DB insert failed: ${e2.message}`);
+        }
+        lastErr = e2;
+      }
+      break;
+    }
+
+    if (!/dpr_reports_pkey|duplicate key/i.test(insErr.message || "")) {
+      throw new Error(`DB insert failed: ${insErr.message}`);
+    }
+    // race on nextId — loop and re-read MAX(id)
   }
-  return { data: null, error: lastError };
+
+  throw new Error(
+    `DB insert failed: ${lastErr?.message || "could not allocate id"}. ` +
+      `Run in Supabase SQL: SELECT setval(pg_get_serial_sequence('public.dpr_reports','id'), (SELECT COALESCE(MAX(id),1) FROM public.dpr_reports));`,
+  );
 }
 async function submitMaterialRequirements(list, site, engineer) {
   if (!list?.length) return;
@@ -4356,16 +4430,7 @@ function DprForm({ user }) {
     draftOpenedRef.current = false;
     const payload = collectPayload();
     try {
-      // Delete any existing report with same site+engineer+date+type (override old entry)
-      await supabase
-        .from("dpr_reports")
-        .delete()
-        .eq("site", site)
-        .eq("engineer", engineer)
-        .eq("report_type", "morning")
-        .eq("date", date);
-
-      const { error } = await insertDprReport({
+      await saveDprReport({
         site,
         engineer,
         report_type: "morning",
@@ -4373,10 +4438,7 @@ function DprForm({ user }) {
         payload,
         pdf_url: null,
         photo_folder: null,
-        created_at: new Date().toISOString(),
       });
-
-      if (error) throw new Error(`DB insert failed: ${error.message}`);
       setSubmitted(true);
       draftOpenedRef.current = false;
     } catch (err) {
@@ -4461,15 +4523,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         caption: p.caption || "",
       }));
 
-      await supabase
-        .from("dpr_reports")
-        .delete()
-        .eq("site", site)
-        .eq("engineer", engineer)
-        .eq("report_type", "evening")
-        .eq("date", date);
-
-      const { error: insertErr } = await insertDprReport({
+      await saveDprReport({
         site,
         engineer,
         report_type: "evening",
@@ -4481,9 +4535,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         },
         pdf_url: pdfPublicUrl,
         photo_folder: photoFolder,
-        created_at: new Date().toISOString(),
       });
-      if (insertErr) throw new Error(`DB insert failed: ${insertErr.message}`);
 
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
@@ -4677,17 +4729,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
     setSubmitting(true);
     const payload = collectPayload();
     try {
-      // Save to DB first
-      // Delete any existing report with same site+engineer+date+type (override old entry)
-      await supabase
-        .from("dpr_reports")
-        .delete()
-        .eq("site", site)
-        .eq("engineer", engineer)
-        .eq("report_type", "morning")
-        .eq("date", date);
-
-      const { error } = await insertDprReport({
+      await saveDprReport({
         site,
         engineer,
         report_type: "morning",
@@ -4695,13 +4737,8 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         payload,
         pdf_url: null,
         photo_folder: null,
-        created_at: new Date().toISOString(),
       });
-      if (error) throw new Error(`DB insert failed: ${error.message}`);
 
-      // Build WhatsApp text and open
-
-      // Build WhatsApp text and open
       const text = buildWhatsAppText(payload);
       const encoded = encodeURIComponent(text);
       window.open(`https://wa.me/?text=${encoded}`, "_blank");
