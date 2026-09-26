@@ -1075,6 +1075,25 @@ router.post('/:id/send-day-list', async (req, res) => {
       dayYmd: weeklyPlanIstYmd(),
     });
 
+    // If Site Incharge / PC clicked Send, also ping their own WhatsApp when different.
+    let cc = null;
+    const viewerProfile = await loadUserProfile(req.user);
+    const viewerTo = normalizeWhatsAppNumber(viewerProfile?.whatsapp_number);
+    const ownerTo = normalizeWhatsAppNumber(toNumber);
+    if (viewerTo && viewerTo !== ownerTo) {
+      try {
+        cc = await notifyWeeklyPlanAfterUpload({
+          username: viewerProfile.username || req.user?.username,
+          user: viewerProfile,
+          toNumber: viewerTo,
+          fullName: viewerProfile.full_name || req.user?.full_name,
+          dayYmd: weeklyPlanIstYmd(),
+        });
+      } catch (ccErr) {
+        cc = { ok: false, error: ccErr.message };
+      }
+    }
+
     const openCount = Number(whatsapp?.openCount) || 0;
     const waOk = !!whatsapp?.ok && !whatsapp?.skipped;
     const emptyOk = whatsapp?.skipped === 'empty' || (whatsapp?.ok && openCount === 0);
@@ -1091,17 +1110,19 @@ router.post('/:id/send-day-list', async (req, res) => {
         'No weekly-plan tasks in database for this week. Open the Excel preview (Refresh) so tasks save, then try WhatsApp again.';
     }
 
+    const toDisplay = ownerTo || normalizeWhatsAppNumber(toNumber);
     res.json({
       ok: waOk || (whatsapp?.ok && openCount > 0),
-      to: normalizeWhatsAppNumber(toNumber),
+      to: toDisplay,
       username,
       ingest,
       openCount,
       whatsapp,
+      cc,
       error: error || undefined,
       note:
-        openCount > 0
-          ? `Sent ${openCount} open task(s) via ${whatsapp?.via || 'whatsapp'}`
+        openCount > 0 && (waOk || whatsapp?.ok)
+          ? `Sent ${openCount} open task(s) via ${whatsapp?.via || 'whatsapp'} to ${toDisplay}${cc?.ok ? ` (+ copy to ${viewerTo})` : ''}`
           : error || whatsapp?.note || null,
     });
   } catch (err) {

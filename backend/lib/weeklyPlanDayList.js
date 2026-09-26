@@ -542,36 +542,10 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
 
   const fullName = opts.fullName || user?.full_name || bundle.employeeName || employeeUsername;
   const parts = formatWeeklyPlanMessageParts(bundle, { fullName });
-  // Prefer free-form text; Meta only allows it inside the 24h customer-care window.
-  // Outside that window text fails and we must use the Utility template.
-  let textResult = null;
-  for (let i = 0; i < parts.length; i += 1) {
-    textResult = await sendWhatsAppText(toNumber, parts[i]);
-    if (!textResult?.ok) {
-      console.warn('Weekly plan WA text failed:', textResult?.reason || textResult?.error, {
-        username: employeeUsername,
-        part: i + 1,
-        of: parts.length,
-      });
-      break;
-    }
-  }
-  if (textResult?.ok) {
-    markSentToday(employeeUsername, dayYmd);
-    rememberWhatsAppSession(toNumber, employeeUsername);
-    return {
-      ok: true,
-      via: 'text',
-      parts: parts.length,
-      openCount,
-      todayCount: (bundle.today || []).length,
-      priorPendingCount: (bundle.priorPending || []).length,
-      dayYmd,
-      dayLabel: dayLabel(dayYmd),
-    };
-  }
+  const toNorm = normalizeWhatsAppNumber(toNumber);
 
-  // Outside 24h session window — approved Utility template only.
+  // Prefer Utility template first — free text only works inside Meta's 24h window
+  // and often reports success to a wrong/stale number without the user noticing.
   const preview = (bundle.openOrdered || [])
     .slice(0, 3)
     .map((t, i) => `${i + 1}) ${clip(workLabel(t), 40)}`)
@@ -584,21 +558,63 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
     preview,
     dayYmd,
   });
-  if (tmplResult?.ok) {
+
+  let textResult = null;
+  let textPartsOk = 0;
+  // Also push the full numbered list when the customer-care window is open.
+  for (let i = 0; i < parts.length; i += 1) {
+    textResult = await sendWhatsAppText(toNumber, parts[i]);
+    if (!textResult?.ok) {
+      console.warn('Weekly plan WA text failed:', textResult?.reason || textResult?.error, {
+        username: employeeUsername,
+        to: toNorm,
+        part: i + 1,
+        of: parts.length,
+      });
+      break;
+    }
+    textPartsOk += 1;
+  }
+
+  if (tmplResult?.ok || textPartsOk > 0) {
     markSentToday(employeeUsername, dayYmd);
     rememberWhatsAppSession(toNumber, employeeUsername);
+    const via = tmplResult?.ok && textPartsOk > 0
+      ? 'template+text'
+      : tmplResult?.ok
+        ? tmplResult.via || 'template'
+        : 'text';
+    return {
+      ok: true,
+      via,
+      to: toNorm,
+      parts: parts.length,
+      textPartsOk,
+      templateOk: !!tmplResult?.ok,
+      openCount,
+      todayCount: (bundle.today || []).length,
+      priorPendingCount: (bundle.priorPending || []).length,
+      dayYmd,
+      dayLabel: label,
+      wamid:
+        tmplResult?.data?.messages?.[0]?.id ||
+        textResult?.data?.messages?.[0]?.id ||
+        null,
+    };
   }
+
   return {
-    ok: !!tmplResult?.ok,
-    via: tmplResult?.ok ? tmplResult.via || 'template_fallback' : 'failed',
+    ok: false,
+    via: 'failed',
+    to: toNorm,
     openCount,
     todayCount: (bundle.today || []).length,
     priorPendingCount: (bundle.priorPending || []).length,
     dayYmd,
     dayLabel: label,
-    reason: tmplResult?.ok ? undefined : textResult?.reason || tmplResult?.reason || 'send_failed',
+    reason: tmplResult?.reason || textResult?.reason || 'send_failed',
     textError: textResult,
-    templateError: tmplResult?.ok ? null : tmplResult,
+    templateError: tmplResult,
   };
 }
 

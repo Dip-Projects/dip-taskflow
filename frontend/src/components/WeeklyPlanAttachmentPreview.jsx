@@ -203,7 +203,7 @@ export function WeeklyPlanAttachmentPreview({
       if (data?.ok) {
         setWaNote(
           data?.note ||
-            `WhatsApp list sent (${data?.whatsapp?.via || "ok"}) · ${data?.openCount ?? data?.whatsapp?.openCount ?? 0} open · to ${data?.to || "number"}`
+            `WhatsApp sent (${data?.whatsapp?.via || "ok"}) · ${data?.openCount ?? 0} open · to ${data?.to || "?"}`
         );
       } else {
         const wa = data?.whatsapp || {};
