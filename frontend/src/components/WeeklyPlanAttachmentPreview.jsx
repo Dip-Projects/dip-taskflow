@@ -191,11 +191,17 @@ export function WeeklyPlanAttachmentPreview({
 
   const loadTasks = useCallback(async () => {
     if (!eaId) return [];
-    const qs = sourceFile ? `?source=${encodeURIComponent(sourceFile)}` : "";
-    const data = await api(`/ea-meeting/${eaId}/tasks${qs}`);
+    const qs = new URLSearchParams();
+    if (sourceFile) qs.set("source", sourceFile);
+    qs.set("_ts", String(Date.now()));
+    const data = await api(`/ea-meeting/${eaId}/tasks?${qs.toString()}`, {
+      cache: "no-store",
+    });
     const listed = Array.isArray(data?.tasks) ? data.tasks : [];
     if (listed.length || !sourceFile) return listed;
-    const fallback = await api(`/ea-meeting/${eaId}/tasks`);
+    const fallback = await api(`/ea-meeting/${eaId}/tasks?_ts=${Date.now()}`, {
+      cache: "no-store",
+    });
     return Array.isArray(fallback?.tasks) ? fallback.tasks : [];
   }, [eaId, sourceFile]);
 
@@ -383,6 +389,7 @@ export function WeeklyPlanAttachmentPreview({
       try {
         const listed = await loadTasks();
         if (!alive || !Array.isArray(listed)) return;
+        tasksRef.current = listed;
         setTasks(listed);
         // Remove optimistic overrides so WhatsApp/DB status becomes authoritative.
         setCellStatus({});
@@ -393,7 +400,7 @@ export function WeeklyPlanAttachmentPreview({
     const onFocus = () => {
       refreshStatuses();
     };
-    const timer = setInterval(refreshStatuses, 15000);
+    const timer = setInterval(refreshStatuses, 3000);
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {

@@ -636,8 +636,9 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
           .update(patch)
           .eq('ea_attendance_id', existing.ea_attendance_id)
           .eq('task_date', String(existing.task_date || '').slice(0, 10))
+          .eq('task_name', existing.task_name || '')
           .eq('time_slot', existing.time_slot || '');
-        if (!existing.time_slot) q = q.eq('task_name', existing.task_name || '');
+        if (existing.source_file) q = q.eq('source_file', existing.source_file);
         return q;
       };
 

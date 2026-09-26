@@ -799,7 +799,7 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
   };
   const { data: target, error: targetError } = await supabase
     .from('weekly_plan_tasks')
-    .select('id, employee_username, task_date, task_name, time_slot, half, status')
+    .select('id, employee_username, ea_attendance_id, task_date, task_name, time_slot, half, source_file, status')
     .eq('id', taskId)
     .maybeSingle();
   if (targetError) return { ok: false, reason: targetError.message };
@@ -812,19 +812,38 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
     .update(patch)
     .eq('employee_username', target.employee_username)
     .eq('task_date', ymdOf(target.task_date))
+    .eq('task_name', target.task_name || '')
     .eq('time_slot', target.time_slot || '');
+  if (target.source_file) updateQuery = updateQuery.eq('source_file', target.source_file);
   let { error } = await updateQuery;
 
   if (error && /completed_at|completed_via/i.test(error.message || '')) {
-    const retry = await supabase
+    let retryQuery = supabase
       .from('weekly_plan_tasks')
       .update({ status: 'Completed', updated_at: now })
       .eq('employee_username', target.employee_username)
       .eq('task_date', ymdOf(target.task_date))
+      .eq('task_name', target.task_name || '')
       .eq('time_slot', target.time_slot || '');
+    if (target.source_file) retryQuery = retryQuery.eq('source_file', target.source_file);
+    const retry = await retryQuery;
     error = retry.error;
   }
   if (error) return { ok: false, reason: error.message };
+
+  try {
+    let sheetQuery = supabase
+      .from('weekly_plan_sheet')
+      .update({ status: 'Completed', completed_at: now, updated_at: now })
+      .eq('ea_attendance_id', target.ea_attendance_id)
+      .eq('task_date', ymdOf(target.task_date))
+      .eq('task', target.task_name || '');
+    if (target.source_file) sheetQuery = sheetQuery.eq('source_file', target.source_file);
+    await sheetQuery;
+  } catch {
+    /* optional compatibility table */
+  }
+
   return { ok: true, task: { ...target, ...patch } };
 }
 
