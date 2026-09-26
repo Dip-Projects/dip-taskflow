@@ -188,16 +188,32 @@ export function WeeklyPlanAttachmentPreview({
     setWaSending(true);
     setWaNote("");
     try {
+      // Ensure cells are saved before messaging
+      const parsed = parsedRef.current;
+      if (parsed?.length) {
+        try {
+          const refreshed = await ingestParsed({ tasks: parsed });
+          setTasks(refreshed);
+        } catch (ingErr) {
+          setWaNote(ingErr.message || "Could not save tasks before WhatsApp");
+        }
+      }
+
       const data = await api(`/ea-meeting/${eaId}/send-day-list`, { method: "POST", body: {} });
       if (data?.ok) {
         setWaNote(
-          `WhatsApp list sent (${data?.whatsapp?.via || "ok"}) · ${data?.whatsapp?.openCount ?? 0} open · to ${data?.to || "number"}`
+          data?.note ||
+            `WhatsApp list sent (${data?.whatsapp?.via || "ok"}) · ${data?.openCount ?? data?.whatsapp?.openCount ?? 0} open · to ${data?.to || "number"}`
         );
       } else {
+        const wa = data?.whatsapp || {};
         setWaNote(
           data?.error ||
-            data?.whatsapp?.error ||
-            data?.whatsapp?.reason ||
+            data?.note ||
+            wa?.templateError?.error ||
+            wa?.textError?.error ||
+            wa?.reason ||
+            wa?.error ||
             "Could not send WhatsApp list"
         );
       }
@@ -206,7 +222,7 @@ export function WeeklyPlanAttachmentPreview({
     } finally {
       setWaSending(false);
     }
-  }, [eaId, waSending]);
+  }, [eaId, ingestParsed, waSending]);
 
   const load = useCallback(async () => {
     cancelledRef.current = false;

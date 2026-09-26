@@ -1027,7 +1027,7 @@ router.get('/:id/tasks', async (req, res) => {
 
 /**
  * POST /api/ea-meeting/:id/send-day-list
- * Resend today's weekly-plan WhatsApp list to the plan owner.
+ * Re-ingest plan Excel if needed, then WhatsApp today's open task list.
  */
 router.post('/:id/send-day-list', async (req, res) => {
   try {
@@ -1058,6 +1058,15 @@ router.post('/:id/send-day-list', async (req, res) => {
       });
     }
 
+    // Ensure tasks exist before messaging (table was often empty after failed ingest).
+    let ingest = null;
+    try {
+      ingest = await ingestWeeklyPlanFromEaRow(ea, null);
+    } catch (ingErr) {
+      console.error('EM send-day-list ingest:', ingErr.message);
+      ingest = { ok: false, error: ingErr.message, inserted: 0 };
+    }
+
     const whatsapp = await notifyWeeklyPlanAfterUpload({
       username,
       user: owner,
@@ -1066,11 +1075,34 @@ router.post('/:id/send-day-list', async (req, res) => {
       dayYmd: weeklyPlanIstYmd(),
     });
 
+    const openCount = Number(whatsapp?.openCount) || 0;
+    const waOk = !!whatsapp?.ok && !whatsapp?.skipped;
+    const emptyOk = whatsapp?.skipped === 'empty' || (whatsapp?.ok && openCount === 0);
+    let error = null;
+    if (!waOk && !emptyOk) {
+      error =
+        whatsapp?.templateError?.error ||
+        whatsapp?.textError?.error ||
+        whatsapp?.reason ||
+        whatsapp?.error ||
+        'WhatsApp send failed';
+    } else if (emptyOk && !(Number(ingest?.inserted) > 0) && openCount === 0) {
+      error =
+        'No weekly-plan tasks in database for this week. Open the Excel preview (Refresh) so tasks save, then try WhatsApp again.';
+    }
+
     res.json({
-      ok: !!whatsapp?.ok,
+      ok: waOk || (whatsapp?.ok && openCount > 0),
       to: normalizeWhatsAppNumber(toNumber),
       username,
+      ingest,
+      openCount,
       whatsapp,
+      error: error || undefined,
+      note:
+        openCount > 0
+          ? `Sent ${openCount} open task(s) via ${whatsapp?.via || 'whatsapp'}`
+          : error || whatsapp?.note || null,
     });
   } catch (err) {
     console.error('EM send-day-list:', err.message);

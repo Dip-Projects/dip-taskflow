@@ -542,10 +542,19 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
 
   const fullName = opts.fullName || user?.full_name || bundle.employeeName || employeeUsername;
   const parts = formatWeeklyPlanMessageParts(bundle, { fullName });
+  // Prefer free-form text; Meta only allows it inside the 24h customer-care window.
+  // Outside that window text fails and we must use the Utility template.
   let textResult = null;
   for (let i = 0; i < parts.length; i += 1) {
     textResult = await sendWhatsAppText(toNumber, parts[i]);
-    if (!textResult?.ok) break;
+    if (!textResult?.ok) {
+      console.warn('Weekly plan WA text failed:', textResult?.reason || textResult?.error, {
+        username: employeeUsername,
+        part: i + 1,
+        of: parts.length,
+      });
+      break;
+    }
   }
   if (textResult?.ok) {
     markSentToday(employeeUsername, dayYmd);
