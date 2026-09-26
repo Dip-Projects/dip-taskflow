@@ -19,6 +19,8 @@ const { ingestWeeklyPlanFromEaRow } = require('../lib/weeklyPlanTasks');
 const router = express.Router();
 router.use(requireAuth);
 
+const DAILY_STATUS_MIGRATION_CUTOFF = '2026-09-26T12:20:00.000Z';
+
 function usernamesFor(user) {
   return [...new Set(
     [user.username, user.user_name, user.employee_username]
@@ -1062,6 +1064,31 @@ router.get('/:id/tasks', async (req, res) => {
     }
 
     const source = String(req.query.source || '').trim();
+
+    // One-time cleanup for the TIME + WORK STATUS parser bug. Only daily rows
+    // (half=0) written before the fix are reset; two-half plans are untouched.
+    try {
+      let cleanup = supabase
+        .from('weekly_plan_tasks')
+        .update({
+          status: 'Pending',
+          completed_at: null,
+          completed_via: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('ea_attendance_id', eaId)
+        .eq('half', 0)
+        .neq('status', 'Pending')
+        .lt('updated_at', DAILY_STATUS_MIGRATION_CUTOFF);
+      if (source) cleanup = cleanup.eq('source_file', normalizeSourceFile(source));
+      const { error: cleanupError } = await cleanup;
+      if (cleanupError && !/half|completed_at|completed_via/i.test(cleanupError.message || '')) {
+        console.warn('daily weekly-plan status cleanup:', cleanupError.message);
+      }
+    } catch (cleanupError) {
+      console.warn('daily weekly-plan status cleanup:', cleanupError.message);
+    }
+
     let q = supabase
       .from('weekly_plan_tasks')
       .select('*')

@@ -18,7 +18,7 @@ import { parseWeeklyPlanBuffer } from "../lib/weeklyPlanExcel";
 import { parseWeeklyPlanPdfBuffer } from "../lib/weeklyPlanPdf";
 import { ExcelSheetTable } from "./ExcelSheetTable";
 
-const DAILY_STATUS_FIX_CUTOFF = Date.parse("2026-09-26T12:08:00.000Z");
+const DAILY_STATUS_FIX_CUTOFF = Date.parse("2026-09-26T12:20:00.000Z");
 
 function isPdfAttachment(fileName, fileUrl) {
   const lower = String(fileName || fileUrl || "").toLowerCase();
