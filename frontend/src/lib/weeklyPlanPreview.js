@@ -187,12 +187,15 @@ function findSheetDayColumns(matrix) {
 
   const halfRow = findHalfLabelRow(matrix, best.row);
   if (halfRow == null) {
-    return best.dates.map((cur) => ({
-      ymd: cur.ymd,
-      firstCol: cur.col,
-      secondCol: null,
-      layout: "daily",
-    }));
+    return best.dates.map((cur) => {
+      const label = findWeekdayLabelNear(matrix, best.row, cur.col);
+      return {
+        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+        firstCol: cur.col,
+        secondCol: null,
+        layout: "daily",
+      };
+    });
   }
 
   const firstHalfCols = [];
@@ -225,22 +228,67 @@ function findSheetDayColumns(matrix) {
         bestPairIdx = p;
       }
     }
+    let firstCol;
+    let secondCol;
     if (bestPairIdx >= 0) {
       usedPairs.add(bestPairIdx);
-      return {
-        ymd: cur.ymd,
-        firstCol: pairs[bestPairIdx].firstCol,
-        secondCol: pairs[bestPairIdx].secondCol,
-        layout: "half",
-      };
+      firstCol = pairs[bestPairIdx].firstCol;
+      secondCol = pairs[bestPairIdx].secondCol;
+    } else {
+      firstCol = cur.col;
+      secondCol = cur.col + 1;
     }
+    const label =
+      findWeekdayLabelNear(matrix, best.row, firstCol) ||
+      findWeekdayLabelNear(matrix, best.row, cur.col) ||
+      findWeekdayLabelNear(matrix, best.row, secondCol);
     return {
-      ymd: cur.ymd,
-      firstCol: cur.col,
-      secondCol: cur.col + 1,
+      ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+      firstCol,
+      secondCol,
       layout: "half",
     };
   });
+}
+
+const WEEKDAY_TO_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+function ymdAddDays(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00+05:30`);
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+}
+
+function alignYmdToWeekdayLabel(ymd, weekdayLabel) {
+  if (!ymd || !weekdayLabel) return ymd;
+  const want = WEEKDAY_TO_INDEX[String(weekdayLabel).trim().toLowerCase()];
+  if (want == null) return ymd;
+  const have = new Date(`${ymd}T12:00:00+05:30`).getDay();
+  let diff = want - have;
+  if (diff > 3) diff -= 7;
+  if (diff < -3) diff += 7;
+  return diff === 0 ? ymd : ymdAddDays(ymd, diff);
+}
+
+function findWeekdayLabelNear(matrix, dateHeaderRow, col) {
+  if (col == null || !Number.isFinite(col)) return null;
+  const start = Math.max(0, (dateHeaderRow ?? 0) - 1);
+  const end = Math.min(matrix.length, (dateHeaderRow ?? 0) + 4);
+  for (let r = start; r < end; r += 1) {
+    const t = cellDisplay(matrix, r, col).toUpperCase();
+    if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) {
+      return t;
+    }
+  }
+  return null;
 }
 
 /** YYYY-MM-DD for the calendar day that owns this sheet column. */
@@ -427,10 +475,12 @@ function sameTaskDate(task, taskDate) {
 function sameTaskRow(task, rowName, srNo) {
   const nameOk =
     rowName && normalizePreviewText(task?.task_name) === rowName;
-  const srOk = srNo != null && Number(task?.sr_no) === srNo;
-  // When both SR and name exist on the sheet row, require both.
-  if (srNo != null && rowName) return srOk && nameOk;
-  if (srNo != null) return srOk;
+  const taskSr = Number(task?.sr_no);
+  const hasTaskSr = Number.isFinite(taskSr) && taskSr > 0;
+  const srOk = srNo != null && hasTaskSr && taskSr === srNo;
+  // Prefer SR+name when both sides have SR; otherwise name (or SR) alone.
+  if (srNo != null && rowName && hasTaskSr) return srOk && nameOk;
+  if (srNo != null && hasTaskSr) return srOk;
   return Boolean(nameOk);
 }
 
@@ -441,13 +491,14 @@ function isAssignablePlanTask(task) {
   return Boolean(String(task.time_slot || task.task_name || "").trim());
 }
 
-function scoreTaskForCell(task, { cellText, taskDate, half }) {
+function scoreTaskForCell(task, { cellText, taskDate, half, requireDate = true }) {
   // Require exact cell text match — soft contains caused status bleed across cells.
   if (!taskMatchesCellText(task, cellText, { exactOnly: true })) return -1;
   let score = 100;
 
   if (taskDate && sameTaskDate(task, taskDate)) score += 40;
-  else if (taskDate) return -1; // never cross days
+  else if (taskDate && requireDate) return -1; // never cross days on the strict pass
+  else if (taskDate) score -= 20; // soft pass: prefer dated matches first
 
   if (half != null && Number(half) > 0) {
     if (Number(task.half) === Number(half)) score += 30;
@@ -543,6 +594,44 @@ export function buildSheetTaskIndex(matrix, tasks) {
     index.set(cell.key, hit);
     used.add(String(hit.id));
     usedCells.add(cell.key);
+  }
+
+  // Soft pass: same text + half (+ row when available) when date headers drifted from ingest.
+  const soft = [];
+  for (const cell of cells) {
+    if (usedCells.has(cell.key) || index.has(cell.key)) continue;
+    const rowName = normalizePreviewText(cell.rowTaskName);
+    for (const task of pool) {
+      if (used.has(String(task.id))) continue;
+      if (!taskMatchesCellText(task, cell.cellText, { exactOnly: true })) continue;
+      if (
+        cell.half != null &&
+        Number(cell.half) > 0 &&
+        Number(task.half) > 0 &&
+        Number(task.half) !== Number(cell.half)
+      ) {
+        continue;
+      }
+      // Prefer same row; allow when sheet row labels were blank before merge-fill.
+      if (rowName && normalizePreviewText(task.task_name) !== rowName) continue;
+      const score = scoreTaskForCell(task, { ...cell, requireDate: false });
+      if (score < 0) continue;
+      soft.push({ cell, task, score });
+    }
+  }
+  soft.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.cell.rowIdx - b.cell.rowIdx ||
+      a.cell.colIdx - b.cell.colIdx,
+  );
+  for (const { cell, task } of soft) {
+    const ck = cell.key;
+    const tid = String(task.id);
+    if (usedCells.has(ck) || used.has(tid) || index.has(ck)) continue;
+    index.set(ck, task);
+    used.add(tid);
+    usedCells.add(ck);
   }
 
   return index;

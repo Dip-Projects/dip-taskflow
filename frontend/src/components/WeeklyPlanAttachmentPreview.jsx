@@ -46,7 +46,43 @@ function cellBusyKey(rowIdx, colIdx) {
 }
 
 function preparePreviewSheet(sheet) {
-  return omitStatusHeaderColumns(sheet || { matrix: [], merges: [], colWidths: [] });
+  const cleaned = omitStatusHeaderColumns(sheet || { matrix: [], merges: [], colWidths: [] });
+  return fillMergedDisplayCells(cleaned);
+}
+
+/** Copy merge-master display into covered cells so row SR/name and date headers match the parser. */
+function fillMergedDisplayCells(sheet) {
+  const matrix = Array.isArray(sheet?.matrix)
+    ? sheet.matrix.map((row) => (Array.isArray(row) ? row.slice() : []))
+    : [];
+  const merges = Array.isArray(sheet?.merges) ? sheet.merges : [];
+  for (const m of merges) {
+    const r1 = Number(m.r1);
+    const c1 = Number(m.c1);
+    const r2 = Number(m.r2);
+    const c2 = Number(m.c2);
+    if (![r1, c1, r2, c2].every((n) => Number.isFinite(n))) continue;
+    const master = matrix[r1]?.[c1];
+    if (!master) continue;
+    for (let r = r1; r <= r2; r += 1) {
+      if (!matrix[r]) matrix[r] = [];
+      for (let c = c1; c <= c2; c += 1) {
+        if (r === r1 && c === c1) continue;
+        const cur = matrix[r][c];
+        const curText = String(cur?.display ?? cur ?? "").trim();
+        if (curText) continue;
+        matrix[r][c] =
+          typeof master === "object" && master
+            ? { ...master }
+            : master;
+      }
+    }
+  }
+  return {
+    matrix,
+    merges,
+    colWidths: Array.isArray(sheet?.colWidths) ? sheet.colWidths : [],
+  };
 }
 
 function sheetCellText(matrix, r, c) {
@@ -317,6 +353,8 @@ export function WeeklyPlanAttachmentPreview({
           setNote(
             "Saved tasks did not match this sheet layout. Click Pending on a cell to create the missing link."
           );
+        } else {
+          setNote("");
         }
       }
     } catch (err) {
@@ -338,6 +376,35 @@ export function WeeklyPlanAttachmentPreview({
       cancelledRef.current = true;
     };
   }, [load]);
+
+  // Keep badges in sync when WhatsApp (or another tab) updates Supabase status.
+  useEffect(() => {
+    if (!eaId) return undefined;
+    let alive = true;
+    const refreshStatuses = async () => {
+      if (!alive || document.visibilityState === "hidden") return;
+      try {
+        const listed = await loadTasks();
+        if (!alive || !Array.isArray(listed)) return;
+        setTasks(listed);
+        setCellStatus({});
+      } catch {
+        /* ignore transient poll errors */
+      }
+    };
+    const onFocus = () => {
+      refreshStatuses();
+    };
+    const timer = setInterval(refreshStatuses, 15000);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [eaId, loadTasks]);
 
   const setTaskStatus = async (task, nextStatus, busyKey) => {
     const wanted = nextStatus === "Pending" ? "Pending" : "Completed";
