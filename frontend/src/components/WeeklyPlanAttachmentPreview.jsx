@@ -137,6 +137,11 @@ function savedTaskShapeKey(task) {
 function taskShapeNeedsRepair(saved, parsed) {
   const savedKeys = new Set((saved || []).map(savedTaskShapeKey));
   const parsedKeys = new Set((parsed || []).map(savedTaskShapeKey));
+  const hasImportedStatus = (saved || []).some((task) => {
+    const status = String(task?.status || "Pending");
+    return status !== "Pending" && !task?.completed_at && !task?.completed_via;
+  });
+  if (hasImportedStatus) return true;
   if ((saved || []).length !== parsedKeys.size) return true;
   if (savedKeys.size !== parsedKeys.size) return true;
   for (const key of parsedKeys) {

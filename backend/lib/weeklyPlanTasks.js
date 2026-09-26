@@ -226,9 +226,11 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     const key = planTaskLooseKey(t);
     const prev = prevMap.get(key);
     const previousStatus = String(prev?.status || '');
-    const keepPrevious = ['Pending', 'Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(
-      previousStatus
-    );
+    const hasRealCompletion = Boolean(prev?.completed_at || prev?.completed_via);
+    const keepPrevious =
+      previousStatus === 'Pending' ||
+      (hasRealCompletion &&
+        ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(previousStatus));
     const finalStatus = keepPrevious
       ? previousStatus
       : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))

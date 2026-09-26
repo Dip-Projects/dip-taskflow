@@ -181,7 +181,7 @@ test("type 1 parses daywise time cells as tasks (not skipped as time headers)", 
   );
 });
 
-test("type 1 pairs merged date TIME columns with adjacent WORK STATUS columns", () => {
+test("type 1 ignores adjacent Excel WORK STATUS values and starts tasks Pending", () => {
   const matrix = [
     ["SR NO", "SITE NAME", "21-Sep-2026", "21-Sep-2026", "22-Sep-2026", "22-Sep-2026"],
     ["", "DAYS", "MONDAY", "", "TUESDAY", ""],
@@ -195,9 +195,9 @@ test("type 1 pairs merged date TIME columns with adjacent WORK STATUS columns", 
   assert.deepEqual(
     parsed.tasks.map((task) => [task.time_slot, task.status]),
     [
-      ["9-00 AM TO 12-00 PM", "In Progress"],
-      ["1-00 PM TO 4-00 PM", "On Hold"],
-      ["10-00 AM TO 12-00 PM", "Completed"],
+      ["9-00 AM TO 12-00 PM", "Pending"],
+      ["1-00 PM TO 4-00 PM", "Pending"],
+      ["10-00 AM TO 12-00 PM", "Pending"],
       ["2-00 PM TO 4-00 PM", "Pending"],
     ]
   );
@@ -338,7 +338,7 @@ test("keeps the daily planning layout without exposing work update columns", () 
     parsed.tasks.some(
       (task) =>
         task.time_slot === "SITE INSPECTION / FOUNDATION WORK" &&
-        task.status === "Completed"
+        task.status === "Pending"
     ),
     true
   );

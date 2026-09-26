@@ -332,7 +332,7 @@ function findDataStartRow(matrix, dateHeaderRow) {
   return Math.min((dateHeaderRow ?? 0) + 4, matrix.length);
 }
 
-function pushHalfTask(tasks, { ymd, taskName, srNo, half, content, statusContent }) {
+function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
   if (!text || isHalfOrTimeHeader(text)) return;
   const pureStatus = isPureStatusCell(text);
@@ -341,7 +341,7 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content, statusContent
     task_date: ymd,
     task_name: taskName,
     time_slot: pureStatus ? '' : text,
-    status: pureStatus ? normalizeStatus(text) : normalizeStatus(statusContent),
+    status: pureStatus ? normalizeStatus(text) : 'Pending',
     sr_no: srNo,
     half,
   });
@@ -394,14 +394,12 @@ function parseWeeklyPlanBuffer(buffer) {
         }
       } else {
         const plan = day.firstCol != null ? cellText(row[day.firstCol]) : '';
-        const workStatus = day.statusCol != null ? cellText(row[day.statusCol]) : '';
         pushHalfTask(tasks, {
           ymd: day.ymd,
           taskName,
           srNo,
           half: 0,
           content: plan,
-          statusContent: workStatus,
         });
       }
     }

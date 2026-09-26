@@ -481,7 +481,7 @@ function isSkipPlanCellText(text) {
   return false;
 }
 
-function pushHalfTask(tasks, { ymd, taskName, srNo, half, content, statusContent }) {
+function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
   if (!text || isSkipPlanCellText(text)) return;
 
@@ -494,7 +494,7 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content, statusContent
     task_date: ymd,
     task_name: taskName,
     time_slot: pureStatus ? "" : text,
-    status: pureStatus ? normalizeStatus(text) : normalizeStatus(statusContent),
+    status: pureStatus ? normalizeStatus(text) : "Pending",
     sr_no: srNo,
     half,
   });
@@ -538,14 +538,12 @@ export function parseWeeklyPlanMatrix(matrix) {
         }
       } else {
         const plan = day.firstCol != null ? cellText(row[day.firstCol]) : "";
-        const workStatus = day.statusCol != null ? cellText(row[day.statusCol]) : "";
         pushHalfTask(tasks, {
           ymd: day.ymd,
           taskName,
           srNo,
           half: 0,
           content: plan,
-          statusContent: workStatus,
         });
       }
     }
