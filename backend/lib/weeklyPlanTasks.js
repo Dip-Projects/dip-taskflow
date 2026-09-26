@@ -242,9 +242,11 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
           ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(previousStatus)));
     const finalStatus = keepPrevious
       ? previousStatus
-      : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
-        ? String(t.status)
-        : 'Pending';
+      : Number(t?.half) === 0
+        ? 'Pending'
+        : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
+          ? String(t.status)
+          : 'Pending';
     return {
       ea_attendance_id: eaId,
       employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
