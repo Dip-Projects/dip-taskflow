@@ -158,6 +158,38 @@ async function loadOwnEaRows(user) {
   );
 }
 
+function latestEaRowsByWeek(rows) {
+  const byWeek = new Map();
+  const rank = (row) =>
+    String(
+      row?.plan_submitted_at ||
+        row?.updated_at ||
+        row?.scanned_at ||
+        row?.created_at ||
+        row?.id ||
+        ''
+    );
+
+  for (const row of rows || []) {
+    const week = String(row?.meeting_week_start || '').slice(0, 10);
+    if (!week) continue;
+    const previous = byWeek.get(week);
+    if (!previous) {
+      byWeek.set(week, row);
+      continue;
+    }
+    const rowHasPlan = Boolean(row?.plan_submitted_at);
+    const previousHasPlan = Boolean(previous?.plan_submitted_at);
+    if (
+      (rowHasPlan && !previousHasPlan) ||
+      (rowHasPlan === previousHasPlan && rank(row) > rank(previous))
+    ) {
+      byWeek.set(week, row);
+    }
+  }
+  return [...byWeek.values()];
+}
+
 async function loadAllEaRows(limit = 200) {
   const { data, error } = await supabase
     .from('ea_meeting_attendance')
@@ -759,7 +791,9 @@ async function fetchWeeklyPlanTasksForUser({ eaIds, uid, namesLower }) {
     merge(data);
   }
 
-  if (uid) {
+  // When attendance IDs are available they are authoritative. Falling back to
+  // username/employee ID as well would pull stale re-uploads from the same week.
+  if (!eaIds.length && uid) {
     const { data, error } = await supabase
       .from('weekly_plan_tasks')
       .select('*')
@@ -773,7 +807,7 @@ async function fetchWeeklyPlanTasksForUser({ eaIds, uid, namesLower }) {
   }
 
   const orFilter = usernameOrFilter(namesLower);
-  if (orFilter) {
+  if (!eaIds.length && orFilter) {
     const { data, error } = await supabase
       .from('weekly_plan_tasks')
       .select('*')
@@ -830,7 +864,7 @@ async function fetchWeeklyPlanSheetForUser({ eaIds, uid, namesLower }) {
     merge(data);
   }
 
-  if (uid) {
+  if (!eaIds.length && uid) {
     const { data, error } = await supabase
       .from('weekly_plan_sheet')
       .select('*')
@@ -844,7 +878,7 @@ async function fetchWeeklyPlanSheetForUser({ eaIds, uid, namesLower }) {
   }
 
   const orFilter = usernameOrFilter(namesLower);
-  if (orFilter) {
+  if (!eaIds.length && orFilter) {
     const { data, error } = await supabase
       .from('weekly_plan_sheet')
       .select('*')
@@ -885,7 +919,8 @@ router.get('/my-plan-tasks', async (req, res) => {
       return res.json({ tasks: [], weeks: [], uploads: [], note: 'Weekly plan tasks are hidden for admin.' });
     }
 
-    const ownRows = await loadOwnEaRows(profile);
+    const allOwnRows = await loadOwnEaRows(profile);
+    const ownRows = latestEaRowsByWeek(allOwnRows);
     const namesLower = usernameSetLower(profile, ownRows);
     const uid = profile?.id != null ? String(profile.id) : null;
     const eaIds = [...new Set(ownRows.map((r) => r.id).filter(Boolean))];
