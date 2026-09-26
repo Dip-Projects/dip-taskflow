@@ -6,7 +6,7 @@ const {
 } = require('./whatsapp');
 const { parseWeeklyPlanBuffer } = require('./weeklyPlanExcel');
 
-const DAILY_STATUS_FIX_CUTOFF = Date.parse('2026-09-26T12:20:00.000Z');
+const DAILY_STATUS_FIX_CUTOFF = Date.parse('2026-09-26T12:30:00.000Z');
 
 function istYmd(d = new Date()) {
   return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });

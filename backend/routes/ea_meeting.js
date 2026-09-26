@@ -19,7 +19,7 @@ const { ingestWeeklyPlanFromEaRow } = require('../lib/weeklyPlanTasks');
 const router = express.Router();
 router.use(requireAuth);
 
-const DAILY_STATUS_MIGRATION_CUTOFF = '2026-09-26T12:20:00.000Z';
+const DAILY_STATUS_MIGRATION_CUTOFF = '2026-09-26T12:30:00.000Z';
 
 function usernamesFor(user) {
   return [...new Set(
