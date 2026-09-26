@@ -479,7 +479,7 @@ export function WeeklyPlanAttachmentPreview({
         <button
           type="button"
           className={`smt-excel-sheet__status-btn ${statusCss}`}
-          disabled={!clickable || Boolean(busyId)}
+          disabled={!clickable || busy}
           title={
             cancelled
               ? "Cancelled"

@@ -79,39 +79,82 @@ async function insertWeeklyPlanSheetRows(eaRow, sourceFile, parsedTasks) {
     .eq('source_file', sourceFile);
   if (del.error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(del.error.message || '')) {
-      throw new Error('Table weekly_plan_sheet missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
+      return { inserted: 0, skipped: true };
     }
     throw del.error;
   }
 
-  const rows = parsedTasks.map((t) => ({
-    ea_attendance_id: eaRow.id,
-    employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
-    employee_username: eaRow.employee_username,
-    employee_name: eaRow.employee_name,
-    site_name: eaRow.employee_site_name,
-    week_from: eaRow.meeting_week_start,
-    week_to: eaRow.meeting_week_end || eaRow.meeting_week_start,
-    task_date: t.task_date || eaRow.meeting_week_start,
-    task: String(t.task_name || '').trim() || 'Untitled task',
-    status: t.status === 'Cancelled' ? 'Cancelled' : (t.status || 'Pending'),
-    source_file: sourceFile,
-    completed_at: null,
-    updated_at: new Date().toISOString(),
-  }));
+  // Sheet unique key has no half — keep one row per (date, task name), prefer half=1 then last.
+  const sheetMap = new Map();
+  for (const t of parsedTasks) {
+    const task = String(t.task_name || '').trim() || 'Untitled task';
+    const taskDate = t.task_date || eaRow.meeting_week_start;
+    const key = `${String(taskDate).slice(0, 10)}|${task.toLowerCase()}`;
+    sheetMap.set(key, {
+      ea_attendance_id: eaRow.id,
+      employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
+      employee_username: eaRow.employee_username,
+      employee_name: eaRow.employee_name,
+      site_name: eaRow.employee_site_name,
+      week_from: eaRow.meeting_week_start,
+      week_to: eaRow.meeting_week_end || eaRow.meeting_week_start,
+      task_date: taskDate,
+      task,
+      status: t.status === 'Cancelled' ? 'Cancelled' : (t.status || 'Pending'),
+      source_file: sourceFile,
+      completed_at: null,
+      updated_at: new Date().toISOString(),
+    });
+  }
+  const rows = [...sheetMap.values()];
+  if (!rows.length) return { inserted: 0 };
 
   const { error } = await supabase.from('weekly_plan_sheet').insert(rows);
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-      throw new Error('Table weekly_plan_sheet missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
+      return { inserted: 0, skipped: true };
     }
-    throw error;
+    // Non-fatal — weekly_plan_tasks is the source of truth for status/WhatsApp.
+    console.warn('weekly_plan_sheet insert:', error.message);
+    return { inserted: 0, error: error.message };
   }
   return { inserted: rows.length };
 }
 
+function planTaskDedupeKey(t) {
+  return [
+    String(t.task_date || '').slice(0, 10),
+    t.sr_no == null || t.sr_no === '' ? '' : String(t.sr_no),
+    String(t.task_name || '').trim().toLowerCase(),
+    String(Number.isFinite(Number(t.half)) ? Number(t.half) : 0),
+    String(t.time_slot || '').trim().toLowerCase(),
+  ].join('|');
+}
+
+/** Drop duplicate keys inside one parse batch (unique index otherwise rejects the whole insert). */
+function dedupeParsedPlanTasks(parsedTasks) {
+  const map = new Map();
+  for (const t of parsedTasks || []) {
+    const taskDate = String(t?.task_date || '').slice(0, 10);
+    const taskName = String(t?.task_name || '').trim();
+    if (!taskDate || !taskName) continue;
+    const normalized = {
+      ...t,
+      task_date: taskDate,
+      task_name: taskName,
+      time_slot: t?.time_slot != null ? String(t.time_slot) : '',
+      sr_no: Number.isFinite(Number(t?.sr_no)) ? Number(t.sr_no) : null,
+      half: Number.isFinite(Number(t?.half)) ? Number(t.half) : 0,
+      status: t?.status || 'Pending',
+    };
+    map.set(planTaskDedupeKey(normalized), normalized);
+  }
+  return [...map.values()];
+}
+
 async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   const eaId = eaRow.id;
+  const uniqueTasks = dedupeParsedPlanTasks(parsedTasks);
 
   // Preserve portal/whatsapp completions across re-parse.
   const prevRes = await supabase
@@ -121,8 +164,7 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     .eq('source_file', sourceFile);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}|${String(t.time_slot || '').trim().toLowerCase()}`;
-    prevMap.set(key, t);
+    prevMap.set(planTaskDedupeKey(t), t);
   });
 
   const del = await supabase
@@ -137,10 +179,10 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     throw del.error;
   }
 
-  if (!parsedTasks.length) return { inserted: 0 };
+  if (!uniqueTasks.length) return { inserted: 0 };
 
-  const rows = parsedTasks.map((t) => {
-    const key = `${t.task_date}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}|${String(t.time_slot || '').trim().toLowerCase()}`;
+  const rows = uniqueTasks.map((t) => {
+    const key = planTaskDedupeKey(t);
     const prev = prevMap.get(key);
     const keepDone = prev && String(prev.status) === 'Completed';
     return {
@@ -153,9 +195,9 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
       week_end: eaRow.meeting_week_end,
       task_date: t.task_date,
       task_name: t.task_name,
-      time_slot: t.time_slot,
+      time_slot: t.time_slot || '',
       sr_no: t.sr_no,
-      half: Number.isFinite(Number(t.half)) ? Number(t.half) : 0,
+      half: t.half,
       source_file: sourceFile,
       status: keepDone ? 'Completed' : (t.status === 'Cancelled' ? 'Cancelled' : 'Pending'),
       completed_at: keepDone ? prev.completed_at : null,
@@ -169,11 +211,28 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
       throw new Error('Table weekly_plan_tasks missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
     }
+    // Batch rejected — insert one-by-one so valid rows still land.
+    if (/duplicate|unique|23505|dedupe/i.test(error.message || '')) {
+      let inserted = 0;
+      for (const row of rows) {
+        const one = await supabase.from('weekly_plan_tasks').insert(row);
+        if (!one.error) inserted += 1;
+        else if (!/duplicate|unique|23505/i.test(one.error.message || '')) {
+          throw one.error;
+        }
+      }
+      await insertWeeklyPlanSheetRows(eaRow, sourceFile, uniqueTasks);
+      return { inserted, deduped: parsedTasks.length - uniqueTasks.length };
+    }
     throw error;
   }
 
-  const flat = await insertWeeklyPlanSheetRows(eaRow, sourceFile, parsedTasks);
-  return { inserted: rows.length, flat_inserted: flat.inserted };
+  const flat = await insertWeeklyPlanSheetRows(eaRow, sourceFile, uniqueTasks);
+  return {
+    inserted: rows.length,
+    flat_inserted: flat.inserted,
+    deduped: parsedTasks.length - uniqueTasks.length,
+  };
 }
 
 /**
