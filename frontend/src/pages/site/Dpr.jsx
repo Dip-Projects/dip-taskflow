@@ -1702,13 +1702,18 @@ async function dbInsert(table, payload) {
 }
 
 /**
- * Save DPR so regenerating the same site+engineer+date+type overrides the
- * existing row (update-by-id).
- *
- * Live `dpr_reports.id` is int4/serial. If the sequence is behind MAX(id),
- * plain inserts hit `dpr_reports_pkey` even when no row exists for that engineer.
- * New rows therefore use explicit next id = MAX(id)+1 (with race retries).
+ * Live `dpr_reports.id` is int4/serial (not UUID). Sequence lag causes
+ * `dpr_reports_pkey` on default inserts. MAX(id)+1 also fails when the true
+ * max is hidden or every retry reuses the same candidate.
+ * New rows use a random signed-int4 id so we never depend on the sequence.
  */
+function randomDprReportId() {
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
+  // Stay in positive int4, skip the low serial range (1..~50k) used historically
+  return 50_000 + (buf[0] % 2_097_433_647);
+}
+
 async function saveDprReport({
   site,
   engineer,
@@ -1736,7 +1741,7 @@ async function saveDprReport({
     .eq("engineer", engineer)
     .eq("report_type", report_type)
     .eq("date", date)
-    .order("id", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(20);
 
   if (findErr) {
@@ -1748,7 +1753,7 @@ async function saveDprReport({
     const keepId = ids[0];
     const { error: updErr } = await supabase
       .from("dpr_reports")
-      .update(row)
+      .update({ ...row, created_at })
       .eq("id", keepId);
     if (updErr) throw new Error(`DB update failed: ${updErr.message}`);
 
@@ -1759,16 +1764,9 @@ async function saveDprReport({
     return { id: keepId, replaced: true };
   }
 
-  // New row — pick next free int id (sequence is often stale after imports/manual inserts)
   let lastErr = null;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const { data: top } = await supabase
-      .from("dpr_reports")
-      .select("id")
-      .order("id", { ascending: false })
-      .limit(1);
-    const nextId = (top?.[0]?.id != null ? Number(top[0].id) : 0) + 1;
-
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const nextId = randomDprReportId();
     const { data: inserted, error: insErr } = await supabase
       .from("dpr_reports")
       .insert({ id: nextId, ...row, created_at })
@@ -1780,7 +1778,7 @@ async function saveDprReport({
     }
     lastErr = insErr;
 
-    // IDENTITY ALWAYS tables reject explicit id — fall back to default + retries
+    // IDENTITY ALWAYS — cannot set id; keep retrying default nextval
     if (/generated|identity|overriding/i.test(insErr.message || "")) {
       for (let r = 0; r < 30; r++) {
         const { data: d2, error: e2 } = await supabase
@@ -1800,12 +1798,10 @@ async function saveDprReport({
     if (!/dpr_reports_pkey|duplicate key/i.test(insErr.message || "")) {
       throw new Error(`DB insert failed: ${insErr.message}`);
     }
-    // race on nextId — loop and re-read MAX(id)
   }
 
   throw new Error(
-    `DB insert failed: ${lastErr?.message || "could not allocate id"}. ` +
-      `Run in Supabase SQL: SELECT setval(pg_get_serial_sequence('public.dpr_reports','id'), (SELECT COALESCE(MAX(id),1) FROM public.dpr_reports));`,
+    `DB insert failed: ${lastErr?.message || "could not allocate id"}`,
   );
 }
 async function submitMaterialRequirements(list, site, engineer) {
