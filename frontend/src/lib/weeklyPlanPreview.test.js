@@ -151,6 +151,29 @@ test("type 1 parses daywise time cells as tasks (not skipped as time headers)", 
   );
 });
 
+test("type 1 pairs merged date TIME columns with adjacent WORK STATUS columns", () => {
+  const matrix = [
+    ["SR NO", "SITE NAME", "21-Sep-2026", "21-Sep-2026", "22-Sep-2026", "22-Sep-2026"],
+    ["", "DAYS", "MONDAY", "", "TUESDAY", ""],
+    ["", "TIME", "9-00 AM TO 7-30 PM", "WORK STATUS", "9-00 AM TO 7-30 PM", "WORK STATUS"],
+    ["1", "SITE WORK BUILDING", "9-00 AM TO 12-00 PM", "IN PROGRESS", "1-00 PM TO 4-00 PM", "ON HOLD"],
+    ["2", "TENDER COMPARISON", "10-00 AM TO 12-00 PM", "COMPLETED", "2-00 PM TO 4-00 PM", "PENDING"],
+  ];
+
+  const parsed = parseWeeklyPlanMatrix(matrix);
+  assert.equal(parsed.tasks.length, 4);
+  assert.deepEqual(
+    parsed.tasks.map((task) => [task.time_slot, task.status]),
+    [
+      ["9-00 AM TO 12-00 PM", "In Progress"],
+      ["1-00 PM TO 4-00 PM", "On Hold"],
+      ["10-00 AM TO 12-00 PM", "Completed"],
+      ["2-00 PM TO 4-00 PM", "Pending"],
+    ]
+  );
+  assert.equal(parsed.tasks.some((task) => task.time_slot === "IN PROGRESS"), false);
+});
+
 test("type 1 shows Pending only on daywise time data cells, not headers or site name", () => {
   const matrix = [
     [
@@ -281,8 +304,14 @@ test("keeps the daily planning layout without exposing work update columns", () 
   assert.equal(parsed.meta.halves, false);
   assert.equal(parsed.tasks.length >= 2, true);
   assert.equal(parsed.tasks.some((task) => task.task_name === "TO STUDY / FOLLOW UP"), true);
-  assert.equal(parsed.tasks.some((task) => task.time_slot === "SITE INSPECTION"), true);
-  assert.equal(parsed.tasks.some((task) => task.time_slot === "FOUNDATION WORK"), true);
+  assert.equal(
+    parsed.tasks.some(
+      (task) =>
+        task.time_slot === "SITE INSPECTION / FOUNDATION WORK" &&
+        task.status === "Completed"
+    ),
+    true
+  );
 });
 
 test("uses the actual half-column header positions when the date cells are offset from task cells", () => {

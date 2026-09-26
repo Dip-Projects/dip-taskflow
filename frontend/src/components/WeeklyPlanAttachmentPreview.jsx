@@ -126,6 +126,24 @@ function countActionableCells(matrix) {
   return n;
 }
 
+function savedTaskShapeKey(task) {
+  return [
+    String(task?.task_date || "").slice(0, 10),
+    String(task?.task_name || "").replace(/\s+/g, " ").trim().toLowerCase(),
+    String(task?.time_slot || "").replace(/\s+/g, " ").trim().toLowerCase(),
+  ].join("|");
+}
+
+function taskShapeNeedsRepair(saved, parsed) {
+  const savedKeys = new Set((saved || []).map(savedTaskShapeKey));
+  const parsedKeys = new Set((parsed || []).map(savedTaskShapeKey));
+  if (savedKeys.size !== parsedKeys.size) return true;
+  for (const key of parsedKeys) {
+    if (!savedKeys.has(key)) return true;
+  }
+  return false;
+}
+
 /**
  * Shows the submitted weekly-plan Excel as a same-layout sheet.
  * Each actionable cell is linked 1:1 to a saved weekly_plan_tasks row.
@@ -332,9 +350,13 @@ export function WeeklyPlanAttachmentPreview({
       setCellStatus({});
 
       let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
-      // Ingest only to initialize an empty plan. Normal view/refresh must be
-      // read-only or it recreates IDs and races WhatsApp status updates.
-      if (!nextTasks.length && parsed?.tasks?.length) {
+      // Initialize empty plans and repair legacy TIME + WORK STATUS parses
+      // where merged date headers previously created duplicate phantom tasks.
+      const repairDailyTemplate =
+        parsed?.tasks?.length &&
+        parsed?.meta?.halves === false &&
+        taskShapeNeedsRepair(nextTasks, parsed.tasks);
+      if (parsed?.tasks?.length && (!nextTasks.length || repairDailyTemplate)) {
         try {
           nextTasks = await ingestParsed(parsed);
         } catch (err) {

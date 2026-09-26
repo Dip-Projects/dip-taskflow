@@ -237,7 +237,11 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
       sr_no: t.sr_no,
       half: t.half,
       source_file: sourceFile,
-      status: keepDone ? 'Completed' : (t.status === 'Cancelled' ? 'Cancelled' : 'Pending'),
+      status: keepDone
+        ? 'Completed'
+        : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
+          ? String(t.status)
+          : 'Pending',
       completed_at: keepDone ? prev.completed_at : null,
       completed_via: keepDone ? prev.completed_via : null,
       updated_at: new Date().toISOString(),
@@ -294,27 +298,8 @@ async function ingestWeeklyPlanFromEaRow(eaRow, clientParsed = null) {
         details.push({ source: key, error: err.message, via: 'client' });
       }
     }
-    // Drop orphan rows from older/wrong source keys so UI/WhatsApp don't see duplicates.
-    const keepSources = new Set(
-      clientParsed.map((s) => String(s.source_file || s.key || 'attachment_1').trim()).filter(Boolean)
-    );
-    if (keepSources.size) {
-      try {
-        const { data: existing } = await supabase
-          .from('weekly_plan_tasks')
-          .select('id, source_file')
-          .eq('ea_attendance_id', eaRow.id);
-        const orphanIds = (existing || [])
-          .filter((r) => !keepSources.has(String(r.source_file || '').trim()))
-          .map((r) => r.id)
-          .filter(Boolean);
-        if (orphanIds.length) {
-          await supabase.from('weekly_plan_tasks').delete().in('id', orphanIds);
-        }
-      } catch (orphErr) {
-        console.warn('weekly plan orphan cleanup:', orphErr.message);
-      }
-    }
+    // Replace only the submitted source. Attachment previews ingest independently;
+    // deleting other source keys here made attachment_1 and attachment_2 erase each other.
     const failed = details.some((d) => d.error);
     return { ok: !failed && total >= 0, inserted: total, details, eaId: eaRow.id };
   }

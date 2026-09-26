@@ -332,9 +332,15 @@ function findDateColumns(matrix) {
   for (let r = 0; r < Math.min(matrix.length, 20); r += 1) {
     const row = matrix[r] || [];
     const dates = [];
+    const seenDates = new Set();
     for (let c = 0; c < row.length; c += 1) {
       const ymd = parseDateLoose(row[c]);
-      if (ymd) dates.push({ col: c, ymd });
+      // Merged date headers are copied into both TIME and WORK STATUS columns.
+      // Keep the first occurrence so one calendar day never becomes two tasks.
+      if (ymd && !seenDates.has(ymd)) {
+        dates.push({ col: c, ymd });
+        seenDates.add(ymd);
+      }
     }
     if (dates.length >= 2 && (!best || dates.length > best.dates.length)) {
       best = { row: r, dates };
@@ -348,12 +354,22 @@ function findDateColumns(matrix) {
   if (!hasHalfLayout) {
     return best.dates.map((cur) => {
       const label = findWeekdayLabelNear(matrix, best.row, cur.col);
+      let statusCol = null;
+      for (let c = cur.col + 1; c <= Math.min(cur.col + 2, (matrix[best.row] || []).length - 1); c += 1) {
+        const hasStatusHeader = matrix
+          .slice(best.row, Math.min(matrix.length, best.row + 6))
+          .some((row) => /^(WORK\s*STATUS|WORK\s*UPDATES?)$/i.test(cellText(row?.[c])));
+        if (hasStatusHeader) {
+          statusCol = c;
+          break;
+        }
+      }
       return {
         ymd: alignYmdToWeekdayLabel(cur.ymd, label),
         firstCol: cur.col,
         secondCol: null,
         timeCol: cur.col,
-        statusCol: cur.col,
+        statusCol,
         layout: "daily",
       };
     });
@@ -465,7 +481,7 @@ function isSkipPlanCellText(text) {
   return false;
 }
 
-function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
+function pushHalfTask(tasks, { ymd, taskName, srNo, half, content, statusContent }) {
   const text = cellText(content);
   if (!text || isSkipPlanCellText(text)) return;
 
@@ -478,7 +494,7 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
     task_date: ymd,
     task_name: taskName,
     time_slot: pureStatus ? "" : text,
-    status: pureStatus ? normalizeStatus(text) : "Pending",
+    status: pureStatus ? normalizeStatus(text) : normalizeStatus(statusContent),
     sr_no: srNo,
     half,
   });
@@ -522,7 +538,15 @@ export function parseWeeklyPlanMatrix(matrix) {
         }
       } else {
         const plan = day.firstCol != null ? cellText(row[day.firstCol]) : "";
-        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 0, content: plan });
+        const workStatus = day.statusCol != null ? cellText(row[day.statusCol]) : "";
+        pushHalfTask(tasks, {
+          ymd: day.ymd,
+          taskName,
+          srNo,
+          half: 0,
+          content: plan,
+          statusContent: workStatus,
+        });
       }
     }
   }
