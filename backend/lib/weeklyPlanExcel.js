@@ -168,6 +168,21 @@ function isSecondHalfLabel(text) {
   return /(2ND|SECOND)\s*HALF/i.test(String(text || '').replace(/\s+/g, ' ').trim());
 }
 
+function alignYmdToWeekdayLabel(ymd, label) {
+  const weekday = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6,
+  };
+  const wanted = weekday[String(label || '').trim().toLowerCase()];
+  if (wanted == null || !ymd) return ymd;
+  const d = new Date(`${ymd}T12:00:00+05:30`);
+  let diff = wanted - d.getDay();
+  if (diff > 3) diff -= 7;
+  if (diff < -3) diff += 7;
+  if (diff) d.setDate(d.getDate() + diff);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
 function findDateColumns(matrix) {
   let best = null;
   for (let r = 0; r < Math.min(matrix.length, 20); r += 1) {
@@ -206,6 +221,14 @@ function findDateColumns(matrix) {
 
   if (halfRow == null) {
     return best.dates.map((cur) => {
+      let weekdayLabel = '';
+      for (let r = Math.max(0, best.row - 1); r < Math.min(matrix.length, best.row + 4); r += 1) {
+        const text = cellText(matrix[r]?.[cur.col]).toUpperCase();
+        if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(text)) {
+          weekdayLabel = text;
+          break;
+        }
+      }
       let statusCol = null;
       for (let c = cur.col + 1; c <= Math.min(cur.col + 2, (matrix[best.row] || []).length - 1); c += 1) {
         const hasStatusHeader = matrix
@@ -217,7 +240,7 @@ function findDateColumns(matrix) {
         }
       }
       return {
-        ymd: cur.ymd,
+        ymd: alignYmdToWeekdayLabel(cur.ymd, weekdayLabel),
         firstCol: cur.col,
         secondCol: null,
         timeCol: cur.col,
@@ -334,7 +357,11 @@ function findDataStartRow(matrix, dateHeaderRow) {
 
 function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
-  if (!text || isHalfOrTimeHeader(text)) return;
+  const upper = text.replace(/\s+/g, ' ').trim().toUpperCase();
+  if (!text) return;
+  if (/^(1ST|2ND|FIRST|SECOND)\s*HALF(\s*PLANNING)?$/.test(upper)) return;
+  if (/^WORK\s*STATUS$|^DAYS\s*PLANNING$|^WORK\s*UPDATE$/.test(upper)) return;
+  if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(upper)) return;
   const pureStatus = isPureStatusCell(text);
   // One cell → one task (keep UI ↔ WhatsApp numbering in sync).
   tasks.push({
