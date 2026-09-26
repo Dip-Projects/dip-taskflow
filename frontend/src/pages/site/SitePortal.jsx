@@ -509,11 +509,9 @@ function buildNav(user, visMap) {
   if (isOfficeSiteViewer(user)) {
     const items = [
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
+      { key: "site-report", label: "Site Visit Report", icon: Ico.site },
+      { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     ];
-    if (visAllows(visMap, "site-report", user)) {
-      items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
-    }
-    items.push({ key: "my-reports", label: "My Reports", icon: Ico.myRpt });
     if (visAllows(visMap, "site-team-submissions", user)) {
       items.push({ key: "report-submissions", label: "Team Submissions", icon: Ico.myRpt });
     }

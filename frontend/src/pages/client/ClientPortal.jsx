@@ -4,6 +4,8 @@ import { api } from "../../lib/api";
 import "./ClientPortal.css";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import SiteReport from "../site/Sitereport";
+import MyReports from "../site/MyReports";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDateTime = (iso) => {
@@ -3008,6 +3010,8 @@ const SECTIONS = {
     title: "Files",
     sub: "DPR, WPR, monthly reports, drawings and site photos.",
   },
+  "site-report": { title: "Site Visit Report", sub: "" },
+  "my-reports": { title: "My Reports", sub: "" },
   profile: { title: "My Profile", sub: "" },
 };
 const mimeToExt = {
@@ -3707,6 +3711,8 @@ export default function ClientPortal() {
   const NAV_ITEMS = [
     { key: "overview", label: "Overview", icon: IcoHome },
     { key: "media", label: "Files", icon: IcoFolder },
+    { key: "site-report", label: "Site Visit Report", icon: IcoFolder },
+    { key: "my-reports", label: "My Reports", icon: IcoFolder },
   ];
 
   return (
@@ -3893,6 +3899,8 @@ export default function ClientPortal() {
                       onBrowse={handleBrowse}
                     />
                   )}
+                  {section === "site-report" && <SiteReport user={user} />}
+                  {section === "my-reports" && <MyReports user={user} />}
                   {section === "profile" && (
                     <ProfilePage
                       siteName={activeSite}

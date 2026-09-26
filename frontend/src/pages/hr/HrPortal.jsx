@@ -10,6 +10,8 @@ import {
 } from './letters/generateOfferLetterPdf';
 import { generateSalarySlipPdf, amountInWords } from './payroll/generateSalarySlipPdf';
 import { generateJoiningFormPdf } from './generateJoiningFormPdf';
+import SiteReport from '../site/Sitereport';
+import MyReports from '../site/MyReports';
 import './HrPortal.css';
 
 const svgProps = {
@@ -137,6 +139,8 @@ const NAV = [
   { key: 'payroll', label: 'Payroll', icon: Ico.payroll },
   { key: 'letters', label: 'Letters', icon: Ico.letter },
   { key: 'documents', label: 'Documents', icon: Ico.docs },
+  { key: 'site-report', label: 'Site Visit Report', icon: Ico.docs },
+  { key: 'my-reports', label: 'My Reports', icon: Ico.docs },
 ];
 
 const CV_ROLES = [
@@ -3566,6 +3570,8 @@ export default function HrPortal({ user, onLogout, onOpenOffice }) {
             {tab === 'documents' && (
               <DocumentsView employees={employees} user={user} />
             )}
+            {tab === 'site-report' && <SiteReport user={user} />}
+            {tab === 'my-reports' && <MyReports user={user} />}
           </div>
         </main>
       </div>

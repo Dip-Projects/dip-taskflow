@@ -4,6 +4,8 @@ import { supabase, fromMaybe } from "../../lib/supabase";
 import { api } from "../../lib/api";
 import { WeeklyPlanAttachmentPreview } from "../../components/WeeklyPlanAttachmentPreview";
 import { formatWeekDate } from "../../lib/weeklyPlanPreview";
+import SiteReport from "../site/Sitereport";
+import MyReports from "../site/MyReports";
 import "../site/SitePortal.css";
 import "../site/SiteMyTasks.css";
 
@@ -2986,6 +2988,8 @@ const BASE_NAV = [
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
+  { key: "site-report", label: "Site Visit Report", icon: Ico.dpr },
+  { key: "my-reports", label: "My Reports", icon: Ico.dpr },
   { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan, pcOnly: true },
   { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_only" },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
@@ -3016,6 +3020,8 @@ const NAV_COLORS = {
   "attendance-log": "#2563eb",
   "engineer-excel": "#0f766e",
   dpr: "#16a34a",
+  "site-report": "#c96a10",
+  "my-reports": "#a55622",
   "weekly-plan": "#0f766e",
   "task-delay": "#c2410c",
   "apply-leave": "#7c3aed",
@@ -3897,6 +3903,10 @@ useEffect(() => {
               <EngineerExcelReport sites={sites} />
             ) : activeTab === "dpr" ? (
               <DprSheetReport sites={sites} />
+            ) : activeTab === "site-report" ? (
+              <SiteReport user={user} />
+            ) : activeTab === "my-reports" ? (
+              <MyReports user={user} />
             ) : activeTab === "weekly-plan" ? (
               <WeeklyPlanReportMdo user={user} sites={sites} />
             ) : activeTab === "task-delay" ? (
