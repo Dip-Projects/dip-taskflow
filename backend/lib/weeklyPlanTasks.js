@@ -195,14 +195,17 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   // Preserve portal/whatsapp completions across re-parse (any prior source key).
   const prevRes = await supabase
     .from('weekly_plan_tasks')
-    .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via')
+    .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via, created_at, updated_at')
     .eq('ea_attendance_id', eaId);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    // Match completions by day+work text so half-clones still keep Completed.
+    // Match by visible cell and keep the newest Supabase status. Preferring any
+    // old Completed clone made a newer Pending toggle flip back after refresh.
     const key = planTaskLooseKey(t);
     const prev = prevMap.get(key);
-    if (!prev || String(t.status) === 'Completed') prevMap.set(key, t);
+    const prevAt = Date.parse(prev?.updated_at || prev?.completed_at || prev?.created_at || '') || 0;
+    const nextAt = Date.parse(t?.updated_at || t?.completed_at || t?.created_at || '') || 0;
+    if (!prev || nextAt >= prevAt) prevMap.set(key, t);
   });
 
   const del = await supabase
@@ -222,7 +225,15 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   const rows = uniqueTasks.map((t) => {
     const key = planTaskLooseKey(t);
     const prev = prevMap.get(key);
-    const keepDone = prev && String(prev.status) === 'Completed';
+    const previousStatus = String(prev?.status || '');
+    const keepPrevious = ['Pending', 'Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(
+      previousStatus
+    );
+    const finalStatus = keepPrevious
+      ? previousStatus
+      : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
+        ? String(t.status)
+        : 'Pending';
     return {
       ea_attendance_id: eaId,
       employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
@@ -237,13 +248,9 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
       sr_no: t.sr_no,
       half: t.half,
       source_file: sourceFile,
-      status: keepDone
-        ? 'Completed'
-        : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
-          ? String(t.status)
-          : 'Pending',
-      completed_at: keepDone ? prev.completed_at : null,
-      completed_via: keepDone ? prev.completed_via : null,
+      status: finalStatus,
+      completed_at: finalStatus === 'Completed' ? prev?.completed_at || null : null,
+      completed_via: finalStatus === 'Completed' ? prev?.completed_via || null : null,
       updated_at: new Date().toISOString(),
     };
   });

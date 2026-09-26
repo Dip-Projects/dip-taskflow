@@ -137,6 +137,7 @@ function savedTaskShapeKey(task) {
 function taskShapeNeedsRepair(saved, parsed) {
   const savedKeys = new Set((saved || []).map(savedTaskShapeKey));
   const parsedKeys = new Set((parsed || []).map(savedTaskShapeKey));
+  if ((saved || []).length !== parsedKeys.size) return true;
   if (savedKeys.size !== parsedKeys.size) return true;
   for (const key of parsedKeys) {
     if (!savedKeys.has(key)) return true;

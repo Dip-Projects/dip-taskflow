@@ -511,14 +511,13 @@ function scoreTaskForCell(task, { cellText, taskDate, half, requireDate = true }
 function taskSheetDedupeKey(task) {
   return [
     String(task?.task_date || "").slice(0, 10),
-    task?.sr_no == null || task?.sr_no === "" ? "" : String(task.sr_no),
     normalizePreviewText(task?.task_name),
     String(Number.isFinite(Number(task?.half)) ? Number(task.half) : 0),
     normalizePreviewText(task?.time_slot),
   ].join("|");
 }
 
-/** One row per sheet cell identity — prefer Completed when duplicates exist. */
+/** One row per sheet cell identity — the latest Supabase update is authoritative. */
 export function dedupeTasksForSheetIndex(tasks) {
   const map = new Map();
   for (const task of Array.isArray(tasks) ? tasks : []) {
@@ -529,9 +528,17 @@ export function dedupeTasksForSheetIndex(tasks) {
       map.set(key, task);
       continue;
     }
-    const prevDone = String(prev.status || "") === "Completed";
-    const nextDone = String(task.status || "") === "Completed";
-    if (nextDone && !prevDone) map.set(key, task);
+    const prevUpdated = Date.parse(prev.updated_at || prev.completed_at || prev.created_at || "") || 0;
+    const nextUpdated = Date.parse(task.updated_at || task.completed_at || task.created_at || "") || 0;
+    if (nextUpdated > prevUpdated) {
+      map.set(key, task);
+      continue;
+    }
+    if (nextUpdated === prevUpdated) {
+      const prevDone = String(prev.status || "") === "Completed";
+      const nextDone = String(task.status || "") === "Completed";
+      if (nextDone && !prevDone) map.set(key, task);
+    }
   }
   return [...map.values()];
 }

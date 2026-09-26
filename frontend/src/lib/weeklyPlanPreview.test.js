@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { parseWeeklyPlanMatrix } from "./weeklyPlanExcel.js";
 import {
   buildSheetTaskIndex,
+  dedupeTasksForSheetIndex,
   findPendingTasksForRow,
   findTaskForSheetCell,
   getCellDisplayText,
@@ -12,6 +13,35 @@ import {
   isWorkUpdateColumn,
   formatWeekDate,
 } from "./weeklyPlanPreview.js";
+
+test("newest Supabase status wins when duplicate task rows exist", () => {
+  const common = {
+    task_date: "2026-09-26",
+    task_name: "SITE VISIT",
+    time_slot: "1-00 PM TO 4-00 PM",
+    half: 0,
+  };
+  const rows = dedupeTasksForSheetIndex([
+    {
+      ...common,
+      id: "old-completed",
+      sr_no: 9,
+      status: "Completed",
+      updated_at: "2026-09-26T08:00:00.000Z",
+    },
+    {
+      ...common,
+      id: "new-pending",
+      sr_no: 5,
+      status: "Pending",
+      updated_at: "2026-09-26T09:00:00.000Z",
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "new-pending");
+  assert.equal(rows[0].status, "Pending");
+});
 
 test("stores task name without mutating the task label with half suffixes", () => {
   const matrix = [
