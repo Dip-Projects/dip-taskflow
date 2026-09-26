@@ -116,15 +116,22 @@ export function parseDateFromText(raw) {
   return parseDateLoose(raw);
 }
 
+/** Whole-cell status only — never match substrings like PROGRESS inside task titles. */
 function normalizeStatus(raw) {
   const t = cellText(raw).toUpperCase();
   if (!t) return "Pending";
-  if (/(COMPLETED|COMPLETE|DONE)/.test(t)) return "Completed";
-  if (/IN\s*PROGRESS|PROGRESS/.test(t)) return "In Progress";
-  if (/ON\s*HOLD|HOLD/.test(t)) return "On Hold";
-  if (/CANCEL/.test(t)) return "Cancelled";
-  if (/PENDING/.test(t)) return "Pending";
+  if (/^(COMPLETED|COMPLETE|DONE)$/.test(t)) return "Completed";
+  if (/^(IN\s*PROGRESS|PROGRESS)$/.test(t)) return "In Progress";
+  if (/^(ON\s*HOLD|HOLD)$/.test(t)) return "On Hold";
+  if (/^(CANCELLED|CANCELED|CANCEL)$/.test(t)) return "Cancelled";
+  if (/^PENDING$/.test(t)) return "Pending";
   return "Pending";
+}
+
+function isPureStatusCell(text) {
+  return /^(PENDING|COMPLETED|COMPLETE|DONE|IN\s*PROGRESS|PROGRESS|ON\s*HOLD|HOLD|CANCELLED|CANCELED|CANCEL)$/i.test(
+    cellText(text)
+  );
 }
 
 function isHeaderTaskName(name) {
@@ -465,16 +472,13 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   // One Excel cell → one task (matches the UI grid 1:1).
   // Do NOT split on "/" or newlines — that created dozens of phantom WA items
   // that did not match the sheet cells, so WhatsApp Done ≠ UI Completed.
-  const maybeStatus = normalizeStatus(text);
-  const isPureStatus =
-    maybeStatus !== "Pending" ||
-    /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
+  const pureStatus = isPureStatusCell(text);
 
   tasks.push({
     task_date: ymd,
     task_name: taskName,
-    time_slot: isPureStatus && maybeStatus !== "Pending" ? "" : text,
-    status: isPureStatus ? maybeStatus : "Pending",
+    time_slot: pureStatus ? "" : text,
+    status: pureStatus ? normalizeStatus(text) : "Pending",
     sr_no: srNo,
     half,
   });

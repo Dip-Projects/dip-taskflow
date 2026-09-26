@@ -89,15 +89,22 @@ function parseDateLoose(raw) {
   return null;
 }
 
+/** Whole-cell status only — never match substrings like PROGRESS inside task titles. */
 function normalizeStatus(raw) {
   const t = cellText(raw).toUpperCase();
   if (!t) return 'Pending';
-  if (/(COMPLETED|COMPLETE|DONE)/.test(t)) return 'Completed';
-  if (/IN\s*PROGRESS|PROGRESS/.test(t)) return 'In Progress';
-  if (/ON\s*HOLD|HOLD/.test(t)) return 'On Hold';
-  if (/CANCEL/.test(t)) return 'Cancelled';
-  if (/PENDING/.test(t)) return 'Pending';
+  if (/^(COMPLETED|COMPLETE|DONE)$/.test(t)) return 'Completed';
+  if (/^(IN\s*PROGRESS|PROGRESS)$/.test(t)) return 'In Progress';
+  if (/^(ON\s*HOLD|HOLD)$/.test(t)) return 'On Hold';
+  if (/^(CANCELLED|CANCELED|CANCEL)$/.test(t)) return 'Cancelled';
+  if (/^PENDING$/.test(t)) return 'Pending';
   return 'Pending';
+}
+
+function isPureStatusCell(text) {
+  return /^(PENDING|COMPLETED|COMPLETE|DONE|IN\s*PROGRESS|PROGRESS|ON\s*HOLD|HOLD|CANCELLED|CANCELED|CANCEL)$/i.test(
+    cellText(text)
+  );
 }
 
 function isHeaderTaskName(name) {
@@ -153,11 +160,12 @@ function sheetToMatrix(sheet) {
 }
 
 function isFirstHalfLabel(text) {
-  return /^(1ST|FIRST)\s*HALF(\s*PLANNING)?$/i.test(String(text || '').replace(/\s+/g, ' ').trim());
+  // Match "1st Half", "1ST HALF PLANNING", "1st Half (9:00 AM - 1:00 PM)"
+  return /(1ST|FIRST)\s*HALF/i.test(String(text || '').replace(/\s+/g, ' ').trim());
 }
 
 function isSecondHalfLabel(text) {
-  return /^(2ND|SECOND)\s*HALF(\s*PLANNING)?$/i.test(String(text || '').replace(/\s+/g, ' ').trim());
+  return /(2ND|SECOND)\s*HALF/i.test(String(text || '').replace(/\s+/g, ' ').trim());
 }
 
 function findDateColumns(matrix) {
@@ -310,16 +318,13 @@ function findDataStartRow(matrix, dateHeaderRow) {
 function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   const text = cellText(content);
   if (!text || isHalfOrTimeHeader(text)) return;
-  const maybeStatus = normalizeStatus(text);
-  const isPureStatus =
-    maybeStatus !== 'Pending' ||
-    /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
+  const pureStatus = isPureStatusCell(text);
   // One cell → one task (keep UI ↔ WhatsApp numbering in sync).
   tasks.push({
     task_date: ymd,
     task_name: taskName,
-    time_slot: isPureStatus && maybeStatus !== 'Pending' ? '' : text,
-    status: isPureStatus ? maybeStatus : 'Pending',
+    time_slot: pureStatus ? '' : text,
+    status: pureStatus ? normalizeStatus(text) : 'Pending',
     sr_no: srNo,
     half,
   });

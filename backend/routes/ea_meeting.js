@@ -1058,10 +1058,11 @@ router.post('/:id/send-day-list', async (req, res) => {
       });
     }
 
-    // Ensure tasks exist before messaging (table was often empty after failed ingest).
+    // Prefer client parse (same as the on-screen grid). Fall back to server Excel parse.
     let ingest = null;
+    const clientParsed = Array.isArray(req.body?.clientParsed) ? req.body.clientParsed : null;
     try {
-      ingest = await ingestWeeklyPlanFromEaRow(ea, null);
+      ingest = await ingestWeeklyPlanFromEaRow(ea, clientParsed);
     } catch (ingErr) {
       console.error('EM send-day-list ingest:', ingErr.message);
       ingest = { ok: false, error: ingErr.message, inserted: 0 };

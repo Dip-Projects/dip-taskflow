@@ -199,7 +199,16 @@ export function WeeklyPlanAttachmentPreview({
         }
       }
 
-      const data = await api(`/ea-meeting/${eaId}/send-day-list`, { method: "POST", body: {} });
+      // Pass the same client parse the grid uses so server ingest cannot overwrite with a divergent parse.
+      const data = await api(`/ea-meeting/${eaId}/send-day-list`, {
+        method: "POST",
+        body: {
+          clientParsed:
+            parsed?.length && sourceFile
+              ? [{ source_file: sourceFile, key: sourceFile, tasks: parsed.slice(0, 400) }]
+              : undefined,
+        },
+      });
       if (data?.ok) {
         setWaNote(
           data?.note ||
