@@ -307,9 +307,9 @@ async function loadOpenWeeklyPlanTasksForUser(user, dayYmd = istYmd()) {
       .select('*')
       .neq('status', 'Completed')
       .neq('status', 'Cancelled')
-      .lte('task_date', dayYmd)
-      .order('task_date', { ascending: true })
+      .eq('task_date', dayYmd)
       .order('sr_no', { ascending: true })
+      .order('half', { ascending: true })
       .order('task_name', { ascending: true });
 
   if (uid) {
@@ -323,20 +323,25 @@ async function loadOpenWeeklyPlanTasksForUser(user, dayYmd = istYmd()) {
 
 function formatWeeklyPlanListMessage({ fullName, dayYmd, tasks, intro }) {
   const label = dayLabel(dayYmd);
+  const todayYmd = String(dayYmd || '').slice(0, 10);
+  const todayTasks = (tasks || []).filter(
+    (t) => String(t.task_date || '').slice(0, 10) === todayYmd
+  );
   const lines = [
     intro || `Hi ${fullName || 'Team'},`,
-    `📋 Weekly plan — through ${label}`,
-    tasks.length ? `Open tasks Mon→today (${tasks.length}):` : 'No open weekly-plan tasks through today.',
+    `📋 Weekly plan — ${label}`,
+    todayTasks.length
+      ? `Today's open tasks (${todayTasks.length}):`
+      : 'No open weekly-plan tasks for today.',
   ];
 
-  tasks.forEach((t, i) => {
-    const when = t.task_date === dayYmd ? 'today' : dayLabel(t.task_date);
+  todayTasks.forEach((t, i) => {
     const time = t.time_slot ? ` · ${t.time_slot}` : '';
-    const pend = t.task_date < dayYmd ? ' · PENDING' : '';
-    lines.push(`${i + 1}. ${clip(t.task_name, 80)}${time} (${when})${pend}`);
+    const half = Number(t.half) === 1 ? ' · 1H' : Number(t.half) === 2 ? ' · 2H' : '';
+    lines.push(`${i + 1}. ${clip(t.task_name, 80)}${time}${half}`);
   });
 
-  if (tasks.length) {
+  if (todayTasks.length) {
     lines.push('');
     lines.push('Reply with numbers to mark done, e.g. 1,3 or ALL');
     lines.push('Reply PLAN for this list again.');
@@ -456,23 +461,30 @@ async function processUploadedWeeklyPlan({ user, eaId, weekStart, clientParsed }
 
   let open = await loadOpenWeeklyPlanTasksForUser(waUser, dayYmd);
 
-  // If DB insert failed but client parsed tasks, still WhatsApp Mon→today from client data
+  // If DB insert failed but client parsed tasks, still WhatsApp today's tasks from client data
   if (!open.length && Array.isArray(clientParsed)) {
     const fallback = [];
     for (const src of clientParsed) {
       for (const t of src.tasks || []) {
         if (t.status === 'Cancelled') continue;
-        if (t.task_date && t.task_date <= dayYmd) {
+        if (String(t.task_date || '').slice(0, 10) === dayYmd) {
           fallback.push({
             task_date: t.task_date,
             task_name: t.task_name,
             time_slot: t.time_slot,
+            half: t.half,
+            sr_no: t.sr_no,
             status: 'Pending',
           });
         }
       }
     }
-    fallback.sort((a, b) => String(a.task_date).localeCompare(String(b.task_date)));
+    fallback.sort((a, b) => {
+      const sa = Number(a.sr_no) || 0;
+      const sb = Number(b.sr_no) || 0;
+      if (sa !== sb) return sa - sb;
+      return (Number(a.half) || 0) - (Number(b.half) || 0);
+    });
     open = fallback;
   }
 
@@ -483,7 +495,7 @@ async function processUploadedWeeklyPlan({ user, eaId, weekStart, clientParsed }
       dayYmd,
       tasks: open,
       fullName: waUser.full_name,
-      intro: `✅ Plan uploaded. Hi ${waUser.full_name || 'Team'}, open weekly-plan tasks (Mon → today):`,
+      intro: `✅ Plan uploaded. Hi ${waUser.full_name || 'Team'}, today's weekly-plan tasks:`,
       sayEmpty: true,
     });
   } else {
@@ -509,7 +521,7 @@ async function runWeeklyPlanDayDigestCron() {
     .select('employee_username, employee_id, employee_name')
     .neq('status', 'Completed')
     .neq('status', 'Cancelled')
-    .lte('task_date', dayYmd);
+    .eq('task_date', dayYmd);
 
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
@@ -562,7 +574,7 @@ async function runWeeklyPlanDayDigestCron() {
     const res = await sendWeeklyPlanDayList(user.whatsapp_number, waUser, {
       dayYmd,
       tasks,
-      intro: `Good morning ${waUser.full_name || 'Team'}, pending + today's weekly-plan tasks:`,
+      intro: `Good morning ${waUser.full_name || 'Team'}, today's weekly-plan tasks:`,
     });
     if (res.ok) sent += 1;
     else skipped += 1;

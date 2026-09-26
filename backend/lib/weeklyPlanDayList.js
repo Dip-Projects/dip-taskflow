@@ -183,15 +183,17 @@ function sortPlanTasks(a, b) {
 
 /**
  * Load week rows for one employee username.
- * Bundle: today (all non-cancelled) + prior open (pending carryover).
+ * Bundle: today (exact task_date match) + optional prior open (earlier days).
  */
-async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
+async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd(), opts = {}) {
   const username = String(employeeUsername || '').trim();
+  const todayYmd = ymdOf(dayYmd) || String(dayYmd || '').slice(0, 10);
   if (!username) {
-    return { dayYmd, weekStart: null, today: [], priorPending: [], openOrdered: [], error: 'no_username' };
+    return { dayYmd: todayYmd, weekStart: null, today: [], priorPending: [], openOrdered: [], error: 'no_username' };
   }
 
-  const weekStart = weekStartMonday(dayYmd);
+  const weekStart = weekStartMonday(todayYmd);
+  const todayOnly = opts.todayOnly === true;
 
   let { data, error } = await supabase
     .from('weekly_plan_tasks')
@@ -199,10 +201,11 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
       'id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name'
     )
     .ilike('employee_username', username)
-    .gte('task_date', weekStart)
-    .lte('task_date', dayYmd)
+    .gte('task_date', todayOnly ? todayYmd : weekStart)
+    .lte('task_date', todayYmd)
     .order('task_date', { ascending: true })
-    .order('sr_no', { ascending: true });
+    .order('sr_no', { ascending: true })
+    .order('half', { ascending: true });
 
   if (error) {
     // Fallback without ilike if needed
@@ -213,8 +216,8 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
           'id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name'
         )
         .eq('employee_username', username)
-        .gte('task_date', weekStart)
-        .lte('task_date', dayYmd)
+        .gte('task_date', todayOnly ? todayYmd : weekStart)
+        .lte('task_date', todayYmd)
         .order('task_date', { ascending: true });
       data = retry.data;
       error = retry.error;
@@ -224,7 +227,7 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
       return {
-        dayYmd,
+        dayYmd: todayYmd,
         weekStart,
         today: [],
         priorPending: [],
@@ -238,27 +241,34 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
 
   const rows = (data || [])
     .filter((r) => String(r.employee_username || '').trim().toLowerCase() === username.toLowerCase())
+    .map((r) => ({ ...r, task_date: ymdOf(r.task_date) || r.task_date }))
     .sort(sortPlanTasks);
 
-  const today = rows.filter((r) => ymdOf(r.task_date) === dayYmd && String(r.status || '') !== 'Cancelled');
-  const priorPending = rows.filter((r) => {
-    const d = ymdOf(r.task_date);
-    return d && d < dayYmd && isOpenWeeklyStatus(r.status);
-  });
+  // Strict calendar-day match only (never put prior days into "today").
+  const today = rows.filter(
+    (r) => ymdOf(r.task_date) === todayYmd && String(r.status || '') !== 'Cancelled'
+  );
+  const priorPending = todayOnly
+    ? []
+    : rows.filter((r) => {
+        const d = ymdOf(r.task_date);
+        return d && d < todayYmd && isOpenWeeklyStatus(r.status);
+      });
 
-  // Numbered open list: today's open first, then prior-day pending (oldest→newest)
+  // Numbered open list: today's open only when todayOnly; else today then prior.
   const openOrdered = [
     ...today.filter((t) => isOpenWeeklyStatus(t.status)),
-    ...priorPending.filter((t) => isOpenWeeklyStatus(t.status)),
+    ...priorPending,
   ];
 
   return {
-    dayYmd,
+    dayYmd: todayYmd,
     weekStart,
     today,
     priorPending,
     openOrdered,
-    employeeName: rows[0]?.employee_name || null,
+    todayOnly,
+    employeeName: rows[0]?.employee_name || today[0]?.employee_name || null,
   };
 }
 
@@ -287,14 +297,31 @@ function formatTaskLine(task, index) {
 /** Build full day-list text, then split into WhatsApp-safe chunks (keep numbering intact). */
 function formatWeeklyPlanMessageParts(bundle, opts = {}) {
   const fullName = opts.fullName || bundle.employeeName || 'Team member';
-  const dayYmd = bundle.dayYmd || istYmd();
+  const dayYmd = ymdOf(bundle.dayYmd) || istYmd();
   const label = dayLabel(dayYmd);
   const CHUNK = 3500;
+  const todayOnly = bundle.todayOnly === true || opts.todayOnly === true;
 
-  const todayOpen = (bundle.today || []).filter((t) => isOpenWeeklyStatus(t.status));
-  const todayDone = (bundle.today || []).filter((t) => !isOpenWeeklyStatus(t.status));
-  const prior = bundle.priorPending || [];
-  const open = bundle.openOrdered || [];
+  // Re-filter by exact date so prior days never leak into TODAY.
+  const todayRows = (bundle.today || []).filter(
+    (t) => ymdOf(t.task_date) === dayYmd && String(t.status || '') !== 'Cancelled'
+  );
+  const todayOpen = todayRows
+    .filter((t) => isOpenWeeklyStatus(t.status))
+    .sort(sortPlanTasks);
+  const todayDone = todayRows
+    .filter((t) => !isOpenWeeklyStatus(t.status))
+    .sort(sortPlanTasks);
+  const prior = todayOnly
+    ? []
+    : (bundle.priorPending || [])
+        .filter((t) => {
+          const d = ymdOf(t.task_date);
+          return d && d < dayYmd && isOpenWeeklyStatus(t.status);
+        })
+        .sort(sortPlanTasks);
+
+  const open = [...todayOpen, ...prior];
   const idToNum = new Map(open.map((t, i) => [t.id, i + 1]));
 
   const header = [
@@ -306,9 +333,14 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
 
   if (!todayOpen.length && !todayDone.length && !prior.length) {
     return [
-      [...header, '_No tasks for today, and nothing pending from earlier this week._', '', 'Reply *PLAN* anytime to refresh.'].join(
-        '\n'
-      ),
+      [
+        ...header,
+        todayOnly
+          ? '_No tasks scheduled for today._'
+          : '_No tasks for today, and nothing pending from earlier this week._',
+        '',
+        'Reply *PLAN* anytime to refresh.',
+      ].join('\n'),
     ];
   }
 
@@ -346,8 +378,8 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
     '',
     '————————',
     open.length
-      ? `Open: *${open.length}*  ·  Reply *1* or *1,3* to mark done`
-      : 'All caught up for this list ✅',
+      ? `Open today: *${todayOpen.length}*  ·  Reply *1* or *1,3* to mark done`
+      : 'All caught up for today ✅',
     'Reply *PLAN* to refresh',
   ];
 
@@ -474,7 +506,7 @@ async function completeWeeklyPlanByNumbersForPhone(fromNumber, candidates, numbe
   for (const u of ordered) {
     const username = String(u.username || '').trim();
     if (!username || isAdminUser(u)) continue;
-    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
+    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd, { todayOnly: true });
     if (!(bundle.openOrdered || []).length && !(bundle.today || []).length) continue;
     const result = await completeWeeklyPlanByNumbers(username, numbers, dayYmd);
     last = { ...result, username, user: u };
@@ -510,9 +542,11 @@ async function findUserByUsername(username) {
 
 /**
  * Send day list WhatsApp for one employee username.
+ * Default: only tasks whose task_date is today (IST) — no prior-day mix-in.
  */
 async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
-  const dayYmd = opts.dayYmd || istYmd();
+  const dayYmd = ymdOf(opts.dayYmd) || istYmd();
+  const todayOnly = opts.todayOnly !== false;
   const user =
     opts.user ||
     (await findUserByUsername(employeeUsername));
@@ -530,7 +564,7 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
     return { ok: true, skipped: 'already_sent_today', dayYmd, via: 'deduped' };
   }
 
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
+  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly });
   if (bundle.error === 'missing_table') {
     return { ok: false, reason: 'missing_table', note: bundle.note, dayYmd };
   }
@@ -541,12 +575,15 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
   }
 
   const fullName = opts.fullName || user?.full_name || bundle.employeeName || employeeUsername;
-  const parts = formatWeeklyPlanMessageParts(bundle, { fullName });
+  const parts = formatWeeklyPlanMessageParts(bundle, { fullName, todayOnly });
   const toNorm = normalizeWhatsAppNumber(toNumber);
 
   // Prefer Utility template first — free text only works inside Meta's 24h window
   // and often reports success to a wrong/stale number without the user noticing.
-  const preview = (bundle.openOrdered || [])
+  const todayOpenPreview = (bundle.today || [])
+    .filter((t) => ymdOf(t.task_date) === dayYmd && isOpenWeeklyStatus(t.status))
+    .sort(sortPlanTasks);
+  const preview = todayOpenPreview
     .slice(0, 3)
     .map((t, i) => `${i + 1}) ${clip(workLabel(t), 40)}`)
     .join('; ');
@@ -554,7 +591,7 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
   const tmplResult = await sendWeeklyPlanUtilityTemplate(toNumber, {
     fullName,
     dayLabel: label,
-    openCount,
+    openCount: todayOpenPreview.length,
     preview,
     dayYmd,
   });
@@ -591,11 +628,12 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
       parts: parts.length,
       textPartsOk,
       templateOk: !!tmplResult?.ok,
-      openCount,
+      openCount: todayOpenPreview.length,
       todayCount: (bundle.today || []).length,
-      priorPendingCount: (bundle.priorPending || []).length,
+      priorPendingCount: 0,
       dayYmd,
       dayLabel: label,
+      todayOnly,
       wamid:
         tmplResult?.data?.messages?.[0]?.id ||
         textResult?.data?.messages?.[0]?.id ||
@@ -607,11 +645,12 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
     ok: false,
     via: 'failed',
     to: toNorm,
-    openCount,
+    openCount: todayOpenPreview.length,
     todayCount: (bundle.today || []).length,
-    priorPendingCount: (bundle.priorPending || []).length,
+    priorPendingCount: 0,
     dayYmd,
     dayLabel: label,
+    todayOnly,
     reason: tmplResult?.reason || textResult?.reason || 'send_failed',
     textError: textResult,
     templateError: tmplResult,
@@ -701,7 +740,7 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
 }
 
 async function completeWeeklyPlanByIndexes(employeeUsername, indexes, dayYmd = istYmd()) {
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
+  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: true });
   const open = bundle.openOrdered || [];
   let done = 0;
   let lastName = '';
@@ -714,7 +753,7 @@ async function completeWeeklyPlanByIndexes(employeeUsername, indexes, dayYmd = i
       lastName = workLabel(r.task || t) || lastName;
     }
   }
-  const refreshed = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
+  const refreshed = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: true });
   return { done, total: indexes.length, lastName, bundle: refreshed };
 }
 
@@ -740,7 +779,7 @@ function resolveWeeklyPlanReplyNumbers(openTasks, numbers) {
 }
 
 async function completeWeeklyPlanByNumbers(employeeUsername, numbers, dayYmd = istYmd()) {
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
+  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: true });
   const indexes = resolveWeeklyPlanReplyNumbers(bundle.openOrdered, numbers);
   if (!indexes.length) {
     return { done: 0, total: (numbers || []).length, lastName: '', bundle, matched: false };
@@ -847,7 +886,7 @@ async function runWeeklyPlanDayListCron(opts = {}) {
       results.push({ username, ok: false, reason: 'admin_skipped' });
       continue;
     }
-    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
+    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd, { todayOnly: true });
     const hasWork =
       (bundle.openOrdered || []).length > 0 || (bundle.today || []).length > 0;
     if (!hasWork) {
