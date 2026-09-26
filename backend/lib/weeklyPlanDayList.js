@@ -182,29 +182,53 @@ function sortPlanTasks(a, b) {
   return String(a.task_name || '').localeCompare(String(b.task_name || ''));
 }
 
-function planRowDedupeKey(t) {
-  return [
-    ymdOf(t?.task_date) || '',
-    t?.sr_no == null || t?.sr_no === '' ? '' : String(t.sr_no),
-    String(t?.task_name || '').trim().toLowerCase(),
-    String(Number.isFinite(Number(t?.half)) ? Number(t.half) : 0),
-    String(t?.time_slot || '').trim().toLowerCase(),
-  ].join('|');
+function normSlot(t) {
+  return String(t?.time_slot || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
-/** Keep one row per sheet cell; prefer Completed when duplicates exist. */
+function normName(t) {
+  return String(t?.task_name || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** Collapse half/sr clones: one WhatsApp line per day + work text. */
+function planRowDedupeKey(t) {
+  const slot = normSlot(t);
+  const name = normName(t);
+  return [ymdOf(t?.task_date) || '', slot || name].join('|');
+}
+
+function preferPlanRow(a, b) {
+  const aDone = String(a?.status || '') === 'Completed';
+  const bDone = String(b?.status || '') === 'Completed';
+  if (bDone && !aDone) return b;
+  if (aDone && !bDone) return a;
+  const ah = Number(a?.half) || 0;
+  const bh = Number(b?.half) || 0;
+  // Prefer a real half tag; if both set, prefer 2H (mis-tagged 1H clones of afternoon work).
+  if (bh > 0 && ah === 0) return b;
+  if (ah > 0 && bh === 0) return a;
+  if (bh !== ah) return bh > ah ? b : a;
+  const as = Number(a?.sr_no);
+  const bs = Number(b?.sr_no);
+  if (Number.isFinite(bs) && !Number.isFinite(as)) return b;
+  if (Number.isFinite(as) && !Number.isFinite(bs)) return a;
+  return a;
+}
+
+/** Keep one row per calendar day + work text; prefer Completed / better half. */
 function dedupePlanRows(rows) {
   const map = new Map();
   for (const row of rows || []) {
     const key = planRowDedupeKey(row);
+    if (!key || key === '|') continue;
     const prev = map.get(key);
-    if (!prev) {
-      map.set(key, row);
-      continue;
-    }
-    const prevDone = String(prev.status || '') === 'Completed';
-    const nextDone = String(row.status || '') === 'Completed';
-    if (nextDone && !prevDone) map.set(key, row);
+    map.set(key, prev ? preferPlanRow(prev, row) : row);
   }
   return [...map.values()];
 }

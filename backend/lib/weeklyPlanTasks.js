@@ -131,9 +131,35 @@ function planTaskDedupeKey(t) {
   ].join('|');
 }
 
+/** Same day + same work text → one row (drops half/sr clones from bad parses). */
+function planTaskLooseKey(t) {
+  const slot = String(t?.time_slot || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const name = String(t?.task_name || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return [String(t?.task_date || '').slice(0, 10), slot || name].join('|');
+}
+
+function preferParsedTask(a, b) {
+  const aDone = String(a?.status || '') === 'Completed';
+  const bDone = String(b?.status || '') === 'Completed';
+  if (bDone && !aDone) return b;
+  if (aDone && !bDone) return a;
+  const ah = Number(a?.half) || 0;
+  const bh = Number(b?.half) || 0;
+  if (bh > 0 && ah === 0) return b;
+  if (ah > 0 && bh === 0) return a;
+  if (bh !== ah) return bh > ah ? b : a;
+  return a;
+}
+
 /** Drop duplicate keys inside one parse batch (unique index otherwise rejects the whole insert). */
 function dedupeParsedPlanTasks(parsedTasks) {
-  const map = new Map();
+  const strict = new Map();
   for (const t of parsedTasks || []) {
     const taskDate = String(t?.task_date || '').slice(0, 10);
     const taskName = String(t?.task_name || '').trim();
@@ -147,9 +173,19 @@ function dedupeParsedPlanTasks(parsedTasks) {
       half: Number.isFinite(Number(t?.half)) ? Number(t.half) : 0,
       status: t?.status || 'Pending',
     };
-    map.set(planTaskDedupeKey(normalized), normalized);
+    const key = planTaskDedupeKey(normalized);
+    const prev = strict.get(key);
+    strict.set(key, prev ? preferParsedTask(prev, normalized) : normalized);
   }
-  return [...map.values()];
+  // Second pass: one row per day + work text (fixes 17 Friday lines for a 12-task day).
+  const loose = new Map();
+  for (const t of strict.values()) {
+    const key = planTaskLooseKey(t);
+    if (!key || key === '|') continue;
+    const prev = loose.get(key);
+    loose.set(key, prev ? preferParsedTask(prev, t) : t);
+  }
+  return [...loose.values()];
 }
 
 async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
@@ -163,7 +199,8 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     .eq('ea_attendance_id', eaId);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    const key = planTaskDedupeKey(t);
+    // Match completions by day+work text so half-clones still keep Completed.
+    const key = planTaskLooseKey(t);
     const prev = prevMap.get(key);
     if (!prev || String(t.status) === 'Completed') prevMap.set(key, t);
   });
@@ -183,7 +220,7 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   if (!uniqueTasks.length) return { inserted: 0 };
 
   const rows = uniqueTasks.map((t) => {
-    const key = planTaskDedupeKey(t);
+    const key = planTaskLooseKey(t);
     const prev = prevMap.get(key);
     const keepDone = prev && String(prev.status) === 'Completed';
     return {
