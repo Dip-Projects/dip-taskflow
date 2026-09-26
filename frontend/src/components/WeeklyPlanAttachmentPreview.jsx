@@ -18,6 +18,8 @@ import { parseWeeklyPlanBuffer } from "../lib/weeklyPlanExcel";
 import { parseWeeklyPlanPdfBuffer } from "../lib/weeklyPlanPdf";
 import { ExcelSheetTable } from "./ExcelSheetTable";
 
+const DAILY_STATUS_FIX_CUTOFF = Date.parse("2026-09-26T12:08:00.000Z");
+
 function isPdfAttachment(fileName, fileUrl) {
   const lower = String(fileName || fileUrl || "").toLowerCase();
   return lower.includes(".pdf") || lower.endsWith("pdf");
@@ -68,6 +70,9 @@ function fillMergedDisplayCells(sheet) {
       if (!matrix[r]) matrix[r] = [];
       for (let c = c1; c <= c2; c += 1) {
         if (r === r1 && c === c1) continue;
+        // Body TIME cells are often vertically merged. Copying their value into
+        // covered cells created a second hidden actionable cell and unstable status links.
+        if (c > 1) continue;
         const cur = matrix[r][c];
         const curText = String(cur?.display ?? cur ?? "").trim();
         if (curText) continue;
@@ -142,6 +147,12 @@ function taskShapeNeedsRepair(saved, parsed) {
     return status !== "Pending" && !task?.completed_at && !task?.completed_via;
   });
   if (hasImportedStatus) return true;
+  const hasStaleDailyStatus = (saved || []).some((task) => {
+    const status = String(task?.status || "Pending");
+    const updatedAt = Date.parse(task?.updated_at || task?.created_at || "") || 0;
+    return status !== "Pending" && updatedAt < DAILY_STATUS_FIX_CUTOFF;
+  });
+  if (hasStaleDailyStatus) return true;
   if ((saved || []).length !== parsedKeys.size) return true;
   if (savedKeys.size !== parsedKeys.size) return true;
   for (const key of parsedKeys) {

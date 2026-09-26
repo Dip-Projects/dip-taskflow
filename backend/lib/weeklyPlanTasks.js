@@ -6,6 +6,8 @@ const {
 } = require('./whatsapp');
 const { parseWeeklyPlanBuffer } = require('./weeklyPlanExcel');
 
+const DAILY_STATUS_FIX_CUTOFF = Date.parse('2026-09-26T12:08:00.000Z');
+
 function istYmd(d = new Date()) {
   return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
@@ -227,10 +229,17 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     const prev = prevMap.get(key);
     const previousStatus = String(prev?.status || '');
     const hasRealCompletion = Boolean(prev?.completed_at || prev?.completed_via);
+    const previousUpdatedAt =
+      Date.parse(prev?.updated_at || prev?.completed_at || prev?.created_at || '') || 0;
+    const staleDailyStatus =
+      Number(t?.half) === 0 &&
+      previousStatus !== 'Pending' &&
+      previousUpdatedAt < DAILY_STATUS_FIX_CUTOFF;
     const keepPrevious =
-      previousStatus === 'Pending' ||
-      (hasRealCompletion &&
-        ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(previousStatus));
+      !staleDailyStatus &&
+      (previousStatus === 'Pending' ||
+        (hasRealCompletion &&
+          ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(previousStatus)));
     const finalStatus = keepPrevious
       ? previousStatus
       : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
