@@ -318,7 +318,7 @@ function findHalfLabelRow(matrix, dateHeaderRow) {
 
 /**
  * Each calendar day owns exactly one 1st-half and one 2nd-half column.
- * Bind spatially (never by index, never reuse a half column across days).
+ * Pair consecutive 1st→2nd half headers, then assign each pair to the nearest date.
  */
 function findDateColumns(matrix) {
   let best = null;
@@ -361,52 +361,49 @@ function findDateColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
-  const usedFirst = new Set();
+  // Build (1st, 2nd) pairs left→right so days cannot steal each other's columns.
+  const pairs = [];
   const usedSecond = new Set();
+  for (const fc of firstHalfCols) {
+    const sc = secondHalfCols.find((c) => c > fc && !usedSecond.has(c));
+    if (sc == null) continue;
+    usedSecond.add(sc);
+    pairs.push({ firstCol: fc, secondCol: sc, mid: (fc + sc) / 2 });
+  }
+
+  const usedPairs = new Set();
   const dayCols = [];
 
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
-    const prev = best.dates[i - 1];
-    const next = best.dates[i + 1];
-    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
-    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
-
-    let firstCol = firstHalfCols.find(
-      (c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c),
-    );
-    let secondCol = secondHalfCols.find(
-      (c) =>
-        c >= rangeStart &&
-        c < rangeEnd &&
-        !usedSecond.has(c) &&
-        (firstCol == null || c > firstCol),
-    );
-
-    if (firstCol == null || secondCol == null) {
-      const span = next ? Math.max(1, next.col - cur.col) : 2;
-      if (firstCol == null) {
-        firstCol = firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ?? cur.col;
-      }
-      if (secondCol == null) {
-        secondCol =
-          secondHalfCols.find(
-            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity),
-          ) ?? (span >= 2 ? firstCol + 1 : null);
-        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
+    let bestPairIdx = -1;
+    let bestDist = Infinity;
+    for (let p = 0; p < pairs.length; p += 1) {
+      if (usedPairs.has(p)) continue;
+      const dist = Math.abs(pairs[p].mid - cur.col);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPairIdx = p;
       }
     }
 
-    // Never let two days claim the same half column.
-    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
-    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
-    if (firstCol == null) firstCol = cur.col;
-    if (firstCol != null) usedFirst.add(firstCol);
-    if (secondCol != null) usedSecond.add(secondCol);
+    let firstCol;
+    let secondCol;
+    if (bestPairIdx >= 0) {
+      usedPairs.add(bestPairIdx);
+      firstCol = pairs[bestPairIdx].firstCol;
+      secondCol = pairs[bestPairIdx].secondCol;
+    } else {
+      const next = best.dates[i + 1];
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
+      firstCol = cur.col;
+      secondCol = span >= 2 ? cur.col + 1 : null;
+    }
 
     const label =
       findWeekdayLabelNear(matrix, best.row, firstCol) ||
-      findWeekdayLabelNear(matrix, best.row, cur.col);
+      findWeekdayLabelNear(matrix, best.row, cur.col) ||
+      findWeekdayLabelNear(matrix, best.row, secondCol);
 
     dayCols.push({
       ymd: alignYmdToWeekdayLabel(cur.ymd, label),

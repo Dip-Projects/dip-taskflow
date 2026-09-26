@@ -213,8 +213,16 @@ function findDateColumns(matrix) {
     }
   }
 
-  const usedFirst = new Set();
+  const pairs = [];
   const usedSecond = new Set();
+  for (const fc of firstHalfCols) {
+    const sc = secondHalfCols.find((c) => c > fc && !usedSecond.has(c));
+    if (sc == null) continue;
+    usedSecond.add(sc);
+    pairs.push({ firstCol: fc, secondCol: sc, mid: (fc + sc) / 2 });
+  }
+
+  const usedPairs = new Set();
   const dayCols = [];
   const WEEKDAY = {
     sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
@@ -223,40 +231,33 @@ function findDateColumns(matrix) {
 
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
-    const prev = best.dates[i - 1];
-    const next = best.dates[i + 1];
-    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
-    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
-
-    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c));
-    let secondCol = secondHalfCols.find(
-      (c) => c >= rangeStart && c < rangeEnd && !usedSecond.has(c) && (firstCol == null || c > firstCol)
-    );
-
-    if (firstCol == null || secondCol == null) {
-      const span = next ? Math.max(1, next.col - cur.col) : 2;
-      if (firstCol == null) {
-        firstCol =
-          firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ?? cur.col;
-      }
-      if (secondCol == null) {
-        secondCol =
-          secondHalfCols.find(
-            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity)
-          ) ?? (span >= 2 ? firstCol + 1 : null);
-        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
+    let bestPairIdx = -1;
+    let bestDist = Infinity;
+    for (let p = 0; p < pairs.length; p += 1) {
+      if (usedPairs.has(p)) continue;
+      const dist = Math.abs(pairs[p].mid - cur.col);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPairIdx = p;
       }
     }
 
-    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
-    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
-    if (firstCol == null) firstCol = cur.col;
-    if (firstCol != null) usedFirst.add(firstCol);
-    if (secondCol != null) usedSecond.add(secondCol);
+    let firstCol;
+    let secondCol;
+    if (bestPairIdx >= 0) {
+      usedPairs.add(bestPairIdx);
+      firstCol = pairs[bestPairIdx].firstCol;
+      secondCol = pairs[bestPairIdx].secondCol;
+    } else {
+      const next = best.dates[i + 1];
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
+      firstCol = cur.col;
+      secondCol = span >= 2 ? cur.col + 1 : null;
+    }
 
     let ymd = cur.ymd;
     for (let r = Math.max(0, best.row - 1); r < Math.min(matrix.length, best.row + 4); r += 1) {
-      const t = cellText(matrix[r]?.[firstCol] || matrix[r]?.[cur.col]).toUpperCase();
+      const t = cellText(matrix[r]?.[firstCol] || matrix[r]?.[cur.col] || matrix[r]?.[secondCol]).toUpperCase();
       if (!/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) continue;
       const want = WEEKDAY[t.toLowerCase()];
       const d = new Date(`${ymd}T12:00:00+05:30`);

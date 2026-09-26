@@ -167,7 +167,7 @@ function findHalfLabelRow(matrix, dateHeaderRow = 0) {
   return null;
 }
 
-/** Map day / half columns the same way the Excel parser does (exclusive spatial bind). */
+/** Map day / half columns — pair 1st+2nd half headers, assign to nearest date. */
 function findSheetDayColumns(matrix) {
   if (!Array.isArray(matrix) || !matrix.length) return [];
 
@@ -204,51 +204,40 @@ function findSheetDayColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
-  const usedFirst = new Set();
+  const pairs = [];
   const usedSecond = new Set();
-  return best.dates.map((cur, i) => {
-    const prev = best.dates[i - 1];
-    const next = best.dates[i + 1];
-    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
-    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
+  for (const fc of firstHalfCols) {
+    const sc = secondHalfCols.find((c) => c > fc && !usedSecond.has(c));
+    if (sc == null) continue;
+    usedSecond.add(sc);
+    pairs.push({ firstCol: fc, secondCol: sc, mid: (fc + sc) / 2 });
+  }
 
-    let firstCol = firstHalfCols.find(
-      (c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c),
-    );
-    let secondCol = secondHalfCols.find(
-      (c) =>
-        c >= rangeStart &&
-        c < rangeEnd &&
-        !usedSecond.has(c) &&
-        (firstCol == null || c > firstCol),
-    );
-
-    if (firstCol == null || secondCol == null) {
-      const span = next ? Math.max(1, next.col - cur.col) : 2;
-      if (firstCol == null) {
-        firstCol =
-          firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ??
-          cur.col;
-      }
-      if (secondCol == null) {
-        secondCol =
-          secondHalfCols.find(
-            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity),
-          ) ?? (span >= 2 ? firstCol + 1 : null);
-        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
+  const usedPairs = new Set();
+  return best.dates.map((cur) => {
+    let bestPairIdx = -1;
+    let bestDist = Infinity;
+    for (let p = 0; p < pairs.length; p += 1) {
+      if (usedPairs.has(p)) continue;
+      const dist = Math.abs(pairs[p].mid - cur.col);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestPairIdx = p;
       }
     }
-
-    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
-    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
-    if (firstCol == null) firstCol = cur.col;
-    if (firstCol != null) usedFirst.add(firstCol);
-    if (secondCol != null) usedSecond.add(secondCol);
-
+    if (bestPairIdx >= 0) {
+      usedPairs.add(bestPairIdx);
+      return {
+        ymd: cur.ymd,
+        firstCol: pairs[bestPairIdx].firstCol,
+        secondCol: pairs[bestPairIdx].secondCol,
+        layout: "half",
+      };
+    }
     return {
       ymd: cur.ymd,
-      firstCol,
-      secondCol,
+      firstCol: cur.col,
+      secondCol: cur.col + 1,
       layout: "half",
     };
   });
