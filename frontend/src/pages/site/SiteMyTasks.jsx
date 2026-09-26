@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
 import { parseWeeklyPlanBuffer } from "../../lib/weeklyPlanExcel";
 import { parseWeeklyPlanPdfBuffer } from "../../lib/weeklyPlanPdf";
@@ -265,6 +265,23 @@ export default function SiteMyTasks() {
     };
   }, [tasks, weekFilter]);
 
+  const dayGroups = useMemo(() => {
+    const map = new Map();
+    const ordered = [...filtered].sort((a, b) => {
+      const dateCmp = String(a.task_date || "").localeCompare(String(b.task_date || ""));
+      if (dateCmp) return dateCmp;
+      const halfCmp = (Number(a.half) || 0) - (Number(b.half) || 0);
+      if (halfCmp) return halfCmp;
+      return (Number(a.sr_no) || 0) - (Number(b.sr_no) || 0);
+    });
+    for (const task of ordered) {
+      const day = String(task.task_date || "").slice(0, 10) || "unknown";
+      if (!map.has(day)) map.set(day, []);
+      map.get(day).push(task);
+    }
+    return [...map.entries()];
+  }, [filtered]);
+
   const toggleStatus = async (task) => {
     if (!task?.id || busyId) return;
     const current = statusOf(task);
@@ -404,45 +421,54 @@ export default function SiteMyTasks() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((task) => {
-                const status = statusOf(task);
-                const done = status === "Completed";
-                const cancelled = status === "Cancelled";
-                const busy = busyId === task.id;
-                return (
-                  <tr key={task.id} className={done ? "smt-table__row--done" : ""}>
-                    <td>{weekLabel({ week_start: task.week_start, week_end: task.week_end })}</td>
-                    <td>{fmtDate(task.task_date)}</td>
-                    <td>{task.site_name || "—"}</td>
-                    <td className="smt-table__task">{task.task_name || "—"}</td>
-                    <td className="smt-table__slot">{task.time_slot || "—"}</td>
-                    <td>{halfLabel(task.half)}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className={`smt-status-toggle ${
-                          done
-                            ? "smt-status-toggle--done"
-                            : cancelled
-                              ? "smt-status-toggle--cancel"
-                              : "smt-status-toggle--pending"
-                        }`}
-                        disabled={cancelled || Boolean(busyId)}
-                        title={
-                          cancelled
-                            ? "Cancelled"
-                            : done
-                              ? "Click to mark Pending"
-                              : "Click to mark Completed"
-                        }
-                        onClick={() => toggleStatus(task)}
-                      >
-                        {busy ? "…" : done ? "Completed" : cancelled ? "Cancelled" : "Pending"}
-                      </button>
+              {dayGroups.map(([day, rows]) => (
+                <Fragment key={day}>
+                  <tr className="smt-table__day-row">
+                    <td colSpan={7}>
+                      {fmtDate(day)} · {rows.length} task{rows.length === 1 ? "" : "s"}
                     </td>
                   </tr>
-                );
-              })}
+                  {rows.map((task) => {
+                    const status = statusOf(task);
+                    const done = status === "Completed";
+                    const cancelled = status === "Cancelled";
+                    const busy = busyId === task.id;
+                    return (
+                      <tr key={task.id} className={done ? "smt-table__row--done" : ""}>
+                        <td>{weekLabel({ week_start: task.week_start, week_end: task.week_end })}</td>
+                        <td>{fmtDate(task.task_date)}</td>
+                        <td>{task.site_name || "—"}</td>
+                        <td className="smt-table__task">{task.task_name || "—"}</td>
+                        <td className="smt-table__slot">{task.time_slot || "—"}</td>
+                        <td>{halfLabel(task.half)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className={`smt-status-toggle ${
+                              done
+                                ? "smt-status-toggle--done"
+                                : cancelled
+                                  ? "smt-status-toggle--cancel"
+                                  : "smt-status-toggle--pending"
+                            }`}
+                            disabled={cancelled || Boolean(busyId)}
+                            title={
+                              cancelled
+                                ? "Cancelled"
+                                : done
+                                  ? "Click to mark Pending"
+                                  : "Click to mark Completed"
+                            }
+                            onClick={() => toggleStatus(task)}
+                          >
+                            {busy ? "…" : done ? "Completed" : cancelled ? "Cancelled" : "Pending"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>

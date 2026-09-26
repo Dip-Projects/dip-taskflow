@@ -632,6 +632,25 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
       if (!data) {
         return res.status(404).json({ error: 'Task not found or could not be updated' });
       }
+
+      // Mirror the toggle into the flattened weekly-plan sheet table.
+      // That table stores the category in `task` (not the work text/time_slot).
+      try {
+        let sheetSync = supabase
+          .from('weekly_plan_sheet')
+          .update(patchSheet)
+          .eq('ea_attendance_id', existing.ea_attendance_id)
+          .eq('task_date', String(existing.task_date || '').slice(0, 10))
+          .eq('task', existing.task_name || '');
+        if (existing.source_file) sheetSync = sheetSync.eq('source_file', existing.source_file);
+        const { error: sheetSyncErr } = await sheetSync;
+        if (sheetSyncErr && !isMissingRelation(sheetSyncErr)) {
+          console.warn('weekly_plan_sheet status sync:', sheetSyncErr.message);
+        }
+      } catch (sheetSyncErr) {
+        console.warn('weekly_plan_sheet status sync:', sheetSyncErr.message);
+      }
+
       return res.json({ ok: true, task: mapTaskRow(data) });
     }
 

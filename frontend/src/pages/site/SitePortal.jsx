@@ -508,6 +508,7 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
+      { key: "my-tasks", label: "My Tasks", icon: Ico.weeklyPlan },
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
       { key: "site-report", label: "Site Visit Report", icon: Ico.site },
       { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
@@ -560,6 +561,7 @@ function buildNav(user, visMap) {
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
+    { key: "my-tasks", label: "My Tasks", icon: Ico.weeklyPlan },
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -2226,11 +2228,6 @@ useEffect(() => {
       OFFICE_SITE_TABS.has(tab) ? tab : "report-submissions",
     );
   }, [user, authUser]);
-
-  // My Tasks removed from sidebar — old links land on Weekly Plan
-  useEffect(() => {
-    if (activeTab === "my-tasks") setActiveTab("weekly-plan");
-  }, [activeTab]);
 
   useEffect(() => {
     if (!user?.user_name) return;
