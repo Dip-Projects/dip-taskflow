@@ -558,6 +558,8 @@ export function buildSheetTaskIndex(matrix, tasks) {
   scored.sort(
     (a, b) =>
       b.score - a.score ||
+      (String(b.task.status || "") === "Completed" ? 1 : 0) -
+        (String(a.task.status || "") === "Completed" ? 1 : 0) ||
       a.cell.rowIdx - b.cell.rowIdx ||
       a.cell.colIdx - b.cell.colIdx,
   );
@@ -573,65 +575,35 @@ export function buildSheetTaskIndex(matrix, tasks) {
   }
 
   // Exact text + date + half among unused (no column-order guessing).
+  // Prefer Completed when duplicate rows exist for the same cell.
   for (const cell of cells) {
     if (usedCells.has(cell.key) || index.has(cell.key)) continue;
     const text = normalizePreviewText(cell.cellText);
-    const hit = pool.find((task) => {
-      if (used.has(String(task.id))) return false;
-      if (normalizePreviewText(task.time_slot) !== text) return false;
-      if (cell.taskDate && !sameTaskDate(task, cell.taskDate)) return false;
-      if (
-        cell.half != null &&
-        Number(cell.half) > 0 &&
-        Number(task.half) > 0 &&
-        Number(task.half) !== Number(cell.half)
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const hits = pool
+      .filter((task) => {
+        if (used.has(String(task.id))) return false;
+        if (normalizePreviewText(task.time_slot) !== text) return false;
+        if (cell.taskDate && !sameTaskDate(task, cell.taskDate)) return false;
+        if (
+          cell.half != null &&
+          Number(cell.half) > 0 &&
+          Number(task.half) > 0 &&
+          Number(task.half) !== Number(cell.half)
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const ac = String(a.status || "") === "Completed" ? 1 : 0;
+        const bc = String(b.status || "") === "Completed" ? 1 : 0;
+        return bc - ac;
+      });
+    const hit = hits[0];
     if (!hit) continue;
     index.set(cell.key, hit);
     used.add(String(hit.id));
     usedCells.add(cell.key);
-  }
-
-  // Soft pass: same text + half (+ row when available) when date headers drifted from ingest.
-  const soft = [];
-  for (const cell of cells) {
-    if (usedCells.has(cell.key) || index.has(cell.key)) continue;
-    const rowName = normalizePreviewText(cell.rowTaskName);
-    for (const task of pool) {
-      if (used.has(String(task.id))) continue;
-      if (!taskMatchesCellText(task, cell.cellText, { exactOnly: true })) continue;
-      if (
-        cell.half != null &&
-        Number(cell.half) > 0 &&
-        Number(task.half) > 0 &&
-        Number(task.half) !== Number(cell.half)
-      ) {
-        continue;
-      }
-      // Prefer same row; allow when sheet row labels were blank before merge-fill.
-      if (rowName && normalizePreviewText(task.task_name) !== rowName) continue;
-      const score = scoreTaskForCell(task, { ...cell, requireDate: false });
-      if (score < 0) continue;
-      soft.push({ cell, task, score });
-    }
-  }
-  soft.sort(
-    (a, b) =>
-      b.score - a.score ||
-      a.cell.rowIdx - b.cell.rowIdx ||
-      a.cell.colIdx - b.cell.colIdx,
-  );
-  for (const { cell, task } of soft) {
-    const ck = cell.key;
-    const tid = String(task.id);
-    if (usedCells.has(ck) || used.has(tid) || index.has(ck)) continue;
-    index.set(ck, task);
-    used.add(tid);
-    usedCells.add(ck);
   }
 
   return index;

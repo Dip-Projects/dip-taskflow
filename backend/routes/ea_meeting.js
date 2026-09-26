@@ -1155,10 +1155,9 @@ router.post('/:id/ingest', async (req, res) => {
       return res.status(500).json(result);
     }
 
-    // First time tasks are saved (or explicit notify), send today's WhatsApp list.
+    // Only send WhatsApp when the client explicitly asks — never on sheet Refresh / week dropdown load.
     let whatsapp = null;
     const wantNotify =
-      Number(result.inserted || 0) > 0 ||
       req.body?.notifyWhatsApp === true ||
       req.query?.notify === '1';
     if (wantNotify) {

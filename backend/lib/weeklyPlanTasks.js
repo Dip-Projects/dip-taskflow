@@ -156,15 +156,16 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   const eaId = eaRow.id;
   const uniqueTasks = dedupeParsedPlanTasks(parsedTasks);
 
-  // Preserve portal/whatsapp completions across re-parse.
+  // Preserve portal/whatsapp completions across re-parse (any prior source key).
   const prevRes = await supabase
     .from('weekly_plan_tasks')
     .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via')
-    .eq('ea_attendance_id', eaId)
-    .eq('source_file', sourceFile);
+    .eq('ea_attendance_id', eaId);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    prevMap.set(planTaskDedupeKey(t), t);
+    const key = planTaskDedupeKey(t);
+    const prev = prevMap.get(key);
+    if (!prev || String(t.status) === 'Completed') prevMap.set(key, t);
   });
 
   const del = await supabase
@@ -254,6 +255,27 @@ async function ingestWeeklyPlanFromEaRow(eaRow, clientParsed = null) {
         details.push({ source: key, inserted: saved.inserted, via: 'client' });
       } catch (err) {
         details.push({ source: key, error: err.message, via: 'client' });
+      }
+    }
+    // Drop orphan rows from older/wrong source keys so UI/WhatsApp don't see duplicates.
+    const keepSources = new Set(
+      clientParsed.map((s) => String(s.source_file || s.key || 'attachment_1').trim()).filter(Boolean)
+    );
+    if (keepSources.size) {
+      try {
+        const { data: existing } = await supabase
+          .from('weekly_plan_tasks')
+          .select('id, source_file')
+          .eq('ea_attendance_id', eaRow.id);
+        const orphanIds = (existing || [])
+          .filter((r) => !keepSources.has(String(r.source_file || '').trim()))
+          .map((r) => r.id)
+          .filter(Boolean);
+        if (orphanIds.length) {
+          await supabase.from('weekly_plan_tasks').delete().in('id', orphanIds);
+        }
+      } catch (orphErr) {
+        console.warn('weekly plan orphan cleanup:', orphErr.message);
       }
     }
     const failed = details.some((d) => d.error);

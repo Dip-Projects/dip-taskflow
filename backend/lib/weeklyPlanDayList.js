@@ -182,6 +182,33 @@ function sortPlanTasks(a, b) {
   return String(a.task_name || '').localeCompare(String(b.task_name || ''));
 }
 
+function planRowDedupeKey(t) {
+  return [
+    ymdOf(t?.task_date) || '',
+    t?.sr_no == null || t?.sr_no === '' ? '' : String(t.sr_no),
+    String(t?.task_name || '').trim().toLowerCase(),
+    String(Number.isFinite(Number(t?.half)) ? Number(t.half) : 0),
+    String(t?.time_slot || '').trim().toLowerCase(),
+  ].join('|');
+}
+
+/** Keep one row per sheet cell; prefer Completed when duplicates exist. */
+function dedupePlanRows(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const key = planRowDedupeKey(row);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, row);
+      continue;
+    }
+    const prevDone = String(prev.status || '') === 'Completed';
+    const nextDone = String(row.status || '') === 'Completed';
+    if (nextDone && !prevDone) map.set(key, row);
+  }
+  return [...map.values()];
+}
+
 /**
  * Load week rows for one employee username.
  * Bundle: today (exact task_date match) + optional prior open (earlier days).
@@ -240,10 +267,11 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd(), opts
     throw error;
   }
 
-  const rows = (data || [])
-    .filter((r) => String(r.employee_username || '').trim().toLowerCase() === username.toLowerCase())
-    .map((r) => ({ ...r, task_date: ymdOf(r.task_date) || r.task_date }))
-    .sort(sortPlanTasks);
+  const rows = dedupePlanRows(
+    (data || [])
+      .filter((r) => String(r.employee_username || '').trim().toLowerCase() === username.toLowerCase())
+      .map((r) => ({ ...r, task_date: ymdOf(r.task_date) || r.task_date }))
+  ).sort(sortPlanTasks);
 
   // Strict calendar-day match only (never put prior days into "today").
   const today = rows.filter(
