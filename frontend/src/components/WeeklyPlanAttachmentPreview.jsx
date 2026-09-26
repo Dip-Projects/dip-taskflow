@@ -200,13 +200,13 @@ export function WeeklyPlanAttachmentPreview({
       }
 
       // Pass the same client parse the grid uses so server ingest cannot overwrite with a divergent parse.
+      const srcKey = sourceFile || "attachment_1";
       const data = await api(`/ea-meeting/${eaId}/send-day-list`, {
         method: "POST",
         body: {
-          clientParsed:
-            parsed?.length && sourceFile
-              ? [{ source_file: sourceFile, key: sourceFile, tasks: parsed.slice(0, 400) }]
-              : undefined,
+          clientParsed: parsed?.length
+            ? [{ source_file: srcKey, key: srcKey, tasks: parsed.slice(0, 400) }]
+            : undefined,
         },
       });
       if (data?.ok) {
@@ -231,7 +231,7 @@ export function WeeklyPlanAttachmentPreview({
     } finally {
       setWaSending(false);
     }
-  }, [eaId, ingestParsed, waSending]);
+  }, [eaId, ingestParsed, sourceFile, waSending]);
 
   const load = useCallback(async () => {
     cancelledRef.current = false;
