@@ -797,25 +797,35 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
     completed_via: via,
     updated_at: now,
   };
-  let { data, error } = await supabase
+  const { data: target, error: targetError } = await supabase
+    .from('weekly_plan_tasks')
+    .select('id, employee_username, task_date, task_name, time_slot, half, status')
+    .eq('id', taskId)
+    .maybeSingle();
+  if (targetError) return { ok: false, reason: targetError.message };
+  if (!target) return { ok: false, reason: 'not_found' };
+
+  // Update every clone of the same sheet cell identity. Older parser versions
+  // created duplicate rows with different half/sr values.
+  let updateQuery = supabase
     .from('weekly_plan_tasks')
     .update(patch)
-    .eq('id', taskId)
-    .select('id, task_name, time_slot, half, status')
-    .maybeSingle();
+    .eq('employee_username', target.employee_username)
+    .eq('task_date', ymdOf(target.task_date))
+    .eq('time_slot', target.time_slot || '');
+  let { error } = await updateQuery;
 
   if (error && /completed_at|completed_via/i.test(error.message || '')) {
     const retry = await supabase
       .from('weekly_plan_tasks')
       .update({ status: 'Completed', updated_at: now })
-      .eq('id', taskId)
-      .select('id, task_name, time_slot, half, status')
-      .maybeSingle();
-    data = retry.data;
+      .eq('employee_username', target.employee_username)
+      .eq('task_date', ymdOf(target.task_date))
+      .eq('time_slot', target.time_slot || '');
     error = retry.error;
   }
   if (error) return { ok: false, reason: error.message };
-  return { ok: true, task: data };
+  return { ok: true, task: { ...target, ...patch } };
 }
 
 async function completeWeeklyPlanByIndexes(employeeUsername, indexes, dayYmd = istYmd()) {

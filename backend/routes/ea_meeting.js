@@ -596,24 +596,26 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
           return res.status(403).json({ error: 'Not allowed to update this task' });
         }
       }
-      if (String(existing.status) === nextStatus) {
-        return res.json({ ok: true, task: mapTaskRow(existing) });
-      }
+      // Update every clone of this sheet cell. Older parses created duplicate
+      // IDs with the same date/work text, so updating only one made UI and WA disagree.
+      const canonical = (patch) => {
+        let q = supabase
+          .from('weekly_plan_tasks')
+          .update(patch)
+          .eq('ea_attendance_id', existing.ea_attendance_id)
+          .eq('task_date', String(existing.task_date || '').slice(0, 10))
+          .eq('time_slot', existing.time_slot || '');
+        if (!existing.time_slot) q = q.eq('task_name', existing.task_name || '');
+        return q;
+      };
 
       // 1) status-only (most compatible)
-      let { data, error } = await supabase
-        .from('weekly_plan_tasks')
-        .update(patchStatusOnly)
-        .eq('id', taskId)
-        .select('*')
-        .maybeSingle();
+      let { error } = await canonical(patchStatusOnly);
+      let data = existing;
 
       // 2) enrich completed_* when columns exist
-      if (!error && data) {
-        const { error: enrichErr } = await supabase
-          .from('weekly_plan_tasks')
-          .update(patchTasksFull)
-          .eq('id', taskId);
+      if (!error) {
+        const { error: enrichErr } = await canonical(patchTasksFull);
         if (!enrichErr) {
           const refreshed = await supabase
             .from('weekly_plan_tasks')
@@ -621,6 +623,8 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
             .eq('id', taskId)
             .maybeSingle();
           if (refreshed.data) data = refreshed.data;
+        } else {
+          data = { ...existing, ...patchStatusOnly };
         }
       }
 
@@ -1058,15 +1062,9 @@ router.post('/:id/send-day-list', async (req, res) => {
       });
     }
 
-    // Prefer client parse (same as the on-screen grid). Fall back to server Excel parse.
-    let ingest = null;
-    const clientParsed = Array.isArray(req.body?.clientParsed) ? req.body.clientParsed : null;
-    try {
-      ingest = await ingestWeeklyPlanFromEaRow(ea, clientParsed);
-    } catch (ingErr) {
-      console.error('EM send-day-list ingest:', ingErr.message);
-      ingest = { ok: false, error: ingErr.message, inserted: 0 };
-    }
+    // Sending is read-only. Re-ingesting here used to delete/recreate task IDs,
+    // causing WhatsApp and the UI to update different rows.
+    const ingest = { ok: true, inserted: 0, skipped: 'send_is_read_only' };
 
     const whatsapp = await notifyWeeklyPlanAfterUpload({
       username,

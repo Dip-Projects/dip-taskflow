@@ -229,26 +229,11 @@ export function WeeklyPlanAttachmentPreview({
     setWaSending(true);
     setWaNote("");
     try {
-      // Ensure cells are saved before messaging
-      const parsed = parsedRef.current;
-      if (parsed?.length) {
-        try {
-          const refreshed = await ingestParsed({ tasks: parsed });
-          setTasks(refreshed);
-        } catch (ingErr) {
-          setWaNote(ingErr.message || "Could not save tasks before WhatsApp");
-        }
-      }
-
-      // Pass the same client parse the grid uses so server ingest cannot overwrite with a divergent parse.
-      const srcKey = sourceFile || "attachment_1";
+      // Sending must be read-only: re-ingesting here recreated task IDs and
+      // made WhatsApp/UI attach status to different copies of the same cell.
       const data = await api(`/ea-meeting/${eaId}/send-day-list`, {
         method: "POST",
-        body: {
-          clientParsed: parsed?.length
-            ? [{ source_file: srcKey, key: srcKey, tasks: parsed.slice(0, 400) }]
-            : undefined,
-        },
+        body: {},
       });
       if (data?.ok) {
         setWaNote(
@@ -272,7 +257,7 @@ export function WeeklyPlanAttachmentPreview({
     } finally {
       setWaSending(false);
     }
-  }, [eaId, ingestParsed, sourceFile, waSending]);
+  }, [eaId, waSending]);
 
   const load = useCallback(async () => {
     cancelledRef.current = false;
@@ -341,8 +326,9 @@ export function WeeklyPlanAttachmentPreview({
       setCellStatus({});
 
       let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
-      // Always try ingest when we have a fresh parse — fills missing cells without wiping status.
-      if (parsed?.tasks?.length) {
+      // Ingest only to initialize an empty plan. Normal view/refresh must be
+      // read-only or it recreates IDs and races WhatsApp status updates.
+      if (!nextTasks.length && parsed?.tasks?.length) {
         try {
           nextTasks = await ingestParsed(parsed);
         } catch (err) {
@@ -398,7 +384,8 @@ export function WeeklyPlanAttachmentPreview({
         const listed = await loadTasks();
         if (!alive || !Array.isArray(listed)) return;
         setTasks(listed);
-        // Do NOT clear cellStatus — rematching duplicates was wiping Completed badges.
+        // Remove optimistic overrides so WhatsApp/DB status becomes authoritative.
+        setCellStatus({});
       } catch {
         /* ignore transient poll errors */
       }
@@ -422,7 +409,13 @@ export function WeeklyPlanAttachmentPreview({
     if (!task?.id) return;
     if (normalizeStatusLabel(task.status) === "Cancelled") return;
     if (normalizeStatusLabel(task.status) === wanted) {
-      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
+      if (busyKey) {
+        setCellStatus((prev) => {
+          const next = { ...prev };
+          delete next[busyKey];
+          return next;
+        });
+      }
       setBusyId("");
       return;
     }
@@ -456,7 +449,13 @@ export function WeeklyPlanAttachmentPreview({
           return { ...row, ...(result?.task || {}), status: wanted };
         });
       });
-      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
+      if (busyKey) {
+        setCellStatus((prev) => {
+          const next = { ...prev };
+          delete next[busyKey];
+          return next;
+        });
+      }
     } catch (err) {
       setTasks((prev) =>
         prev.map((row) => (String(row.id) === taskId ? previous : row))
