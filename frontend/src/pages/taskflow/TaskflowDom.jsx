@@ -1,11 +1,26 @@
 /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
 import { useLayoutEffect } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
+import SiteReport from '../site/Sitereport';
+import MyReports from '../site/MyReports';
 
-function OfficeMonthlyReport() {
+function readOfficeUser() {
   let user = null;
   try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
+  return user;
+}
+
+function OfficeMonthlyReport() {
+  const user = readOfficeUser();
   return <MonthlyReport user={user} />;
+}
+
+function OfficeSiteReport() {
+  return <SiteReport user={readOfficeUser()} />;
+}
+
+function OfficeMyReports() {
+  return <MyReports user={readOfficeUser()} />;
 }
 
 /** Re-apply sidebar open/overlay after React re-renders (MonthlyReport etc. wipe className). */
@@ -1668,6 +1683,14 @@ export default function TaskflowDom() {
             <p className="view-sub">Submitted monthly packs. Add a folder when a new month is ready.</p>
           </div>
           <OfficeMonthlyReport />
+        </section>
+
+        <section id="view-site-report" className="view" hidden={true}>
+          <OfficeSiteReport />
+        </section>
+
+        <section id="view-my-reports" className="view" hidden={true}>
+          <OfficeMyReports />
         </section>
 
       </main>

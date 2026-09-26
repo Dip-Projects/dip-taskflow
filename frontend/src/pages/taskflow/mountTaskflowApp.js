@@ -1454,10 +1454,17 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
+    const reportBtns = [
+      makeNavButton('site-report', '🏗️ Site Visit Report'),
+      makeNavButton('my-reports', '📄 My Reports'),
+    ];
     if (visOk('monthly-report')) {
+      reportBtns.push(makeNavButton('monthly-report', '📁 Monthly Report'));
+    }
+    if (reportBtns.length) {
       appendCollapsibleNav(
         'Reports',
-        [makeNavButton('monthly-report', '📁 Monthly Report')],
+        reportBtns,
         { collapsed: true, sectionId: 'reports' }
       );
     }
@@ -1491,7 +1498,7 @@ export async function mountTaskflowApp(opts = {}) {
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
     'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
-    'monthly-report': 'reports',
+    'site-report': 'reports', 'my-reports': 'reports', 'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
     'new-recruitment': 'hr-hiring',
