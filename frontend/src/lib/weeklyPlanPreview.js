@@ -149,7 +149,10 @@ export function hasHalfPlanningLayout(matrix) {
 }
 
 function findHalfLabelRow(matrix, dateHeaderRow = 0) {
-  const maxRows = Math.min(Array.isArray(matrix) ? matrix.length : 0, 20);
+  const maxRows = Math.min(
+    Array.isArray(matrix) ? matrix.length : 0,
+    Math.max(dateHeaderRow + 30, 30),
+  );
   for (let r = Math.max(0, dateHeaderRow); r < maxRows; r += 1) {
     const row = matrix[r] || [];
     let firstHits = 0;
@@ -164,7 +167,7 @@ function findHalfLabelRow(matrix, dateHeaderRow = 0) {
   return null;
 }
 
-/** Map day / half columns the same way the Excel parser does. */
+/** Map day / half columns the same way the Excel parser does (exclusive spatial bind). */
 function findSheetDayColumns(matrix) {
   if (!Array.isArray(matrix) || !matrix.length) return [];
 
@@ -201,25 +204,47 @@ function findSheetDayColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
-  if (firstHalfCols.length >= best.dates.length && secondHalfCols.length >= best.dates.length) {
-    return best.dates.map((cur, i) => ({
-      ymd: cur.ymd,
-      firstCol: firstHalfCols[i],
-      secondCol: secondHalfCols[i],
-      layout: "half",
-    }));
-  }
-
+  const usedFirst = new Set();
+  const usedSecond = new Set();
   return best.dates.map((cur, i) => {
+    const prev = best.dates[i - 1];
     const next = best.dates[i + 1];
-    const rangeEnd = next ? next.col : Infinity;
-    let firstCol = firstHalfCols.find((c) => c >= cur.col && c < rangeEnd);
-    let secondCol = secondHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
+    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
+
+    let firstCol = firstHalfCols.find(
+      (c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c),
+    );
+    let secondCol = secondHalfCols.find(
+      (c) =>
+        c >= rangeStart &&
+        c < rangeEnd &&
+        !usedSecond.has(c) &&
+        (firstCol == null || c > firstCol),
+    );
+
     if (firstCol == null || secondCol == null) {
       const span = next ? Math.max(1, next.col - cur.col) : 2;
-      firstCol = cur.col;
-      secondCol = span >= 2 ? cur.col + 1 : null;
+      if (firstCol == null) {
+        firstCol =
+          firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ??
+          cur.col;
+      }
+      if (secondCol == null) {
+        secondCol =
+          secondHalfCols.find(
+            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity),
+          ) ?? (span >= 2 ? firstCol + 1 : null);
+        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
+      }
     }
+
+    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
+    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
+    if (firstCol == null) firstCol = cur.col;
+    if (firstCol != null) usedFirst.add(firstCol);
+    if (secondCol != null) usedSecond.add(secondCol);
+
     return {
       ymd: cur.ymd,
       firstCol,
@@ -391,7 +416,7 @@ export function isActionablePlanCell(matrix, rowIdx, colIdx, cellText) {
   return isDaywiseTimeValue(text) || Boolean(text);
 }
 
-function taskMatchesCellText(task, text, { exactOnly = false } = {}) {
+function taskMatchesCellText(task, text, { exactOnly = true } = {}) {
   const slot = normalizePreviewText(task?.time_slot);
   const slotTime = normalizeTimeText(task?.time_slot);
   const textNorm = normalizePreviewText(text);
@@ -402,22 +427,22 @@ function taskMatchesCellText(task, text, { exactOnly = false } = {}) {
   if (slot && slot === textNorm) return true;
   if (slotTime && textTime && slotTime === textTime) return true;
   if (exactOnly) return false;
-  // Soft contains only when both sides are reasonably long (avoid "call"/"to call" collisions).
-  if (slot && slot.length >= 8 && textNorm.length >= 8) {
-    if (textNorm.includes(slot) || slot.includes(textNorm)) return true;
-  }
   return false;
 }
 
 function sameTaskDate(task, taskDate) {
-  if (!taskDate) return true;
+  if (!taskDate) return false;
   return String(task?.task_date || "").slice(0, 10) === String(taskDate).slice(0, 10);
 }
 
 function sameTaskRow(task, rowName, srNo) {
-  if (srNo != null && Number(task?.sr_no) === srNo) return true;
-  if (rowName && normalizePreviewText(task?.task_name) === rowName) return true;
-  return false;
+  const nameOk =
+    rowName && normalizePreviewText(task?.task_name) === rowName;
+  const srOk = srNo != null && Number(task?.sr_no) === srNo;
+  // When both SR and name exist on the sheet row, require both.
+  if (srNo != null && rowName) return srOk && nameOk;
+  if (srNo != null) return srOk;
+  return Boolean(nameOk);
 }
 
 function isAssignablePlanTask(task) {
@@ -428,14 +453,18 @@ function isAssignablePlanTask(task) {
 }
 
 function scoreTaskForCell(task, { cellText, taskDate, half }) {
-  let score = 0;
-  if (taskMatchesCellText(task, cellText, { exactOnly: true })) score += 100;
-  else if (taskMatchesCellText(task, cellText)) score += 40;
-  else return -1;
+  // Require exact cell text match — soft contains caused status bleed across cells.
+  if (!taskMatchesCellText(task, cellText, { exactOnly: true })) return -1;
+  let score = 100;
 
-  if (taskDate && sameTaskDate(task, taskDate)) score += 30;
-  if (half != null && Number(half) > 0 && Number(task.half) === Number(half)) score += 20;
-  if (half != null && Number(half) > 0 && Number(task.half) === 0) score += 5; // legacy rows
+  if (taskDate && sameTaskDate(task, taskDate)) score += 40;
+  else if (taskDate) return -1; // never cross days
+
+  if (half != null && Number(half) > 0) {
+    if (Number(task.half) === Number(half)) score += 30;
+    else if (Number(task.half) === 0) score += 5; // legacy rows only
+    else return -1; // wrong half
+  }
   return score;
 }
 
@@ -476,24 +505,25 @@ export function buildSheetTaskIndex(matrix, tasks) {
     }
   }
 
-  // Collect candidate scores, then assign highest scores first (unique tasks).
-  // Prefer row-scoped matches; allow exact text+date without row as a weaker fallback.
   const scored = [];
   for (const cell of cells) {
     const rowName = normalizePreviewText(cell.rowTaskName);
     for (const task of pool) {
-      const rowOk = sameTaskRow(task, rowName, cell.srNo);
+      if (!sameTaskRow(task, rowName, cell.srNo)) continue;
       const score = scoreTaskForCell(task, cell);
       if (score < 0) continue;
-      if (!rowOk && score < 130) continue; // need exact text + date to cross rows
-      scored.push({ cell, task, score: score + (rowOk ? 50 : 0) });
+      scored.push({ cell, task, score: score + 50 });
     }
   }
-  scored.sort((a, b) => b.score - a.score || a.cell.rowIdx - b.cell.rowIdx || a.cell.colIdx - b.cell.colIdx);
+  scored.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.cell.rowIdx - b.cell.rowIdx ||
+      a.cell.colIdx - b.cell.colIdx,
+  );
 
   const usedCells = new Set();
-  for (const { cell, task, score } of scored) {
-    if (score < 40) continue; // require at least soft text match for scored pass
+  for (const { cell, task } of scored) {
     const ck = cell.key;
     const tid = String(task.id);
     if (usedCells.has(ck) || used.has(tid)) continue;
@@ -502,48 +532,24 @@ export function buildSheetTaskIndex(matrix, tasks) {
     usedCells.add(ck);
   }
 
-  // Remaining cells — column order within each row.
-  const remainingCells = cells.filter((c) => !usedCells.has(c.key));
-  const byRow = new Map();
-  for (const cell of remainingCells) {
-    const rk = `${cell.srNo ?? ""}|${normalizePreviewText(cell.rowTaskName)}`;
-    if (!byRow.has(rk)) byRow.set(rk, []);
-    byRow.get(rk).push(cell);
-  }
-
-  for (const [, rowCells] of byRow) {
-    rowCells.sort((a, b) => a.colIdx - b.colIdx);
-    const rowName = normalizePreviewText(rowCells[0].rowTaskName);
-    const srNo = rowCells[0].srNo;
-    const rowTasks = pool
-      .filter((task) => !used.has(String(task.id)) && sameTaskRow(task, rowName, srNo))
-      .sort((a, b) => {
-        const d = String(a.task_date || "").localeCompare(String(b.task_date || ""));
-        if (d) return d;
-        return (Number(a.half) || 0) - (Number(b.half) || 0);
-      });
-
-    let ti = 0;
-    for (const cell of rowCells) {
-      while (ti < rowTasks.length && used.has(String(rowTasks[ti].id))) ti += 1;
-      if (ti >= rowTasks.length) break;
-      const next = rowTasks[ti];
-      index.set(cell.key, next);
-      used.add(String(next.id));
-      ti += 1;
-    }
-  }
-
-  // Last resort: leftover cells by exact text among unused tasks (any row).
+  // Exact text + date + half among unused (no column-order guessing).
   for (const cell of cells) {
     if (usedCells.has(cell.key) || index.has(cell.key)) continue;
     const text = normalizePreviewText(cell.cellText);
-    const hit = pool.find(
-      (task) =>
-        !used.has(String(task.id)) &&
-        normalizePreviewText(task.time_slot) === text &&
-        (!cell.taskDate || sameTaskDate(task, cell.taskDate))
-    );
+    const hit = pool.find((task) => {
+      if (used.has(String(task.id))) return false;
+      if (normalizePreviewText(task.time_slot) !== text) return false;
+      if (cell.taskDate && !sameTaskDate(task, cell.taskDate)) return false;
+      if (
+        cell.half != null &&
+        Number(cell.half) > 0 &&
+        Number(task.half) > 0 &&
+        Number(task.half) !== Number(cell.half)
+      ) {
+        return false;
+      }
+      return true;
+    });
     if (!hit) continue;
     index.set(cell.key, hit);
     used.add(String(hit.id));
@@ -559,13 +565,21 @@ export function buildSheetTaskIndex(matrix, tasks) {
  */
 export function findTaskForSheetCell(
   tasks,
-  { cellText, rowTaskName, taskDate, half, colIdx, matrix, rowIdx } = {}
+  { cellText, rowTaskName, taskDate, half, matrix, rowIdx, usedIds } = {},
 ) {
   const text = normalizePreviewText(cellText);
   if (!text || text === "—") return null;
-  const list = (Array.isArray(tasks) ? tasks : []).filter(isAssignablePlanTask);
+  const used = usedIds instanceof Set ? usedIds : null;
+  const list = (Array.isArray(tasks) ? tasks : []).filter((task) => {
+    if (!isAssignablePlanTask(task)) return false;
+    if (used && used.has(String(task.id))) return false;
+    return true;
+  });
   const rowName = normalizePreviewText(rowTaskName);
-  const srRaw = Array.isArray(matrix) && Number.isFinite(rowIdx) ? cellDisplay(matrix, rowIdx, 0) : "";
+  const srRaw =
+    Array.isArray(matrix) && Number.isFinite(rowIdx)
+      ? cellDisplay(matrix, rowIdx, 0)
+      : "";
   const srNo = /^\d+$/.test(srRaw) ? Number(srRaw) : null;
 
   let best = null;
@@ -578,30 +592,7 @@ export function findTaskForSheetCell(
       best = task;
     }
   }
-  if (bestScore >= 0) return best;
-
-  // Column-order fallback within the row when text scoring failed.
-  if (!Array.isArray(matrix) || !Number.isFinite(colIdx) || !Number.isFinite(rowIdx)) {
-    return null;
-  }
-  const rowTasks = list
-    .filter((task) => sameTaskRow(task, rowName, srNo))
-    .sort((a, b) => {
-      const d = String(a.task_date || "").localeCompare(String(b.task_date || ""));
-      if (d) return d;
-      return (Number(a.half) || 0) - (Number(b.half) || 0);
-    });
-  if (!rowTasks.length) return null;
-
-  const dayCols = [];
-  const colCount = (matrix[rowIdx] || []).length;
-  for (let c = 2; c < colCount; c += 1) {
-    const val = cellDisplay(matrix, rowIdx, c);
-    if (val && isActionablePlanCell(matrix, rowIdx, c, val)) dayCols.push(c);
-  }
-  const slot = dayCols.indexOf(colIdx);
-  if (slot < 0 || !rowTasks[slot]) return null;
-  return rowTasks[slot];
+  return bestScore >= 0 ? best : null;
 }
 
 /** Prefer open tasks for one Excel task/site row. */

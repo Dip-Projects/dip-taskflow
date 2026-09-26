@@ -129,7 +129,35 @@ function sheetToMatrix(sheet) {
     }
     rows.push(row);
   }
+
+  // Fill merged cells so continuation rows keep SR / Task identity.
+  const merges = Array.isArray(sheet['!merges']) ? sheet['!merges'] : [];
+  for (const m of merges) {
+    const topRow = m.s.r - range.s.r;
+    const topCol = m.s.c - range.s.c;
+    if (topRow < 0 || topCol < 0 || topRow >= rows.length) continue;
+    const masterValue = rows[topRow]?.[topCol];
+    for (let r = m.s.r; r <= m.e.r; r += 1) {
+      const rr = r - range.s.r;
+      if (rr < 0 || rr >= rows.length) continue;
+      for (let c = m.s.c; c <= m.e.c; c += 1) {
+        const cc = c - range.s.c;
+        if (cc < 0 || cc >= rows[rr].length) continue;
+        if (rr === topRow && cc === topCol) continue;
+        rows[rr][cc] = masterValue;
+      }
+    }
+  }
+
   return rows;
+}
+
+function isFirstHalfLabel(text) {
+  return /^(1ST|FIRST)\s*HALF(\s*PLANNING)?$/i.test(String(text || '').replace(/\s+/g, ' ').trim());
+}
+
+function isSecondHalfLabel(text) {
+  return /^(2ND|SECOND)\s*HALF(\s*PLANNING)?$/i.test(String(text || '').replace(/\s+/g, ' ').trim());
 }
 
 function findDateColumns(matrix) {
@@ -147,16 +175,15 @@ function findDateColumns(matrix) {
   }
   if (!best) return [];
 
-  // Prefer explicit 1st/2nd half label columns (same as frontend parser).
   let halfRow = null;
-  for (let r = best.row; r < Math.min(matrix.length, best.row + 8); r += 1) {
+  for (let r = best.row; r < Math.min(matrix.length, best.row + 30); r += 1) {
     const row = matrix[r] || [];
     let firstHits = 0;
     let secondHits = 0;
     for (let c = 0; c < row.length; c += 1) {
-      const t = cellText(row[c]).toUpperCase();
-      if (/1ST\s*HALF|FIRST\s*HALF/.test(t)) firstHits += 1;
-      else if (/2ND\s*HALF|SECOND\s*HALF/.test(t)) secondHits += 1;
+      const t = cellText(row[c]);
+      if (isFirstHalfLabel(t)) firstHits += 1;
+      else if (isSecondHalfLabel(t)) secondHits += 1;
     }
     if (firstHits >= 1 && secondHits >= 1) {
       halfRow = r;
@@ -164,74 +191,92 @@ function findDateColumns(matrix) {
     }
   }
 
+  if (halfRow == null) {
+    return best.dates.map((cur) => ({
+      ymd: cur.ymd,
+      firstCol: cur.col,
+      secondCol: null,
+      timeCol: cur.col,
+      statusCol: cur.col,
+      layout: 'daily',
+    }));
+  }
+
   const firstHalfCols = [];
   const secondHalfCols = [];
-  if (halfRow != null) {
+  {
     const row = matrix[halfRow] || [];
     for (let c = 0; c < row.length; c += 1) {
-      const t = cellText(row[c]).toUpperCase();
-      if (/1ST\s*HALF|FIRST\s*HALF/.test(t)) firstHalfCols.push(c);
-      else if (/2ND\s*HALF|SECOND\s*HALF/.test(t)) secondHalfCols.push(c);
+      const t = cellText(row[c]);
+      if (isFirstHalfLabel(t)) firstHalfCols.push(c);
+      else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
     }
   }
 
+  const usedFirst = new Set();
+  const usedSecond = new Set();
   const dayCols = [];
+  const WEEKDAY = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6,
+  };
+
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
     const prev = best.dates[i - 1];
     const next = best.dates[i + 1];
-    // Day owns columns from midpoint after previous date → midpoint before next date.
-    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : Math.max(0, cur.col - 1);
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
     const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
 
-    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
-    let secondCol = secondHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c));
+    let secondCol = secondHalfCols.find(
+      (c) => c >= rangeStart && c < rangeEnd && !usedSecond.has(c) && (firstCol == null || c > firstCol)
+    );
 
-    if (firstCol == null && firstHalfCols.length) {
-      // Date often sits in the middle of a merged header — pick nearest 1st-half col.
-      firstCol = firstHalfCols.reduce((bestCol, c) =>
-        bestCol == null || Math.abs(c - cur.col) < Math.abs(bestCol - cur.col) ? c : bestCol
-      , null);
-      if (firstCol != null) {
-        const idx = firstHalfCols.indexOf(firstCol);
-        secondCol = secondHalfCols[idx] != null ? secondHalfCols[idx] : secondCol;
+    if (firstCol == null || secondCol == null) {
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
+      if (firstCol == null) {
+        firstCol =
+          firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ?? cur.col;
+      }
+      if (secondCol == null) {
+        secondCol =
+          secondHalfCols.find(
+            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity)
+          ) ?? (span >= 2 ? firstCol + 1 : null);
+        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
       }
     }
 
-    if (firstCol == null) {
-      const span = next ? Math.max(1, next.col - cur.col) : 2;
-      firstCol = cur.col;
-      secondCol = span >= 4 ? cur.col + 2 : span >= 2 ? cur.col + 1 : null;
+    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
+    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
+    if (firstCol == null) firstCol = cur.col;
+    if (firstCol != null) usedFirst.add(firstCol);
+    if (secondCol != null) usedSecond.add(secondCol);
+
+    let ymd = cur.ymd;
+    for (let r = Math.max(0, best.row - 1); r < Math.min(matrix.length, best.row + 4); r += 1) {
+      const t = cellText(matrix[r]?.[firstCol] || matrix[r]?.[cur.col]).toUpperCase();
+      if (!/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) continue;
+      const want = WEEKDAY[t.toLowerCase()];
+      const d = new Date(`${ymd}T12:00:00+05:30`);
+      let diff = want - d.getDay();
+      if (diff > 3) diff -= 7;
+      if (diff < -3) diff += 7;
+      if (diff) {
+        d.setDate(d.getDate() + diff);
+        ymd = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      }
+      break;
     }
 
     dayCols.push({
-      ymd: (() => {
-        // Align date to nearby weekday label (fixes Fri column showing Thu date).
-        const WEEKDAY = {
-          sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-          thursday: 4, friday: 5, saturday: 6,
-        };
-        let ymd = cur.ymd;
-        for (let r = Math.max(0, best.row - 1); r < Math.min(matrix.length, best.row + 4); r += 1) {
-          const t = cellText(matrix[r]?.[firstCol] || matrix[r]?.[cur.col]).toUpperCase();
-          if (!/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) continue;
-          const want = WEEKDAY[t.toLowerCase()];
-          const d = new Date(`${ymd}T12:00:00+05:30`);
-          let diff = want - d.getDay();
-          if (diff > 3) diff -= 7;
-          if (diff < -3) diff += 7;
-          if (diff) {
-            d.setDate(d.getDate() + diff);
-            ymd = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-          }
-          break;
-        }
-        return ymd;
-      })(),
+      ymd,
       firstCol,
       secondCol,
       timeCol: firstCol,
       statusCol: secondCol != null ? secondCol : firstCol,
+      layout: 'half',
     });
   }
   return dayCols;
@@ -314,13 +359,19 @@ function parseWeeklyPlanBuffer(buffer) {
 
     const srRaw = cellText(row[0]);
     const srNo = /^\d+$/.test(srRaw) ? Number(srRaw) : null;
+    const halfLayout = dayCols.some((day) => day.layout === 'half');
 
     for (const day of dayCols) {
-      const first = cellText(row[day.firstCol]);
-      const second = day.secondCol != null ? cellText(row[day.secondCol]) : '';
-      pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 1, content: first });
-      if (day.secondCol != null) {
-        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 2, content: second });
+      if (halfLayout) {
+        const first = cellText(row[day.firstCol]);
+        const second = day.secondCol != null ? cellText(row[day.secondCol]) : '';
+        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 1, content: first });
+        if (day.secondCol != null) {
+          pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 2, content: second });
+        }
+      } else {
+        const plan = day.firstCol != null ? cellText(row[day.firstCol]) : '';
+        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 0, content: plan });
       }
     }
   }
@@ -333,7 +384,7 @@ function parseWeeklyPlanBuffer(buffer) {
       dataStart,
       days: dayCols.map((d) => d.ymd),
       count: tasks.length,
-      halves: true,
+      halves: dayCols.some((d) => d.layout === 'half'),
     },
   };
 }

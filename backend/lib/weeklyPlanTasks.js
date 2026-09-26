@@ -197,7 +197,8 @@ async function ingestWeeklyPlanFromEaRow(eaRow, clientParsed = null) {
         details.push({ source: key, error: err.message, via: 'client' });
       }
     }
-    if (total > 0) return { ok: true, inserted: total, details, eaId: eaRow.id };
+    const failed = details.some((d) => d.error);
+    return { ok: !failed && total >= 0, inserted: total, details, eaId: eaRow.id };
   }
 
   const sources = [];

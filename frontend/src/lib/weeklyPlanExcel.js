@@ -301,7 +301,7 @@ function isSecondHalfLabel(text) {
 
 /** Find the row (near the date row) that carries explicit "1st half" / "2nd half" labels. */
 function findHalfLabelRow(matrix, dateHeaderRow) {
-  const maxRows = Math.min(matrix.length, 12);
+  const maxRows = Math.min(matrix.length, Math.max(dateHeaderRow + 30, 30));
   for (let r = dateHeaderRow; r < maxRows; r += 1) {
     const row = matrix[r] || [];
     let firstHits = 0;
@@ -317,7 +317,8 @@ function findHalfLabelRow(matrix, dateHeaderRow) {
 }
 
 /**
- * Each calendar day owns two partitions (1st half 8AM–1PM | 2nd half 2PM–7PM).
+ * Each calendar day owns exactly one 1st-half and one 2nd-half column.
+ * Bind spatially (never by index, never reuse a half column across days).
  */
 function findDateColumns(matrix) {
   let best = null;
@@ -351,11 +352,8 @@ function findDateColumns(matrix) {
     });
   }
 
-  // Prefer the *real* 1st half / 2nd half sub-header columns when present,
-  // instead of guessing offsets from date-cell spacing (which breaks on
-  // merged cells / uneven column widths).
-  let firstHalfCols = [];
-  let secondHalfCols = [];
+  const firstHalfCols = [];
+  const secondHalfCols = [];
   const row = matrix[halfRow] || [];
   for (let c = 0; c < row.length; c += 1) {
     const t = cellText(row[c]);
@@ -363,57 +361,55 @@ function findDateColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
+  const usedFirst = new Set();
+  const usedSecond = new Set();
   const dayCols = [];
-  if (firstHalfCols.length >= best.dates.length && secondHalfCols.length >= best.dates.length) {
-    for (let i = 0; i < best.dates.length; i += 1) {
-      const cur = best.dates[i];
-      const firstCol = firstHalfCols[i];
-      const secondCol = secondHalfCols[i];
-      const label =
-        findWeekdayLabelNear(matrix, best.row, firstCol) ||
-        findWeekdayLabelNear(matrix, best.row, cur.col);
-      dayCols.push({
-        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
-        firstCol,
-        secondCol,
-        timeCol: firstCol,
-        statusCol: secondCol != null ? secondCol : firstCol,
-        layout: "half",
-      });
-    }
-    return dayCols;
-  }
 
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
     const prev = best.dates[i - 1];
     const next = best.dates[i + 1];
-    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : Math.max(0, cur.col - 1);
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : 0;
     const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
 
-    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
-    let secondCol = secondHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+    let firstCol = firstHalfCols.find(
+      (c) => c >= rangeStart && c < rangeEnd && !usedFirst.has(c),
+    );
+    let secondCol = secondHalfCols.find(
+      (c) =>
+        c >= rangeStart &&
+        c < rangeEnd &&
+        !usedSecond.has(c) &&
+        (firstCol == null || c > firstCol),
+    );
 
     if (firstCol == null || secondCol == null) {
-      // Fallback to the old spacing heuristic only if labels weren't found.
       const span = next ? Math.max(1, next.col - cur.col) : 2;
-      firstCol = firstCol != null ? firstCol : cur.col;
-      secondCol =
-        secondCol != null
-          ? secondCol
-          : span >= 4
-            ? cur.col + 2
-            : span >= 2
-              ? cur.col + 1
-              : null;
+      if (firstCol == null) {
+        firstCol = firstHalfCols.find((c) => !usedFirst.has(c) && Math.abs(c - cur.col) <= span) ?? cur.col;
+      }
+      if (secondCol == null) {
+        secondCol =
+          secondHalfCols.find(
+            (c) => !usedSecond.has(c) && c > firstCol && c < (next ? next.col : Infinity),
+          ) ?? (span >= 2 ? firstCol + 1 : null);
+        if (secondCol != null && usedFirst.has(secondCol)) secondCol = null;
+      }
     }
 
+    // Never let two days claim the same half column.
+    if (firstCol != null && usedFirst.has(firstCol)) firstCol = null;
+    if (secondCol != null && usedSecond.has(secondCol)) secondCol = null;
+    if (firstCol == null) firstCol = cur.col;
+    if (firstCol != null) usedFirst.add(firstCol);
+    if (secondCol != null) usedSecond.add(secondCol);
+
+    const label =
+      findWeekdayLabelNear(matrix, best.row, firstCol) ||
+      findWeekdayLabelNear(matrix, best.row, cur.col);
+
     dayCols.push({
-      ymd: alignYmdToWeekdayLabel(
-        cur.ymd,
-        findWeekdayLabelNear(matrix, best.row, firstCol) ||
-          findWeekdayLabelNear(matrix, best.row, cur.col)
-      ),
+      ymd: alignYmdToWeekdayLabel(cur.ymd, label),
       firstCol,
       secondCol,
       timeCol: firstCol,

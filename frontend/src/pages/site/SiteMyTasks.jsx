@@ -53,12 +53,6 @@ async function parsePlanFile(fileUrl, fileName) {
 
 async function ingestPlanAttachment(eaId, sourceFile, fileUrl, fileName) {
   if (!eaId || !fileUrl) return { inserted: 0 };
-  const existing = await api(`/ea-meeting/${eaId}/tasks?source=${encodeURIComponent(sourceFile)}`).catch(
-    () => ({ tasks: [] })
-  );
-  if (Array.isArray(existing?.tasks) && existing.tasks.length) {
-    return { inserted: 0, already: existing.tasks.length };
-  }
 
   const parsed = await parsePlanFile(fileUrl, fileName);
   if (!parsed?.tasks?.length) return { inserted: 0, skipped: true };
