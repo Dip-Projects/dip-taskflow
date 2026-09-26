@@ -4,7 +4,6 @@ import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
-import SiteMyTasks from "./SiteMyTasks";
 import EaMeetingReport from "./EaMeetingReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
@@ -508,7 +507,6 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
-      { key: "my-tasks", label: "My Tasks", icon: Ico.weeklyPlan },
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
       { key: "site-report", label: "Site Visit Report", icon: Ico.site },
       { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
@@ -561,7 +559,6 @@ function buildNav(user, visMap) {
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
-    { key: "my-tasks", label: "My Tasks", icon: Ico.weeklyPlan },
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
@@ -2323,8 +2320,6 @@ useEffect(() => {
     switch (tab) {
       case "team-chat":
         return <SiteTeamChat user={user} />;
-      case "my-tasks":
-        return <SiteMyTasks />;
       case "ea-attendance":
         return <EaMeetingReport />;
       case "clock-in":

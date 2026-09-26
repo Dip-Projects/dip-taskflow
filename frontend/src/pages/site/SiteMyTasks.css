@@ -917,18 +917,6 @@
   color: #047857;
 }
 
-.smt-table__day-row td {
-  position: sticky;
-  top: 36px;
-  z-index: 1;
-  padding: 8px 12px;
-  background: #fff3df;
-  color: #7a2e00;
-  font-weight: 800;
-  border-top: 1px solid #f3d2a8;
-  border-bottom: 1px solid #f3d2a8;
-}
-
 .smt-status-toggle {
   appearance: none;
   border-radius: 8px;
@@ -988,12 +976,6 @@
 
 [data-theme="dark"] .smt-table__row--done td {
   color: #6ee7b7;
-}
-
-[data-theme="dark"] .smt-table__day-row td {
-  background: #3b2412;
-  color: #fdba74;
-  border-color: #6b3d18;
 }
 
 [data-theme="dark"] .smt-status-toggle {
