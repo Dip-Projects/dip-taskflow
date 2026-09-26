@@ -154,6 +154,8 @@ export function WeeklyPlanAttachmentPreview({
   const parsedRef = useRef([]);
   const sheetRef = useRef({ matrix: [], merges: [], colWidths: [] });
   const indexRef = useRef(new Map());
+  /** Sticky cellKey → taskId so badges don't jump between duplicate rows. */
+  const stickyIdsRef = useRef(new Map());
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -165,10 +167,13 @@ export function WeeklyPlanAttachmentPreview({
     sheetRef.current = sheet;
   }, [sheet]);
 
-  const cellTaskIndex = useMemo(
-    () => buildSheetTaskIndex(sheet.matrix, tasks),
-    [sheet.matrix, tasks]
-  );
+  const cellTaskIndex = useMemo(() => {
+    const next = buildSheetTaskIndex(sheet.matrix, tasks, stickyIdsRef.current);
+    for (const [key, task] of next.entries()) {
+      if (task?.id) stickyIdsRef.current.set(key, String(task.id));
+    }
+    return next;
+  }, [sheet.matrix, tasks]);
   useEffect(() => {
     indexRef.current = cellTaskIndex;
   }, [cellTaskIndex]);
@@ -332,6 +337,8 @@ export function WeeklyPlanAttachmentPreview({
       setFromPdf(convertedFromPdf);
       setSheet(nextSheet);
       setParsedTasks(Array.isArray(parsed?.tasks) ? parsed.tasks : []);
+      stickyIdsRef.current = new Map();
+      setCellStatus({});
 
       let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
       // Always try ingest when we have a fresh parse — fills missing cells without wiping status.
@@ -347,7 +354,11 @@ export function WeeklyPlanAttachmentPreview({
 
       if (!cancelledRef.current) {
         setTasks(nextTasks);
-        const linked = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
+        const linked = buildSheetTaskIndex(
+          nextSheet.matrix,
+          nextTasks,
+          stickyIdsRef.current
+        ).size;
         const actionable = countActionableCells(nextSheet.matrix);
         if (actionable > 0 && linked === 0 && nextTasks.length > 0) {
           setNote(
@@ -387,7 +398,7 @@ export function WeeklyPlanAttachmentPreview({
         const listed = await loadTasks();
         if (!alive || !Array.isArray(listed)) return;
         setTasks(listed);
-        setCellStatus({});
+        // Do NOT clear cellStatus — rematching duplicates was wiping Completed badges.
       } catch {
         /* ignore transient poll errors */
       }
@@ -467,8 +478,19 @@ export function WeeklyPlanAttachmentPreview({
   const resolveTaskForCell = async (rowIdx, colIdx) => {
     const matrix = sheetRef.current.matrix;
     const key = `${rowIdx}:${colIdx}`;
+
+    // Prefer sticky / current index — never re-ingest just to rematch (that flipped statuses).
+    const stickyId = stickyIdsRef.current.get(key);
+    if (stickyId) {
+      const pinned =
+        tasksRef.current.find((row) => String(row.id) === String(stickyId)) || null;
+      if (pinned?.id) return pinned;
+    }
     let task = indexRef.current.get(key) || null;
-    if (task?.id) return task;
+    if (task?.id) {
+      stickyIdsRef.current.set(key, String(task.id));
+      return task;
+    }
 
     const cellText = sheetCellText(matrix, rowIdx, colIdx);
     const rowTaskName =
@@ -479,8 +501,11 @@ export function WeeklyPlanAttachmentPreview({
     const half = findHalfForSheetColumn(matrix, colIdx);
 
     const rebuild = (list) => {
-      const next = buildSheetTaskIndex(matrix, list);
+      const next = buildSheetTaskIndex(matrix, list, stickyIdsRef.current);
       indexRef.current = next;
+      for (const [k, t] of next.entries()) {
+        if (t?.id) stickyIdsRef.current.set(k, String(t.id));
+      }
       return next.get(key) || findTaskForSheetCell(list, {
         cellText,
         rowTaskName,
@@ -492,21 +517,27 @@ export function WeeklyPlanAttachmentPreview({
       });
     };
 
-    // 1) Ingest full parse (deduped) then rematch.
-    const parsed = parsedRef.current;
-    if (parsed.length) {
-      const refreshed = await ingestParsed({ tasks: parsed });
-      setTasks(refreshed);
-      task = rebuild(refreshed);
-      if (task?.id) return task;
-    } else {
-      const refreshed = await loadTasks();
-      setTasks(refreshed);
-      task = rebuild(refreshed);
-      if (task?.id) return task;
+    // Reload saved tasks only — avoid full re-ingest on every click.
+    const refreshed = await loadTasks();
+    setTasks(refreshed);
+    task = rebuild(refreshed);
+    if (task?.id) {
+      stickyIdsRef.current.set(key, String(task.id));
+      return task;
     }
 
-    // 2) Create exactly this cell as a saved task, then rematch.
+    // Last resort: ingest parse (or this one cell) then rematch.
+    const parsed = parsedRef.current;
+    if (parsed.length) {
+      const afterIngest = await ingestParsed({ tasks: parsed });
+      setTasks(afterIngest);
+      task = rebuild(afterIngest);
+      if (task?.id) {
+        stickyIdsRef.current.set(key, String(task.id));
+        return task;
+      }
+    }
+
     if (!taskDate || !rowTaskName || !cellText) return null;
     const synthetic = {
       task_date: taskDate,
@@ -516,13 +547,16 @@ export function WeeklyPlanAttachmentPreview({
       sr_no: srNo,
       half: half || 0,
     };
-    const after = await ingestParsed({ tasks: [synthetic, ...parsed] });
+    const after = await ingestParsed({ tasks: [synthetic, ...(parsed || [])] });
     setTasks(after);
-    return rebuild(after);
+    task = rebuild(after);
+    if (task?.id) stickyIdsRef.current.set(key, String(task.id));
+    return task;
   };
 
   const completeCell = async (rowIdx, colIdx) => {
     const busyKey = cellBusyKey(rowIdx, colIdx);
+    const key = `${rowIdx}:${colIdx}`;
     if (!eaId) {
       setNote("Missing EM attendance id — cannot update task status.");
       return;
@@ -538,6 +572,7 @@ export function WeeklyPlanAttachmentPreview({
           "Could not save a task for this cell. Re-upload the weekly plan, then try again."
         );
       }
+      stickyIdsRef.current.set(key, String(task.id));
 
       const live =
         tasksRef.current.find((row) => String(row.id) === String(task.id)) || task;
@@ -556,8 +591,16 @@ export function WeeklyPlanAttachmentPreview({
     }
 
     const busyKey = cellBusyKey(rowIdx, colIdx);
-    const task = cellTaskIndex.get(`${rowIdx}:${colIdx}`) || null;
-    const status = cellStatus[busyKey] || (task ? getCellStatusText(task) : "Pending");
+    const key = `${rowIdx}:${colIdx}`;
+    const stickyId = stickyIdsRef.current.get(key);
+    const stickyTask = stickyId
+      ? tasks.find((row) => String(row.id) === String(stickyId))
+      : null;
+    const task = stickyTask || cellTaskIndex.get(key) || null;
+    // Prefer live DB status on the sticky task; cellStatus only for in-flight clicks.
+    const status =
+      cellStatus[busyKey] ||
+      (task ? getCellStatusText(task) : "Pending");
     const statusCss = statusClass(status);
     const done = statusCss === "smt-excel-sheet__cell--done";
     const cancelled = statusCss === "smt-excel-sheet__cell--cancel";

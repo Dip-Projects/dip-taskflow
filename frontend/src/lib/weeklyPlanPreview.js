@@ -508,19 +508,50 @@ function scoreTaskForCell(task, { cellText, taskDate, half, requireDate = true }
   return score;
 }
 
+function taskSheetDedupeKey(task) {
+  return [
+    String(task?.task_date || "").slice(0, 10),
+    task?.sr_no == null || task?.sr_no === "" ? "" : String(task.sr_no),
+    normalizePreviewText(task?.task_name),
+    String(Number.isFinite(Number(task?.half)) ? Number(task.half) : 0),
+    normalizePreviewText(task?.time_slot),
+  ].join("|");
+}
+
+/** One row per sheet cell identity — prefer Completed when duplicates exist. */
+export function dedupeTasksForSheetIndex(tasks) {
+  const map = new Map();
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (!isAssignablePlanTask(task)) continue;
+    const key = taskSheetDedupeKey(task);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, task);
+      continue;
+    }
+    const prevDone = String(prev.status || "") === "Completed";
+    const nextDone = String(task.status || "") === "Completed";
+    if (nextDone && !prevDone) map.set(key, task);
+  }
+  return [...map.values()];
+}
+
 /**
  * Build a 1:1 map of sheet cell → task.
  * Each task is used at most once, so duplicate labels on other days/rows
  * cannot share status when one Pending is clicked.
  *
+ * preferredIds: optional Map<"row:col", taskId> sticky links that win when still valid.
+ *
  * Returns Map<"row:col", task>
  */
-export function buildSheetTaskIndex(matrix, tasks) {
+export function buildSheetTaskIndex(matrix, tasks, preferredIds = null) {
   const index = new Map();
   if (!Array.isArray(matrix) || !matrix.length) return index;
-  const pool = (Array.isArray(tasks) ? tasks : []).filter(isAssignablePlanTask);
+  const pool = dedupeTasksForSheetIndex(tasks);
   if (!pool.length) return index;
 
+  const byId = new Map(pool.map((t) => [String(t.id), t]));
   const used = new Set();
   const cells = [];
 
@@ -545,10 +576,28 @@ export function buildSheetTaskIndex(matrix, tasks) {
     }
   }
 
+  const usedCells = new Set();
+
+  // Sticky links first — keep the same task id on a cell across refreshes.
+  if (preferredIds instanceof Map || (preferredIds && typeof preferredIds.get === "function")) {
+    for (const cell of cells) {
+      const preferId = String(preferredIds.get(cell.key) || "");
+      if (!preferId) continue;
+      const task = byId.get(preferId);
+      if (!task || used.has(preferId)) continue;
+      if (scoreTaskForCell(task, cell) < 0) continue;
+      index.set(cell.key, task);
+      used.add(preferId);
+      usedCells.add(cell.key);
+    }
+  }
+
   const scored = [];
   for (const cell of cells) {
+    if (usedCells.has(cell.key)) continue;
     const rowName = normalizePreviewText(cell.rowTaskName);
     for (const task of pool) {
+      if (used.has(String(task.id))) continue;
       if (!sameTaskRow(task, rowName, cell.srNo)) continue;
       const score = scoreTaskForCell(task, cell);
       if (score < 0) continue;
@@ -564,7 +613,6 @@ export function buildSheetTaskIndex(matrix, tasks) {
       a.cell.colIdx - b.cell.colIdx,
   );
 
-  const usedCells = new Set();
   for (const { cell, task } of scored) {
     const ck = cell.key;
     const tid = String(task.id);
@@ -574,8 +622,7 @@ export function buildSheetTaskIndex(matrix, tasks) {
     usedCells.add(ck);
   }
 
-  // Exact text + date + half among unused (no column-order guessing).
-  // Prefer Completed when duplicate rows exist for the same cell.
+  // Exact text + date + half among unused.
   for (const cell of cells) {
     if (usedCells.has(cell.key) || index.has(cell.key)) continue;
     const text = normalizePreviewText(cell.cellText);
