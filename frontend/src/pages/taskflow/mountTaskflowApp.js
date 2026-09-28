@@ -1758,6 +1758,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     state.activeView = viewKey;
+    window.__tfActiveView = viewKey;
     ensureNavSectionOpen(viewKey);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   
@@ -10470,12 +10471,24 @@ export async function mountTaskflowApp(opts = {}) {
             if (row.answer) appendBotBubble('bot', row.answer);
           });
         } else {
-          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets.');
+          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets. Offer letter and Experience letter are the buttons above.');
         }
       } catch (_) {
-        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets.');
+        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets. Offer letter and Experience letter are the buttons above.');
       }
     }
+  }
+
+  function openBotLetter(tabKey) {
+    const kind = tabKey === 'letter-exp' ? 'exp' : 'offer';
+    window.dispatchEvent(new CustomEvent('dip-bot-letter', { detail: kind }));
+  }
+
+  function letterTabFromQuestion(q) {
+    const s = String(q || '').toLowerCase();
+    if (/\b(offer)\b/.test(s) && /\bletter\b/.test(s)) return 'letter-offer';
+    if (/\b(exp|experience)\b/.test(s) && /\b(letter|cert|certificate)\b/.test(s)) return 'letter-exp';
+    return '';
   }
 
   function bindBotAskForm() {
@@ -10489,6 +10502,16 @@ export async function mountTaskflowApp(opts = {}) {
       const input = document.getElementById('botAskInput');
       const q = (input?.value || '').trim();
       if (!q) return;
+      const letterTab = letterTabFromQuestion(q);
+      if (letterTab) {
+        appendBotBubble('you', q);
+        if (input) input.value = '';
+        appendBotBubble('bot', letterTab === 'letter-exp'
+          ? 'Experience letter form is open above.'
+          : 'Offer letter form is open above.');
+        openBotLetter(letterTab);
+        return;
+      }
       appendBotBubble('you', q);
       if (input) input.value = '';
       const askBtn = form.querySelector('button[type="submit"]');

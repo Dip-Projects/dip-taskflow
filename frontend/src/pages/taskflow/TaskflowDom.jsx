@@ -1,8 +1,9 @@
 /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
-import { useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
 import SiteReport from '../site/Sitereport';
 import MyReports from '../site/MyReports';
+import BotLetterPanel from './BotLetterPanel';
 
 function readOfficeUser() {
   let user = null;
@@ -41,8 +42,25 @@ function restoreSidebarDom() {
 }
 
 export default function TaskflowDom() {
+  const [botLetter, setBotLetter] = useState('');
+
+  useEffect(() => {
+    const onLetter = (e) => {
+      const kind = e.detail === 'exp' ? 'exp' : 'offer';
+      setBotLetter(kind);
+    };
+    window.addEventListener('dip-bot-letter', onLetter);
+    return () => window.removeEventListener('dip-bot-letter', onLetter);
+  }, []);
+
   useLayoutEffect(() => {
     restoreSidebarDom();
+    const key = window.__tfActiveView;
+    if (!key) return;
+    const htmlKey = (key === 'tickets-open' || key === 'tickets-resolved') ? 'tickets' : key;
+    document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
+    const viewEl = document.getElementById(`view-${htmlKey}`);
+    if (viewEl) viewEl.hidden = false;
   });
 
   return (
@@ -571,9 +589,28 @@ export default function TaskflowDom() {
               <img src="/logo192.png" alt="" className="view-bot-dp" width="28" height="28" />
               DIP Bot
             </h2>
-            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. DIP Bot answers only that.</p>
+            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. Offer letter and experience letter download here.</p>
           </div>
           <div className="bot-shell">
+            <div className="bot-quick" id="botQuickActions">
+              <button
+                type="button"
+                className={`bot-quick-btn${botLetter === 'offer' ? ' is-on' : ''}`}
+                data-hr-tab="letter-offer"
+                onClick={() => setBotLetter((cur) => (cur === 'offer' ? '' : 'offer'))}
+              >
+                Offer letter
+              </button>
+              <button
+                type="button"
+                className={`bot-quick-btn${botLetter === 'exp' ? ' is-on' : ''}`}
+                data-hr-tab="letter-exp"
+                onClick={() => setBotLetter((cur) => (cur === 'exp' ? '' : 'exp'))}
+              >
+                Experience letter
+              </button>
+            </div>
+            {botLetter && <BotLetterPanel key={botLetter} kind={botLetter} />}
             <div id="botChatLog" className="bot-chat-log"></div>
             <form id="botAskForm" className="bot-ask-form">
               <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
