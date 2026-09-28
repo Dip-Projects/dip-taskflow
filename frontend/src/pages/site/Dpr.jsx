@@ -1778,6 +1778,27 @@ async function saveDprReport({
     }
     lastErr = insErr;
 
+    if (/duplicate key/i.test(insErr.message || "")) {
+      const { data: raced } = await supabase
+        .from("dpr_reports")
+        .select("id")
+        .eq("site", site)
+        .eq("engineer", engineer)
+        .eq("report_type", report_type)
+        .eq("date", date)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (raced?.id) {
+        const { error: updErr } = await supabase
+          .from("dpr_reports")
+          .update({ ...row, created_at })
+          .eq("id", raced.id);
+        if (updErr) throw new Error(`DB update failed: ${updErr.message}`);
+        return { id: raced.id, replaced: true };
+      }
+    }
+
     // IDENTITY ALWAYS — cannot set id; keep retrying default nextval
     if (/generated|identity|overriding/i.test(insErr.message || "")) {
       for (let r = 0; r < 30; r++) {
