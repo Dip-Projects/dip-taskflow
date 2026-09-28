@@ -121,6 +121,13 @@ function collectEls() {
     verifyPerson: document.getElementById('verify-person'),
     closeVerifyModal: document.getElementById('closeVerifyModal'),
     cancelVerifyModal: document.getElementById('cancelVerifyModal'),
+    forwardVerifyModal: document.getElementById('forwardVerifyModal'),
+    forwardVerifyForm: document.getElementById('forwardVerifyForm'),
+    forwardVerifyFormMsg: document.getElementById('forwardVerifyFormMsg'),
+    forwardVerifyPerson: document.getElementById('forward-verify-person'),
+    forwardVerifyHint: document.getElementById('forwardVerifyHint'),
+    closeForwardVerifyModal: document.getElementById('closeForwardVerifyModal'),
+    cancelForwardVerifyModal: document.getElementById('cancelForwardVerifyModal'),
     ticketsList: document.getElementById('ticketsList'),
     ticketsTableBody: document.getElementById('ticketsTableBody'),
     openRaiseTicket: document.getElementById('openRaiseTicket'),
@@ -3378,10 +3385,11 @@ export async function mountTaskflowApp(opts = {}) {
       if (verificationHasStarted(task)) {
         startVerificationInline(task, actionsEl);
       } else {
-        const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
           await clickStartVerification(task, actionsEl, startBtn);
         });
         actionsEl.appendChild(startBtn);
+        appendForwardVerificationBtn(actionsEl, task);
       }
       return card;
     }
@@ -3417,6 +3425,23 @@ export async function mountTaskflowApp(opts = {}) {
     btn.className = `action-btn ${cls}`; btn.textContent = label;
     btn.addEventListener('click', onClick);
     return btn;
+  }
+
+  const VERIFY_ICON_START = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.2 8.4v7.2L16.2 12 10.2 8.4z" fill="currentColor"/></svg>';
+  const VERIFY_ICON_SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.5M12.5 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function makeIconActionBtn(cls, label, icon, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `action-btn ${cls}`;
+    btn.innerHTML = `${icon}<span>${label}</span>`;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  function fillStartVerificationBtn(btn) {
+    if (!btn) return;
+    btn.innerHTML = `${VERIFY_ICON_START}<span>Start Verification</span>`;
   }
   
   async function updateStatus(taskId, status, status_note) {
@@ -3598,6 +3623,90 @@ export async function mountTaskflowApp(opts = {}) {
   // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
   // Called when verifier clicks "Start Verification" on a card/row.
   // We toggle the card's action area to show the two choice buttons.
+  function canForwardVerification(task) {
+    const vid = task?.verifier?.id || task?.verifier_id || null;
+    return state.user?.role === 'admin' || (!!vid && state.user?.id === vid);
+  }
+
+  function makeForwardVerificationBtn(task) {
+    if (!canForwardVerification(task)) return null;
+    const btn = makeIconActionBtn('action-forward', 'Send to another', VERIFY_ICON_SEND, () => openForwardVerificationModal(task));
+    btn.title = 'Send this task to a different verifier';
+    return btn;
+  }
+
+  function appendForwardVerificationBtn(actionsEl, task) {
+    const btn = makeForwardVerificationBtn(task);
+    if (btn) actionsEl.appendChild(btn);
+  }
+
+  async function openForwardVerificationModal(task) {
+    state.pendingTaskId = task?.id || null;
+    state.pendingForwardFromId = task?.verifier?.id || task?.verifier_id || null;
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    if (els.forwardVerifyHint) {
+      const who = task?.verifier?.full_name || 'the current verifier';
+      els.forwardVerifyHint.textContent = `This leaves ${who}. The person you pick will verify it.`;
+    }
+    if (els.forwardVerifyPerson) els.forwardVerifyPerson.innerHTML = '<option value="">Loading…</option>';
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = false;
+    try {
+      const verifiers = await api('/master/verifiers');
+      const choices = (verifiers || []).filter((v) => v.id && v.id !== state.pendingForwardFromId);
+      fillSelect(els.forwardVerifyPerson, choices, { placeholder: 'Select a verifier', labelKey: 'full_name' });
+      if (!choices.length && els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'No other verifier is available';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    }
+  }
+
+  function closeForwardVerificationModal() {
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = true;
+  }
+
+  els.closeForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.cancelForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.forwardVerifyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    const verifierId = els.forwardVerifyPerson?.value || '';
+    if (!state.pendingTaskId || !verifierId) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'Please choose who should verify this task';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+      return;
+    }
+    try {
+      const sent = await api(`/tasks/${state.pendingTaskId}/forward-verification`, {
+        method: 'PATCH',
+        body: { verifier_id: verifierId },
+      });
+      const who = els.forwardVerifyPerson?.selectedOptions?.[0]?.textContent || 'the new verifier';
+      if (sent?._whatsapp?.ok) {
+        showToast(`Sent for verification to ${who} ✅`, 'success');
+      } else {
+        showToast(`Sent to ${who}. WhatsApp was not delivered.`, 'success');
+      }
+      closeForwardVerificationModal();
+      loadVerifications();
+      refreshNavBadges();
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
   function startVerificationInline(task, actionsEl) {
     const taskId = task?.id || task;
     actionsEl.innerHTML = '';
@@ -3606,6 +3715,7 @@ export async function mountTaskflowApp(opts = {}) {
     }));
     actionsEl.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
     actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+    appendForwardVerificationBtn(actionsEl, task);
   }
   
   async function verifyApprove(taskId) {
@@ -3777,7 +3887,7 @@ export async function mountTaskflowApp(opts = {}) {
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       btn.style.pointerEvents = 'none';
-      btn.textContent = 'Starting…';
+      btn.innerHTML = `${VERIFY_ICON_START}<span>Starting…</span>`;
     }
     showBusyOverlay('Starting verification…');
     try {
@@ -3796,7 +3906,7 @@ export async function mountTaskflowApp(opts = {}) {
         btn.disabled = false;
         btn.removeAttribute('aria-busy');
         btn.style.pointerEvents = '';
-        btn.textContent = '🔎 Start Verification';
+        fillStartVerificationBtn(btn);
       }
       showToast(err.message, 'error');
     } finally {
@@ -4348,6 +4458,7 @@ export async function mountTaskflowApp(opts = {}) {
         }));
         tdActions.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
         tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+        appendForwardVerificationBtn(tdActions, task);
       }
   
       // Actions — "Start Verification" → then Verify or Send for Correction
@@ -4355,10 +4466,11 @@ export async function mountTaskflowApp(opts = {}) {
         // Already started (recorded on the task itself) — show verify/correction buttons directly
         showVerifyActions();
       } else {
-        const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
           await clickStartVerification(task, tdActions, startBtn);
         });
         tdActions.appendChild(startBtn);
+        appendForwardVerificationBtn(tdActions, task);
       }
       tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdAttach, tdDate, tdActions);
       tbody.appendChild(tr);

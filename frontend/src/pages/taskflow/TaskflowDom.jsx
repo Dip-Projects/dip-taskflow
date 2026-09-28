@@ -2038,6 +2038,28 @@ export default function TaskflowDom() {
     </div>
   </div>
 
+  {/* Verifier forwards a request already in their queue */}
+  <div id="forwardVerifyModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Send to another verifier</h3>
+        <button className="modal-close" id="closeForwardVerifyModal" type="button">&times;</button>
+      </div>
+      <form id="forwardVerifyForm" className="modal-body">
+        <p className="form-note" id="forwardVerifyHint">This task will leave the current verifier and show up for the person you pick.</p>
+        <div className="field">
+          <label htmlFor="forward-verify-person">Send to <span className="req">*</span></label>
+          <select id="forward-verify-person" required><option value="">Select a verifier</option></select>
+        </div>
+        <p id="forwardVerifyFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelForwardVerifyModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   {/* Ticket Modal */}
   <div id="ticketModal" className="modal-backdrop" hidden={true}>
     <div className="modal">
