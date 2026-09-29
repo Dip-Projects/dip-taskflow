@@ -3575,8 +3575,32 @@ const fmtD = (d) =>
         year: "numeric",
       })
     : "—";
+function mdoCanSeeWeeklyPlan(user, visMap) {
+  if (!visMap || !visMap["weekly-plan"]) return true;
+  const row = visMap["weekly-plan"];
+  const role = String(user?.role || "").toLowerCase().trim();
+  const dept = String(user?.department || "").toLowerCase().trim();
+  const desig = String(user?.designation || user?.site_role || "").toLowerCase().trim();
+  const blob = `${role} ${dept} ${desig}`;
+  const on = (value) => value === true || value === "true" || value === 1;
+  if (role === "admin") return on(row.admin);
+  if (user?.is_mis_executive || /\bmis\b/.test(`${dept} ${desig}`)) return on(row.mis);
+  const head =
+    !!user?.is_head ||
+    role === "head" ||
+    /site incharge|project head|site head/.test(blob);
+  if (
+    dept === "site engineer" ||
+    /site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+  ) {
+    return head ? on(row.site_head) && on(row.site) : on(row.site);
+  }
+  return on(row.employee);
+}
+
 export default function MDOPortal({ onLogout }) {
   const [user, setUser] = useState(null);
+  const [visMap, setVisMap] = useState(null);
   const [activeTab, setActiveTab] = useState("attendance");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hoveredNavKey, setHoveredNavKey] = useState(null);
@@ -3720,7 +3744,26 @@ useEffect(() => {
     if (names.length) setAllSites(names);
   });
 }, []);
-useEffect(() => {
+  useEffect(() => {
+    let cancelled = false;
+    const loadVis = async () => {
+      try {
+        const data = await api("/master/nav-visibility");
+        if (!cancelled && data?.map) setVisMap(data.map);
+      } catch {
+        /* keep the last map */
+      }
+    };
+    loadVis();
+    const onFocus = () => loadVis();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
     loadUser();
     const onResize = () => {
       if (window.innerWidth <= 768) setSidebarOpen(false);
@@ -3752,9 +3795,11 @@ useEffect(() => {
         : []
   ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const sites = ownSites.length ? ownSites : allSites;
-  const NAV = getNavItems(user).filter(
-    (n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)
-  );
+  const NAV = getNavItems(user).filter((n) => {
+    if (n.restricted === "chirag_only" && !canSeeMdoTaskDelayReport(user)) return false;
+    if (n.key === "weekly-plan" && !mdoCanSeeWeeklyPlan(user, visMap)) return false;
+    return true;
+  });
   const activeItem = NAV.find((n) => n.key === activeTab);
 
   return (
@@ -3907,7 +3952,7 @@ useEffect(() => {
               <SiteReport user={user} />
             ) : activeTab === "my-reports" ? (
               <MyReports user={user} />
-            ) : activeTab === "weekly-plan" ? (
+            ) : activeTab === "weekly-plan" && mdoCanSeeWeeklyPlan(user, visMap) ? (
               <WeeklyPlanReportMdo user={user} sites={sites} />
             ) : activeTab === "task-delay" ? (
               <MdoTaskDelayReport />

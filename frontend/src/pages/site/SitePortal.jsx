@@ -501,16 +501,23 @@ function flagOn(value) {
   return value === true || value === "true" || value === 1;
 }
 
-/** Who sees what → Site: Material Received. Site off hides site staff. Site head off hides incharge. */
-function showMaterialReceived(user, visMap) {
-  if (!canRecordMaterial(user)) return false;
-  if (!visMap) return false;
-  const row = visMap["material-received"];
-  if (!row) return false;
+/** Who sees what row. Site off hides site staff. Site head off hides incharge. */
+function showWhenVisibilityOn(user, visMap, key, untilLoaded = false) {
+  if (!visMap) return untilLoaded;
+  const row = visMap[key];
+  if (!row) return untilLoaded;
   const who = visibilityRole(user);
   if (who === "site") return flagOn(row.site);
   if (who === "site_head") return flagOn(row.site_head) && flagOn(row.site);
   return flagOn(row[who]);
+}
+
+function showMaterialReceived(user, visMap) {
+  return canRecordMaterial(user) && showWhenVisibilityOn(user, visMap, "material-received", false);
+}
+
+function showWeeklyPlan(user, visMap) {
+  return showWhenVisibilityOn(user, visMap, "weekly-plan", true);
 }
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
@@ -596,7 +603,9 @@ function buildNav(user, visMap) {
   const reportChildren = [
     { key: "daily-report", label: "Daily Report (DPR)", icon: Ico.report },
     { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
-    { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
+    ...(showWeeklyPlan(user, visMap)
+      ? [{ key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan }]
+      : []),
     { key: "site-report", label: "Site Visit Report", icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
@@ -2421,6 +2430,7 @@ useEffect(() => {
       case "my-reports":
         return <MyReports user={user} />;
       case "weekly-plan":
+        if (!showWeeklyPlan(navUser, visMap)) return null;
         return <WeeklyPlanReport user={user} />;
       case "manpower-reports":
         return <ManpowerReport user={user} />;
