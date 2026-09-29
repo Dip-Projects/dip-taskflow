@@ -526,7 +526,7 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
-      ...(canRecordMaterial(user)
+      ...(canRecordMaterial(user) && visAllows(visMap, "material-received", user)
         ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
         : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
@@ -578,7 +578,7 @@ function buildNav(user, visMap) {
   });
 
   return [
-    ...(canRecordMaterial(user)
+    ...(canRecordMaterial(user) && visAllows(visMap, "material-received", user)
       ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
       : []),
     ...(showEaReport
@@ -2353,7 +2353,7 @@ useEffect(() => {
       case "calendar":
         return <CalendarView user={user} supabase={supabase} />;
       case "material-received":
-        if (!canRecordMaterial(navUser)) return null;
+        if (!canRecordMaterial(navUser) || !visAllows(visMap, "material-received", navUser)) return null;
         return <MaterialReceived user={user} />;
       case "my-leave":
         return <MyLeave user={user} onApply={() => nav("apply-leave")} />;

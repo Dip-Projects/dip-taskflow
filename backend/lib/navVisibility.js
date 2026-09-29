@@ -33,6 +33,7 @@ const MODULES = [
   { key: 'corrections', label: 'Corrections / updations', area: 'office' },
   { key: 'site-team-submissions', label: 'Site: Team submissions', area: 'site' },
   { key: 'site-leave-approvals', label: 'Site: Leave approvals', area: 'site' },
+  { key: 'material-received', label: 'Site: Material Received', area: 'site' },
 ];
 
 const ROLES = ['admin', 'mis', 'employee', 'site', 'site_head'];
@@ -75,6 +76,7 @@ function defaultRow(key) {
     corrections: { admin: false, mis: true, employee: true, site: false, site_head: false },
     'site-team-submissions': { admin: false, mis: false, employee: false, site: false, site_head: true },
     'site-leave-approvals': { admin: false, mis: false, employee: false, site: true, site_head: true },
+    'material-received': { admin: false, mis: false, employee: false, site: true, site_head: true },
   };
   return map[key] || allTrue;
 }
