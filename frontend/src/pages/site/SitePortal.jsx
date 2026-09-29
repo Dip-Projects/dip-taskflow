@@ -474,6 +474,45 @@ function visAllows(visMap, key, user) {
   return row.site !== false;
 }
 
+function visibilityRole(user) {
+  const role = String(user?.role || "").toLowerCase().trim();
+  const dept = String(user?.department || "").toLowerCase().trim();
+  const desig = String(user?.designation || user?.site_role || "").toLowerCase().trim();
+  if (role === "client" || dept === "client") return "client";
+  if (role === "admin") return "admin";
+  if (user?.is_mis_executive || /\bmis\b/.test(`${dept} ${desig}`)) return "mis";
+  const blob = `${role} ${dept} ${desig}`;
+  const head =
+    !!user?.is_head ||
+    role === "head" ||
+    desig === "head" ||
+    /site incharge|project head|site head/.test(blob);
+  if (
+    dept === "site engineer" ||
+    /site engineer|jr\.?\s*site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+  ) {
+    return head ? "site_head" : "site";
+  }
+  if (head && /incharge|project head|\bhead\b/.test(blob)) return "site_head";
+  return "employee";
+}
+
+function flagOn(value) {
+  return value === true || value === "true" || value === 1;
+}
+
+/** Who sees what → Site: Material Received. Site off hides site staff. Site head off hides incharge. */
+function showMaterialReceived(user, visMap) {
+  if (!canRecordMaterial(user)) return false;
+  if (!visMap) return false;
+  const row = visMap["material-received"];
+  if (!row) return false;
+  const who = visibilityRole(user);
+  if (who === "site") return flagOn(row.site);
+  if (who === "site_head") return flagOn(row.site_head) && flagOn(row.site);
+  return flagOn(row[who]);
+}
+
 // ─── Nav structure ────────────────────────────────────────────────────────────
 function reportMatchesTeam(rawName, teamNames) {
   const n = String(rawName || "").toLowerCase().trim();
@@ -526,7 +565,7 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
-      ...(canRecordMaterial(user) && visAllows(visMap, "material-received", user)
+      ...(showMaterialReceived(user, visMap)
         ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
         : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
@@ -578,7 +617,7 @@ function buildNav(user, visMap) {
   });
 
   return [
-    ...(canRecordMaterial(user) && visAllows(visMap, "material-received", user)
+    ...(showMaterialReceived(user, visMap)
       ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
       : []),
     ...(showEaReport
@@ -2287,19 +2326,23 @@ useEffect(() => {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadVis = async () => {
       try {
         const res = await fetch("/api/master/nav-visibility", {
           headers: { Authorization: `Bearer ${localStorage.getItem("tf_token") || ""}` },
         });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setVisMap(data.map || {});
+        if (!cancelled && data?.map) setVisMap(data.map);
       } catch {
-        if (!cancelled) setVisMap({});
+        /* keep the last map */
       }
-    })();
+    };
+    loadVis();
+    const onFocus = () => loadVis();
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -2353,7 +2396,7 @@ useEffect(() => {
       case "calendar":
         return <CalendarView user={user} supabase={supabase} />;
       case "material-received":
-        if (!canRecordMaterial(navUser) || !visAllows(visMap, "material-received", navUser)) return null;
+        if (!showMaterialReceived(navUser, visMap)) return null;
         return <MaterialReceived user={user} />;
       case "my-leave":
         return <MyLeave user={user} onApply={() => nav("apply-leave")} />;
