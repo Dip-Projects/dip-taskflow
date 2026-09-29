@@ -10,6 +10,7 @@ import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
 import WprGenerator from "./Wprgenerator.jsx";
 import MatRequirement from "./MatRequirement.jsx";
+import MaterialReceived from "./MaterialReceived.jsx";
 import SiteTeamChat from "./SiteTeamChat.jsx";
 import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
@@ -493,6 +494,16 @@ function showLeaveApprovalsMenu(user, visMap) {
 }
 
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
+function isPlainSiteEngineer(user) {
+  const norm = (v) =>
+    String(v || "")
+      .toLowerCase()
+      .replace(/[.\-_]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return [user?.role, user?.designation].some((v) => norm(v) === "site engineer");
+}
+
 function isBeenaOrPcUser(user) {
   if (!user) return false;
   if (String(user.role || "").toLowerCase() === "admin") return false;
@@ -561,6 +572,9 @@ function buildNav(user, visMap) {
       : []),
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
+    ...(isPlainSiteEngineer(user)
+      ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
+      : []),
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
     { section: "leave", label: "Leave", children: leaveChildren },
     { section: "reports", label: "Reports", children: reportChildren },
@@ -1865,6 +1879,7 @@ const [hoveredNavKey, setHoveredNavKey] = useState(null);
 const NAV_COLORS = {
   "clock-in": "#2563eb",
   "calendar": "#2563eb",
+  "material-received": "#c2410c",
   "apply-leave": "#7c3aed",
   "my-leave": "#7c3aed",
   "leave-approvals": "#7c3aed",
@@ -2326,6 +2341,9 @@ useEffect(() => {
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":
         return <CalendarView user={user} supabase={supabase} />;
+      case "material-received":
+        if (!isPlainSiteEngineer(navUser)) return null;
+        return <MaterialReceived user={user} />;
       case "my-leave":
         return <MyLeave user={user} onApply={() => nav("apply-leave")} />;
       case "apply-leave":
