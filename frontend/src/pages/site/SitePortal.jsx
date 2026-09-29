@@ -39,6 +39,7 @@ const OFFICE_SITE_TABS = new Set([
   "site-report",
   "my-reports",
   "leave-approvals",
+  "material-received",
 ]);
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
@@ -494,7 +495,7 @@ function showLeaveApprovalsMenu(user, visMap) {
 }
 
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
-function isPlainSiteEngineer(user) {
+function canRecordMaterial(user) {
   const norm = (v) =>
     String(v || "")
       .toLowerCase()
@@ -505,7 +506,8 @@ function isPlainSiteEngineer(user) {
   const des = norm(user?.designation || user?.site_role);
   const dept = norm(user?.department);
   const title = `${role} ${des}`;
-  if (/incharge|coordinator|co ordinator/.test(title)) return false;
+  if (/coordinator|co ordinator/.test(title)) return false;
+  if (/incharge/.test(title)) return true;
   if (dept === "site engineer" || role === "site engineer" || des === "site engineer") return true;
   return /(?:jr |junior |sr |senior )?site engineer/.test(title);
 }
@@ -524,6 +526,9 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
+      ...(canRecordMaterial(user)
+        ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
+        : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
       { key: "site-report", label: "Site Visit Report", icon: Ico.site },
       { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
@@ -573,7 +578,7 @@ function buildNav(user, visMap) {
   });
 
   return [
-    ...(isPlainSiteEngineer(user)
+    ...(canRecordMaterial(user)
       ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
       : []),
     ...(showEaReport
@@ -2348,7 +2353,7 @@ useEffect(() => {
       case "calendar":
         return <CalendarView user={user} supabase={supabase} />;
       case "material-received":
-        if (!isPlainSiteEngineer(navUser)) return null;
+        if (!canRecordMaterial(navUser)) return null;
         return <MaterialReceived user={user} />;
       case "my-leave":
         return <MyLeave user={user} onApply={() => nav("apply-leave")} />;
