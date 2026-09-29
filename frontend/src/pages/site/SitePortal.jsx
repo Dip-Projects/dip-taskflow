@@ -501,7 +501,13 @@ function isPlainSiteEngineer(user) {
       .replace(/[.\-_]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-  return [user?.role, user?.designation].some((v) => norm(v) === "site engineer");
+  const role = norm(user?.role);
+  const des = norm(user?.designation || user?.site_role);
+  const dept = norm(user?.department);
+  const title = `${role} ${des}`;
+  if (/incharge|coordinator|co ordinator/.test(title)) return false;
+  if (dept === "site engineer" || role === "site engineer" || des === "site engineer") return true;
+  return /(?:jr |junior |sr |senior )?site engineer/.test(title);
 }
 
 function isBeenaOrPcUser(user) {
@@ -567,14 +573,14 @@ function buildNav(user, visMap) {
   });
 
   return [
+    ...(isPlainSiteEngineer(user)
+      ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
+      : []),
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
-    ...(isPlainSiteEngineer(user)
-      ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
-      : []),
     ...(showChat ? [{ key: "team-chat", label: "Team chat", icon: Ico.chat }] : []),
     { section: "leave", label: "Leave", children: leaveChildren },
     { section: "reports", label: "Reports", children: reportChildren },
