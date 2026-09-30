@@ -9611,10 +9611,11 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function downloadReportPdf({ title, subtitle, filename, sections }) {
-    const widest = Math.max(1, ...sections.map((sec) => (sec.head || []).length));
-    const pageW = Math.max(420, widest * 28 + 16);
-    const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: [pageW, 297] });
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+    const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const tableW = pageW - margin * 2;
     doc.setFontSize(16);
     doc.text(title, pageW / 2, 12, { align: 'center' });
     doc.setFontSize(9);
@@ -9627,26 +9628,27 @@ export async function mountTaskflowApp(opts = {}) {
     sections.forEach((sec) => {
       if (!sec.head?.length) return;
       if (y > pageH - 28) {
-        doc.addPage([pageW, 297], 'l');
+        doc.addPage('a3', 'landscape');
         y = 12;
       }
       doc.setFontSize(11);
-      doc.text(sec.heading, 8, y);
+      doc.text(sec.heading, margin, y);
       const body = sec.body?.length
         ? sec.body
         : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
+      const fontSize = sec.head.length > 14 ? 6 : sec.head.length > 8 ? 7 : 9;
       autoTable(doc, {
         startY: y + 2,
         head: [sec.head],
         body,
-        styles: { fontSize: 7, cellPadding: 1.15, overflow: 'linebreak', valign: 'top' },
-        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize: 7 },
-        margin: { left: 8, right: 8, top: 12, bottom: 12 },
-        tableWidth: 'auto',
+        styles: { fontSize, cellPadding: 1, overflow: 'linebreak', valign: 'top' },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize, halign: 'left' },
+        alternateRowStyles: { fillColor: [247, 243, 236] },
+        margin: { left: margin, right: margin, top: 12, bottom: 12 },
+        tableWidth: tableW,
         showHead: 'everyPage',
         rowPageBreak: 'auto',
-        horizontalPageBreak: true,
-        horizontalPageBreakRepeat: [0],
+        horizontalPageBreak: false,
       });
       y = (doc.lastAutoTable?.finalY || y) + 8;
     });
