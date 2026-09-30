@@ -74,7 +74,18 @@ async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = [], opt
 
   const components = [];
   const headerParams = Array.isArray(opts.headerParams) ? opts.headerParams : [];
-  if (headerParams.length) {
+  if (opts.document?.link) {
+    const filename = String(opts.document.filename || 'report.pdf')
+      .replace(/[^\w.\-]+/g, '-')
+      .slice(0, 80);
+    components.push({
+      type: 'header',
+      parameters: [{
+        type: 'document',
+        document: { link: String(opts.document.link), filename },
+      }],
+    });
+  } else if (headerParams.length) {
     components.push({
       type: 'header',
       parameters: headerParams.map((text) => ({
