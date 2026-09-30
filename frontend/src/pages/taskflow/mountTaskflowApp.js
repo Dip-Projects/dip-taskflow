@@ -9269,6 +9269,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   // ─── MIS Report (admin, week-wise) ────────────────────────────────────────────
   let _misLastData = null;
+  let _misReq = 0;
 
   function misPill(n, kind, icon = '') {
     return `<span class="mis-pill ${kind}">${icon ? `${icon} ` : ''}${n}</span>`;
@@ -9416,22 +9417,26 @@ export async function mountTaskflowApp(opts = {}) {
     }
 
     async function run() {
+      const reqId = ++_misReq;
       body.innerHTML = '<div class="empty-state">Building MIS report…</div>';
       try {
         const [y, m] = monthEl.value.split('-').map(Number);
         const taskType = typeEl?.value || 'all';
+        const week = weekEl?.value || '';
+        const dept = deptEl?.value || '';
+        const sort = sortEl?.value || 'name';
         const qs = new URLSearchParams({ year: String(y), month: String(m), task_type: taskType });
-        if (weekEl?.value) qs.set('week', weekEl.value);
-        if (deptEl?.value) qs.set('department', deptEl.value);
-        if (sortEl?.value) qs.set('sort', sortEl.value);
+        if (week) qs.set('week', week);
+        if (dept) qs.set('department', dept);
+        if (sort) qs.set('sort', sort);
 
         const data = await api(`/mis-report?${qs}`);
+        if (reqId !== _misReq) return;
         _misLastData = data;
         const activeType = data.filters?.task_type || taskType;
 
-        // Week options
+        // Week options. Keep the week the user picked for this request.
         if (weekEl) {
-          const prev = weekEl.value;
           weekEl.innerHTML = '<option value="">All weeks</option>';
           (data.week_options || data.weeks || []).forEach((w) => {
             const opt = document.createElement('option');
@@ -9439,12 +9444,11 @@ export async function mountTaskflowApp(opts = {}) {
             opt.textContent = w.label + (w.spans_prev_month ? ' *' : '');
             weekEl.appendChild(opt);
           });
-          if ([...weekEl.options].some((o) => o.value === prev)) weekEl.value = prev;
+          if ([...weekEl.options].some((o) => o.value === week)) weekEl.value = week;
         }
 
-        // Department options
+        // Department options. Keep the department picked for this request.
         if (deptEl) {
-          const prev = deptEl.value;
           deptEl.innerHTML = '<option value="">All departments</option>';
           (data.departments || []).forEach((d) => {
             const opt = document.createElement('option');
@@ -9452,7 +9456,7 @@ export async function mountTaskflowApp(opts = {}) {
             opt.textContent = d;
             deptEl.appendChild(opt);
           });
-          if ([...deptEl.options].some((o) => o.value === prev)) deptEl.value = prev;
+          if ([...deptEl.options].some((o) => o.value === dept)) deptEl.value = dept;
         }
 
         if (!data.weeks?.length) {
@@ -9469,7 +9473,7 @@ export async function mountTaskflowApp(opts = {}) {
 
         const tabs = `
           <div class="mis-week-tabs" id="misWeekTabs">
-            <button type="button" class="mis-week-tab active" data-week="">All weeks</button>
+            <button type="button" class="mis-week-tab" data-week="">All weeks</button>
             ${(data.week_options || data.weeks).map((w) => `
               <button type="button" class="mis-week-tab ${String(weekEl?.value) === String(w.week) ? 'active' : ''}" data-week="${w.week}">
                 W${w.week}${w.spans_prev_month ? '<span class="mis-week-hint">+prev</span>' : ''}
