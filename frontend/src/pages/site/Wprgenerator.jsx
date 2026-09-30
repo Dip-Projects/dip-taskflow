@@ -5250,7 +5250,9 @@ export default function WprGenerator({ user, supabase }) {
                       <path d="M20 6L9 17l-5-5" />
                     </svg>
                   </div>
-                 {successUrls.pptUrl ? <a href={resolveViewUrl(successUrls.pptUrl)} target="_blank" rel="noreferrer" className="wpr-link-row">
+                 {successUrls.pptUrl ? (
+                 <>
+                 <a href={resolveViewUrl(successUrls.pptUrl)} target="_blank" rel="noreferrer" className="wpr-link-row">
                 <span className="wpr-link-icon">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -5288,7 +5290,9 @@ export default function WprGenerator({ user, supabase }) {
                   </div>
                 </div>
                 <span className="wpr-link-arrow">↓</span>
-              </button> : null}
+              </button>
+                 </>
+                 ) : null}
                 </div>
                 <button className="btn btn-amber" style={{ width: "100%", height: 44, marginTop: 4 }} onClick={closeOverlay} >
                   ✓ Done
