@@ -502,14 +502,29 @@ async function loadAish() {
  */
 async function sendReportPdfMessage({ toNumber, name, reportTitle, period, summary, pdfUrl, filename }) {
   const docTemplate = process.env.WA_EMP_REPORT_TEMPLATE || 'emp_report_pdf';
+  const language = process.env.WHATSAPP_TEMPLATE_LANG || 'en';
+  const body = [name || 'Team', reportTitle, period, summary];
   if (pdfUrl) {
-    const attached = await sendWhatsAppTemplate(
-      toNumber,
-      docTemplate,
-      [name || 'Team', reportTitle, period, summary],
-      { document: { link: pdfUrl, filename } }
-    );
+    const attached = await sendWhatsAppTemplate(toNumber, docTemplate, body, {
+      document: { link: pdfUrl, filename },
+      language,
+    });
     if (attached.ok) return attached;
+    const headerRejected = /132018|no parameters allowed|title component/i.test(
+      `${attached.error || ''} ${attached.reason || ''}`
+    );
+    if (headerRejected) {
+      const withLink = await sendWhatsAppTemplate(
+        toNumber,
+        docTemplate,
+        [name || 'Team', reportTitle, period, pdfUrl],
+        { language }
+      );
+      if (withLink.ok) return withLink;
+      console.warn('emp_report_pdf body failed:', withLink.error || withLink.reason || 'failed');
+    } else {
+      console.warn('emp_report_pdf not sent:', attached.error || attached.reason || 'failed');
+    }
   }
   const linkTemplate = process.env.WA_DELAY_REPORT_TEMPLATE || 'task_delay_report';
   const linked = await sendWhatsAppTemplate(toNumber, linkTemplate, [
@@ -582,7 +597,7 @@ async function buildAndUploadPdf({ title, subtitle, headers, rows, path }) {
 }
 
 /** Monday: full Emp Report to Aish, and each employee their own rows. */
-async function runMondayEmpReports() {
+async function runMondayEmpReports(opts = {}) {
   const { startDate, endDate } = parseRange('last-week');
   const day = istDateKey();
   const period = periodLabel(startDate, endDate);
@@ -615,11 +630,14 @@ async function runMondayEmpReports() {
       pdfUrl,
       filename,
     });
-    sent.push({ who: 'aish', name: aish.full_name, ok: !!result.ok, pdf: !!pdfUrl });
+    sent.push({ who: 'aish', name: aish.full_name, ok: !!result.ok, pdf: !!pdfUrl, template: result.templateName || '' });
   } else {
     sent.push({ who: 'aish', ok: false, reason: 'no_number' });
   }
 
+  let personal = 0;
+  let skippedShared = 0;
+  if (!opts.aishOnly) {
   const byEmp = {};
   rows.forEach((r) => {
     if (!r.employee_id) return;
@@ -630,8 +648,6 @@ async function runMondayEmpReports() {
     .from('users')
     .select('id, full_name, whatsapp_number, is_active')
     .eq('is_active', true);
-  let personal = 0;
-  let skippedShared = 0;
   for (const [empId, empRows] of Object.entries(byEmp)) {
     const u = (users || []).find((x) => String(x.id) === String(empId));
     if (!u?.whatsapp_number) continue;
@@ -665,6 +681,7 @@ async function runMondayEmpReports() {
     });
     if (result.ok) personal += 1;
     sent.push({ who: 'employee', name: u.full_name, ok: !!result.ok });
+  }
   }
 
   return {
