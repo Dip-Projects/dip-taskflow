@@ -253,6 +253,9 @@ border:2px solid transparent;border-radius:12px;color:#6b2d0f;cursor:pointer;fon
     font-weight:700;
     border-radius:8px;
 }
+.dpr-mode-tabs { display:flex; gap:6px; margin-bottom:14px; }
+.dpr-mode-tab { flex:1; height:38px; border:1.5px solid #c96a10; border-radius:9px; background:transparent; font-family:var(--font); font-size:12.5px; font-weight:700; color:#c96a10; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; }
+.dpr-mode-tab.active { background:var(--grad); color:#fff; border-color:transparent; }
     @media (max-width:600px){
 
   .visitor-card{
@@ -972,6 +975,11 @@ function buildVisitorsHtml(visitors) {
     .join("");
 }
 
+function buildSiteVisitHtml(payload) {
+  if (payload?.visitMode === "photo") return buildPhotosHtml(payload.visitPhotos);
+  return buildVisitorsHtml(payload?.visitors);
+}
+
 function buildPlanningHtml(planning) {
   if (!planning?.trim()) return "";
   const lines = planning.split("\n").filter((l) => l.trim());
@@ -1153,7 +1161,7 @@ function buildEveningPdfHtml(payload, pendingMaterials) {
   sections += pdfSection("CUBE TEST RESULTS", buildCubeHtml(payload.cube));
   sections += pdfSection(
     "SITE VISIT & INSTRUCTIONS",
-    buildVisitorsHtml(payload.visitors),
+    buildSiteVisitHtml(payload),
   );
   sections += pdfSection(
     "ADDITIONAL INFORMATION",
@@ -1531,7 +1539,7 @@ async function generateEveningPdf(payload, onProgress) {
     ...(pmHtml ? [["MATERIAL REQUIREMENT", pmHtml]] : []),
     ["MATERIAL USED / RECEIVED", buildMaterialHtml(payload.material)],
     ["CUBE TEST RESULTS", buildCubeHtml(payload.cube)],
-    ["SITE VISIT & INSTRUCTIONS", buildVisitorsHtml(payload.visitors)],
+    ["SITE VISIT & INSTRUCTIONS", buildSiteVisitHtml(payload)],
     ["ADDITIONAL INFORMATION", buildCustomFieldsHtml(payload.customFields)],
     ["CHECKLIST PHOTOS", buildPhotosHtml(payload.checklistPhotos)], // NEW
     ["WORK PROGRESS PHOTOS", buildPhotosHtml(payload.photos)],
@@ -1548,7 +1556,9 @@ async function generateEveningPdf(payload, onProgress) {
     if (!body?.trim()) continue;
 
     const isPhotos =
-      title === "WORK PROGRESS PHOTOS" || title === "CHECKLIST PHOTOS"; // widened
+      title === "WORK PROGRESS PHOTOS" ||
+      title === "CHECKLIST PHOTOS" ||
+      (title === "SITE VISIT & INSTRUCTIONS" && body.includes("photo-pair"));
     const isManpower = title === "MANPOWER REPORT";
     const isPendingMaterials = title === "MATERIAL REQUIREMENT";
 
@@ -4130,6 +4140,8 @@ function DprForm({ user }) {
   const [visitors, setVisitors] = useState([
     { id: "v_init", name: "", instruction: "" },
   ]);
+  const [visitMode, setVisitMode] = useState("details");
+  const [visitPhotos, setVisitPhotos] = useState([]);
   const [customFields, setCustomFields] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [checklistPhotos, setChecklistPhotos] = useState([]);
@@ -4147,7 +4159,8 @@ function DprForm({ user }) {
   const [lightbox, setLightbox] = useState(null);
   const [checklistConverting, setChecklistConverting] = useState(false);
   const [photosConverting, setPhotosConverting] = useState(false);
-  const anyConverting = checklistConverting || photosConverting;
+  const [visitConverting, setVisitConverting] = useState(false);
+  const anyConverting = checklistConverting || photosConverting || visitConverting;
   const openLightbox = (photos, idx) => {
     const filtered = photos.filter((p) => p.data || p.supabaseUrl);
     if (!filtered.length) return;
@@ -4359,7 +4372,9 @@ function DprForm({ user }) {
     material,
     materialRequirement: materialReq,
     cube, // ← added materialRequirement
+    visitMode,
     visitors: visitors.filter((v) => v.name),
+    visitPhotos,
     customFields: customFields.filter((f) => f.title || f.value),
     photos,
     checklistPhotos,
@@ -4413,6 +4428,8 @@ function DprForm({ user }) {
         ? d.visitors.map((v, i) => ({ ...v, id: "dr_v_" + i }))
         : [{ id: "v_init", name: "", instruction: "" }],
     );
+    setVisitMode(d.visitMode === "photo" ? "photo" : "details");
+    setVisitPhotos(Array.isArray(d.visitPhotos) ? d.visitPhotos : []);
     setCustomFields(d.customFields || []);
     setPhotos(d.photos || []);
     setChecklistPhotos(d.checklistPhotos || []);
@@ -4512,6 +4529,22 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
       });
       payload.checklistPhotos = uploadedChecklistPhotos;
 
+      let uploadedVisitPhotos = [];
+      if (visitMode === "photo" && visitPhotos.length) {
+        setSubmitDetail(`Uploading ${visitPhotos.length} site visit photos…`);
+        uploadedVisitPhotos = await uploadBatch(visitPhotos, async (ph, i) => {
+          if (ph.supabaseUrl && !ph.data) return ph;
+          const cap = (ph.caption || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
+          const fname = `site_visit_${i + 1}${cap ? "_" + cap : ""}.jpg`;
+          const path = `${photoFolder}/site-visit/${fname}`;
+          const url = await uploadPhotoToSupabase(ph.data, site, path);
+          return { ...ph, supabaseUrl: url, storagePath: path };
+        });
+      }
+      payload.visitMode = visitMode;
+      payload.visitPhotos = visitMode === "photo" ? uploadedVisitPhotos : [];
+      if (visitMode === "photo") payload.visitors = [];
+
       if (materialReq.length) {
         setSubmitDetail("Submitting material requirements…");
         await submitMaterialRequirements(materialReq, site, engineer);
@@ -4539,6 +4572,11 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         storagePath: p.storagePath,
         caption: p.caption || "",
       }));
+      const visitPhotosForDb = uploadedVisitPhotos.map((p) => ({
+        supabaseUrl: p.supabaseUrl,
+        storagePath: p.storagePath,
+        caption: p.caption || "",
+      }));
 
       await saveDprReport({
         site,
@@ -4549,6 +4587,8 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
           ...payload,
           photos: photosForDb,
           checklistPhotos: checklistPhotosForDb,
+          visitPhotos: visitPhotosForDb,
+          visitMode,
         },
         pdf_url: pdfPublicUrl,
         photo_folder: photoFolder,
@@ -4786,6 +4826,8 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
     setConcreteDesc("");
     setCube("");
     setVisitors([{ id: "v_init", name: "", instruction: "" }]);
+    setVisitMode("details");
+    setVisitPhotos([]);
     setCustomFields([]);
     setPdfUrl(null);
     setMaterialReq([]);
@@ -5186,7 +5228,38 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
           </SectionBlock>
 
           <SectionBlock title="9. Site Visit &amp; Instructions">
-            <VisitorsSection visitors={visitors} setVisitors={setVisitors} />
+            <div className="dpr-mode-tabs">
+              <button
+                type="button"
+                className={`dpr-mode-tab${visitMode === "details" ? " active" : ""}`}
+                onClick={() => setVisitMode("details")}
+              >
+                Type Details
+              </button>
+              <button
+                type="button"
+                className={`dpr-mode-tab${visitMode === "photo" ? " active" : ""}`}
+                onClick={() => setVisitMode("photo")}
+              >
+                Upload Photo
+              </button>
+            </div>
+            {visitMode === "details" ? (
+              <VisitorsSection visitors={visitors} setVisitors={setVisitors} />
+            ) : (
+              <>
+                <div className="info-banner info-blue" style={{ marginBottom: 12 }}>
+                  Upload a photo of the site visit instructions instead of typing them.
+                </div>
+                <PhotosSection
+                  photos={visitPhotos}
+                  setPhotos={setVisitPhotos}
+                  onLightbox={openLightbox}
+                  showToast={showToast}
+                  onConvertingChange={setVisitConverting}
+                />
+              </>
+            )}
           </SectionBlock>
 
           <SectionBlock title="10. Additional Custom Fields">
