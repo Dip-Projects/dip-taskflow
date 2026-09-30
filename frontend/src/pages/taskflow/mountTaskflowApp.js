@@ -277,9 +277,9 @@ export async function mountTaskflowApp(opts = {}) {
     return;
   }
 
-  // If React remounted the DOM (Strict Mode / HMR), old els are detached — rebind.
+  // Already on screen. Do not run enterApp again — that reloads Add Task
+  // dropdowns and wipes department / employee / project / task type mid-form.
   if (_listenersBound && els.navList && els.navList.isConnected) {
-    if (state.token && state.user && typeof _enterApp === 'function') await _enterApp();
     return;
   }
   _listenersBound = false;
@@ -393,6 +393,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   function fillSelect(select, items, { placeholder, valueKey = 'id', labelKey = 'name', extraOption } = {}) {
     if (!select) return;
+    const prev = select.value;
     select.innerHTML = '';
     if (placeholder) {
       const opt = document.createElement('option');
@@ -409,6 +410,7 @@ export async function mountTaskflowApp(opts = {}) {
       opt.value = extraOption.value; opt.textContent = extraOption.label;
       select.appendChild(opt);
     }
+    if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
   }
 
   function parseEmployeeSites(emp) {

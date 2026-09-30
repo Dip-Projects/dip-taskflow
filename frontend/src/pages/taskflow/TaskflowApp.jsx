@@ -16,6 +16,7 @@ const StableTaskflowDom = memo(TaskflowDom, () => true);
 export default function TaskflowApp() {
   const { user, token, isAuthenticated, logout, canToggleSite, canToggleMdo } = useAuth();
   const navigate = useNavigate();
+  const userId = user?.id || '';
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -62,7 +63,7 @@ export default function TaskflowApp() {
       cancelled = true;
       unmountTaskflowApp();
     };
-  }, [isAuthenticated, token, user, logout, navigate]);
+  }, [isAuthenticated, token, userId, logout, navigate]);
 
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
