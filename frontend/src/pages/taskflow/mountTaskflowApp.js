@@ -3,9 +3,6 @@
  * Call mountTaskflowApp() once after TaskflowDom is in the document.
  * Login UI is owned by React AuthContext.
  */
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
 const API_BASE = '/api';
 
 let _onLogout = null;
@@ -9610,124 +9607,35 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
-  const PDF_FONT = 14;
-  const PDF_MAX_COLS = 6;
-
-  function pdfColumnStyles(headers, tableW) {
-    const weightFor = (label) => {
-      const s = String(label || '').toLowerCase();
-      if (s === 'sr') return 0.55;
-      if (s.includes('description') || s.includes('hold /') || s.includes('projects')) return 2.4;
-      if (s.includes('employee') || s.includes('project') || s.includes('verifier') || s.includes('submitted by')) return 1.45;
-      if (s.includes('status')) return 0.95;
-      if (s === 'hrs' || s.includes('hours') || s.includes('total')) return 0.85;
-      return 1.15;
-    };
-    const weights = headers.map(weightFor);
-    const sum = weights.reduce((n, w) => n + w, 0) || 1;
-    const styles = {};
-    headers.forEach((_, i) => {
-      styles[i] = { cellWidth: (weights[i] / sum) * tableW };
-    });
-    return styles;
-  }
-
-  function pdfSectionsForPage(sections) {
-    const out = [];
-    sections.forEach((sec) => {
-      const head = sec.head || [];
-      const body = sec.body || [];
-      if (head.length <= PDF_MAX_COLS) {
-        out.push(sec);
-        return;
-      }
-      const keep = String(head[0] || '').toLowerCase() === 'sr' ? Math.min(2, head.length) : 1;
-      const take = PDF_MAX_COLS - keep;
-      const parts = Math.ceil((head.length - keep) / take);
-      for (let part = 0; part < parts; part += 1) {
-        const start = keep + part * take;
-        const idx = [];
-        for (let i = 0; i < keep; i += 1) idx.push(i);
-        for (let i = start; i < Math.min(head.length, start + take); i += 1) idx.push(i);
-        out.push({
-          heading: parts > 1 ? `${sec.heading} (${part + 1}/${parts})` : sec.heading,
-          head: idx.map((i) => head[i]),
-          body: body.map((row) => idx.map((i) => row[i])),
-        });
-      }
-    });
-    return out;
-  }
-
-  function downloadReportPdf({ title, subtitle, filename, sections }) {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    doc.setFont('helvetica', 'normal');
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const margin = 8;
-    const tableW = pageW - margin * 2;
-    doc.setFontSize(PDF_FONT + 3);
-    doc.text(title, pageW / 2, 10, { align: 'center' });
-    doc.setFontSize(PDF_FONT);
-    doc.setTextColor(70);
-    const subLines = doc.splitTextToSize(subtitle || '', tableW);
-    doc.text(subLines, pageW / 2, 16, { align: 'center' });
-    doc.setTextColor(20);
-    let y = 16 + subLines.length * 4.2 + 2;
-
-    pdfSectionsForPage(sections).forEach((sec) => {
-      if (!sec.head?.length) return;
-      if (y > pageH - 22) {
-        doc.addPage('a4', 'landscape');
-        y = 10;
-      }
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(PDF_FONT);
-      doc.text(sec.heading, margin, y);
-      doc.setFont('helvetica', 'normal');
-      const body = sec.body?.length
-        ? sec.body
-        : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
-      autoTable(doc, {
-        startY: y + 1.5,
-        head: [sec.head],
-        body,
-        styles: {
-          font: 'helvetica',
-          fontSize: PDF_FONT,
-          cellPadding: 1.2,
-          overflow: 'linebreak',
-          valign: 'middle',
-        },
-        headStyles: {
-          fillColor: [31, 41, 55],
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: PDF_FONT,
-          overflow: 'linebreak',
-          valign: 'middle',
-        },
-        alternateRowStyles: { fillColor: [247, 243, 236] },
-        columnStyles: pdfColumnStyles(sec.head, tableW),
-        margin: { left: margin, right: margin, top: 10, bottom: 10 },
-        tableWidth: tableW,
-        showHead: 'everyPage',
-        rowPageBreak: 'auto',
-        horizontalPageBreak: false,
-      });
-      y = (doc.lastAutoTable?.finalY || y) + 6;
-    });
-
-    const pages = doc.getNumberOfPages();
-    for (let i = 1; i <= pages; i += 1) {
-      doc.setPage(i);
-      const w = doc.internal.pageSize.getWidth();
-      const h = doc.internal.pageSize.getHeight();
-      doc.setFontSize(PDF_FONT);
-      doc.setTextColor(120);
-      doc.text(`${i} / ${pages}`, w - 18, h - 6);
-    }
-    doc.save(filename);
+  function downloadReportPdf({ title, subtitle, sections }) {
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups so the print box can open', 'error');
+    const tables = (sections || []).filter((sec) => sec.head?.length).map((sec) => {
+      const head = sec.head.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+      const rows = sec.body?.length ? sec.body : [sec.head.map(() => '')];
+      const body = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+      return `<h2>${escapeHtml(sec.heading || '')}</h2><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }).join('');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+      <style>
+        @page { size: A3 landscape; margin: 8mm; }
+        html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, Helvetica, sans-serif; }
+        h1 { text-align: center; font-size: 18pt; margin: 0 0 4px; }
+        .sub { text-align: center; font-size: 11pt; color: #444; margin: 0 0 12px; }
+        h2 { font-size: 12pt; margin: 12px 0 6px; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; }
+        th { background: #1f2937; color: #fff; font-weight: 700; }
+        tr:nth-child(even) td { background: #f7f3ec; }
+        thead { display: table-header-group; }
+        tr { break-inside: avoid; page-break-inside: avoid; }
+      </style></head><body>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="sub">${escapeHtml(subtitle || '')}</p>
+      ${tables}
+      <script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script>
+      </body></html>`);
+    win.document.close();
   }
 
   function printWorkDashboardPdf() {
@@ -9810,7 +9718,7 @@ export async function mountTaskflowApp(opts = {}) {
         },
       ],
     });
-    showToast('PDF downloaded — open the file, it has every page', 'success');
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -10409,7 +10317,7 @@ export async function mountTaskflowApp(opts = {}) {
       filename: `emp-report-${String(data.from || '').slice(0, 10)}.pdf`,
       sections: [{ heading: 'Tasks', head, body }],
     });
-    showToast('PDF downloaded — open the file, it has every page', 'success');
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   async function loadMdoDelayReport() {
@@ -10488,7 +10396,7 @@ export async function mountTaskflowApp(opts = {}) {
       filename: `emp-delay-report-${String(data.from || '').slice(0, 10)}.pdf`,
       sections: [{ heading: 'Tasks', head, body }],
     });
-    showToast('PDF downloaded — open the file, it has every page', 'success');
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
