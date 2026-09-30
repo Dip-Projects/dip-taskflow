@@ -9600,28 +9600,67 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  function printWorkDashboardPdf() {
-    const report = document.getElementById('wvdReport');
-    if (!report) return showToast('Generate the dashboard first', 'error');
+  function reportPrintExtras(pageSize) {
+    return `<style>
+      html, body {
+        background: #fff !important;
+        margin: 0 !important;
+        padding: 10px !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      .wvd, .dr-report, .wvd-sec, .dr-table-wrap, .wvd-table-wrap {
+        overflow: visible !important;
+        height: auto !important;
+        max-height: none !important;
+        box-shadow: none !important;
+      }
+      .dr-table, .wvd-matrix {
+        min-width: 0 !important;
+        width: 100% !important;
+        font-size: 9px !important;
+      }
+      .dr-table th, .dr-table td, .wvd-matrix th, .wvd-matrix td {
+        white-space: normal !important;
+        word-break: break-word;
+        padding: 4px 5px !important;
+      }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; page-break-inside: avoid; }
+      @page { size: ${pageSize}; margin: 8mm; }
+      @media print {
+        html, body, .wvd, .dr-report, .wvd-sec, .dr-table-wrap, .wvd-table-wrap {
+          overflow: visible !important;
+          height: auto !important;
+          max-height: none !important;
+          break-inside: auto !important;
+          page-break-inside: auto !important;
+        }
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      }
+    </style>`;
+  }
+
+  function openReportPrint(title, reportEl, pageSize) {
     const win = window.open('', '_blank');
     if (!win) return showToast('Allow pop-ups to download PDF', 'error');
     const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map((el) => el.outerHTML)
       .join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Work & Verification Dashboard</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
       ${styles}
-      <style>
-        body { background: #F7F4EE !important; margin: 0; padding: 24px; }
-        .wvd { box-shadow: none !important; border: none !important; }
-        @page { size: A4; margin: 12mm; }
-        @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-      </style>
-    </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
-    </body></html>`);
+      ${reportPrintExtras(pageSize)}
+      </head><body>${reportEl.outerHTML}
+      <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
+      </body></html>`);
     win.document.close();
+  }
+
+  function printWorkDashboardPdf() {
+    const report = document.getElementById('wvdReport');
+    if (!report) return showToast('Generate the dashboard first', 'error');
+    openReportPrint('Work & Verification Dashboard', report, 'A4 landscape');
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -10191,18 +10230,7 @@ export async function mountTaskflowApp(opts = {}) {
   function printEmpReportPdf() {
     const report = document.getElementById('erReport');
     if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Emp Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    openReportPrint('Emp Report', report, 'A4 landscape');
   }
 
   async function loadMdoDelayReport() {
@@ -10252,18 +10280,7 @@ export async function mountTaskflowApp(opts = {}) {
   function printDelayReportPdf() {
     const report = document.getElementById('drReport');
     if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Task Delay Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    openReportPrint('Emp Delay Report', report, 'A4 landscape');
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
