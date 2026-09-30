@@ -12,7 +12,7 @@ async function buildReportPdf({ title, subtitle, headers, rows }) {
   const tableW = pageW - margin * 2;
   const head = (headers || []).map((h) => String(h || ''));
   const body = (rows && rows.length)
-    ? rows.map((row) => head.map((_, i) => cell(row[i])))
+    ? rows.map((row) => head.map((header, i) => cell(row[i], header)))
     : [head.map((_, i) => (i === 0 ? 'No tasks' : ''))];
 
   doc.setFont('helvetica', 'normal');
@@ -30,10 +30,10 @@ async function buildReportPdf({ title, subtitle, headers, rows }) {
     body,
     styles: {
       font: 'helvetica',
-      fontSize: 8,
-      cellPadding: 1,
+      fontSize: 9,
+      cellPadding: 1.4,
       overflow: 'linebreak',
-      valign: 'middle',
+      valign: 'top',
     },
     headStyles: {
       fillColor: [31, 41, 55],
@@ -41,6 +41,7 @@ async function buildReportPdf({ title, subtitle, headers, rows }) {
       fontStyle: 'bold',
       fontSize: 8,
       overflow: 'linebreak',
+      valign: 'middle',
     },
     alternateRowStyles: { fillColor: [247, 243, 236] },
     columnStyles: columnStyles(head, tableW),
@@ -54,25 +55,44 @@ async function buildReportPdf({ title, subtitle, headers, rows }) {
   return Buffer.from(doc.output('arraybuffer'));
 }
 
-function cell(v) {
-  const s = String(v ?? '').replace(/\s+/g, ' ').trim();
-  return s || '—';
+function cell(v, header) {
+  const raw = String(v ?? '').trim();
+  if (!raw) return '—';
+  if (String(header || '').toLowerCase().includes('hold /')) return formatHoldCell(raw);
+  return raw.replace(/\s+/g, ' ').trim() || '—';
+}
+
+/** Hold trail was one crushed line. Stack each pause and resume on its own lines. */
+function formatHoldCell(raw) {
+  if (raw === '—') return '—';
+  return raw.split(/\s*(?:→|\|)\s*/).map((part) => (
+    part
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\s*\((timer stopped for [^)]+)\)/i, '\n$1')
+      .replace(/\s*\(timer stopped\)/i, '\nTimer stopped')
+      .replace(/\s*\(timer restarted\)/i, '\nTimer restarted')
+      .replace(/\s*·\s*/g, '\n')
+  )).filter(Boolean).join('\n\n');
 }
 
 function columnStyles(headers, tableW) {
   const weightFor = (label) => {
     const s = String(label || '').toLowerCase();
-    if (s === 'sr') return 0.5;
-    if (s.includes('description') || s.includes('hold /')) return 2.2;
-    if (s.includes('employee') || s.includes('project')) return 1.35;
-    if (s.includes('status')) return 0.9;
-    return 1.05;
+    if (s === 'sr') return 0.45;
+    if (s.includes('hold /')) return 3.6;
+    if (s.includes('description')) return 2.1;
+    if (s.includes('employee') || s.includes('project')) return 1.25;
+    if (s.includes('status')) return 0.85;
+    return 1;
   };
   const weights = headers.map(weightFor);
   const sum = weights.reduce((n, w) => n + w, 0) || 1;
   const styles = {};
-  headers.forEach((_, i) => {
-    styles[i] = { cellWidth: (weights[i] / sum) * tableW };
+  headers.forEach((label, i) => {
+    const style = { cellWidth: (weights[i] / sum) * tableW };
+    if (String(label || '').toLowerCase().includes('hold /')) style.fontSize = 9;
+    styles[i] = style;
   });
   return styles;
 }
