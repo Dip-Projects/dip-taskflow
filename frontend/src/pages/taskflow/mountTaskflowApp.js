@@ -9610,47 +9610,67 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
+  function pdfColumnStyles(headers, tableW) {
+    const weightFor = (label) => {
+      const s = String(label || '').toLowerCase();
+      if (s === 'sr') return 0.55;
+      if (s.includes('description') || s.includes('hold /') || s.includes('projects')) return 2.4;
+      if (s.includes('employee') || s.includes('project') || s.includes('verifier') || s.includes('submitted by')) return 1.45;
+      if (s.includes('status')) return 0.95;
+      if (s === 'hrs' || s.includes('hours') || s.includes('total')) return 0.85;
+      return 1.15;
+    };
+    const weights = headers.map(weightFor);
+    const sum = weights.reduce((n, w) => n + w, 0) || 1;
+    const styles = {};
+    headers.forEach((_, i) => {
+      styles[i] = { cellWidth: (weights[i] / sum) * tableW };
+    });
+    return styles;
+  }
+
   function downloadReportPdf({ title, subtitle, filename, sections }) {
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
-    const margin = 10;
+    const margin = 8;
     const tableW = pageW - margin * 2;
-    doc.setFontSize(16);
-    doc.text(title, pageW / 2, 12, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text(title, pageW / 2, 10, { align: 'center' });
     doc.setFontSize(9);
-    doc.setTextColor(90);
-    const subLines = doc.splitTextToSize(subtitle || '', pageW - 24);
-    doc.text(subLines, pageW / 2, 18, { align: 'center' });
+    doc.setTextColor(80);
+    const subLines = doc.splitTextToSize(subtitle || '', tableW);
+    doc.text(subLines, pageW / 2, 15, { align: 'center' });
     doc.setTextColor(20);
-    let y = 18 + subLines.length * 4 + 3;
+    let y = 15 + subLines.length * 4 + 3;
 
     sections.forEach((sec) => {
       if (!sec.head?.length) return;
-      if (y > pageH - 28) {
-        doc.addPage('a3', 'landscape');
-        y = 12;
+      if (y > pageH - 24) {
+        doc.addPage('a4', 'landscape');
+        y = 10;
       }
-      doc.setFontSize(11);
+      doc.setFontSize(10);
       doc.text(sec.heading, margin, y);
       const body = sec.body?.length
         ? sec.body
         : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
-      const fontSize = sec.head.length > 14 ? 8 : sec.head.length > 8 ? 9 : 11;
+      const fontSize = sec.head.length > 14 ? 9 : sec.head.length > 8 ? 10 : 11;
       autoTable(doc, {
-        startY: y + 2,
+        startY: y + 1.5,
         head: [sec.head],
         body,
-        styles: { fontSize, cellPadding: 1.3, overflow: 'linebreak', valign: 'top' },
-        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize, halign: 'left' },
+        styles: { fontSize, cellPadding: 1.15, overflow: 'linebreak', valign: 'top' },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize, overflow: 'linebreak', valign: 'middle' },
         alternateRowStyles: { fillColor: [247, 243, 236] },
-        margin: { left: margin, right: margin, top: 12, bottom: 12 },
+        columnStyles: pdfColumnStyles(sec.head, tableW),
+        margin: { left: margin, right: margin, top: 10, bottom: 10 },
         tableWidth: tableW,
         showHead: 'everyPage',
         rowPageBreak: 'auto',
         horizontalPageBreak: false,
       });
-      y = (doc.lastAutoTable?.finalY || y) + 8;
+      y = (doc.lastAutoTable?.finalY || y) + 7;
     });
 
     const pages = doc.getNumberOfPages();
