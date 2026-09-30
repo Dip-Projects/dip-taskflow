@@ -3,6 +3,9 @@
  * Call mountTaskflowApp() once after TaskflowDom is in the document.
  * Login UI is owned by React AuthContext.
  */
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
 const API_BASE = '/api';
 
 let _onLogout = null;
@@ -9564,6 +9567,8 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   let _tdLastData = null;
+  let _tdDash = null;
+  let _tdMeta = null;
 
   function downloadTimeCsv(data) {
     const dash = data?.dashboard;
@@ -9600,67 +9605,145 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  function reportPrintExtras(pageSize) {
-    return `<style>
-      html, body {
-        background: #fff !important;
-        margin: 0 !important;
-        padding: 10px !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-      }
-      .wvd, .dr-report, .wvd-sec, .dr-table-wrap, .wvd-table-wrap {
-        overflow: visible !important;
-        height: auto !important;
-        max-height: none !important;
-        box-shadow: none !important;
-      }
-      .dr-table, .wvd-matrix {
-        min-width: 0 !important;
-        width: 100% !important;
-        font-size: 9px !important;
-      }
-      .dr-table th, .dr-table td, .wvd-matrix th, .wvd-matrix td {
-        white-space: normal !important;
-        word-break: break-word;
-        padding: 4px 5px !important;
-      }
-      thead { display: table-header-group; }
-      tr { break-inside: avoid; page-break-inside: avoid; }
-      @page { size: ${pageSize}; margin: 8mm; }
-      @media print {
-        html, body, .wvd, .dr-report, .wvd-sec, .dr-table-wrap, .wvd-table-wrap {
-          overflow: visible !important;
-          height: auto !important;
-          max-height: none !important;
-          break-inside: auto !important;
-          page-break-inside: auto !important;
-        }
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      }
-    </style>`;
+  function pdfCell(v) {
+    const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+    return s || '—';
   }
 
-  function openReportPrint(title, reportEl, pageSize) {
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to download PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML)
-      .join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
-      ${styles}
-      ${reportPrintExtras(pageSize)}
-      </head><body>${reportEl.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script>
-      </body></html>`);
-    win.document.close();
+  function downloadReportPdf({ title, subtitle, filename, sections }) {
+    const widest = Math.max(1, ...sections.map((sec) => (sec.head || []).length));
+    const pageW = Math.max(420, widest * 28 + 16);
+    const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: [pageW, 297] });
+    const pageH = doc.internal.pageSize.getHeight();
+    doc.setFontSize(16);
+    doc.text(title, pageW / 2, 12, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(90);
+    const subLines = doc.splitTextToSize(subtitle || '', pageW - 24);
+    doc.text(subLines, pageW / 2, 18, { align: 'center' });
+    doc.setTextColor(20);
+    let y = 18 + subLines.length * 4 + 3;
+
+    sections.forEach((sec) => {
+      if (!sec.head?.length) return;
+      if (y > pageH - 28) {
+        doc.addPage([pageW, 297], 'l');
+        y = 12;
+      }
+      doc.setFontSize(11);
+      doc.text(sec.heading, 8, y);
+      const body = sec.body?.length
+        ? sec.body
+        : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
+      autoTable(doc, {
+        startY: y + 2,
+        head: [sec.head],
+        body,
+        styles: { fontSize: 7, cellPadding: 1.15, overflow: 'linebreak', valign: 'top' },
+        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize: 7 },
+        margin: { left: 8, right: 8, top: 12, bottom: 12 },
+        tableWidth: 'auto',
+        showHead: 'everyPage',
+        rowPageBreak: 'auto',
+        horizontalPageBreak: true,
+        horizontalPageBreakRepeat: [0],
+      });
+      y = (doc.lastAutoTable?.finalY || y) + 8;
+    });
+
+    const pages = doc.getNumberOfPages();
+    for (let i = 1; i <= pages; i += 1) {
+      doc.setPage(i);
+      const w = doc.internal.pageSize.getWidth();
+      const h = doc.internal.pageSize.getHeight();
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(`${i} / ${pages}`, w - 18, h - 6);
+    }
+    doc.save(filename);
   }
 
   function printWorkDashboardPdf() {
-    const report = document.getElementById('wvdReport');
-    if (!report) return showToast('Generate the dashboard first', 'error');
-    openReportPrint('Work & Verification Dashboard', report, 'A4 landscape');
+    const dash = _tdDash;
+    if (!dash) return showToast('Generate the dashboard first', 'error');
+    const s = dash.summary || {};
+    const fromTo = `${String(_tdMeta?.from || '').slice(0, 10)} → ${String(_tdMeta?.to || '').slice(0, 10)}`;
+    const pem = dash.project_employee_matrix || { employees: [], projects: [] };
+    const pvm = dash.project_verifier_matrix || { verifiers: [], projects: [] };
+    const ct = dash.completion_time || {};
+    const vt = dash.verify_turnaround || {};
+    const pemHead = ['Project', ...(pem.employees || []), 'Total'];
+    const pvmHead = ['Project', ...(pvm.verifiers || []), 'Total'];
+    downloadReportPdf({
+      title: 'Work & Verification Dashboard',
+      subtitle: `${fromTo} · ${s.total_tasks || 0} tasks · ${s.employees || 0} employees · ${s.verified || 0} verified · ${s.pending_verify || 0} pending · ${s.corrections_sent || 0} corrections`,
+      filename: `work-verification-${String(_tdMeta?.from || '').slice(0, 10)}.pdf`,
+      sections: [
+        {
+          heading: '1. Work by employee',
+          head: ['Employee', 'Total', 'Verified', 'Pending', 'Projects'],
+          body: (dash.by_employee || []).map((e) => [
+            pdfCell(e.name),
+            pdfCell(e.total),
+            pdfCell(e.verified),
+            pdfCell(e.pending),
+            pdfCell((e.projects || []).map((p) => `${p.name}: ${p.count}`).join(', ')),
+          ]),
+        },
+        {
+          heading: '2. Project x employee',
+          head: pemHead,
+          body: (pem.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pem.employees || []).map((e) => pdfCell(p.counts?.[e] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3. Project x verifier',
+          head: pvmHead,
+          body: (pvm.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pvm.verifiers || []).map((v) => pdfCell(p.counts?.[v] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3b. Verifier summary',
+          head: ['Verifier', 'Total', 'Verified', 'Correction sent', 'Correction ack', 'Pending'],
+          body: (dash.verifier_summary || []).map((v) => [
+            pdfCell(v.name), pdfCell(v.total), pdfCell(v.verified),
+            pdfCell(v.correction_sent), pdfCell(v.correction_ack), pdfCell(v.pending),
+          ]),
+        },
+        {
+          heading: '4. Correction log',
+          head: ['Employee', 'Project', 'SR', 'Status'],
+          body: (dash.correction_log?.items || []).map((i) => [
+            pdfCell(i.employee), pdfCell(i.project), pdfCell(i.sr), pdfCell(i.status),
+          ]),
+        },
+        {
+          heading: '5a. Task completion time',
+          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours'],
+          body: (ct.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
+            pdfCell(r.task_type), pdfCell(fmtWvdDateTime(r.assigned_at)),
+            pdfCell(fmtWvdDateTime(r.submitted_at)), pdfCell(fmtHrs(r.hours)),
+          ]),
+        },
+        {
+          heading: '5b. Verification turnaround',
+          head: ['SR', 'Submitted by', 'Verifier', 'Project', 'Task description', 'Start verification', 'Verified', 'Office hours'],
+          body: (vt.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.verifier), pdfCell(r.project),
+            pdfCell(r.description), pdfCell(fmtWvdDateTime(r.started_at || r.accepted_at)),
+            pdfCell(fmtWvdDateTime(r.verified_at)), pdfCell(fmtHrs(r.hours != null ? r.hours : r.days)),
+          ]),
+        },
+      ],
+    });
+    showToast('PDF downloaded — open the file, it has every page', 'success');
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -10005,6 +10088,8 @@ export async function mountTaskflowApp(opts = {}) {
         return;
       }
       dash = filterDashboardData(dash, allEmps);
+      _tdDash = dash;
+      _tdMeta = { from: data.from, to: data.to };
       if (!(dash.summary?.total_tasks) && !(dash.by_employee || []).length) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
         return;
@@ -10228,9 +10313,36 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function printEmpReportPdf() {
-    const report = document.getElementById('erReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    openReportPrint('Emp Report', report, 'A4 landscape');
+    const data = _erLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('erEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Submitted', 'Status', 'Early / Delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.timing_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('PDF downloaded — open the file, it has every page', 'success');
   }
 
   async function loadMdoDelayReport() {
@@ -10278,9 +10390,38 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
 
   function printDelayReportPdf() {
-    const report = document.getElementById('drReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    openReportPrint('Emp Delay Report', report, 'A4 landscape');
+    const data = _drLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('drEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Sent for verification',
+      'Work status', 'Work delay', 'Start Verification', 'Verified', 'Verify status', 'Verify delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.delay_label),
+        pdfCell(r.verify_started_label), pdfCell(r.verified_label), pdfCell(r.verify_status), pdfCell(r.verify_delay_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Delay Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-delay-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('PDF downloaded — open the file, it has every page', 'success');
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
