@@ -517,7 +517,7 @@ async function sendReportPdfMessage({ toNumber, name, reportTitle, period, summa
       const withLink = await sendWhatsAppTemplate(
         toNumber,
         docTemplate,
-        [name || 'Team', reportTitle, period, `Click to download the PDF: ${pdfUrl}`],
+        [name || 'Team', reportTitle, period, `Download the PDF: ${pdfUrl}`],
         { language }
       );
       if (withLink.ok) return withLink;

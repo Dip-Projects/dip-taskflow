@@ -62,18 +62,50 @@ function cell(v, header) {
   return raw.replace(/\s+/g, ' ').trim() || '—';
 }
 
-/** Hold trail was one crushed line. Stack each pause and resume on its own lines. */
+/** Turn the raw hold log into short lines a person can read. */
 function formatHoldCell(raw) {
-  if (raw === '—') return '—';
-  return raw.split(/\s*(?:→|\|)\s*/).map((part) => (
-    part
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/\s*\((timer stopped for [^)]+)\)/i, '\n$1')
-      .replace(/\s*\(timer stopped\)/i, '\nTimer stopped')
-      .replace(/\s*\(timer restarted\)/i, '\nTimer restarted')
-      .replace(/\s*·\s*/g, '\n')
-  )).filter(Boolean).join('\n\n');
+  if (!raw || raw === '—') return '—';
+  return raw
+    .split(/\s*(?:→|\|)\s*/)
+    .map(formatHoldPart)
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function formatHoldPart(part) {
+  let s = String(part || '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  if (/^total hold/i.test(s)) {
+    return `Total time on hold: ${s.replace(/^total hold\s*/i, '').trim()}`;
+  }
+
+  const stoppedFor = s.match(/\(timer stopped for ([^)]+)\)/i);
+  const stopped = !stoppedFor && /\(timer stopped\)/i.test(s);
+  const restarted = /\(timer restarted\)/i.test(s);
+  s = s.replace(/\s*\([^)]*\)/g, '').trim();
+
+  const leftMatch = s.match(/·\s*([0-9.]+)h left/i);
+  s = s.replace(/\s*·\s*[0-9.]+h left/i, '').trim();
+
+  const when = (value) => {
+    const m = String(value || '').trim().match(/^(.+?)\s+(\d{2}:\d{2})$/);
+    return m ? `${m[1]} at ${m[2]}` : value;
+  };
+
+  const lines = [];
+  const hold = s.match(/^Hold\s+(.+)$/i);
+  const resume = s.match(/^Resume\s+(.+)$/i);
+  const since = s.match(/^On hold since\s+(.+)$/i);
+  if (hold) lines.push(`Hold on ${when(hold[1])}`);
+  else if (resume) lines.push(`Resumed on ${when(resume[1])}`);
+  else if (since) lines.push(`On hold since ${when(since[1])}`);
+  else lines.push(s);
+
+  if (leftMatch) lines.push(`Time left: ${leftMatch[1]} hours`);
+  if (stoppedFor) lines.push(`Timer was stopped for ${stoppedFor[1]}`);
+  else if (stopped) lines.push('Timer was stopped');
+  if (restarted) lines.push('Timer started again');
+  return lines.join('\n');
 }
 
 function columnStyles(headers, tableW) {
@@ -97,4 +129,4 @@ function columnStyles(headers, tableW) {
   return styles;
 }
 
-module.exports = { buildReportPdf };
+module.exports = { buildReportPdf, formatHoldCell };
