@@ -9610,6 +9610,9 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
+  const PDF_FONT = 11;
+  const PDF_MAX_COLS = 8;
+
   function pdfColumnStyles(headers, tableW) {
     const weightFor = (label) => {
       const s = String(label || '').toLowerCase();
@@ -9629,39 +9632,81 @@ export async function mountTaskflowApp(opts = {}) {
     return styles;
   }
 
+  function pdfSectionsForPage(sections) {
+    const out = [];
+    sections.forEach((sec) => {
+      const head = sec.head || [];
+      const body = sec.body || [];
+      if (head.length <= PDF_MAX_COLS) {
+        out.push(sec);
+        return;
+      }
+      const keep = String(head[0] || '').toLowerCase() === 'sr' ? Math.min(2, head.length) : 1;
+      const take = PDF_MAX_COLS - keep;
+      const parts = Math.ceil((head.length - keep) / take);
+      for (let part = 0; part < parts; part += 1) {
+        const start = keep + part * take;
+        const idx = [];
+        for (let i = 0; i < keep; i += 1) idx.push(i);
+        for (let i = start; i < Math.min(head.length, start + take); i += 1) idx.push(i);
+        out.push({
+          heading: parts > 1 ? `${sec.heading} (${part + 1}/${parts})` : sec.heading,
+          head: idx.map((i) => head[i]),
+          body: body.map((row) => idx.map((i) => row[i])),
+        });
+      }
+    });
+    return out;
+  }
+
   function downloadReportPdf({ title, subtitle, filename, sections }) {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    doc.setFont('helvetica', 'normal');
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const margin = 8;
     const tableW = pageW - margin * 2;
-    doc.setFontSize(14);
+    doc.setFontSize(PDF_FONT + 3);
     doc.text(title, pageW / 2, 10, { align: 'center' });
-    doc.setFontSize(9);
-    doc.setTextColor(80);
+    doc.setFontSize(PDF_FONT);
+    doc.setTextColor(70);
     const subLines = doc.splitTextToSize(subtitle || '', tableW);
-    doc.text(subLines, pageW / 2, 15, { align: 'center' });
+    doc.text(subLines, pageW / 2, 16, { align: 'center' });
     doc.setTextColor(20);
-    let y = 15 + subLines.length * 4 + 3;
+    let y = 16 + subLines.length * 4.2 + 2;
 
-    sections.forEach((sec) => {
+    pdfSectionsForPage(sections).forEach((sec) => {
       if (!sec.head?.length) return;
-      if (y > pageH - 24) {
+      if (y > pageH - 22) {
         doc.addPage('a4', 'landscape');
         y = 10;
       }
-      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(PDF_FONT);
       doc.text(sec.heading, margin, y);
+      doc.setFont('helvetica', 'normal');
       const body = sec.body?.length
         ? sec.body
         : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
-      const fontSize = sec.head.length > 14 ? 9 : sec.head.length > 8 ? 10 : 11;
       autoTable(doc, {
         startY: y + 1.5,
         head: [sec.head],
         body,
-        styles: { fontSize, cellPadding: 1.15, overflow: 'linebreak', valign: 'top' },
-        headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize, overflow: 'linebreak', valign: 'middle' },
+        styles: {
+          font: 'helvetica',
+          fontSize: PDF_FONT,
+          cellPadding: 1.2,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [31, 41, 55],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: PDF_FONT,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
         alternateRowStyles: { fillColor: [247, 243, 236] },
         columnStyles: pdfColumnStyles(sec.head, tableW),
         margin: { left: margin, right: margin, top: 10, bottom: 10 },
@@ -9670,7 +9715,7 @@ export async function mountTaskflowApp(opts = {}) {
         rowPageBreak: 'auto',
         horizontalPageBreak: false,
       });
-      y = (doc.lastAutoTable?.finalY || y) + 7;
+      y = (doc.lastAutoTable?.finalY || y) + 6;
     });
 
     const pages = doc.getNumberOfPages();
@@ -9678,7 +9723,7 @@ export async function mountTaskflowApp(opts = {}) {
       doc.setPage(i);
       const w = doc.internal.pageSize.getWidth();
       const h = doc.internal.pageSize.getHeight();
-      doc.setFontSize(8);
+      doc.setFontSize(PDF_FONT);
       doc.setTextColor(120);
       doc.text(`${i} / ${pages}`, w - 18, h - 6);
     }
