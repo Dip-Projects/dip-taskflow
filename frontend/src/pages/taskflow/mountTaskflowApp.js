@@ -9610,8 +9610,8 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
-  const PDF_FONT = 11;
-  const PDF_MAX_COLS = 8;
+  const PDF_FONT = 14;
+  const PDF_MAX_COLS = 6;
 
   function pdfColumnStyles(headers, tableW) {
     const weightFor = (label) => {
