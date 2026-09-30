@@ -4176,7 +4176,23 @@ body.sidebar-open { overflow: hidden; }
   font-size: 0.82rem;
   font-family: system-ui, sans-serif;
 }
-.dr-table-wrap { overflow: auto; border: 1px solid #D1D5DB; border-radius: 6px; }
+.dr-table-wrap, .wvd-table-wrap {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+.dr-table-wrap {
+  border: 1px solid #D1D5DB;
+  border-radius: 6px;
+}
+#view-emp-report,
+#view-delay-report,
+#view-time-dashboard,
+#view-mdo-delay-report {
+  max-width: 100%;
+  overflow-x: auto;
+}
 .dr-table {
   width: 100%;
   border-collapse: collapse;
@@ -4312,24 +4328,31 @@ body.org-print-mode .org-tree-svg .org-line { stroke-width: 1.15; opacity: 0.6; 
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
+    width: 297mm !important;
+    min-width: 297mm !important;
   }
   .dr-report, .wvd, .dr-table-wrap, .wvd-table-wrap, .wvd-sec {
     overflow: visible !important;
     max-height: none !important;
     height: auto !important;
+    width: 277mm !important;
+    min-width: 277mm !important;
+    max-width: 277mm !important;
     break-inside: auto !important;
     page-break-inside: auto !important;
   }
   .dr-table, .wvd-matrix {
-    min-width: 0 !important;
-    width: 100% !important;
-    font-size: 14pt !important;
+    width: 277mm !important;
+    min-width: 277mm !important;
+    max-width: 277mm !important;
+    font-size: 11pt !important;
   }
   .dr-table th, .dr-table td, .wvd-matrix th, .wvd-matrix td {
     white-space: normal !important;
     word-break: break-word;
-    font-size: 14pt !important;
+    font-size: 11pt !important;
   }
+  @page { size: A4 landscape; margin: 8mm; }
 }
 
 
