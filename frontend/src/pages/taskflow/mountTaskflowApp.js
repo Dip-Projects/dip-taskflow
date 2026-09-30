@@ -9636,12 +9636,12 @@ export async function mountTaskflowApp(opts = {}) {
       const body = sec.body?.length
         ? sec.body
         : [sec.head.map((_, i) => (i === 0 ? 'No rows' : ''))];
-      const fontSize = sec.head.length > 14 ? 6 : sec.head.length > 8 ? 7 : 9;
+      const fontSize = sec.head.length > 14 ? 8 : sec.head.length > 8 ? 9 : 11;
       autoTable(doc, {
         startY: y + 2,
         head: [sec.head],
         body,
-        styles: { fontSize, cellPadding: 1, overflow: 'linebreak', valign: 'top' },
+        styles: { fontSize, cellPadding: 1.3, overflow: 'linebreak', valign: 'top' },
         headStyles: { fillColor: [31, 41, 55], textColor: 255, fontStyle: 'bold', fontSize, halign: 'left' },
         alternateRowStyles: { fillColor: [247, 243, 236] },
         margin: { left: margin, right: margin, top: 12, bottom: 12 },
