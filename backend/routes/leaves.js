@@ -662,10 +662,7 @@ router.post('/', async (req, res) => {
     if (new Date(to_date) < new Date(from_date)) {
       return res.status(400).json({ error: 'To date cannot be before from date' });
     }
-    if (!buddy_id) {
-      return res.status(400).json({ error: 'Please choose a buddy to cover your tasks' });
-    }
-    if (String(buddy_id) === String(req.user.id)) {
+    if (buddy_id && String(buddy_id) === String(req.user.id)) {
       return res.status(400).json({ error: 'You cannot select yourself as buddy' });
     }
 
@@ -692,7 +689,7 @@ router.post('/', async (req, res) => {
     }
 
     let buddy = null;
-    {
+    if (buddy_id) {
       const { data: buddyUser, error: buddyErr } = await supabase
         .from('users')
         .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
@@ -712,15 +709,15 @@ router.post('/', async (req, res) => {
         buddy = buddyUser;
       }
     }
-    if (!buddy || buddy.is_active === false) {
+    if (buddy_id && (!buddy || buddy.is_active === false)) {
       return res.status(400).json({ error: 'Selected buddy is not available' });
     }
-    if ((buddy.role || '').toLowerCase() === 'client') {
+    if (buddy && (buddy.role || '').toLowerCase() === 'client') {
       return res.status(400).json({ error: 'Client users cannot be leave buddies' });
     }
 
     // Buddy must be same department (MDO with MDO, Engg with Engg, …)
-    {
+    if (buddy) {
       const { data: me } = await supabase
         .from('users')
         .select('department, department_id')
@@ -745,8 +742,8 @@ router.post('/', async (req, res) => {
         is_half_day: !!is_half_day,
         reason: reason.trim(),
       status: 'Pending',
-      buddy_id,
-      buddy_status: 'Pending',
+      buddy_id: buddy_id || null,
+      buddy_status: buddy_id ? 'Pending' : null,
     };
 
     let { data, error } = await supabase
@@ -783,7 +780,7 @@ if (error) throw error;
     }
 
     try {
-      if (buddy.whatsapp_number) {
+      if (buddy?.whatsapp_number) {
         const buddySent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
           buddyName: buddy.full_name,
           applicantName: req.user.full_name,
@@ -797,7 +794,7 @@ if (error) throw error;
           reason: buddySent?.reason || null,
         };
         console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
-      } else {
+      } else if (buddy) {
         waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
         console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
       }
