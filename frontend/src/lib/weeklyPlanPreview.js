@@ -149,10 +149,7 @@ export function hasHalfPlanningLayout(matrix) {
 }
 
 function findHalfLabelRow(matrix, dateHeaderRow = 0) {
-  const maxRows = Math.min(
-    Array.isArray(matrix) ? matrix.length : 0,
-    Math.max(dateHeaderRow + 30, 30),
-  );
+  const maxRows = Math.min(Array.isArray(matrix) ? matrix.length : 0, 20);
   for (let r = Math.max(0, dateHeaderRow); r < maxRows; r += 1) {
     const row = matrix[r] || [];
     let firstHits = 0;
@@ -167,7 +164,7 @@ function findHalfLabelRow(matrix, dateHeaderRow = 0) {
   return null;
 }
 
-/** Map day / half columns — pair 1st+2nd half headers, assign to nearest date. */
+/** Map day / half columns the same way the Excel parser does. */
 function findSheetDayColumns(matrix) {
   if (!Array.isArray(matrix) || !matrix.length) return [];
 
@@ -187,15 +184,12 @@ function findSheetDayColumns(matrix) {
 
   const halfRow = findHalfLabelRow(matrix, best.row);
   if (halfRow == null) {
-    return best.dates.map((cur) => {
-      const label = findWeekdayLabelNear(matrix, best.row, cur.col);
-      return {
-        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
-        firstCol: cur.col,
-        secondCol: null,
-        layout: "daily",
-      };
-    });
+    return best.dates.map((cur) => ({
+      ymd: cur.ymd,
+      firstCol: cur.col,
+      secondCol: null,
+      layout: "daily",
+    }));
   }
 
   const firstHalfCols = [];
@@ -207,88 +201,32 @@ function findSheetDayColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
-  const pairs = [];
-  const usedSecond = new Set();
-  for (const fc of firstHalfCols) {
-    const sc = secondHalfCols.find((c) => c > fc && !usedSecond.has(c));
-    if (sc == null) continue;
-    usedSecond.add(sc);
-    pairs.push({ firstCol: fc, secondCol: sc, mid: (fc + sc) / 2 });
+  if (firstHalfCols.length >= best.dates.length && secondHalfCols.length >= best.dates.length) {
+    return best.dates.map((cur, i) => ({
+      ymd: cur.ymd,
+      firstCol: firstHalfCols[i],
+      secondCol: secondHalfCols[i],
+      layout: "half",
+    }));
   }
 
-  const usedPairs = new Set();
-  return best.dates.map((cur) => {
-    let bestPairIdx = -1;
-    let bestDist = Infinity;
-    for (let p = 0; p < pairs.length; p += 1) {
-      if (usedPairs.has(p)) continue;
-      const dist = Math.abs(pairs[p].mid - cur.col);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPairIdx = p;
-      }
-    }
-    let firstCol;
-    let secondCol;
-    if (bestPairIdx >= 0) {
-      usedPairs.add(bestPairIdx);
-      firstCol = pairs[bestPairIdx].firstCol;
-      secondCol = pairs[bestPairIdx].secondCol;
-    } else {
+  return best.dates.map((cur, i) => {
+    const next = best.dates[i + 1];
+    const rangeEnd = next ? next.col : Infinity;
+    let firstCol = firstHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+    let secondCol = secondHalfCols.find((c) => c >= cur.col && c < rangeEnd);
+    if (firstCol == null || secondCol == null) {
+      const span = next ? Math.max(1, next.col - cur.col) : 2;
       firstCol = cur.col;
-      secondCol = cur.col + 1;
+      secondCol = span >= 2 ? cur.col + 1 : null;
     }
-    const label =
-      findWeekdayLabelNear(matrix, best.row, firstCol) ||
-      findWeekdayLabelNear(matrix, best.row, cur.col) ||
-      findWeekdayLabelNear(matrix, best.row, secondCol);
     return {
-      ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+      ymd: cur.ymd,
       firstCol,
       secondCol,
       layout: "half",
     };
   });
-}
-
-const WEEKDAY_TO_INDEX = {
-  sunday: 0,
-  monday: 1,
-  tuesday: 2,
-  wednesday: 3,
-  thursday: 4,
-  friday: 5,
-  saturday: 6,
-};
-
-function ymdAddDays(ymd, days) {
-  const d = new Date(`${ymd}T12:00:00+05:30`);
-  d.setDate(d.getDate() + (Number(days) || 0));
-  return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-}
-
-function alignYmdToWeekdayLabel(ymd, weekdayLabel) {
-  if (!ymd || !weekdayLabel) return ymd;
-  const want = WEEKDAY_TO_INDEX[String(weekdayLabel).trim().toLowerCase()];
-  if (want == null) return ymd;
-  const have = new Date(`${ymd}T12:00:00+05:30`).getDay();
-  let diff = want - have;
-  if (diff > 3) diff -= 7;
-  if (diff < -3) diff += 7;
-  return diff === 0 ? ymd : ymdAddDays(ymd, diff);
-}
-
-function findWeekdayLabelNear(matrix, dateHeaderRow, col) {
-  if (col == null || !Number.isFinite(col)) return null;
-  const start = Math.max(0, (dateHeaderRow ?? 0) - 1);
-  const end = Math.min(matrix.length, (dateHeaderRow ?? 0) + 4);
-  for (let r = start; r < end; r += 1) {
-    const t = cellDisplay(matrix, r, col).toUpperCase();
-    if (/^(MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY)$/.test(t)) {
-      return t;
-    }
-  }
-  return null;
 }
 
 /** YYYY-MM-DD for the calendar day that owns this sheet column. */
@@ -453,7 +391,7 @@ export function isActionablePlanCell(matrix, rowIdx, colIdx, cellText) {
   return isDaywiseTimeValue(text) || Boolean(text);
 }
 
-function taskMatchesCellText(task, text, { exactOnly = true } = {}) {
+function taskMatchesCellText(task, text, { exactOnly = false } = {}) {
   const slot = normalizePreviewText(task?.time_slot);
   const slotTime = normalizeTimeText(task?.time_slot);
   const textNorm = normalizePreviewText(text);
@@ -464,24 +402,45 @@ function taskMatchesCellText(task, text, { exactOnly = true } = {}) {
   if (slot && slot === textNorm) return true;
   if (slotTime && textTime && slotTime === textTime) return true;
   if (exactOnly) return false;
+  // Soft contains only when both sides are reasonably long (avoid "call"/"to call" collisions).
+  if (slot && slot.length >= 8 && textNorm.length >= 8) {
+    if (textNorm.includes(slot) || slot.includes(textNorm)) return true;
+  }
   return false;
 }
 
+function ymdFromTaskValue(value) {
+  if (value == null || value === "") return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  }
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    }
+    return s.slice(0, 10);
+  }
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  }
+  return "";
+}
+
 function sameTaskDate(task, taskDate) {
-  if (!taskDate) return false;
-  return String(task?.task_date || "").slice(0, 10) === String(taskDate).slice(0, 10);
+  if (!taskDate) return true;
+  const a = ymdFromTaskValue(task?.task_date);
+  const b = ymdFromTaskValue(taskDate);
+  return Boolean(a && b && a === b);
 }
 
 function sameTaskRow(task, rowName, srNo) {
-  const nameOk =
-    rowName && normalizePreviewText(task?.task_name) === rowName;
-  const taskSr = Number(task?.sr_no);
-  const hasTaskSr = Number.isFinite(taskSr) && taskSr > 0;
-  const srOk = srNo != null && hasTaskSr && taskSr === srNo;
-  // Prefer SR+name when both sides have SR; otherwise name (or SR) alone.
-  if (srNo != null && rowName && hasTaskSr) return srOk && nameOk;
-  if (srNo != null && hasTaskSr) return srOk;
-  return Boolean(nameOk);
+  if (srNo != null && Number(task?.sr_no) === srNo) return true;
+  if (rowName && normalizePreviewText(task?.task_name) === rowName) return true;
+  return false;
 }
 
 function isAssignablePlanTask(task) {
@@ -491,56 +450,73 @@ function isAssignablePlanTask(task) {
   return Boolean(String(task.time_slot || task.task_name || "").trim());
 }
 
-function scoreTaskForCell(task, { cellText, taskDate, half, requireDate = true }) {
-  // Require exact cell text match — soft contains caused status bleed across cells.
-  if (!taskMatchesCellText(task, cellText, { exactOnly: true })) return -1;
-  let score = 100;
-
-  if (taskDate && sameTaskDate(task, taskDate)) score += 40;
-  else if (taskDate && requireDate) return -1; // never cross days on the strict pass
-  else if (taskDate) score -= 20; // soft pass: prefer dated matches first
-
-  if (half != null && Number(half) > 0) {
-    if (Number(task.half) === Number(half)) score += 30;
-    else if (Number(task.half) === 0) score += 5; // legacy rows only
-    else return -1; // wrong half
-  }
-  return score;
+function isCompletedStatus(status) {
+  const s = String(status || "")
+    .trim()
+    .toLowerCase();
+  return s === "completed" || s === "complete" || s === "done";
 }
 
-function taskSheetDedupeKey(task) {
-  return [
-    String(task?.task_date || "").slice(0, 10),
-    normalizePreviewText(task?.task_name),
-    String(Number.isFinite(Number(task?.half)) ? Number(task.half) : 0),
-    normalizePreviewText(task?.time_slot),
-  ].join("|");
+function planCellKeyFromTask(task) {
+  const ymd = ymdFromTaskValue(task?.task_date);
+  const half = Number(task?.half) || 0;
+  const sr = Number(task?.sr_no);
+  const srPart = Number.isFinite(sr) && sr > 0 ? `sr:${sr}` : "";
+  const name = normalizePreviewText(
+    String(task?.task_name || "").replace(/\s*[·•]\s*(1st|2nd)\s*half/i, "")
+  );
+  return `${ymd}|${half}|${srPart}|${name}`;
 }
 
-/** One row per sheet cell identity — the latest Supabase update is authoritative. */
-export function dedupeTasksForSheetIndex(tasks) {
+function slotQualityForUi(task) {
+  const slot = String(task?.time_slot || "").trim();
+  const cat = String(task?.task_name || "")
+    .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, "")
+    .trim();
+  if (!slot) return 0;
+  if (/^(1st half|2nd half)$/i.test(slot)) return 1;
+  if (/^(pending|completed|done)$/i.test(slot)) return 1;
+  if (cat && slot.toLowerCase() === cat.toLowerCase()) return 1;
+  return 2 + Math.min(slot.length, 40) / 100;
+}
+
+/** One DB row per Excel cell — prefer Completed, then real work text. Matches WhatsApp dedupe. */
+export function collapseDuplicatePlanTasks(tasks) {
   const map = new Map();
-  for (const task of Array.isArray(tasks) ? tasks : []) {
-    if (!isAssignablePlanTask(task)) continue;
-    const key = taskSheetDedupeKey(task);
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    if (!t?.id) continue;
+    const key = planCellKeyFromTask(t);
     const prev = map.get(key);
     if (!prev) {
-      map.set(key, task);
+      map.set(key, t);
       continue;
     }
-    const prevUpdated = Date.parse(prev.updated_at || prev.completed_at || prev.created_at || "") || 0;
-    const nextUpdated = Date.parse(task.updated_at || task.completed_at || task.created_at || "") || 0;
-    if (nextUpdated > prevUpdated) {
-      map.set(key, task);
+    const prevDone = isCompletedStatus(prev.status);
+    const nextDone = isCompletedStatus(t.status);
+    if (nextDone !== prevDone) {
+      map.set(key, nextDone ? t : prev);
       continue;
     }
-    if (nextUpdated === prevUpdated) {
-      const prevDone = String(prev.status || "") === "Completed";
-      const nextDone = String(task.status || "") === "Completed";
-      if (nextDone && !prevDone) map.set(key, task);
-    }
+    map.set(key, slotQualityForUi(t) > slotQualityForUi(prev) ? t : prev);
   }
   return [...map.values()];
+}
+
+function scoreTaskForCell(task, { cellText, taskDate, half }) {
+  let score = 0;
+  if (taskMatchesCellText(task, cellText, { exactOnly: true })) score += 100;
+  else if (taskMatchesCellText(task, cellText)) score += 40;
+  else return -1;
+
+  if (taskDate && sameTaskDate(task, taskDate)) score += 30;
+  if (half != null && Number(half) > 0 && Number(task.half) === Number(half)) score += 20;
+  if (half != null && Number(half) > 0 && Number(task.half) === 0) score += 5; // legacy rows
+  // Prefer Completed for this exact cell so WhatsApp Done shows on the grid.
+  if (isCompletedStatus(task?.status) && taskDate && sameTaskDate(task, taskDate)) {
+    if (half != null && Number(half) > 0 && Number(task.half) === Number(half)) score += 40;
+    else score += 10;
+  }
+  return score;
 }
 
 /**
@@ -548,17 +524,15 @@ export function dedupeTasksForSheetIndex(tasks) {
  * Each task is used at most once, so duplicate labels on other days/rows
  * cannot share status when one Pending is clicked.
  *
- * preferredIds: optional Map<"row:col", taskId> sticky links that win when still valid.
- *
  * Returns Map<"row:col", task>
  */
-export function buildSheetTaskIndex(matrix, tasks, preferredIds = null) {
+export function buildSheetTaskIndex(matrix, tasks) {
   const index = new Map();
   if (!Array.isArray(matrix) || !matrix.length) return index;
-  const pool = dedupeTasksForSheetIndex(tasks);
+  // Collapse phantoms first so UI + WhatsApp share one row per cell.
+  const pool = collapseDuplicatePlanTasks(tasks).filter(isAssignablePlanTask);
   if (!pool.length) return index;
 
-  const byId = new Map(pool.map((t) => [String(t.id), t]));
   const used = new Set();
   const cells = [];
 
@@ -583,44 +557,24 @@ export function buildSheetTaskIndex(matrix, tasks, preferredIds = null) {
     }
   }
 
-  const usedCells = new Set();
-
-  // Sticky links first — keep the same task id on a cell across refreshes.
-  if (preferredIds instanceof Map || (preferredIds && typeof preferredIds.get === "function")) {
-    for (const cell of cells) {
-      const preferId = String(preferredIds.get(cell.key) || "");
-      if (!preferId) continue;
-      const task = byId.get(preferId);
-      if (!task || used.has(preferId)) continue;
-      if (scoreTaskForCell(task, cell) < 0) continue;
-      index.set(cell.key, task);
-      used.add(preferId);
-      usedCells.add(cell.key);
-    }
-  }
-
+  // Collect candidate scores, then assign highest scores first (unique tasks).
+  // Prefer row-scoped matches; allow exact text+date without row as a weaker fallback.
   const scored = [];
   for (const cell of cells) {
-    if (usedCells.has(cell.key)) continue;
     const rowName = normalizePreviewText(cell.rowTaskName);
     for (const task of pool) {
-      if (used.has(String(task.id))) continue;
-      if (!sameTaskRow(task, rowName, cell.srNo)) continue;
+      const rowOk = sameTaskRow(task, rowName, cell.srNo);
       const score = scoreTaskForCell(task, cell);
       if (score < 0) continue;
-      scored.push({ cell, task, score: score + 50 });
+      if (!rowOk && score < 130) continue; // need exact text + date to cross rows
+      scored.push({ cell, task, score: score + (rowOk ? 50 : 0) });
     }
   }
-  scored.sort(
-    (a, b) =>
-      b.score - a.score ||
-      (String(b.task.status || "") === "Completed" ? 1 : 0) -
-        (String(a.task.status || "") === "Completed" ? 1 : 0) ||
-      a.cell.rowIdx - b.cell.rowIdx ||
-      a.cell.colIdx - b.cell.colIdx,
-  );
+  scored.sort((a, b) => b.score - a.score || a.cell.rowIdx - b.cell.rowIdx || a.cell.colIdx - b.cell.colIdx);
 
-  for (const { cell, task } of scored) {
+  const usedCells = new Set();
+  for (const { cell, task, score } of scored) {
+    if (score < 40) continue; // require at least soft text match for scored pass
     const ck = cell.key;
     const tid = String(task.id);
     if (usedCells.has(ck) || used.has(tid)) continue;
@@ -629,34 +583,55 @@ export function buildSheetTaskIndex(matrix, tasks, preferredIds = null) {
     usedCells.add(ck);
   }
 
-  // Exact text + date + half among unused.
+  // Remaining cells — match by date + half within the row (never fill left→right blindly).
+  const remainingCells = cells.filter((c) => !usedCells.has(c.key));
+  for (const cell of remainingCells) {
+    const rowName = normalizePreviewText(cell.rowTaskName);
+    const hit = pool
+      .filter((task) => !used.has(String(task.id)) && sameTaskRow(task, rowName, cell.srNo))
+      .map((task) => ({ task, score: scoreTaskForCell(task, cell) }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)[0];
+    if (!hit) continue;
+    index.set(cell.key, hit.task);
+    used.add(String(hit.task.id));
+    usedCells.add(cell.key);
+  }
+
+  // Last resort: leftover cells by exact text among unused tasks (require date when known).
   for (const cell of cells) {
     if (usedCells.has(cell.key) || index.has(cell.key)) continue;
     const text = normalizePreviewText(cell.cellText);
-    const hits = pool
-      .filter((task) => {
-        if (used.has(String(task.id))) return false;
-        if (normalizePreviewText(task.time_slot) !== text) return false;
-        if (cell.taskDate && !sameTaskDate(task, cell.taskDate)) return false;
-        if (
-          cell.half != null &&
-          Number(cell.half) > 0 &&
-          Number(task.half) > 0 &&
-          Number(task.half) !== Number(cell.half)
-        ) {
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const ac = String(a.status || "") === "Completed" ? 1 : 0;
-        const bc = String(b.status || "") === "Completed" ? 1 : 0;
-        return bc - ac;
-      });
-    const hit = hits[0];
+    const hit = pool.find(
+      (task) =>
+        !used.has(String(task.id)) &&
+        normalizePreviewText(task.time_slot) === text &&
+        (cell.taskDate ? sameTaskDate(task, cell.taskDate) : true) &&
+        (cell.half > 0 ? Number(task.half) === Number(cell.half) || Number(task.half) === 0 : true)
+    );
     if (!hit) continue;
     index.set(cell.key, hit);
     used.add(String(hit.id));
+    usedCells.add(cell.key);
+  }
+
+  // WhatsApp completes by day + work text. Mirror that for display.
+  for (const cell of cells) {
+    const current = index.get(cell.key);
+    if (current && isCompletedStatus(current.status)) continue;
+    if (!cell.taskDate) continue;
+    const text = normalizePreviewText(cell.cellText);
+    if (!text) continue;
+    const done = (Array.isArray(tasks) ? tasks : []).find(
+      (task) =>
+        isCompletedStatus(task.status) &&
+        sameTaskDate(task, cell.taskDate) &&
+        normalizePreviewText(task.time_slot) === text
+    );
+    if (!done) continue;
+    if (current?.id) used.delete(String(current.id));
+    index.set(cell.key, done);
+    used.add(String(done.id));
     usedCells.add(cell.key);
   }
 
@@ -669,21 +644,13 @@ export function buildSheetTaskIndex(matrix, tasks, preferredIds = null) {
  */
 export function findTaskForSheetCell(
   tasks,
-  { cellText, rowTaskName, taskDate, half, matrix, rowIdx, usedIds } = {},
+  { cellText, rowTaskName, taskDate, half, colIdx, matrix, rowIdx } = {}
 ) {
   const text = normalizePreviewText(cellText);
   if (!text || text === "—") return null;
-  const used = usedIds instanceof Set ? usedIds : null;
-  const list = (Array.isArray(tasks) ? tasks : []).filter((task) => {
-    if (!isAssignablePlanTask(task)) return false;
-    if (used && used.has(String(task.id))) return false;
-    return true;
-  });
+  const list = (Array.isArray(tasks) ? tasks : []).filter(isAssignablePlanTask);
   const rowName = normalizePreviewText(rowTaskName);
-  const srRaw =
-    Array.isArray(matrix) && Number.isFinite(rowIdx)
-      ? cellDisplay(matrix, rowIdx, 0)
-      : "";
+  const srRaw = Array.isArray(matrix) && Number.isFinite(rowIdx) ? cellDisplay(matrix, rowIdx, 0) : "";
   const srNo = /^\d+$/.test(srRaw) ? Number(srRaw) : null;
 
   let best = null;
@@ -696,7 +663,30 @@ export function findTaskForSheetCell(
       best = task;
     }
   }
-  return bestScore >= 0 ? best : null;
+  if (bestScore >= 0) return best;
+
+  // Column-order fallback within the row when text scoring failed.
+  if (!Array.isArray(matrix) || !Number.isFinite(colIdx) || !Number.isFinite(rowIdx)) {
+    return null;
+  }
+  const rowTasks = list
+    .filter((task) => sameTaskRow(task, rowName, srNo))
+    .sort((a, b) => {
+      const d = String(a.task_date || "").localeCompare(String(b.task_date || ""));
+      if (d) return d;
+      return (Number(a.half) || 0) - (Number(b.half) || 0);
+    });
+  if (!rowTasks.length) return null;
+
+  const dayCols = [];
+  const colCount = (matrix[rowIdx] || []).length;
+  for (let c = 2; c < colCount; c += 1) {
+    const val = cellDisplay(matrix, rowIdx, c);
+    if (val && isActionablePlanCell(matrix, rowIdx, c, val)) dayCols.push(c);
+  }
+  const slot = dayCols.indexOf(colIdx);
+  if (slot < 0 || !rowTasks[slot]) return null;
+  return rowTasks[slot];
 }
 
 /** Prefer open tasks for one Excel task/site row. */

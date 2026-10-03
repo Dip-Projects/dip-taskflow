@@ -52,29 +52,7 @@ function preparePreviewSheet(sheet) {
 function sheetCellText(matrix, r, c) {
   const cell = matrix?.[r]?.[c];
   if (cell == null) return "";
-  if (cell instanceof Date && !Number.isNaN(cell.getTime())) {
-    return cell.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      timeZone: "Asia/Kolkata",
-    });
-  }
-  if (typeof cell === "object") {
-    const display = String(cell.display ?? "").trim();
-    if (/GMT[+-]\d{4}/i.test(display) || /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b.+\d{4}/i.test(display)) {
-      const d = new Date(display);
-      if (!Number.isNaN(d.getTime())) {
-        return d.toLocaleDateString("en-GB", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-          timeZone: "Asia/Kolkata",
-        });
-      }
-    }
-    return display;
-  }
+  if (typeof cell === "object") return String(cell.display ?? "").trim();
   return String(cell).trim();
 }
 
@@ -150,28 +128,13 @@ export function WeeklyPlanAttachmentPreview({
 
   const loadTasks = useCallback(async () => {
     if (!eaId) return [];
-    // Always load all saved tasks for this attendance row (do not filter by
-    // source_file). Filtering was hiding WhatsApp Completed rows when source
-    // labels differed slightly, so the grid kept linking Pending duplicates.
-    const data = await api(`/ea-meeting/${eaId}/tasks`);
-    return Array.isArray(data?.tasks) ? data.tasks : [];
-  }, [eaId]);
-
-  /** Soft refresh: pull latest statuses from DB (WhatsApp Done) without re-ingest. */
-  const refreshFromDb = useCallback(async () => {
-    if (!eaId) return;
-    try {
-      const listed = await loadTasks();
-      if (cancelledRef.current) return;
-      setCellStatus({});
-      setTasks(listed);
-      setNote("");
-    } catch (err) {
-      if (!cancelledRef.current) {
-        setNote(err.message || "Could not refresh task statuses.");
-      }
-    }
-  }, [eaId, loadTasks]);
+    const qs = sourceFile ? `?source=${encodeURIComponent(sourceFile)}` : "";
+    const data = await api(`/ea-meeting/${eaId}/tasks${qs}`);
+    const listed = Array.isArray(data?.tasks) ? data.tasks : [];
+    if (listed.length || !sourceFile) return listed;
+    const fallback = await api(`/ea-meeting/${eaId}/tasks`);
+    return Array.isArray(fallback?.tasks) ? fallback.tasks : [];
+  }, [eaId, sourceFile]);
 
   const ingestParsed = useCallback(
     async (parsed) => {
@@ -288,14 +251,8 @@ export function WeeklyPlanAttachmentPreview({
       setParsedTasks(Array.isArray(parsed?.tasks) ? parsed.tasks : []);
 
       let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
-      // Only ingest when DB is empty or sheet cells are unlinked.
-      // Re-ingesting on every Refresh was rematching Pending duplicates over WhatsApp Completed rows.
-      const linkedBefore = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
-      const actionable = countActionableCells(nextSheet.matrix);
-      const needsIngest =
-        Boolean(parsed?.tasks?.length) &&
-        (nextTasks.length === 0 || (actionable > 0 && linkedBefore === 0));
-      if (needsIngest) {
+      // Always try ingest when we have a fresh parse — fills missing cells without wiping status.
+      if (parsed?.tasks?.length) {
         try {
           nextTasks = await ingestParsed(parsed);
         } catch (err) {
@@ -308,6 +265,7 @@ export function WeeklyPlanAttachmentPreview({
       if (!cancelledRef.current) {
         setTasks(nextTasks);
         const linked = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
+        const actionable = countActionableCells(nextSheet.matrix);
         if (actionable > 0 && linked === 0 && nextTasks.length > 0) {
           setNote(
             "Saved tasks did not match this sheet layout. Click Pending on a cell to create the missing link."
@@ -333,24 +291,6 @@ export function WeeklyPlanAttachmentPreview({
       cancelledRef.current = true;
     };
   }, [load]);
-
-  // Pull WhatsApp / portal status changes while this preview is open.
-  useEffect(() => {
-    if (!eaId) return undefined;
-    const tick = () => {
-      if (document.visibilityState === "hidden") return;
-      refreshFromDb();
-    };
-    const id = window.setInterval(tick, 12000);
-    const onVis = () => {
-      if (document.visibilityState === "visible") refreshFromDb();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [eaId, refreshFromDb]);
 
   const setTaskStatus = async (task, nextStatus, busyKey) => {
     const wanted = nextStatus === "Pending" ? "Pending" : "Completed";
@@ -552,10 +492,9 @@ export function WeeklyPlanAttachmentPreview({
           <button
             type="button"
             className="smt-excel-preview__link"
-            onClick={() => refreshFromDb()}
-            disabled={loading || !eaId}
+            onClick={load}
+            disabled={loading}
             style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }}
-            title="Reload Completed / Pending from database (WhatsApp updates)"
           >
             Refresh
           </button>

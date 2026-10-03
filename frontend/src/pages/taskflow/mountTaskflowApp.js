@@ -121,6 +121,13 @@ function collectEls() {
     verifyPerson: document.getElementById('verify-person'),
     closeVerifyModal: document.getElementById('closeVerifyModal'),
     cancelVerifyModal: document.getElementById('cancelVerifyModal'),
+    forwardVerifyModal: document.getElementById('forwardVerifyModal'),
+    forwardVerifyForm: document.getElementById('forwardVerifyForm'),
+    forwardVerifyFormMsg: document.getElementById('forwardVerifyFormMsg'),
+    forwardVerifyPerson: document.getElementById('forward-verify-person'),
+    forwardVerifyHint: document.getElementById('forwardVerifyHint'),
+    closeForwardVerifyModal: document.getElementById('closeForwardVerifyModal'),
+    cancelForwardVerifyModal: document.getElementById('cancelForwardVerifyModal'),
     ticketsList: document.getElementById('ticketsList'),
     ticketsTableBody: document.getElementById('ticketsTableBody'),
     openRaiseTicket: document.getElementById('openRaiseTicket'),
@@ -270,9 +277,9 @@ export async function mountTaskflowApp(opts = {}) {
     return;
   }
 
-  // If React remounted the DOM (Strict Mode / HMR), old els are detached — rebind.
+  // Already on screen. Do not run enterApp again — that reloads Add Task
+  // dropdowns and wipes department / employee / project / task type mid-form.
   if (_listenersBound && els.navList && els.navList.isConnected) {
-    if (state.token && state.user && typeof _enterApp === 'function') await _enterApp();
     return;
   }
   _listenersBound = false;
@@ -386,6 +393,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   function fillSelect(select, items, { placeholder, valueKey = 'id', labelKey = 'name', extraOption } = {}) {
     if (!select) return;
+    const prev = select.value;
     select.innerHTML = '';
     if (placeholder) {
       const opt = document.createElement('option');
@@ -402,6 +410,7 @@ export async function mountTaskflowApp(opts = {}) {
       opt.value = extraOption.value; opt.textContent = extraOption.label;
       select.appendChild(opt);
     }
+    if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
   }
 
   function parseEmployeeSites(emp) {
@@ -1454,17 +1463,10 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
-    const reportBtns = [
-      makeNavButton('site-report', '🏗️ Site Visit Report'),
-      makeNavButton('my-reports', '📄 My Reports'),
-    ];
     if (visOk('monthly-report')) {
-      reportBtns.push(makeNavButton('monthly-report', '📁 Monthly Report'));
-    }
-    if (reportBtns.length) {
       appendCollapsibleNav(
         'Reports',
-        reportBtns,
+        [makeNavButton('monthly-report', '📁 Monthly Report')],
         { collapsed: true, sectionId: 'reports' }
       );
     }
@@ -1498,7 +1500,7 @@ export async function mountTaskflowApp(opts = {}) {
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
     'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
-    'site-report': 'reports', 'my-reports': 'reports', 'monthly-report': 'reports',
+    'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
     'new-recruitment': 'hr-hiring',
@@ -1758,7 +1760,6 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     state.activeView = viewKey;
-    window.__tfActiveView = viewKey;
     ensureNavSectionOpen(viewKey);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   
@@ -3378,10 +3379,11 @@ export async function mountTaskflowApp(opts = {}) {
       if (verificationHasStarted(task)) {
         startVerificationInline(task, actionsEl);
       } else {
-        const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
           await clickStartVerification(task, actionsEl, startBtn);
         });
         actionsEl.appendChild(startBtn);
+        appendForwardVerificationBtn(actionsEl, task);
       }
       return card;
     }
@@ -3417,6 +3419,23 @@ export async function mountTaskflowApp(opts = {}) {
     btn.className = `action-btn ${cls}`; btn.textContent = label;
     btn.addEventListener('click', onClick);
     return btn;
+  }
+
+  const VERIFY_ICON_START = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.2 8.4v7.2L16.2 12 10.2 8.4z" fill="currentColor"/></svg>';
+  const VERIFY_ICON_SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.5M12.5 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function makeIconActionBtn(cls, label, icon, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `action-btn ${cls}`;
+    btn.innerHTML = `${icon}<span>${label}</span>`;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  function fillStartVerificationBtn(btn) {
+    if (!btn) return;
+    btn.innerHTML = `${VERIFY_ICON_START}<span>Start Verification</span>`;
   }
   
   async function updateStatus(taskId, status, status_note) {
@@ -3598,6 +3617,90 @@ export async function mountTaskflowApp(opts = {}) {
   // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
   // Called when verifier clicks "Start Verification" on a card/row.
   // We toggle the card's action area to show the two choice buttons.
+  function canForwardVerification(task) {
+    const vid = task?.verifier?.id || task?.verifier_id || null;
+    return state.user?.role === 'admin' || (!!vid && state.user?.id === vid);
+  }
+
+  function makeForwardVerificationBtn(task) {
+    if (!canForwardVerification(task)) return null;
+    const btn = makeIconActionBtn('action-forward', 'Send to another', VERIFY_ICON_SEND, () => openForwardVerificationModal(task));
+    btn.title = 'Send this task to a different verifier';
+    return btn;
+  }
+
+  function appendForwardVerificationBtn(actionsEl, task) {
+    const btn = makeForwardVerificationBtn(task);
+    if (btn) actionsEl.appendChild(btn);
+  }
+
+  async function openForwardVerificationModal(task) {
+    state.pendingTaskId = task?.id || null;
+    state.pendingForwardFromId = task?.verifier?.id || task?.verifier_id || null;
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    if (els.forwardVerifyHint) {
+      const who = task?.verifier?.full_name || 'the current verifier';
+      els.forwardVerifyHint.textContent = `This leaves ${who}. The person you pick will verify it.`;
+    }
+    if (els.forwardVerifyPerson) els.forwardVerifyPerson.innerHTML = '<option value="">Loading…</option>';
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = false;
+    try {
+      const verifiers = await api('/master/verifiers');
+      const choices = (verifiers || []).filter((v) => v.id && v.id !== state.pendingForwardFromId);
+      fillSelect(els.forwardVerifyPerson, choices, { placeholder: 'Select a verifier', labelKey: 'full_name' });
+      if (!choices.length && els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'No other verifier is available';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    }
+  }
+
+  function closeForwardVerificationModal() {
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = true;
+  }
+
+  els.closeForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.cancelForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.forwardVerifyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    const verifierId = els.forwardVerifyPerson?.value || '';
+    if (!state.pendingTaskId || !verifierId) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'Please choose who should verify this task';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+      return;
+    }
+    try {
+      const sent = await api(`/tasks/${state.pendingTaskId}/forward-verification`, {
+        method: 'PATCH',
+        body: { verifier_id: verifierId },
+      });
+      const who = els.forwardVerifyPerson?.selectedOptions?.[0]?.textContent || 'the new verifier';
+      if (sent?._whatsapp?.ok) {
+        showToast(`Sent for verification to ${who} ✅`, 'success');
+      } else {
+        showToast(`Sent to ${who}. WhatsApp was not delivered.`, 'success');
+      }
+      closeForwardVerificationModal();
+      loadVerifications();
+      refreshNavBadges();
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
   function startVerificationInline(task, actionsEl) {
     const taskId = task?.id || task;
     actionsEl.innerHTML = '';
@@ -3606,6 +3709,7 @@ export async function mountTaskflowApp(opts = {}) {
     }));
     actionsEl.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
     actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+    appendForwardVerificationBtn(actionsEl, task);
   }
   
   async function verifyApprove(taskId) {
@@ -3777,7 +3881,7 @@ export async function mountTaskflowApp(opts = {}) {
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       btn.style.pointerEvents = 'none';
-      btn.textContent = 'Starting…';
+      btn.innerHTML = `${VERIFY_ICON_START}<span>Starting…</span>`;
     }
     showBusyOverlay('Starting verification…');
     try {
@@ -3796,7 +3900,7 @@ export async function mountTaskflowApp(opts = {}) {
         btn.disabled = false;
         btn.removeAttribute('aria-busy');
         btn.style.pointerEvents = '';
-        btn.textContent = '🔎 Start Verification';
+        fillStartVerificationBtn(btn);
       }
       showToast(err.message, 'error');
     } finally {
@@ -4348,6 +4452,7 @@ export async function mountTaskflowApp(opts = {}) {
         }));
         tdActions.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
         tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+        appendForwardVerificationBtn(tdActions, task);
       }
   
       // Actions — "Start Verification" → then Verify or Send for Correction
@@ -4355,10 +4460,11 @@ export async function mountTaskflowApp(opts = {}) {
         // Already started (recorded on the task itself) — show verify/correction buttons directly
         showVerifyActions();
       } else {
-        const startBtn = makeActionBtn('action-start', '🔎 Start Verification', async () => {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
           await clickStartVerification(task, tdActions, startBtn);
         });
         tdActions.appendChild(startBtn);
+        appendForwardVerificationBtn(tdActions, task);
       }
       tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdAttach, tdDate, tdActions);
       tbody.appendChild(tr);
@@ -9155,6 +9261,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   // ─── MIS Report (admin, week-wise) ────────────────────────────────────────────
   let _misLastData = null;
+  let _misReq = 0;
 
   function misPill(n, kind, icon = '') {
     return `<span class="mis-pill ${kind}">${icon ? `${icon} ` : ''}${n}</span>`;
@@ -9302,22 +9409,26 @@ export async function mountTaskflowApp(opts = {}) {
     }
 
     async function run() {
+      const reqId = ++_misReq;
       body.innerHTML = '<div class="empty-state">Building MIS report…</div>';
       try {
         const [y, m] = monthEl.value.split('-').map(Number);
         const taskType = typeEl?.value || 'all';
+        const week = weekEl?.value || '';
+        const dept = deptEl?.value || '';
+        const sort = sortEl?.value || 'name';
         const qs = new URLSearchParams({ year: String(y), month: String(m), task_type: taskType });
-        if (weekEl?.value) qs.set('week', weekEl.value);
-        if (deptEl?.value) qs.set('department', deptEl.value);
-        if (sortEl?.value) qs.set('sort', sortEl.value);
+        if (week) qs.set('week', week);
+        if (dept) qs.set('department', dept);
+        if (sort) qs.set('sort', sort);
 
         const data = await api(`/mis-report?${qs}`);
+        if (reqId !== _misReq) return;
         _misLastData = data;
         const activeType = data.filters?.task_type || taskType;
 
-        // Week options
+        // Week options. Keep the week the user picked for this request.
         if (weekEl) {
-          const prev = weekEl.value;
           weekEl.innerHTML = '<option value="">All weeks</option>';
           (data.week_options || data.weeks || []).forEach((w) => {
             const opt = document.createElement('option');
@@ -9325,12 +9436,11 @@ export async function mountTaskflowApp(opts = {}) {
             opt.textContent = w.label + (w.spans_prev_month ? ' *' : '');
             weekEl.appendChild(opt);
           });
-          if ([...weekEl.options].some((o) => o.value === prev)) weekEl.value = prev;
+          if ([...weekEl.options].some((o) => o.value === week)) weekEl.value = week;
         }
 
-        // Department options
+        // Department options. Keep the department picked for this request.
         if (deptEl) {
-          const prev = deptEl.value;
           deptEl.innerHTML = '<option value="">All departments</option>';
           (data.departments || []).forEach((d) => {
             const opt = document.createElement('option');
@@ -9338,7 +9448,7 @@ export async function mountTaskflowApp(opts = {}) {
             opt.textContent = d;
             deptEl.appendChild(opt);
           });
-          if ([...deptEl.options].some((o) => o.value === prev)) deptEl.value = prev;
+          if ([...deptEl.options].some((o) => o.value === dept)) deptEl.value = dept;
         }
 
         if (!data.weeks?.length) {
@@ -9355,7 +9465,7 @@ export async function mountTaskflowApp(opts = {}) {
 
         const tabs = `
           <div class="mis-week-tabs" id="misWeekTabs">
-            <button type="button" class="mis-week-tab active" data-week="">All weeks</button>
+            <button type="button" class="mis-week-tab" data-week="">All weeks</button>
             ${(data.week_options || data.weeks).map((w) => `
               <button type="button" class="mis-week-tab ${String(weekEl?.value) === String(w.week) ? 'active' : ''}" data-week="${w.week}">
                 W${w.week}${w.spans_prev_month ? '<span class="mis-week-hint">+prev</span>' : ''}
@@ -9450,6 +9560,8 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   let _tdLastData = null;
+  let _tdDash = null;
+  let _tdMeta = null;
 
   function downloadTimeCsv(data) {
     const dash = data?.dashboard;
@@ -9486,28 +9598,123 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
-  function printWorkDashboardPdf() {
-    const report = document.getElementById('wvdReport');
-    if (!report) return showToast('Generate the dashboard first', 'error');
+  function pdfCell(v) {
+    const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+    return s || '—';
+  }
+
+  function downloadReportPdf({ title, subtitle, sections }) {
     const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to download PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML)
-      .join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Work & Verification Dashboard</title>
-      ${styles}
+    if (!win) return showToast('Allow pop-ups so the print box can open', 'error');
+    const tables = (sections || []).filter((sec) => sec.head?.length).map((sec) => {
+      const head = sec.head.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+      const rows = sec.body?.length ? sec.body : [sec.head.map(() => '')];
+      const body = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+      return `<h2>${escapeHtml(sec.heading || '')}</h2><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }).join('');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
       <style>
-        body { background: #F7F4EE !important; margin: 0; padding: 24px; }
-        .wvd { box-shadow: none !important; border: none !important; }
-        @page { size: A4; margin: 12mm; }
-        @media print {
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-      </style>
-    </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
-    </body></html>`);
+        @page { size: A3 landscape; margin: 8mm; }
+        html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, Helvetica, sans-serif; }
+        h1 { text-align: center; font-size: 18pt; margin: 0 0 4px; }
+        .sub { text-align: center; font-size: 11pt; color: #444; margin: 0 0 12px; }
+        h2 { font-size: 12pt; margin: 12px 0 6px; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; }
+        th { background: #1f2937; color: #fff; font-weight: 700; }
+        tr:nth-child(even) td { background: #f7f3ec; }
+        thead { display: table-header-group; }
+        tr { break-inside: avoid; page-break-inside: avoid; }
+      </style></head><body>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="sub">${escapeHtml(subtitle || '')}</p>
+      ${tables}
+      <script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script>
+      </body></html>`);
     win.document.close();
+  }
+
+  function printWorkDashboardPdf() {
+    const dash = _tdDash;
+    if (!dash) return showToast('Generate the dashboard first', 'error');
+    const s = dash.summary || {};
+    const fromTo = `${String(_tdMeta?.from || '').slice(0, 10)} → ${String(_tdMeta?.to || '').slice(0, 10)}`;
+    const pem = dash.project_employee_matrix || { employees: [], projects: [] };
+    const pvm = dash.project_verifier_matrix || { verifiers: [], projects: [] };
+    const ct = dash.completion_time || {};
+    const vt = dash.verify_turnaround || {};
+    const pemHead = ['Project', ...(pem.employees || []), 'Total'];
+    const pvmHead = ['Project', ...(pvm.verifiers || []), 'Total'];
+    downloadReportPdf({
+      title: 'Work & Verification Dashboard',
+      subtitle: `${fromTo} · ${s.total_tasks || 0} tasks · ${s.employees || 0} employees · ${s.verified || 0} verified · ${s.pending_verify || 0} pending · ${s.corrections_sent || 0} corrections`,
+      filename: `work-verification-${String(_tdMeta?.from || '').slice(0, 10)}.pdf`,
+      sections: [
+        {
+          heading: '1. Work by employee',
+          head: ['Employee', 'Total', 'Verified', 'Pending', 'Projects'],
+          body: (dash.by_employee || []).map((e) => [
+            pdfCell(e.name),
+            pdfCell(e.total),
+            pdfCell(e.verified),
+            pdfCell(e.pending),
+            pdfCell((e.projects || []).map((p) => `${p.name}: ${p.count}`).join(', ')),
+          ]),
+        },
+        {
+          heading: '2. Project x employee',
+          head: pemHead,
+          body: (pem.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pem.employees || []).map((e) => pdfCell(p.counts?.[e] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3. Project x verifier',
+          head: pvmHead,
+          body: (pvm.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pvm.verifiers || []).map((v) => pdfCell(p.counts?.[v] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3b. Verifier summary',
+          head: ['Verifier', 'Total', 'Verified', 'Correction sent', 'Correction ack', 'Pending'],
+          body: (dash.verifier_summary || []).map((v) => [
+            pdfCell(v.name), pdfCell(v.total), pdfCell(v.verified),
+            pdfCell(v.correction_sent), pdfCell(v.correction_ack), pdfCell(v.pending),
+          ]),
+        },
+        {
+          heading: '4. Correction log',
+          head: ['Employee', 'Project', 'SR', 'Status'],
+          body: (dash.correction_log?.items || []).map((i) => [
+            pdfCell(i.employee), pdfCell(i.project), pdfCell(i.sr), pdfCell(i.status),
+          ]),
+        },
+        {
+          heading: '5a. Task completion time',
+          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours'],
+          body: (ct.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
+            pdfCell(r.task_type), pdfCell(fmtWvdDateTime(r.assigned_at)),
+            pdfCell(fmtWvdDateTime(r.submitted_at)), pdfCell(fmtHrs(r.hours)),
+          ]),
+        },
+        {
+          heading: '5b. Verification turnaround',
+          head: ['SR', 'Submitted by', 'Verifier', 'Project', 'Task description', 'Start verification', 'Verified', 'Office hours'],
+          body: (vt.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.verifier), pdfCell(r.project),
+            pdfCell(r.description), pdfCell(fmtWvdDateTime(r.started_at || r.accepted_at)),
+            pdfCell(fmtWvdDateTime(r.verified_at)), pdfCell(fmtHrs(r.hours != null ? r.hours : r.days)),
+          ]),
+        },
+      ],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -9852,6 +10059,8 @@ export async function mountTaskflowApp(opts = {}) {
         return;
       }
       dash = filterDashboardData(dash, allEmps);
+      _tdDash = dash;
+      _tdMeta = { from: data.from, to: data.to };
       if (!(dash.summary?.total_tasks) && !(dash.by_employee || []).length) {
         body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
         return;
@@ -10075,20 +10284,36 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function printEmpReportPdf() {
-    const report = document.getElementById('erReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Emp Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    const data = _erLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('erEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Submitted', 'Status', 'Early / Delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.timing_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   async function loadMdoDelayReport() {
@@ -10136,20 +10361,38 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
 
   function printDelayReportPdf() {
-    const report = document.getElementById('drReport');
-    if (!report) return showToast('Generate the report first', 'error');
-    const win = window.open('', '_blank');
-    if (!win) return showToast('Allow pop-ups to save PDF', 'error');
-    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-      .map((el) => el.outerHTML).join('\n');
-    win.document.write(`<!DOCTYPE html><html><head><title>Task Delay Report</title>${styles}
-      <style>body{background:#fff;padding:20px;margin:0}.dr-report{box-shadow:none;border:none}
-      @page{size:A4 landscape;margin:10mm}
-      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>
-      </head><body>${report.outerHTML}
-      <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script>
-      </body></html>`);
-    win.document.close();
+    const data = _drLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('drEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Sent for verification',
+      'Work status', 'Work delay', 'Start Verification', 'Verified', 'Verify status', 'Verify delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.delay_label),
+        pdfCell(r.verify_started_label), pdfCell(r.verified_label), pdfCell(r.verify_status), pdfCell(r.verify_delay_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Delay Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-delay-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
   }
 
   document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
@@ -10471,24 +10714,12 @@ export async function mountTaskflowApp(opts = {}) {
             if (row.answer) appendBotBubble('bot', row.answer);
           });
         } else {
-          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets. Offer letter and Experience letter are the buttons above.');
+          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets.');
         }
       } catch (_) {
-        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets. Offer letter and Experience letter are the buttons above.');
+        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets.');
       }
     }
-  }
-
-  function openBotLetter(tabKey) {
-    const kind = tabKey === 'letter-exp' ? 'exp' : 'offer';
-    window.dispatchEvent(new CustomEvent('dip-bot-letter', { detail: kind }));
-  }
-
-  function letterTabFromQuestion(q) {
-    const s = String(q || '').toLowerCase();
-    if (/\b(offer)\b/.test(s) && /\bletter\b/.test(s)) return 'letter-offer';
-    if (/\b(exp|experience)\b/.test(s) && /\b(letter|cert|certificate)\b/.test(s)) return 'letter-exp';
-    return '';
   }
 
   function bindBotAskForm() {
@@ -10502,16 +10733,6 @@ export async function mountTaskflowApp(opts = {}) {
       const input = document.getElementById('botAskInput');
       const q = (input?.value || '').trim();
       if (!q) return;
-      const letterTab = letterTabFromQuestion(q);
-      if (letterTab) {
-        appendBotBubble('you', q);
-        if (input) input.value = '';
-        appendBotBubble('bot', letterTab === 'letter-exp'
-          ? 'Experience letter form is open above.'
-          : 'Offer letter form is open above.');
-        openBotLetter(letterTab);
-        return;
-      }
       appendBotBubble('you', q);
       if (input) input.value = '';
       const askBtn = form.querySelector('button[type="submit"]');

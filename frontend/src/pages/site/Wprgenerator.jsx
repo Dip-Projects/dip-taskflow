@@ -5,6 +5,7 @@ import generatePPT from "./pptGenerator";
 import PptxGenJS from "pptxgenjs";
 // ─── CSS ────────────────────────────────────────────────────────────────────
 import "./Wprgenerator.css";
+import WprImageMarkup from "./WprImageMarkup";
 
 const STANDARD_SECTIONS = [
   "Detailed Status of Activities",
@@ -2235,6 +2236,7 @@ function PhotoGrid({
   multiple = true,
   label = "Upload Photos",
   onLightbox,
+  onMark,
 }) {
   const fileRef = useRef();
   return (
@@ -2267,6 +2269,11 @@ function PhotoGrid({
               <button className="wpr-photo-del" onClick={() => onRemove(i)}>
                 ✕
               </button>
+              {onMark && (
+                <button type="button" className="wpr-photo-mark" onClick={() => onMark(i)}>
+                  Mark
+                </button>
+              )}
               <div className="wpr-photo-cap">
                 <input
                   value={ph.label || ph.caption || ""}
@@ -2282,6 +2289,40 @@ function PhotoGrid({
   );
 }
 
+function personName(user) {
+  return (
+    user?.name ||
+    user?.full_name ||
+    user?.username ||
+    user?.user_name ||
+    ""
+  );
+}
+
+function blobToJpegDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width || 1;
+        canvas.height = img.naturalHeight || img.height || 1;
+        canvas.getContext("2d").drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Site image could not be read"));
+    };
+    img.src = url;
+  });
+}
+
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
 export default function WprGenerator({ user, supabase }) {
   const [openSec, setOpenSec] = useState({ info: true });
@@ -2291,13 +2332,14 @@ export default function WprGenerator({ user, supabase }) {
   const [site, setSite] = useState(
     user?.site_names?.[0] || user?.site_name || "",
   );
-  const [engineer, setEngineer] = useState(user?.name || "");
+  const [engineer, setEngineer] = useState(() => personName(user));
   const [reportDate, setReportDate] = useState(today());
   const [location, setLocation] = useState("");
   const [reportNum, setReportNum] = useState(1);
   const [siteImage, setSiteImage] = useState(null);
   const [activities, setActivities] = useState([]);
   const [graphicalImages, setGraphicalImages] = useState([]);
+  const [markupIndex, setMarkupIndex] = useState(null);
   const [sitePhotos, setSitePhotos] = useState([]);
   const [drawingHeaders, setDrawingHeaders] = useState([
     "Architect GFC Drawing",
@@ -2428,15 +2470,16 @@ export default function WprGenerator({ user, supabase }) {
         .maybeSingle();
       if (data?.site_image_url) {
         try {
-          // cache-bust so stale CDN copy doesn't block updated image
-          const bustUrl = data.site_image_url + "?t=" + Date.now();
+          const bustUrl = data.site_image_url + (data.site_image_url.includes("?") ? "&" : "?") + "t=" + Date.now();
           const res = await fetch(bustUrl);
+          if (!res.ok) throw new Error("site image " + res.status);
           const blob = await res.blob();
-          const reader = new FileReader();
-          reader.onload = (e) => setSiteImage(e.target.result);
-          reader.readAsDataURL(blob);
+          if (!blob.type || blob.type.startsWith("image/")) {
+            const jpeg = await blobToJpegDataUrl(blob);
+            setSiteImage(jpeg);
+          }
         } catch (_) {
-          /* silently ignore if image fetch fails */
+          /* title photo is optional — a bad file must not block the PPT */
         }
       }
       // Also fetch job_no
@@ -2714,6 +2757,7 @@ export default function WprGenerator({ user, supabase }) {
     setGenProgress(5);
     setGenStep("Preparing…");
     setSuccessUrls(null);
+    let pptDownloaded = false;
     try {
       await loadPptxGen();
       const dateFormatted = new Date(
@@ -2760,17 +2804,22 @@ export default function WprGenerator({ user, supabase }) {
         momItems,
       });
 
+      const fileSafeSite = safeNamePart(safeSite) || "site";
       const downloadPpt = () => {
         const dlUrl = URL.createObjectURL(pptBlob);
         const dlA = document.createElement("a");
         dlA.href = dlUrl;
-        dlA.download = `WPR_${zp(reportNum)}_${safeSite}.pptx`;
+        dlA.download = `WPR_${zp(reportNum)}_${fileSafeSite}.pptx`;
         dlA.style.display = "none";
         document.body.appendChild(dlA);
         dlA.click();
         document.body.removeChild(dlA);
         setTimeout(() => URL.revokeObjectURL(dlUrl), 10000);
       };
+      // Hand the file over before any database or storage step. Those used to
+      // throw, close this screen, and leave no download.
+      downloadPpt();
+      pptDownloaded = true;
 
       // 2) Save to DB
       setGenProgress(40);
@@ -2818,9 +2867,9 @@ export default function WprGenerator({ user, supabase }) {
         .single();
 
       if (reportError) {
-        // Still give the user the PPT; DB needs fix_wpr_tables.sql
-        downloadPpt();
-        throw reportError;
+        setSuccessUrls({ reportId: "local", pptUrl: "", viewUrl: "" });
+        showToast("PowerPoint downloaded. Saving the report online failed: " + (reportError.message || "database error"), "error", 12000);
+        return;
       }
       const reportId = reportData.id;
 
@@ -2930,7 +2979,6 @@ export default function WprGenerator({ user, supabase }) {
 
       setGenProgress(100);
       setGenStep("Done!");
-      downloadPpt();
 
       if (draftExists)
         await supabase
@@ -2943,7 +2991,6 @@ export default function WprGenerator({ user, supabase }) {
       await fetchReportNum(site, reportDate);
       setSuccessUrls({ reportId, pptUrl, viewUrl: `/wpr/${reportId}` });
     } catch (err) {
-      setGenerating(false);
       const msg =
         err?.message ||
         err?.error_description ||
@@ -2952,6 +2999,12 @@ export default function WprGenerator({ user, supabase }) {
         "Generation failed";
       const detail = err?.details || err?.hint || "";
       console.error("WPR generate error:", err);
+      if (pptDownloaded) {
+        setSuccessUrls({ reportId: "local", pptUrl: "", viewUrl: "" });
+        showToast("PowerPoint downloaded. Saving it online failed: " + msg + (detail ? " — " + detail : ""), "error", 12000);
+        return;
+      }
+      setGenerating(false);
       showToast("❌ " + msg + (detail ? " — " + detail : ""), "error", 12000);
     }
   };
@@ -3778,7 +3831,21 @@ export default function WprGenerator({ user, supabase }) {
             }}
             label="Upload Graphical Images"
             onLightbox={(imgs, idx) => openLightbox(imgs, idx)}
+            onMark={(i) => setMarkupIndex(i)}
           />
+          {markupIndex != null && graphicalImages[markupIndex]?.dataUrl && (
+            <WprImageMarkup
+              imageUrl={graphicalImages[markupIndex].dataUrl}
+              onCancel={() => setMarkupIndex(null)}
+              onSave={(dataUrl) => {
+                setGraphicalImages((prev) =>
+                  prev.map((image, index) => (index === markupIndex ? { ...image, dataUrl } : image)),
+                );
+                setMarkupIndex(null);
+                showToast("Marked image saved. It uploads with the generated WPR.", "success");
+              }}
+            />
+          )}
         </Acc>
 
         {/* ④ SITE PHOTOGRAPHS */}
@@ -5205,6 +5272,8 @@ export default function WprGenerator({ user, supabase }) {
                       <path d="M20 6L9 17l-5-5" />
                     </svg>
                   </div>
+                 {successUrls.pptUrl ? (
+                 <>
                  <a href={resolveViewUrl(successUrls.pptUrl)} target="_blank" rel="noreferrer" className="wpr-link-row">
                 <span className="wpr-link-icon">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -5244,6 +5313,8 @@ export default function WprGenerator({ user, supabase }) {
                 </div>
                 <span className="wpr-link-arrow">↓</span>
               </button>
+                 </>
+                 ) : null}
                 </div>
                 <button className="btn btn-amber" style={{ width: "100%", height: 44, marginTop: 4 }} onClick={closeOverlay} >
                   ✓ Done

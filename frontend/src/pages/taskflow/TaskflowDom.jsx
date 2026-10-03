@@ -1,27 +1,11 @@
 /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useLayoutEffect } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
-import SiteReport from '../site/Sitereport';
-import MyReports from '../site/MyReports';
-import BotLetterPanel from './BotLetterPanel';
-
-function readOfficeUser() {
-  let user = null;
-  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
-  return user;
-}
 
 function OfficeMonthlyReport() {
-  const user = readOfficeUser();
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
   return <MonthlyReport user={user} />;
-}
-
-function OfficeSiteReport() {
-  return <SiteReport user={readOfficeUser()} />;
-}
-
-function OfficeMyReports() {
-  return <MyReports user={readOfficeUser()} />;
 }
 
 /** Re-apply sidebar open/overlay after React re-renders (MonthlyReport etc. wipe className). */
@@ -42,25 +26,8 @@ function restoreSidebarDom() {
 }
 
 export default function TaskflowDom() {
-  const [botLetter, setBotLetter] = useState('');
-
-  useEffect(() => {
-    const onLetter = (e) => {
-      const kind = e.detail === 'exp' ? 'exp' : 'offer';
-      setBotLetter(kind);
-    };
-    window.addEventListener('dip-bot-letter', onLetter);
-    return () => window.removeEventListener('dip-bot-letter', onLetter);
-  }, []);
-
   useLayoutEffect(() => {
     restoreSidebarDom();
-    const key = window.__tfActiveView;
-    if (!key) return;
-    const htmlKey = (key === 'tickets-open' || key === 'tickets-resolved') ? 'tickets' : key;
-    document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
-    const viewEl = document.getElementById(`view-${htmlKey}`);
-    if (viewEl) viewEl.hidden = false;
   });
 
   return (
@@ -589,28 +556,9 @@ export default function TaskflowDom() {
               <img src="/logo192.png" alt="" className="view-bot-dp" width="28" height="28" />
               DIP Bot
             </h2>
-            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. Offer letter and experience letter download here.</p>
+            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. DIP Bot answers only that.</p>
           </div>
           <div className="bot-shell">
-            <div className="bot-quick" id="botQuickActions">
-              <button
-                type="button"
-                className={`bot-quick-btn${botLetter === 'offer' ? ' is-on' : ''}`}
-                data-hr-tab="letter-offer"
-                onClick={() => setBotLetter((cur) => (cur === 'offer' ? '' : 'offer'))}
-              >
-                Offer letter
-              </button>
-              <button
-                type="button"
-                className={`bot-quick-btn${botLetter === 'exp' ? ' is-on' : ''}`}
-                data-hr-tab="letter-exp"
-                onClick={() => setBotLetter((cur) => (cur === 'exp' ? '' : 'exp'))}
-              >
-                Experience letter
-              </button>
-            </div>
-            {botLetter && <BotLetterPanel key={botLetter} kind={botLetter} />}
             <div id="botChatLog" className="bot-chat-log"></div>
             <form id="botAskForm" className="bot-ask-form">
               <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
@@ -1722,14 +1670,6 @@ export default function TaskflowDom() {
           <OfficeMonthlyReport />
         </section>
 
-        <section id="view-site-report" className="view" hidden={true}>
-          <OfficeSiteReport />
-        </section>
-
-        <section id="view-my-reports" className="view" hidden={true}>
-          <OfficeMyReports />
-        </section>
-
       </main>
     </div>
   </section>
@@ -2032,6 +1972,28 @@ export default function TaskflowDom() {
         <p id="verifyFormMsg" className="form-error" hidden={true}></p>
         <div className="modal-actions">
           <button type="button" className="ghost-btn-text" id="cancelVerifyModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Verifier forwards a request already in their queue */}
+  <div id="forwardVerifyModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Send to another verifier</h3>
+        <button className="modal-close" id="closeForwardVerifyModal" type="button">&times;</button>
+      </div>
+      <form id="forwardVerifyForm" className="modal-body">
+        <p className="form-note" id="forwardVerifyHint">This task will leave the current verifier and show up for the person you pick.</p>
+        <div className="field">
+          <label htmlFor="forward-verify-person">Send to <span className="req">*</span></label>
+          <select id="forward-verify-person" required><option value="">Select a verifier</option></select>
+        </div>
+        <p id="forwardVerifyFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelForwardVerifyModal">Cancel</button>
           <button type="submit" className="primary-btn primary-btn-inline">Send</button>
         </div>
       </form>

@@ -798,6 +798,96 @@ router.patch('/:id/start-verification', async (req, res) => {
   }
 });
 
+// Current verifier (or admin) hands a pending verification to a different verifier.
+// The new person sees it in their queue and starts verification themselves.
+router.patch('/:id/forward-verification', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const verifier_id = String(req.body?.verifier_id || '').trim();
+    if (!verifier_id) {
+      return res.status(400).json({ error: 'Please choose who should verify this task' });
+    }
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only the current verifier can send this task to someone else' });
+    }
+    if (existing.verification_status !== 'Pending Verification') {
+      return res.status(400).json({ error: 'This task is not awaiting verification' });
+    }
+    if (verifier_id === existing.verifier_id) {
+      return res.status(400).json({ error: 'This task is already with that verifier' });
+    }
+
+    const { data: verifierUser, error: verifierErr } = await supabase
+      .from('users')
+      .select('id, full_name, whatsapp_number, username, can_verify, role, is_active')
+      .eq('id', verifier_id)
+      .maybeSingle();
+    if (verifierErr) throw verifierErr;
+    if (!verifierUser || verifierUser.is_active === false) {
+      return res.status(400).json({ error: 'That verifier was not found' });
+    }
+    if (!verifierUser.can_verify && verifierUser.role !== 'admin') {
+      return res.status(400).json({ error: 'That person is not set up as a verifier' });
+    }
+
+    const data = await updateTaskTolerant(id, {
+      verifier_id,
+      verification_started_by: null,
+      verification_started_at: null,
+      task_events: withTaskEvent(existing, 'forward_verification', req.user.id, {
+        from_verifier_id: existing.verifier_id || null,
+        to_verifier_id: verifier_id,
+      }),
+    }, TASK_SELECT);
+
+    const SHARED_PLACEHOLDER_WA = '8208026194';
+    const waDigits = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
+    let waVerify = null;
+    if (verifierUser.whatsapp_number && waDigits(verifierUser.whatsapp_number) !== SHARED_PLACEHOLDER_WA) {
+      waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
+        verifierName: verifierUser.full_name || 'Verifier',
+        taskDescription: data.description || 'Task',
+        projectName: data.project?.name || '—',
+      });
+    } else {
+      waVerify = {
+        ok: false,
+        reason: verifierUser.whatsapp_number ? 'shared_placeholder_number' : 'no_number',
+      };
+    }
+
+    try {
+      const bot = require('./bot');
+      if (typeof bot.notifyVerifierBot === 'function') {
+        await bot.notifyVerifierBot(
+          verifier_id,
+          data.description || 'Task',
+          data.project?.name || '—'
+        );
+      }
+    } catch (botErr) {
+      console.warn('Forward verification bot notify skip:', botErr.message);
+    }
+
+    res.json({
+      ...data,
+      _whatsapp: {
+        ok: !!waVerify?.ok,
+        to: verifierUser.full_name || 'Verifier',
+        reason: waVerify?.ok ? null : waVerify?.reason || waVerify?.error || null,
+      },
+    });
+  } catch (err) {
+    console.error('Forward verification error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send this task to another verifier' });
+  }
+});
+
 // ----------------------------- accept task -----------------------------
 router.patch('/:id/accept', async (req, res) => {
   try {

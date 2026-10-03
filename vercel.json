@@ -23,6 +23,10 @@
       "schedule": "30 3 * * 1"
     },
     {
+      "path": "/api/delay-report/cron/auto-reports",
+      "schedule": "30 3 * * *"
+    },
+    {
       "path": "/api/hr/cron/insurance-whatsapp",
       "schedule": "30 2 * * *"
     },

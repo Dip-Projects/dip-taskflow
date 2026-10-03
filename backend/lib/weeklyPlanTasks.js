@@ -5,8 +5,7 @@ const {
   normalizeWhatsAppNumber,
 } = require('./whatsapp');
 const { parseWeeklyPlanBuffer } = require('./weeklyPlanExcel');
-
-const DAILY_STATUS_FIX_CUTOFF = Date.parse('2026-09-26T12:30:00.000Z');
+const { canonicalizeEaPlanTasks } = require('./weeklyPlanCellSync');
 
 function istYmd(d = new Date()) {
   return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -81,133 +80,51 @@ async function insertWeeklyPlanSheetRows(eaRow, sourceFile, parsedTasks) {
     .eq('source_file', sourceFile);
   if (del.error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(del.error.message || '')) {
-      return { inserted: 0, skipped: true };
+      throw new Error('Table weekly_plan_sheet missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
     }
     throw del.error;
   }
 
-  // Sheet unique key has no half — keep one row per (date, task name), prefer half=1 then last.
-  const sheetMap = new Map();
-  for (const t of parsedTasks) {
-    const task = String(t.task_name || '').trim() || 'Untitled task';
-    const taskDate = t.task_date || eaRow.meeting_week_start;
-    const key = `${String(taskDate).slice(0, 10)}|${task.toLowerCase()}`;
-    sheetMap.set(key, {
-      ea_attendance_id: eaRow.id,
-      employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
-      employee_username: eaRow.employee_username,
-      employee_name: eaRow.employee_name,
-      site_name: eaRow.employee_site_name,
-      week_from: eaRow.meeting_week_start,
-      week_to: eaRow.meeting_week_end || eaRow.meeting_week_start,
-      task_date: taskDate,
-      task,
-      status: t.status === 'Cancelled' ? 'Cancelled' : (t.status || 'Pending'),
-      source_file: sourceFile,
-      completed_at: null,
-      updated_at: new Date().toISOString(),
-    });
-  }
-  const rows = [...sheetMap.values()];
-  if (!rows.length) return { inserted: 0 };
+  const rows = parsedTasks.map((t) => ({
+    ea_attendance_id: eaRow.id,
+    employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
+    employee_username: eaRow.employee_username,
+    employee_name: eaRow.employee_name,
+    site_name: eaRow.employee_site_name,
+    week_from: eaRow.meeting_week_start,
+    week_to: eaRow.meeting_week_end || eaRow.meeting_week_start,
+    task_date: t.task_date || eaRow.meeting_week_start,
+    task: String(t.task_name || '').trim() || 'Untitled task',
+    status: t.status === 'Cancelled' ? 'Cancelled' : (t.status || 'Pending'),
+    source_file: sourceFile,
+    completed_at: null,
+    updated_at: new Date().toISOString(),
+  }));
 
   const { error } = await supabase.from('weekly_plan_sheet').insert(rows);
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
-      return { inserted: 0, skipped: true };
+      throw new Error('Table weekly_plan_sheet missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
     }
-    // Non-fatal — weekly_plan_tasks is the source of truth for status/WhatsApp.
-    console.warn('weekly_plan_sheet insert:', error.message);
-    return { inserted: 0, error: error.message };
+    throw error;
   }
   return { inserted: rows.length };
 }
 
-function planTaskDedupeKey(t) {
-  return [
-    String(t.task_date || '').slice(0, 10),
-    t.sr_no == null || t.sr_no === '' ? '' : String(t.sr_no),
-    String(t.task_name || '').trim().toLowerCase(),
-    String(Number.isFinite(Number(t.half)) ? Number(t.half) : 0),
-    String(t.time_slot || '').trim().toLowerCase(),
-  ].join('|');
-}
-
-/** Same day + same work text → one row (drops half/sr clones from bad parses). */
-function planTaskLooseKey(t) {
-  const slot = String(t?.time_slot || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-  const name = String(t?.task_name || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-  return [String(t?.task_date || '').slice(0, 10), slot || name].join('|');
-}
-
-function preferParsedTask(a, b) {
-  const aDone = String(a?.status || '') === 'Completed';
-  const bDone = String(b?.status || '') === 'Completed';
-  if (bDone && !aDone) return b;
-  if (aDone && !bDone) return a;
-  const ah = Number(a?.half) || 0;
-  const bh = Number(b?.half) || 0;
-  if (bh > 0 && ah === 0) return b;
-  if (ah > 0 && bh === 0) return a;
-  if (bh !== ah) return bh > ah ? b : a;
-  return a;
-}
-
-/** Drop duplicate keys inside one parse batch (unique index otherwise rejects the whole insert). */
-function dedupeParsedPlanTasks(parsedTasks) {
-  const strict = new Map();
-  for (const t of parsedTasks || []) {
-    const taskDate = String(t?.task_date || '').slice(0, 10);
-    const taskName = String(t?.task_name || '').trim();
-    if (!taskDate || !taskName) continue;
-    const normalized = {
-      ...t,
-      task_date: taskDate,
-      task_name: taskName,
-      time_slot: t?.time_slot != null ? String(t.time_slot) : '',
-      sr_no: Number.isFinite(Number(t?.sr_no)) ? Number(t.sr_no) : null,
-      half: Number.isFinite(Number(t?.half)) ? Number(t.half) : 0,
-      status: t?.status || 'Pending',
-    };
-    const key = planTaskDedupeKey(normalized);
-    const prev = strict.get(key);
-    strict.set(key, prev ? preferParsedTask(prev, normalized) : normalized);
-  }
-  // Second pass: one row per day + work text (fixes 17 Friday lines for a 12-task day).
-  const loose = new Map();
-  for (const t of strict.values()) {
-    const key = planTaskLooseKey(t);
-    if (!key || key === '|') continue;
-    const prev = loose.get(key);
-    loose.set(key, prev ? preferParsedTask(prev, t) : t);
-  }
-  return [...loose.values()];
-}
-
 async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
   const eaId = eaRow.id;
-  const uniqueTasks = dedupeParsedPlanTasks(parsedTasks);
 
-  // Preserve portal/whatsapp completions across re-parse (any prior source key).
+  // Prefer completed status from any prior row for the same Excel cell (ignore time_slot drift).
   const prevRes = await supabase
     .from('weekly_plan_tasks')
-    .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via, created_at, updated_at')
-    .eq('ea_attendance_id', eaId);
+    .select('task_date, task_name, sr_no, half, time_slot, status, completed_at, completed_via')
+    .eq('ea_attendance_id', eaId)
+    .eq('source_file', sourceFile);
   const prevMap = new Map();
   (prevRes.data || []).forEach((t) => {
-    // Match by visible cell and keep the newest Supabase status. Preferring any
-    // old Completed clone made a newer Pending toggle flip back after refresh.
-    const key = planTaskLooseKey(t);
-    const prev = prevMap.get(key);
-    const prevAt = Date.parse(prev?.updated_at || prev?.completed_at || prev?.created_at || '') || 0;
-    const nextAt = Date.parse(t?.updated_at || t?.completed_at || t?.created_at || '') || 0;
-    if (!prev || nextAt >= prevAt) prevMap.set(key, t);
+    const key = `${String(t.task_date || '').slice(0, 10)}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}`;
+    const cur = prevMap.get(key);
+    if (!cur || String(t.status) === 'Completed') prevMap.set(key, t);
   });
 
   const del = await supabase
@@ -222,31 +139,25 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     throw del.error;
   }
 
-  if (!uniqueTasks.length) return { inserted: 0 };
+  if (!parsedTasks.length) return { inserted: 0 };
 
-  const rows = uniqueTasks.map((t) => {
-    const key = planTaskLooseKey(t);
+  // One row per Excel cell before insert.
+  const cellMap = new Map();
+  for (const t of parsedTasks) {
+    const key = `${String(t.task_date || '').slice(0, 10)}|${String(t.task_name || '').trim().toLowerCase()}|${t.sr_no ?? ''}|${t.half ?? 0}`;
+    const prev = cellMap.get(key);
+    if (!prev) {
+      cellMap.set(key, t);
+      continue;
+    }
+    const prevQ = String(prev.time_slot || '').trim().length;
+    const nextQ = String(t.time_slot || '').trim().length;
+    if (nextQ > prevQ) cellMap.set(key, t);
+  }
+
+  const rows = [...cellMap.entries()].map(([key, t]) => {
     const prev = prevMap.get(key);
-    const previousStatus = String(prev?.status || '');
-    const hasRealCompletion = Boolean(prev?.completed_at || prev?.completed_via);
-    const previousUpdatedAt =
-      Date.parse(prev?.updated_at || prev?.completed_at || prev?.created_at || '') || 0;
-    const staleDailyStatus =
-      Number(t?.half) === 0 &&
-      previousStatus !== 'Pending' &&
-      previousUpdatedAt < DAILY_STATUS_FIX_CUTOFF;
-    const keepPrevious =
-      !staleDailyStatus &&
-      (previousStatus === 'Pending' ||
-        (hasRealCompletion &&
-          ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(previousStatus)));
-    const finalStatus = keepPrevious
-      ? previousStatus
-      : Number(t?.half) === 0
-        ? 'Pending'
-        : ['Completed', 'In Progress', 'On Hold', 'Cancelled'].includes(String(t.status || ''))
-          ? String(t.status)
-          : 'Pending';
+    const keepDone = prev && String(prev.status) === 'Completed';
     return {
       ea_attendance_id: eaId,
       employee_id: eaRow.employee_id != null ? String(eaRow.employee_id) : null,
@@ -257,13 +168,13 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
       week_end: eaRow.meeting_week_end,
       task_date: t.task_date,
       task_name: t.task_name,
-      time_slot: t.time_slot || '',
+      time_slot: t.time_slot,
       sr_no: t.sr_no,
-      half: t.half,
+      half: Number.isFinite(Number(t.half)) ? Number(t.half) : 0,
       source_file: sourceFile,
-      status: finalStatus,
-      completed_at: finalStatus === 'Completed' ? prev?.completed_at || null : null,
-      completed_via: finalStatus === 'Completed' ? prev?.completed_via || null : null,
+      status: keepDone ? 'Completed' : (t.status === 'Cancelled' ? 'Cancelled' : 'Pending'),
+      completed_at: keepDone ? prev.completed_at : null,
+      completed_via: keepDone ? prev.completed_via : null,
       updated_at: new Date().toISOString(),
     };
   });
@@ -273,28 +184,12 @@ async function replacePlanTasksForSource(eaRow, sourceFile, parsedTasks) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
       throw new Error('Table weekly_plan_tasks missing — run backend/sql/weekly_plan_tasks.sql in Supabase');
     }
-    // Batch rejected — insert one-by-one so valid rows still land.
-    if (/duplicate|unique|23505|dedupe/i.test(error.message || '')) {
-      let inserted = 0;
-      for (const row of rows) {
-        const one = await supabase.from('weekly_plan_tasks').insert(row);
-        if (!one.error) inserted += 1;
-        else if (!/duplicate|unique|23505/i.test(one.error.message || '')) {
-          throw one.error;
-        }
-      }
-      await insertWeeklyPlanSheetRows(eaRow, sourceFile, uniqueTasks);
-      return { inserted, deduped: parsedTasks.length - uniqueTasks.length };
-    }
     throw error;
   }
 
-  const flat = await insertWeeklyPlanSheetRows(eaRow, sourceFile, uniqueTasks);
-  return {
-    inserted: rows.length,
-    flat_inserted: flat.inserted,
-    deduped: parsedTasks.length - uniqueTasks.length,
-  };
+  const flat = await insertWeeklyPlanSheetRows(eaRow, sourceFile, parsedTasks);
+  await canonicalizeEaPlanTasks(eaId);
+  return { inserted: rows.length, flat_inserted: flat.inserted };
 }
 
 /**
@@ -318,10 +213,7 @@ async function ingestWeeklyPlanFromEaRow(eaRow, clientParsed = null) {
         details.push({ source: key, error: err.message, via: 'client' });
       }
     }
-    // Replace only the submitted source. Attachment previews ingest independently;
-    // deleting other source keys here made attachment_1 and attachment_2 erase each other.
-    const failed = details.some((d) => d.error);
-    return { ok: !failed && total >= 0, inserted: total, details, eaId: eaRow.id };
+    if (total > 0) return { ok: true, inserted: total, details, eaId: eaRow.id };
   }
 
   const sources = [];
@@ -371,9 +263,9 @@ async function loadOpenWeeklyPlanTasksForUser(user, dayYmd = istYmd()) {
       .select('*')
       .neq('status', 'Completed')
       .neq('status', 'Cancelled')
-      .eq('task_date', dayYmd)
+      .lte('task_date', dayYmd)
+      .order('task_date', { ascending: true })
       .order('sr_no', { ascending: true })
-      .order('half', { ascending: true })
       .order('task_name', { ascending: true });
 
   if (uid) {
@@ -387,25 +279,20 @@ async function loadOpenWeeklyPlanTasksForUser(user, dayYmd = istYmd()) {
 
 function formatWeeklyPlanListMessage({ fullName, dayYmd, tasks, intro }) {
   const label = dayLabel(dayYmd);
-  const todayYmd = String(dayYmd || '').slice(0, 10);
-  const todayTasks = (tasks || []).filter(
-    (t) => String(t.task_date || '').slice(0, 10) === todayYmd
-  );
   const lines = [
     intro || `Hi ${fullName || 'Team'},`,
-    `📋 Weekly plan — ${label}`,
-    todayTasks.length
-      ? `Today's open tasks (${todayTasks.length}):`
-      : 'No open weekly-plan tasks for today.',
+    `📋 Weekly plan — through ${label}`,
+    tasks.length ? `Open tasks Mon→today (${tasks.length}):` : 'No open weekly-plan tasks through today.',
   ];
 
-  todayTasks.forEach((t, i) => {
+  tasks.forEach((t, i) => {
+    const when = t.task_date === dayYmd ? 'today' : dayLabel(t.task_date);
     const time = t.time_slot ? ` · ${t.time_slot}` : '';
-    const half = Number(t.half) === 1 ? ' · 1H' : Number(t.half) === 2 ? ' · 2H' : '';
-    lines.push(`${i + 1}. ${clip(t.task_name, 80)}${time}${half}`);
+    const pend = t.task_date < dayYmd ? ' · PENDING' : '';
+    lines.push(`${i + 1}. ${clip(t.task_name, 80)}${time} (${when})${pend}`);
   });
 
-  if (todayTasks.length) {
+  if (tasks.length) {
     lines.push('');
     lines.push('Reply with numbers to mark done, e.g. 1,3 or ALL');
     lines.push('Reply PLAN for this list again.');
@@ -525,30 +412,23 @@ async function processUploadedWeeklyPlan({ user, eaId, weekStart, clientParsed }
 
   let open = await loadOpenWeeklyPlanTasksForUser(waUser, dayYmd);
 
-  // If DB insert failed but client parsed tasks, still WhatsApp today's tasks from client data
+  // If DB insert failed but client parsed tasks, still WhatsApp Mon→today from client data
   if (!open.length && Array.isArray(clientParsed)) {
     const fallback = [];
     for (const src of clientParsed) {
       for (const t of src.tasks || []) {
         if (t.status === 'Cancelled') continue;
-        if (String(t.task_date || '').slice(0, 10) === dayYmd) {
+        if (t.task_date && t.task_date <= dayYmd) {
           fallback.push({
             task_date: t.task_date,
             task_name: t.task_name,
             time_slot: t.time_slot,
-            half: t.half,
-            sr_no: t.sr_no,
             status: 'Pending',
           });
         }
       }
     }
-    fallback.sort((a, b) => {
-      const sa = Number(a.sr_no) || 0;
-      const sb = Number(b.sr_no) || 0;
-      if (sa !== sb) return sa - sb;
-      return (Number(a.half) || 0) - (Number(b.half) || 0);
-    });
+    fallback.sort((a, b) => String(a.task_date).localeCompare(String(b.task_date)));
     open = fallback;
   }
 
@@ -559,7 +439,7 @@ async function processUploadedWeeklyPlan({ user, eaId, weekStart, clientParsed }
       dayYmd,
       tasks: open,
       fullName: waUser.full_name,
-      intro: `✅ Plan uploaded. Hi ${waUser.full_name || 'Team'}, today's weekly-plan tasks:`,
+      intro: `✅ Plan uploaded. Hi ${waUser.full_name || 'Team'}, open weekly-plan tasks (Mon → today):`,
       sayEmpty: true,
     });
   } else {
@@ -585,7 +465,7 @@ async function runWeeklyPlanDayDigestCron() {
     .select('employee_username, employee_id, employee_name')
     .neq('status', 'Completed')
     .neq('status', 'Cancelled')
-    .eq('task_date', dayYmd);
+    .lte('task_date', dayYmd);
 
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
@@ -638,7 +518,7 @@ async function runWeeklyPlanDayDigestCron() {
     const res = await sendWeeklyPlanDayList(user.whatsapp_number, waUser, {
       dayYmd,
       tasks,
-      intro: `Good morning ${waUser.full_name || 'Team'}, today's weekly-plan tasks:`,
+      intro: `Good morning ${waUser.full_name || 'Team'}, pending + today's weekly-plan tasks:`,
     });
     if (res.ok) sent += 1;
     else skipped += 1;

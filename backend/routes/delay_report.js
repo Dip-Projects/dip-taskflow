@@ -2,6 +2,7 @@ const express = require('express');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdminOrMis } = require('../middleware/auth');
 const { sendWhatsAppTemplate } = require('../lib/whatsapp');
+const { buildReportPdf } = require('../lib/reportPdf');
 const { buildSrMap } = require('../lib/workVerificationDashboard');
 const {
   buildDelayReportRows,
@@ -397,5 +398,386 @@ router.post('/send-monday-now', requireAuth, requireAdminOrMis, async (req, res)
   }
 });
 
+const AUTO_SETTINGS_KEY = 'report_wa_auto';
+const SHARED_WA = '8208026194';
+const FIFTEEN_DAYS_MS = 15 * 24 * 60 * 60 * 1000;
+
+function istDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function istWeekday(date = new Date()) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    weekday: 'short',
+  }).format(date);
+}
+
+function isSharedWa(raw) {
+  const n = String(raw || '').replace(/\D/g, '');
+  return n.endsWith(SHARED_WA);
+}
+
+function periodLabel(startDate, endDate) {
+  return `${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}`;
+}
+
+function reportSummary(rows) {
+  const list = rows || [];
+  const delayed = list.filter((r) => r.status === 'Delayed').length;
+  const onTime = list.filter((r) => r.status === 'On Time').length;
+  return `${list.length} tasks, ${delayed} delayed, ${onTime} on time`;
+}
+
+function last15Days() {
+  const endDate = new Date();
+  endDate.setDate(endDate.getDate() - 1);
+  endDate.setHours(23, 59, 59, 999);
+  const startDate = new Date(endDate);
+  startDate.setDate(endDate.getDate() - 14);
+  startDate.setHours(0, 0, 0, 0);
+  return { startDate, endDate };
+}
+
+async function loadAutoState() {
+  try {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', AUTO_SETTINGS_KEY)
+      .maybeSingle();
+    return data?.value && typeof data.value === 'object' ? { ...data.value } : {};
+  } catch (err) {
+    console.warn('Report WA state load:', err.message);
+    return {};
+  }
+}
+
+async function saveAutoState(value) {
+  const { error } = await supabase.from('app_settings').upsert({
+    key: AUTO_SETTINGS_KEY,
+    value,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) console.warn('Report WA state save:', error.message);
+}
+
+async function uploadReportPdf(path, bytes) {
+  const bucket = 'site-files';
+  const { error } = await supabase.storage.from(bucket).upload(path, bytes, {
+    contentType: 'application/pdf',
+    upsert: true,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+
+async function loadAish() {
+  const username = process.env.WA_AISH_USERNAME || 'aishwarya.v';
+  const { data } = await supabase
+    .from('users')
+    .select('id, full_name, username, whatsapp_number')
+    .eq('username', username)
+    .maybeSingle();
+  if (process.env.WA_AISH_NUMBER) {
+    return {
+      id: data?.id || null,
+      full_name: data?.full_name || 'Aish',
+      username,
+      whatsapp_number: process.env.WA_AISH_NUMBER,
+    };
+  }
+  return data;
+}
+
+/**
+ * New document template when Meta has approved it.
+ * Until then, the existing delay-report template carries the PDF link.
+ */
+async function sendReportPdfMessage({ toNumber, name, reportTitle, period, summary, pdfUrl, filename }) {
+  const docTemplate = process.env.WA_EMP_REPORT_TEMPLATE || 'emp_report_pdf';
+  const language = process.env.WHATSAPP_TEMPLATE_LANG || 'en';
+  const body = [name || 'Team', reportTitle, period, summary];
+  if (pdfUrl) {
+    const attached = await sendWhatsAppTemplate(toNumber, docTemplate, body, {
+      document: { link: pdfUrl, filename },
+      language,
+    });
+    if (attached.ok) return attached;
+    const headerRejected = /132018|no parameters allowed|title component/i.test(
+      `${attached.error || ''} ${attached.reason || ''}`
+    );
+    if (headerRejected) {
+      const withLink = await sendWhatsAppTemplate(
+        toNumber,
+        docTemplate,
+        [name || 'Team', reportTitle, period, `Download the PDF: ${pdfUrl}`],
+        { language }
+      );
+      if (withLink.ok) return withLink;
+      console.warn('emp_report_pdf body failed:', withLink.error || withLink.reason || 'failed');
+    } else {
+      console.warn('emp_report_pdf not sent:', attached.error || attached.reason || 'failed');
+    }
+  }
+  const linkTemplate = process.env.WA_DELAY_REPORT_TEMPLATE || 'task_delay_report';
+  const linked = await sendWhatsAppTemplate(toNumber, linkTemplate, [
+    name || 'Team',
+    `${reportTitle}: ${summary}`.slice(0, 180),
+    pdfUrl || 'Open TaskFlow',
+  ]);
+  if (linked.ok) return linked;
+  return sendWhatsAppTemplate(toNumber, 'task_notification_v2', [
+    name || 'Team',
+    `${reportTitle}: ${summary}`.slice(0, 180),
+    reportTitle.slice(0, 60),
+    period.slice(0, 60),
+    'Ready',
+  ]);
+}
+
+function empSheet(rows, showEmployee) {
+  const head = ['SR'];
+  if (showEmployee) head.push('Employee');
+  head.push(
+    'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+    'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Submitted', 'Status', 'Early / Delay'
+  );
+  const body = (rows || []).map((r) => {
+    const project = r.reschedule_count > 0
+      ? `${r.project} (rescheduled ${r.reschedule_count}x)`
+      : r.project;
+    const row = [r.sr ?? ''];
+    if (showEmployee) row.push(r.employee);
+    row.push(
+      project, r.description, r.assigned_label, r.accepted_label, r.hours_label,
+      r.hold_resume_label, r.total_hold_label, r.deadline_label, r.submitted_label,
+      r.status, r.timing_label
+    );
+    return row;
+  });
+  return { head, body };
+}
+
+function delaySheet(rows, showEmployee) {
+  const head = ['SR'];
+  if (showEmployee) head.push('Employee');
+  head.push(
+    'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+    'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Sent for verification',
+    'Work status', 'Work delay', 'Start Verification', 'Verified', 'Verify status', 'Verify delay'
+  );
+  const body = (rows || []).map((r) => {
+    const project = r.reschedule_count > 0
+      ? `${r.project} (rescheduled ${r.reschedule_count}x)`
+      : r.project;
+    const row = [r.sr ?? ''];
+    if (showEmployee) row.push(r.employee);
+    row.push(
+      project, r.description, r.assigned_label, r.accepted_label, r.hours_label,
+      r.hold_resume_label, r.total_hold_label, r.deadline_label, r.submitted_label,
+      r.status, r.delay_label, r.verify_started_label, r.verified_label,
+      r.verify_status, r.verify_delay_label
+    );
+    return row;
+  });
+  return { head, body };
+}
+
+async function buildAndUploadPdf({ title, subtitle, headers, rows, path }) {
+  const bytes = await buildReportPdf({ title, subtitle, headers, rows });
+  const url = await uploadReportPdf(path, bytes);
+  return url;
+}
+
+/** Monday: full Emp Report to Aish, and each employee their own rows. */
+async function runMondayEmpReports(opts = {}) {
+  const { startDate, endDate } = parseRange('last-week');
+  const day = istDateKey();
+  const period = periodLabel(startDate, endDate);
+  const tasks = await loadTasksForDelayReport({ startDate, endDate, employeeId: null });
+  const rows = buildEmpReportRows(tasks, { srMap: buildSrMap(tasks) });
+  const aish = await loadAish();
+  const sent = [];
+
+  if (aish?.whatsapp_number) {
+    const sheet = empSheet(rows, true);
+    const filename = `Emp-Report-${day}.pdf`;
+    let pdfUrl = null;
+    try {
+      pdfUrl = await buildAndUploadPdf({
+        title: 'Emp Report',
+        subtitle: period,
+        headers: sheet.head,
+        rows: sheet.body,
+        path: `delay-reports/${day}/emp-report-all.pdf`,
+      });
+    } catch (err) {
+      console.warn('Emp report PDF upload:', err.message);
+    }
+    const result = await sendReportPdfMessage({
+      toNumber: aish.whatsapp_number,
+      name: aish.full_name || 'Aish',
+      reportTitle: 'Emp Report',
+      period,
+      summary: reportSummary(rows),
+      pdfUrl,
+      filename,
+    });
+    sent.push({ who: 'aish', name: aish.full_name, ok: !!result.ok, pdf: !!pdfUrl, template: result.templateName || '' });
+  } else {
+    sent.push({ who: 'aish', ok: false, reason: 'no_number' });
+  }
+
+  let personal = 0;
+  let skippedShared = 0;
+  if (!opts.aishOnly) {
+  const byEmp = {};
+  rows.forEach((r) => {
+    if (!r.employee_id) return;
+    if (!byEmp[r.employee_id]) byEmp[r.employee_id] = [];
+    byEmp[r.employee_id].push(r);
+  });
+  const { data: users } = await supabase
+    .from('users')
+    .select('id, full_name, whatsapp_number, is_active')
+    .eq('is_active', true);
+  for (const [empId, empRows] of Object.entries(byEmp)) {
+    const u = (users || []).find((x) => String(x.id) === String(empId));
+    if (!u?.whatsapp_number) continue;
+    if (isSharedWa(u.whatsapp_number)) {
+      skippedShared += 1;
+      continue;
+    }
+    const sheet = empSheet(empRows, false);
+    const safeName = String(u.full_name || 'employee').replace(/[^\w.\-]+/g, '-').slice(0, 40);
+    const filename = `Emp-Report-${safeName}.pdf`;
+    let pdfUrl = null;
+    try {
+      pdfUrl = await buildAndUploadPdf({
+        title: 'Emp Report',
+        subtitle: `${u.full_name} · ${period}`,
+        headers: sheet.head,
+        rows: sheet.body,
+        path: `delay-reports/${day}/emp-report-${empId}.pdf`,
+      });
+    } catch (err) {
+      console.warn('Emp personal PDF upload:', err.message);
+    }
+    const result = await sendReportPdfMessage({
+      toNumber: u.whatsapp_number,
+      name: u.full_name,
+      reportTitle: 'Emp Report',
+      period,
+      summary: reportSummary(empRows),
+      pdfUrl,
+      filename,
+    });
+    if (result.ok) personal += 1;
+    sent.push({ who: 'employee', name: u.full_name, ok: !!result.ok });
+  }
+  }
+
+  return {
+    period,
+    rows: rows.length,
+    aish_sent: sent.some((s) => s.who === 'aish' && s.ok),
+    employees_messaged: personal,
+    skipped_shared_number: skippedShared,
+    sent,
+  };
+}
+
+/** Every 15 days: full Emp Delay Report to Aish only. */
+async function runAishDelayReport() {
+  const { startDate, endDate } = last15Days();
+  const day = istDateKey();
+  const period = periodLabel(startDate, endDate);
+  const tasks = await loadTasksForDelayReport({ startDate, endDate, employeeId: null });
+  const rows = buildDelayReportRows(tasks, { srMap: buildSrMap(tasks) });
+  const aish = await loadAish();
+  if (!aish?.whatsapp_number) return { ok: false, reason: 'no_number', period };
+  const sheet = delaySheet(rows, true);
+  const filename = `Emp-Delay-Report-${day}.pdf`;
+  let pdfUrl = null;
+  try {
+    pdfUrl = await buildAndUploadPdf({
+      title: 'Emp Delay Report',
+      subtitle: period,
+      headers: sheet.head,
+      rows: sheet.body,
+      path: `delay-reports/${day}/emp-delay-report-all.pdf`,
+    });
+  } catch (err) {
+    console.warn('Delay report PDF upload:', err.message);
+  }
+  const result = await sendReportPdfMessage({
+    toNumber: aish.whatsapp_number,
+    name: aish.full_name || 'Aish',
+    reportTitle: 'Emp Delay Report',
+    period,
+    summary: reportSummary(rows),
+    pdfUrl,
+    filename,
+  });
+  return {
+    ok: !!result.ok,
+    period,
+    rows: rows.length,
+    pdf: !!pdfUrl,
+    name: aish.full_name,
+  };
+}
+
+async function handleAutoReports(req, res) {
+  try {
+    if (!cronAuthorized(req)) return res.status(401).json({ error: 'Unauthorized cron' });
+    const istDay = istDateKey();
+    const weekday = istWeekday();
+    const state = await loadAutoState();
+    const out = { ist_day: istDay, weekday };
+
+    if (weekday === 'Mon' && state.emp_report_on !== istDay) {
+      out.emp_report = await runMondayEmpReports();
+      if (out.emp_report.aish_sent) state.emp_report_on = istDay;
+    } else {
+      out.emp_report = {
+        skipped: true,
+        reason: weekday === 'Mon' ? 'already_sent' : 'not_monday',
+      };
+    }
+
+    const lastDelay = state.delay_report_on ? new Date(state.delay_report_on) : null;
+    const delayDue = !lastDelay || Number.isNaN(lastDelay.getTime())
+      || (Date.now() - lastDelay.getTime()) >= FIFTEEN_DAYS_MS;
+    if (delayDue) {
+      out.delay_report = await runAishDelayReport();
+      if (out.delay_report.ok) state.delay_report_on = new Date().toISOString();
+    } else {
+      out.delay_report = {
+        skipped: true,
+        last_sent: state.delay_report_on,
+      };
+    }
+
+    await saveAutoState(state);
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    console.error('Auto report WA:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+router.post('/cron/auto-reports', handleAutoReports);
+router.get('/cron/auto-reports', handleAutoReports);
+
 module.exports = router;
 module.exports.runMondayDelayWhatsApp = runMondayDelayWhatsApp;
+module.exports.runMondayEmpReports = runMondayEmpReports;
+module.exports.runAishDelayReport = runAishDelayReport;

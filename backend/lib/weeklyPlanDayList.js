@@ -15,6 +15,10 @@ const {
   normalizeWhatsAppNumber,
 } = require('./whatsapp');
 const { istYmd, dayLabel, isAdminUser } = require('./taskListDigest');
+const {
+  canonicalizeEaPlanTasks,
+  completeExcelCellForEa,
+} = require('./weeklyPlanCellSync');
 
 /** Avoid duplicate day-list WA to same user on same IST day (upload + cron). */
 const sentToday = new Map(); // key: username|ymd → ts
@@ -172,104 +176,259 @@ function sortPlanTasks(a, b) {
   const da = ymdOf(a.task_date) || '';
   const db = ymdOf(b.task_date) || '';
   if (da !== db) return da.localeCompare(db);
-  // Sheet order: full 1st-half column top→bottom, then 2nd-half column.
-  const ha = Number(a.half) || 0;
-  const hb = Number(b.half) || 0;
-  if (ha !== hb) return ha - hb;
   const sa = Number(a.sr_no);
   const sb = Number(b.sr_no);
   if (Number.isFinite(sa) && Number.isFinite(sb) && sa !== sb) return sa - sb;
+  const ha = Number(a.half) || 0;
+  const hb = Number(b.half) || 0;
+  if (ha !== hb) return ha - hb;
   return String(a.task_name || '').localeCompare(String(b.task_name || ''));
 }
 
-function normSlot(t) {
-  return String(t?.time_slot || '')
+/** One WhatsApp / grid item per Excel cell: date + half + row (sr / category). */
+function planCellKey(task) {
+  const ymd = ymdOf(task?.task_date) || '';
+  const half = Number(task?.half) || 0;
+  const sr = Number(task?.sr_no);
+  const srPart = Number.isFinite(sr) && sr > 0 ? `sr:${sr}` : '';
+  const name = String(task?.task_name || '')
+    .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return `${ymd}|${half}|${srPart}|${name}`;
+}
+
+function rowDayKey(task) {
+  const ymd = ymdOf(task?.task_date) || '';
+  const sr = Number(task?.sr_no);
+  const srPart = Number.isFinite(sr) && sr > 0 ? `sr:${sr}` : '';
+  const name = String(task?.task_name || '')
+    .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return `${ymd}|${srPart}|${name}`;
+}
+
+function normSlot(task) {
+  return String(task?.time_slot || '')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
 
-function normName(t) {
-  return String(t?.task_name || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
+function slotQuality(task) {
+  const slot = String(task?.time_slot || '').trim();
+  const cat = String(task?.task_name || '')
+    .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '')
+    .trim();
+  if (!slot) return 0;
+  if (/^(1st half|2nd half)$/i.test(slot)) return 1;
+  if (/^(pending|completed|done)$/i.test(slot)) return 1;
+  // Category leaked into time_slot — almost useless for the list.
+  if (cat && slot.toLowerCase() === cat.toLowerCase()) return 1;
+  return 2 + Math.min(slot.length, 40) / 100;
 }
 
-/** Collapse half/sr clones: one WhatsApp line per day + work text. */
-function planRowDedupeKey(t) {
-  const slot = normSlot(t);
-  const name = normName(t);
-  return [ymdOf(t?.task_date) || '', slot || name].join('|');
-}
+/**
+ * Score a candidate for a grid cell. Penalize work text that already belongs
+ * to the *other* half of the same row/day (common phantom from bad ingest).
+ */
+function scorePlanCandidate(task, { slotHalves } = {}) {
+  let score = 0;
+  if (!isOpenWeeklyStatus(task?.status)) score += 1000;
+  score += slotQuality(task) * 100;
 
-function preferPlanRow(a, b) {
-  const aDone = String(a?.status || '') === 'Completed';
-  const bDone = String(b?.status || '') === 'Completed';
-  if (bDone && !aDone) return b;
-  if (aDone && !bDone) return a;
-  const ah = Number(a?.half) || 0;
-  const bh = Number(b?.half) || 0;
-  // Prefer a real half tag; if both set, prefer 2H (mis-tagged 1H clones of afternoon work).
-  if (bh > 0 && ah === 0) return b;
-  if (ah > 0 && bh === 0) return a;
-  if (bh !== ah) return bh > ah ? b : a;
-  const as = Number(a?.sr_no);
-  const bs = Number(b?.sr_no);
-  if (Number.isFinite(bs) && !Number.isFinite(as)) return b;
-  if (Number.isFinite(as) && !Number.isFinite(bs)) return a;
-  return a;
-}
-
-/** Keep one row per calendar day + work text; prefer Completed / better half. */
-function dedupePlanRows(rows) {
-  const map = new Map();
-  for (const row of rows || []) {
-    const key = planRowDedupeKey(row);
-    if (!key || key === '|') continue;
-    const prev = map.get(key);
-    map.set(key, prev ? preferPlanRow(prev, row) : row);
+  const slot = normSlot(task);
+  const half = Number(task?.half) || 0;
+  if (slot && slotHalves) {
+    const key = `${rowDayKey(task)}|${slot}`;
+    const halves = slotHalves.get(key) || new Set();
+    if (halves.size === 1 && halves.has(half)) score += 80; // unique to this half
+    else if (halves.size > 1 && halves.has(half)) score -= 60; // also on other half → likely copy
   }
-  return [...map.values()];
+
+  const updated = Date.parse(task?.updated_at || task?.completed_at || 0) || 0;
+  score += Math.min(updated / 1e12, 1); // tiny tie-break toward newer
+  return score;
+}
+
+function pickBetterPlanTask(a, b, ctx) {
+  const as = scorePlanCandidate(a, ctx);
+  const bs = scorePlanCandidate(b, ctx);
+  if (as !== bs) return as >= bs ? a : b;
+  return String(a?.id || '') >= String(b?.id || '') ? a : b;
+}
+
+/** Collapse phantom/duplicate DB rows so WA matches the Excel grid (1 cell → 1 item). */
+function dedupePlanTasksByCell(tasks) {
+  const list = (tasks || []).filter(Boolean);
+
+  // Which halves each work-text appears on for a given row+day.
+  const slotHalves = new Map();
+  for (const t of list) {
+    const slot = normSlot(t);
+    if (!slot || slotQuality(t) < 2) continue;
+    const key = `${rowDayKey(t)}|${slot}`;
+    if (!slotHalves.has(key)) slotHalves.set(key, new Set());
+    slotHalves.get(key).add(Number(t.half) || 0);
+  }
+
+  const groups = new Map();
+  for (const t of list) {
+    const key = planCellKey(t);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+
+  const ctx = { slotHalves };
+  const out = [];
+  const usedIds = new Set();
+  for (const [, cands] of groups) {
+    let bestSlotTask = cands[0];
+    for (const t of cands) {
+      if (slotQuality(t) > slotQuality(bestSlotTask)) bestSlotTask = t;
+    }
+    // Prefer the real Excel work-text row as the list id (UI links to that).
+    // Status comes ONLY from that same row — never copy Completed from a phantom sibling.
+    let winner =
+      slotQuality(bestSlotTask) >= 2
+        ? { ...bestSlotTask }
+        : { ...cands.reduce((a, b) => pickBetterPlanTask(a, b, ctx)) };
+
+    // If best-slot id already used, keep label but we must not duplicate ids in the list.
+    const wid = String(winner.id || '');
+    if (wid && usedIds.has(wid)) {
+      const alt = cands.find((t) => t?.id && !usedIds.has(String(t.id)));
+      if (alt) {
+        winner = {
+          ...alt,
+          time_slot: winner.time_slot || alt.time_slot,
+        };
+      } else {
+        continue; // skip duplicate cell entry
+      }
+    }
+    if (winner.id) usedIds.add(String(winner.id));
+    out.push(winner);
+  }
+
+  // Second pass: empty time_slot? Copy text only — do NOT switch to another list item's id.
+  for (let i = 0; i < out.length; i += 1) {
+    const t = out[i];
+    if (slotQuality(t) >= 2) continue;
+    const ymd = ymdOf(t.task_date);
+    const half = Number(t.half) || 0;
+    const row = rowDayKey(t);
+    let best = null;
+    for (const cand of list) {
+      if (ymdOf(cand.task_date) !== ymd) continue;
+      if (rowDayKey(cand) !== row) continue;
+      const ch = Number(cand.half) || 0;
+      if (ch !== half && ch !== 0) continue;
+      if (!best || slotQuality(cand) > slotQuality(best)) best = cand;
+    }
+    if (best && slotQuality(best) >= 2) {
+      out[i] = { ...t, time_slot: best.time_slot };
+    }
+  }
+
+  return out.sort(sortPlanTasks);
 }
 
 /**
  * Load week rows for one employee username.
- * Bundle: today (exact task_date match) + optional prior open (earlier days).
+ * Bundle: today (all non-cancelled) + prior open (pending carryover).
  */
-async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd(), opts = {}) {
+async function resolveLatestEaAttendanceId(username) {
+  const u = String(username || '').trim();
+  if (!u) return null;
+  try {
+    const { data, error } = await supabase
+      .from('ea_meeting_attendance')
+      .select('id, plan_submitted_at, created_at')
+      .ilike('employee_username', u)
+      .order('plan_submitted_at', { ascending: false, nullsFirst: false })
+      .limit(8);
+    if (error) throw error;
+    const withPlan = (data || []).filter((r) => r.plan_submitted_at);
+    return (withPlan[0] || data?.[0] || null)?.id || null;
+  } catch (err) {
+    console.warn('resolveLatestEaAttendanceId:', err.message);
+    return null;
+  }
+}
+
+async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
   const username = String(employeeUsername || '').trim();
-  const todayYmd = ymdOf(dayYmd) || String(dayYmd || '').slice(0, 10);
   if (!username) {
-    return { dayYmd: todayYmd, weekStart: null, today: [], priorPending: [], openOrdered: [], error: 'no_username' };
+    return { dayYmd, weekStart: null, today: [], priorPending: [], openOrdered: [], error: 'no_username' };
   }
 
-  const weekStart = weekStartMonday(todayYmd);
-  const todayOnly = opts.todayOnly === true;
+  const weekStart = weekStartMonday(dayYmd);
+  const eaId = await resolveLatestEaAttendanceId(username);
+  if (eaId) {
+    try {
+      await canonicalizeEaPlanTasks(eaId);
+    } catch (err) {
+      console.warn('canonicalize before WA list:', err.message);
+    }
+  }
+  const selectCols =
+    'id, ea_attendance_id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name, updated_at, completed_at';
+  const selectColsBasic =
+    'id, ea_attendance_id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name';
 
-  let { data, error } = await supabase
+  let q = supabase
     .from('weekly_plan_tasks')
-    .select(
-      'id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name'
-    )
+    .select(selectCols)
     .ilike('employee_username', username)
-    .gte('task_date', todayOnly ? todayYmd : weekStart)
-    .lte('task_date', todayYmd)
+    .gte('task_date', weekStart)
+    .lte('task_date', dayYmd)
     .order('task_date', { ascending: true })
-    .order('sr_no', { ascending: true })
-    .order('half', { ascending: true });
+    .order('sr_no', { ascending: true });
+  if (eaId) q = q.eq('ea_attendance_id', eaId);
+
+  let { data, error } = await q;
+
+  if (error && /updated_at|completed_at|ea_attendance_id|column/i.test(error.message || '')) {
+    let q2 = supabase
+      .from('weekly_plan_tasks')
+      .select(selectColsBasic)
+      .ilike('employee_username', username)
+      .gte('task_date', weekStart)
+      .lte('task_date', dayYmd)
+      .order('task_date', { ascending: true })
+      .order('sr_no', { ascending: true });
+    if (eaId) q2 = q2.eq('ea_attendance_id', eaId);
+    const retry = await q2;
+    data = retry.data;
+    error = retry.error;
+  }
+
+  // If scoped EA returned nothing, fall back to all rows for the user.
+  if (!error && eaId && !(data || []).length) {
+    const fallback = await supabase
+      .from('weekly_plan_tasks')
+      .select(selectColsBasic)
+      .ilike('employee_username', username)
+      .gte('task_date', weekStart)
+      .lte('task_date', dayYmd)
+      .order('task_date', { ascending: true })
+      .order('sr_no', { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) {
-    // Fallback without ilike if needed
     if (/ilike|operator/i.test(error.message || '')) {
       const retry = await supabase
         .from('weekly_plan_tasks')
-        .select(
-          'id, employee_username, employee_name, task_date, task_name, time_slot, sr_no, half, status, week_start, week_end, site_name'
-        )
+        .select(selectColsBasic)
         .eq('employee_username', username)
-        .gte('task_date', todayOnly ? todayYmd : weekStart)
-        .lte('task_date', todayYmd)
+        .gte('task_date', weekStart)
+        .lte('task_date', dayYmd)
         .order('task_date', { ascending: true });
       data = retry.data;
       error = retry.error;
@@ -279,7 +438,7 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd(), opts
   if (error) {
     if (/does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
       return {
-        dayYmd: todayYmd,
+        dayYmd,
         weekStart,
         today: [],
         priorPending: [],
@@ -291,37 +450,31 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd(), opts
     throw error;
   }
 
-  const rows = dedupePlanRows(
+  const rows = dedupePlanTasksByCell(
     (data || [])
       .filter((r) => String(r.employee_username || '').trim().toLowerCase() === username.toLowerCase())
-      .map((r) => ({ ...r, task_date: ymdOf(r.task_date) || r.task_date }))
-  ).sort(sortPlanTasks);
-
-  // Strict calendar-day match only (never put prior days into "today").
-  const today = rows.filter(
-    (r) => ymdOf(r.task_date) === todayYmd && String(r.status || '') !== 'Cancelled'
+      .sort(sortPlanTasks)
   );
-  const priorPending = todayOnly
-    ? []
-    : rows.filter((r) => {
-        const d = ymdOf(r.task_date);
-        return d && d < todayYmd && isOpenWeeklyStatus(r.status);
-      });
 
-  // Numbered open list: today's open only when todayOnly; else today then prior.
+  const today = rows.filter((r) => ymdOf(r.task_date) === dayYmd && String(r.status || '') !== 'Cancelled');
+  const priorPending = rows.filter((r) => {
+    const d = ymdOf(r.task_date);
+    return d && d < dayYmd && isOpenWeeklyStatus(r.status);
+  });
+
   const openOrdered = [
     ...today.filter((t) => isOpenWeeklyStatus(t.status)),
-    ...priorPending,
+    ...priorPending.filter((t) => isOpenWeeklyStatus(t.status)),
   ];
 
   return {
-    dayYmd: todayYmd,
+    dayYmd,
     weekStart,
+    eaAttendanceId: eaId,
     today,
     priorPending,
     openOrdered,
-    todayOnly,
-    employeeName: rows[0]?.employee_name || today[0]?.employee_name || null,
+    employeeName: rows[0]?.employee_name || null,
   };
 }
 
@@ -338,43 +491,26 @@ function formatTaskLine(task, index) {
     .replace(/\s*[·•]\s*(1st|2nd)\s*half/i, '')
     .trim();
   const half =
-    Number(task.half) === 1 ? '1H' : Number(task.half) === 2 ? '2H' : null;
-  const bits = [
-    `${index}) ${clip(work, 72)}`,
-    half,
-    cat && cat.toUpperCase() !== work.toUpperCase() ? clip(cat, 28) : null,
-  ].filter(Boolean);
-  return bits.join(' · ');
+    Number(task.half) === 1 ? '1st half' : Number(task.half) === 2 ? '2nd half' : null;
+  const meta = [half, cat && cat.toUpperCase() !== work.toUpperCase() ? clip(cat, 40) : null]
+    .filter(Boolean)
+    .join(' | ');
+  // Two lines so WhatsApp keeps each task readable.
+  if (meta) return `${index}) ${clip(work, 80)}\n   ${meta}`;
+  return `${index}) ${clip(work, 80)}`;
 }
 
 /** Build full day-list text, then split into WhatsApp-safe chunks (keep numbering intact). */
 function formatWeeklyPlanMessageParts(bundle, opts = {}) {
   const fullName = opts.fullName || bundle.employeeName || 'Team member';
-  const dayYmd = ymdOf(bundle.dayYmd) || istYmd();
+  const dayYmd = bundle.dayYmd || istYmd();
   const label = dayLabel(dayYmd);
   const CHUNK = 3500;
-  const todayOnly = bundle.todayOnly === true || opts.todayOnly === true;
 
-  // Re-filter by exact date so prior days never leak into TODAY.
-  const todayRows = (bundle.today || []).filter(
-    (t) => ymdOf(t.task_date) === dayYmd && String(t.status || '') !== 'Cancelled'
-  );
-  const todayOpen = todayRows
-    .filter((t) => isOpenWeeklyStatus(t.status))
-    .sort(sortPlanTasks);
-  const todayDone = todayRows
-    .filter((t) => !isOpenWeeklyStatus(t.status))
-    .sort(sortPlanTasks);
-  const prior = todayOnly
-    ? []
-    : (bundle.priorPending || [])
-        .filter((t) => {
-          const d = ymdOf(t.task_date);
-          return d && d < dayYmd && isOpenWeeklyStatus(t.status);
-        })
-        .sort(sortPlanTasks);
-
-  const open = [...todayOpen, ...prior];
+  const todayOpen = (bundle.today || []).filter((t) => isOpenWeeklyStatus(t.status));
+  const todayDone = (bundle.today || []).filter((t) => !isOpenWeeklyStatus(t.status));
+  const prior = bundle.priorPending || [];
+  const open = bundle.openOrdered || [];
   const idToNum = new Map(open.map((t, i) => [t.id, i + 1]));
 
   const header = [
@@ -386,14 +522,9 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
 
   if (!todayOpen.length && !todayDone.length && !prior.length) {
     return [
-      [
-        ...header,
-        todayOnly
-          ? '_No tasks scheduled for today._'
-          : '_No tasks for today, and nothing pending from earlier this week._',
-        '',
-        'Reply *PLAN* anytime to refresh.',
-      ].join('\n'),
+      [...header, '_No tasks for today, and nothing pending from earlier this week._', '', 'Reply *PLAN* anytime to refresh.'].join(
+        '\n'
+      ),
     ];
   }
 
@@ -402,29 +533,11 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
   if (!todayOpen.length && !todayDone.length) {
     bodyLines.push('_No tasks scheduled for today._');
   } else {
-    const half1 = todayOpen.filter((t) => Number(t.half) === 1);
-    const half2 = todayOpen.filter((t) => Number(t.half) === 2);
-    const other = todayOpen.filter((t) => Number(t.half) !== 1 && Number(t.half) !== 2);
-    if (half1.length) {
-      bodyLines.push('_1st half_');
-      for (const t of half1) {
-        const n = idToNum.get(t.id);
-        if (n == null) continue;
-        bodyLines.push(formatTaskLine(t, n));
-      }
-    }
-    if (half2.length) {
-      bodyLines.push('_2nd half_');
-      for (const t of half2) {
-        const n = idToNum.get(t.id);
-        if (n == null) continue;
-        bodyLines.push(formatTaskLine(t, n));
-      }
-    }
-    for (const t of other) {
+    for (const t of todayOpen) {
       const n = idToNum.get(t.id);
       if (n == null) continue;
       bodyLines.push(formatTaskLine(t, n));
+      bodyLines.push('');
     }
     if (todayDone.length) {
       bodyLines.push(`_Done today: ${todayDone.length}_`);
@@ -432,7 +545,9 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
         bodyLines.push(`✅ ${clip(workLabel(t), 70)}`);
       }
       if (todayDone.length > 8) bodyLines.push(`… +${todayDone.length - 8} more done`);
+      bodyLines.push('');
     }
+    while (bodyLines[bodyLines.length - 1] === '') bodyLines.pop();
   }
 
   if (prior.length) {
@@ -442,7 +557,11 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
       const n = idToNum.get(t.id);
       if (n == null) continue;
       const when = shortDay(ymdOf(t.task_date) || '');
-      bodyLines.push(`${n}) [${when}] ${clip(workLabel(t), 60)}`);
+      const half =
+        Number(t.half) === 1 ? '1H' : Number(t.half) === 2 ? '2H' : '';
+      bodyLines.push(
+        `${n}) [${when}${half ? ` ${half}` : ''}] ${clip(workLabel(t), 70)}`
+      );
     }
   }
 
@@ -450,7 +569,7 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
     '',
     '————————',
     open.length
-      ? `Open: *${open.length}* (today ${todayOpen.length}${prior.length ? ` + earlier ${prior.length}` : ''})  ·  Reply *1* or *1,3*`
+      ? `Open: *${open.length}*  ·  Reply *1* or *1,3* to mark done`
       : 'All caught up for this list ✅',
     'Reply *PLAN* to refresh',
   ];
@@ -578,7 +697,7 @@ async function completeWeeklyPlanByNumbersForPhone(fromNumber, candidates, numbe
   for (const u of ordered) {
     const username = String(u.username || '').trim();
     if (!username || isAdminUser(u)) continue;
-    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd, { todayOnly: false });
+    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
     if (!(bundle.openOrdered || []).length && !(bundle.today || []).length) continue;
     const result = await completeWeeklyPlanByNumbers(username, numbers, dayYmd);
     last = { ...result, username, user: u };
@@ -614,12 +733,9 @@ async function findUserByUsername(username) {
 
 /**
  * Send day list WhatsApp for one employee username.
- * TODAY = exact task_date match; also includes earlier open tasks under PENDING.
  */
 async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
-  const dayYmd = ymdOf(opts.dayYmd) || istYmd();
-  // Default: include prior pending in a separate section (today section stays date-strict).
-  const todayOnly = opts.todayOnly === true;
+  const dayYmd = opts.dayYmd || istYmd();
   const user =
     opts.user ||
     (await findUserByUsername(employeeUsername));
@@ -637,33 +753,40 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
     return { ok: true, skipped: 'already_sent_today', dayYmd, via: 'deduped' };
   }
 
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly });
+  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
   if (bundle.error === 'missing_table') {
     return { ok: false, reason: 'missing_table', note: bundle.note, dayYmd };
   }
 
-  const todayOpenPreview = (bundle.today || [])
-    .filter((t) => ymdOf(t.task_date) === dayYmd && isOpenWeeklyStatus(t.status))
-    .sort(sortPlanTasks);
-  const priorPreview = todayOnly
-    ? []
-    : (bundle.priorPending || [])
-        .filter((t) => {
-          const d = ymdOf(t.task_date);
-          return d && d < dayYmd && isOpenWeeklyStatus(t.status);
-        })
-        .sort(sortPlanTasks);
-  const openCount = todayOpenPreview.length + priorPreview.length;
-
+  const openCount = (bundle.openOrdered || []).length;
   if (!openCount && !(bundle.today || []).length && !opts.sayEmpty) {
     return { ok: true, skipped: 'empty', openCount: 0, dayYmd, via: 'none' };
   }
 
   const fullName = opts.fullName || user?.full_name || bundle.employeeName || employeeUsername;
-  const parts = formatWeeklyPlanMessageParts(bundle, { fullName, todayOnly });
-  const toNorm = normalizeWhatsAppNumber(toNumber);
+  const parts = formatWeeklyPlanMessageParts(bundle, { fullName });
+  let textResult = null;
+  for (let i = 0; i < parts.length; i += 1) {
+    textResult = await sendWhatsAppText(toNumber, parts[i]);
+    if (!textResult?.ok) break;
+  }
+  if (textResult?.ok) {
+    markSentToday(employeeUsername, dayYmd);
+    rememberWhatsAppSession(toNumber, employeeUsername);
+    return {
+      ok: true,
+      via: 'text',
+      parts: parts.length,
+      openCount,
+      todayCount: (bundle.today || []).length,
+      priorPendingCount: (bundle.priorPending || []).length,
+      dayYmd,
+      dayLabel: dayLabel(dayYmd),
+    };
+  }
 
-  const preview = todayOpenPreview
+  // Outside 24h session window — approved Utility template only.
+  const preview = (bundle.openOrdered || [])
     .slice(0, 3)
     .map((t, i) => `${i + 1}) ${clip(workLabel(t), 40)}`)
     .join('; ');
@@ -671,68 +794,25 @@ async function sendWeeklyPlanDayList(employeeUsername, opts = {}) {
   const tmplResult = await sendWeeklyPlanUtilityTemplate(toNumber, {
     fullName,
     dayLabel: label,
-    openCount: todayOpenPreview.length,
+    openCount,
     preview,
     dayYmd,
   });
-
-  let textResult = null;
-  let textPartsOk = 0;
-  for (let i = 0; i < parts.length; i += 1) {
-    textResult = await sendWhatsAppText(toNumber, parts[i]);
-    if (!textResult?.ok) {
-      console.warn('Weekly plan WA text failed:', textResult?.reason || textResult?.error, {
-        username: employeeUsername,
-        to: toNorm,
-        part: i + 1,
-        of: parts.length,
-      });
-      break;
-    }
-    textPartsOk += 1;
-  }
-
-  if (tmplResult?.ok || textPartsOk > 0) {
+  if (tmplResult?.ok) {
     markSentToday(employeeUsername, dayYmd);
     rememberWhatsAppSession(toNumber, employeeUsername);
-    const via = tmplResult?.ok && textPartsOk > 0
-      ? 'template+text'
-      : tmplResult?.ok
-        ? tmplResult.via || 'template'
-        : 'text';
-    return {
-      ok: true,
-      via,
-      to: toNorm,
-      parts: parts.length,
-      textPartsOk,
-      templateOk: !!tmplResult?.ok,
-      openCount,
-      todayCount: todayOpenPreview.length,
-      priorPendingCount: priorPreview.length,
-      dayYmd,
-      dayLabel: label,
-      todayOnly,
-      wamid:
-        tmplResult?.data?.messages?.[0]?.id ||
-        textResult?.data?.messages?.[0]?.id ||
-        null,
-    };
   }
-
   return {
-    ok: false,
-    via: 'failed',
-    to: toNorm,
+    ok: !!tmplResult?.ok,
+    via: tmplResult?.ok ? tmplResult.via || 'template_fallback' : 'failed',
     openCount,
-    todayCount: todayOpenPreview.length,
-    priorPendingCount: priorPreview.length,
+    todayCount: (bundle.today || []).length,
+    priorPendingCount: (bundle.priorPending || []).length,
     dayYmd,
     dayLabel: label,
-    todayOnly,
-    reason: tmplResult?.reason || textResult?.reason || 'send_failed',
+    reason: tmplResult?.ok ? undefined : textResult?.reason || tmplResult?.reason || 'send_failed',
     textError: textResult,
-    templateError: tmplResult,
+    templateError: tmplResult?.ok ? null : tmplResult,
   };
 }
 
@@ -790,6 +870,11 @@ async function sendWeeklyPlanUtilityTemplate(toNumber, opts = {}) {
 }
 
 async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
+  const id = String(taskId || '').trim();
+  // Hard guard: never run a broad update if id is missing/invalid.
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return { ok: false, reason: 'invalid_task_id' };
+  }
   const now = new Date().toISOString();
   const patch = {
     status: 'Completed',
@@ -797,71 +882,58 @@ async function completeWeeklyPlanTask(taskId, via = 'whatsapp') {
     completed_via: via,
     updated_at: now,
   };
-  const { data: target, error: targetError } = await supabase
-    .from('weekly_plan_tasks')
-    .select('id, employee_username, ea_attendance_id, task_date, task_name, time_slot, half, source_file, status')
-    .eq('id', taskId)
-    .maybeSingle();
-  if (targetError) return { ok: false, reason: targetError.message };
-  if (!target) return { ok: false, reason: 'not_found' };
-
-  // Update every clone of the same sheet cell identity. Older parser versions
-  // created duplicate rows with different half/sr values.
-  let updateQuery = supabase
+  let { data, error } = await supabase
     .from('weekly_plan_tasks')
     .update(patch)
-    .eq('employee_username', target.employee_username)
-    .eq('task_date', ymdOf(target.task_date))
-    .eq('task_name', target.task_name || '')
-    .eq('time_slot', target.time_slot || '');
-  if (target.source_file) updateQuery = updateQuery.eq('source_file', target.source_file);
-  let { error } = await updateQuery;
+    .eq('id', id)
+    .select('id, task_name, time_slot, half, status')
+    .maybeSingle();
 
   if (error && /completed_at|completed_via/i.test(error.message || '')) {
-    let retryQuery = supabase
+    const retry = await supabase
       .from('weekly_plan_tasks')
       .update({ status: 'Completed', updated_at: now })
-      .eq('employee_username', target.employee_username)
-      .eq('task_date', ymdOf(target.task_date))
-      .eq('task_name', target.task_name || '')
-      .eq('time_slot', target.time_slot || '');
-    if (target.source_file) retryQuery = retryQuery.eq('source_file', target.source_file);
-    const retry = await retryQuery;
+      .eq('id', id)
+      .select('id, task_name, time_slot, half, status')
+      .maybeSingle();
+    data = retry.data;
     error = retry.error;
   }
   if (error) return { ok: false, reason: error.message };
-
-  try {
-    let sheetQuery = supabase
-      .from('weekly_plan_sheet')
-      .update({ status: 'Completed', completed_at: now, updated_at: now })
-      .eq('ea_attendance_id', target.ea_attendance_id)
-      .eq('task_date', ymdOf(target.task_date))
-      .eq('task', target.task_name || '');
-    if (target.source_file) sheetQuery = sheetQuery.eq('source_file', target.source_file);
-    await sheetQuery;
-  } catch {
-    /* optional compatibility table */
-  }
-
-  return { ok: true, task: { ...target, ...patch } };
+  if (!data?.id) return { ok: false, reason: 'task_not_found' };
+  return { ok: true, task: data };
 }
 
 async function completeWeeklyPlanByIndexes(employeeUsername, indexes, dayYmd = istYmd()) {
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: false });
+  const username = String(employeeUsername || '').trim();
+  const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
   const open = bundle.openOrdered || [];
+  const eaId = bundle.eaAttendanceId;
   let done = 0;
   let lastName = '';
+
   for (const i of indexes) {
     const t = open[i];
-    if (!t) continue;
+    if (!t?.id) continue;
+
+    if (eaId) {
+      const r = await completeExcelCellForEa(eaId, t, 'whatsapp');
+      if (r.ok) {
+        done += 1;
+        lastName = workLabel(r.task || t) || lastName;
+      }
+      continue;
+    }
+
+    // No EA scope — complete this id only.
     const r = await completeWeeklyPlanTask(t.id);
     if (r.ok) {
       done += 1;
       lastName = workLabel(r.task || t) || lastName;
     }
   }
-  const refreshed = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: false });
+
+  const refreshed = await loadWeeklyPlanDayBundle(username, dayYmd);
   return { done, total: indexes.length, lastName, bundle: refreshed };
 }
 
@@ -887,7 +959,7 @@ function resolveWeeklyPlanReplyNumbers(openTasks, numbers) {
 }
 
 async function completeWeeklyPlanByNumbers(employeeUsername, numbers, dayYmd = istYmd()) {
-  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd, { todayOnly: false });
+  const bundle = await loadWeeklyPlanDayBundle(employeeUsername, dayYmd);
   const indexes = resolveWeeklyPlanReplyNumbers(bundle.openOrdered, numbers);
   if (!indexes.length) {
     return { done: 0, total: (numbers || []).length, lastName: '', bundle, matched: false };
@@ -994,7 +1066,7 @@ async function runWeeklyPlanDayListCron(opts = {}) {
       results.push({ username, ok: false, reason: 'admin_skipped' });
       continue;
     }
-    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd, { todayOnly: false });
+    const bundle = await loadWeeklyPlanDayBundle(username, dayYmd);
     const hasWork =
       (bundle.openOrdered || []).length > 0 || (bundle.today || []).length > 0;
     if (!hasWork) {

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { parseWeeklyPlanMatrix } from "./weeklyPlanExcel.js";
 import {
   buildSheetTaskIndex,
-  dedupeTasksForSheetIndex,
   findPendingTasksForRow,
   findTaskForSheetCell,
   getCellDisplayText,
@@ -13,35 +12,6 @@ import {
   isWorkUpdateColumn,
   formatWeekDate,
 } from "./weeklyPlanPreview.js";
-
-test("newest Supabase status wins when duplicate task rows exist", () => {
-  const common = {
-    task_date: "2026-09-26",
-    task_name: "SITE VISIT",
-    time_slot: "1-00 PM TO 4-00 PM",
-    half: 0,
-  };
-  const rows = dedupeTasksForSheetIndex([
-    {
-      ...common,
-      id: "old-completed",
-      sr_no: 9,
-      status: "Completed",
-      updated_at: "2026-09-26T08:00:00.000Z",
-    },
-    {
-      ...common,
-      id: "new-pending",
-      sr_no: 5,
-      status: "Pending",
-      updated_at: "2026-09-26T09:00:00.000Z",
-    },
-  ]);
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].id, "new-pending");
-  assert.equal(rows[0].status, "Pending");
-});
 
 test("stores task name without mutating the task label with half suffixes", () => {
   const matrix = [
@@ -139,6 +109,80 @@ test("duplicate plan labels on different rows/days do not share one task", () =>
   assert.notEqual(index.get("2:2")?.id, index.get("3:2")?.id);
 });
 
+test("prefers Completed task when duplicate cell matches exist (WhatsApp Done)", () => {
+  const matrix = [
+    ["SR NO", "SITE NAME", "23-Sep-2026", "23-Sep-2026"],
+    ["", "", "WEDNESDAY", "WEDNESDAY"],
+    ["", "", "1st half planning", "2nd half planning"],
+    ["1", "TO STUDY / FOLLOW UP", "DRAWING CROSS-CHECK", ""],
+  ];
+  const tasks = [
+    {
+      id: "pending-dup",
+      task_name: "TO STUDY / FOLLOW UP",
+      sr_no: 1,
+      time_slot: "DRAWING CROSS-CHECK",
+      task_date: "2026-09-23",
+      half: 1,
+      status: "Pending",
+    },
+    {
+      id: "wa-done",
+      task_name: "TO STUDY / FOLLOW UP",
+      sr_no: 1,
+      time_slot: "DRAWING CROSS-CHECK",
+      task_date: "2026-09-23",
+      half: 1,
+      status: "Completed",
+    },
+  ];
+  const index = buildSheetTaskIndex(matrix, tasks);
+  assert.equal(index.get("3:2")?.id, "wa-done");
+  assert.equal(getCellStatusText(index.get("3:2")), "Completed");
+});
+
+test("does not paint Completed onto the wrong half of the same day", () => {
+  const matrix = [
+    ["SR NO", "SITE NAME", "23-Sep-2026", "23-Sep-2026"],
+    ["", "", "WEDNESDAY", "WEDNESDAY"],
+    ["", "", "1st half planning", "2nd half planning"],
+    ["1", "TO STUDY / FOLLOW UP", "CONCRETE POUR SUPERVISION", "DRAWING CROSS-CHECK"],
+  ];
+  const tasks = [
+    {
+      id: "pending-2h",
+      task_name: "TO STUDY / FOLLOW UP",
+      sr_no: 1,
+      time_slot: "DRAWING CROSS-CHECK",
+      task_date: "2026-09-23",
+      half: 2,
+      status: "Pending",
+    },
+    {
+      id: "wa-done-1h",
+      task_name: "TO STUDY / FOLLOW UP",
+      sr_no: 1,
+      time_slot: "DRAWING CROSS-CHECK",
+      task_date: "2026-09-23",
+      half: 1,
+      status: "Completed",
+    },
+    {
+      id: "pending-pour",
+      task_name: "TO STUDY / FOLLOW UP",
+      sr_no: 1,
+      time_slot: "CONCRETE POUR SUPERVISION",
+      task_date: "2026-09-23",
+      half: 1,
+      status: "Pending",
+    },
+  ];
+  const index = buildSheetTaskIndex(matrix, tasks);
+  // 2nd-half cell must stay on the Pending half=2 row — not steal Completed from half=1.
+  assert.equal(index.get("3:3")?.id, "pending-2h");
+  assert.equal(getCellStatusText(index.get("3:3")), "Pending");
+});
+
 test("finds pending tasks for a clicked task/site row", () => {
   const tasks = [
     { id: "1", task_name: "TO CALL", time_slot: "A", status: "Pending" },
@@ -179,29 +223,6 @@ test("type 1 parses daywise time cells as tasks (not skipped as time headers)", 
     ),
     true
   );
-});
-
-test("type 1 ignores adjacent Excel WORK STATUS values and starts tasks Pending", () => {
-  const matrix = [
-    ["SR NO", "SITE NAME", "21-Sep-2026", "21-Sep-2026", "22-Sep-2026", "22-Sep-2026"],
-    ["", "DAYS", "MONDAY", "", "TUESDAY", ""],
-    ["", "TIME", "9-00 AM TO 7-30 PM", "WORK STATUS", "9-00 AM TO 7-30 PM", "WORK STATUS"],
-    ["1", "SITE WORK BUILDING", "9-00 AM TO 12-00 PM", "IN PROGRESS", "1-00 PM TO 4-00 PM", "ON HOLD"],
-    ["2", "TENDER COMPARISON", "10-00 AM TO 12-00 PM", "COMPLETED", "2-00 PM TO 4-00 PM", "PENDING"],
-  ];
-
-  const parsed = parseWeeklyPlanMatrix(matrix);
-  assert.equal(parsed.tasks.length, 4);
-  assert.deepEqual(
-    parsed.tasks.map((task) => [task.time_slot, task.status]),
-    [
-      ["9-00 AM TO 12-00 PM", "Pending"],
-      ["1-00 PM TO 4-00 PM", "Pending"],
-      ["10-00 AM TO 12-00 PM", "Pending"],
-      ["2-00 PM TO 4-00 PM", "Pending"],
-    ]
-  );
-  assert.equal(parsed.tasks.some((task) => task.time_slot === "IN PROGRESS"), false);
 });
 
 test("type 1 shows Pending only on daywise time data cells, not headers or site name", () => {
@@ -334,14 +355,8 @@ test("keeps the daily planning layout without exposing work update columns", () 
   assert.equal(parsed.meta.halves, false);
   assert.equal(parsed.tasks.length >= 2, true);
   assert.equal(parsed.tasks.some((task) => task.task_name === "TO STUDY / FOLLOW UP"), true);
-  assert.equal(
-    parsed.tasks.some(
-      (task) =>
-        task.time_slot === "SITE INSPECTION / FOUNDATION WORK" &&
-        task.status === "Pending"
-    ),
-    true
-  );
+  assert.equal(parsed.tasks.some((task) => task.time_slot === "SITE INSPECTION"), true);
+  assert.equal(parsed.tasks.some((task) => task.time_slot === "FOUNDATION WORK"), true);
 });
 
 test("uses the actual half-column header positions when the date cells are offset from task cells", () => {

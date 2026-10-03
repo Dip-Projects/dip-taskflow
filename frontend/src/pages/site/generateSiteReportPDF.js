@@ -48,9 +48,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.7;colo
   border-bottom:1px solid #f1f5f9;}
 .bullet-item:last-child{border-bottom:none;}
 .bullet-arrow{color:#800000;font-weight:700;font-size:12px;margin-top:4px;flex-shrink:0;}
-.bullet-text{font-size:15px;color:#0f172a;line-height:1.5;}
+/*.bullet-text{font-size:15px;color:#0f172a;line-height:1.5;}*/
+.bullet-text{font-size:13.5px;color:#0f172a;line-height:1.5;}
 .bullet-item.bullet-title{gap:0;padding:8px 0 4px;}
-.bullet-item.bullet-title .bullet-text{font-weight:800;font-size:15.5px;color:#0f172a;}
+/*.bullet-item.bullet-title .bullet-text{font-weight:800;font-size:15.5px;color:#0f172a;}*/
+.bullet-item.bullet-title .bullet-text{font-weight:800;font-size:13.5px;color:#0f172a;}
 
 /* ── INFO ROWS (visit details) ── */
 .info-row{display:flex;gap:20px;padding:10px 16px;border-bottom:1px solid #cbd5e1;}
@@ -126,7 +128,8 @@ function bulletBlock(txt) {
     if (isSub) {
       return `<div class="bullet-item" style="padding-left:32px;border-bottom:1px solid #f8fafc;">
         <span class="bullet-arrow" style="color:#b45309;font-size:10px;margin-top:5px;">&#9656;</span>
-        <span class="bullet-text" style="font-size:13.5px;color:#475569;">${text}</span>
+      /*  <span class="bullet-text" style="font-size:13.5px;color:#475569;">${text}</span> */
+      <span class="bullet-text" style="color:#475569;">${text}</span>
       </div>`;
     }
     return `<div class="bullet-item">

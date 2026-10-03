@@ -959,6 +959,43 @@ async function buildThankYouSlide(pres, fd, hidden = false) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MASTER generatePPT function
 // ═══════════════════════════════════════════════════════════════════════════════
+function asPptImage(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return Promise.resolve(null);
+  if (/^data:image\/(png|jpe?g);base64,/i.test(dataUrl)) return Promise.resolve(dataUrl);
+  if (!dataUrl.startsWith('data:image/')) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width || 1;
+        canvas.height = img.naturalHeight || img.height || 1;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+async function mapPptImages(list) {
+  const out = [];
+  for (const item of list || []) {
+    if (!item) continue;
+    if (!item.dataUrl) {
+      out.push(item);
+      continue;
+    }
+    const dataUrl = await asPptImage(item.dataUrl);
+    if (dataUrl) out.push({ ...item, dataUrl });
+    else if (item.table) out.push({ ...item, dataUrl: null });
+  }
+  return out;
+}
+
 async function generatePPT({
   site, engineer, reportDate, reportNum, location,
   activities, graphicalImages, sitePhotos, siteImage,
@@ -969,7 +1006,15 @@ async function generatePPT({
   const PptxGenJS = window.PptxGenJS;
   if (!PptxGenJS) throw new Error('PptxGenJS not loaded');
 
-  const logoDataUrl = await getLogoDataUrl();
+  const logoDataUrl = await asPptImage(await getLogoDataUrl()) || await getLogoDataUrl();
+  const safeSiteImage = await asPptImage(siteImage);
+  const safeActivities = [];
+  for (const activity of activities || []) {
+    safeActivities.push({
+      ...activity,
+      progressImages: await mapPptImages(activity?.progressImages),
+    });
+  }
   const pres = new PptxGenJS();
   let globalSlideNum = 0;
 
@@ -985,23 +1030,23 @@ async function generatePPT({
     engineerName: engineer,
     reportNumber: reportNum,
     location,
-    activities:           activities || [],
-    graphicalImages:      graphicalImages || [],
-    sitePhotos:           sitePhotos || [],
-    titleSiteImage:       siteImage || null,
+    activities:           safeActivities,
+    graphicalImages:      await mapPptImages(graphicalImages),
+    sitePhotos:           await mapPptImages(sitePhotos),
+    titleSiteImage:       safeSiteImage,
     nextWeekPlans:        plans || [],
     drawingRegisterHeaders: drawingHeaders || [],
     drawingRegisterData:  drawingData || [],
     officeActivityItems:  officeItems || [],
     visitorRegisterData:  visitors || [],
-    visitorPhotos:        visitorPhotos || [],
+    visitorPhotos:        await mapPptImages(visitorPhotos),
     drawingDecisionData:  drawDecision || [],
     delayPoints:          delayPoints || [],
-    weeklyChecklistPhotos: checklistPhotos || [],
-    barchartRegisterItems: barchartItems || [],
-    cubeRangeImages:      cubeItems || [],
-    momRegisterImages:    momItems || [],
-    momRangeImages:       momItems || [],
+    weeklyChecklistPhotos: await mapPptImages(checklistPhotos),
+    barchartRegisterItems: await mapPptImages(barchartItems),
+    cubeRangeImages:      await mapPptImages(cubeItems),
+    momRegisterImages:    await mapPptImages(momItems),
+    momRangeImages:       await mapPptImages(momItems),
     reportSections:       sections || [],
     logoDataUrl,
   };
@@ -1053,24 +1098,29 @@ for (const sec of activeSections) {
 
    if      (title === 'detailed status of activities')        await buildActivitiesSlide(pres, fd, slideHidden);
     else if (title === 'graphical report of work')             await buildGraphicalSlides(pres, fd, slideHidden);
-    else if (title === 'site photographs')                     await buildPhotoSlides(pres, fd, sitePhotos.map(p => ({...p, label: p.label||p.caption})), 'Site Photographs', 3, slideHidden);
-    else if (title === 'cube testing register')                await buildRangeCaptureSlides(pres, fd, cubeItems, 'Cube Testing Register', slideHidden);
+    else if (title === 'site photographs')                     await buildPhotoSlides(pres, fd, (fd.sitePhotos || []).map(p => ({...p, label: p.label||p.caption})), 'Site Photographs', 3, slideHidden);
+    else if (title === 'cube testing register')                await buildRangeCaptureSlides(pres, fd, fd.cubeRangeImages, 'Cube Testing Register', slideHidden);
     else if (title === 'next week planning')                   await buildNextWeekSlide(pres, fd, slideHidden);
     else if (title === 'drawing register')                     await buildDrawingRegisterSlide(pres, fd, slideHidden);
     else if (title === 'office activity')                      await buildOfficeActivitySlide(pres, fd, slideHidden);
     else if (title === 'visitor register')                     await buildVisitorRegisterSlide(pres, fd, slideHidden);
     else if (title === 'drawing & decision pending')           await buildDrawingDecisionSlide(pres, fd, slideHidden);
-    else if (title === 'weekly site checklist')                await buildPhotoSlides(pres, fd, checklistPhotos.map(p => ({...p})), 'Weekly Site Checklist', 3, slideHidden);
+    else if (title === 'weekly site checklist')                await buildPhotoSlides(pres, fd, (fd.weeklyChecklistPhotos || []).map(p => ({...p})), 'Weekly Site Checklist', 3, slideHidden);
     else if (title === 'delay points / highlights / red flag') await buildDelayPointsSlide(pres, fd, slideHidden);
-    else if (title === 'mom review')                           await buildRangeCaptureSlides(pres, fd, momItems, 'MOM Review', slideHidden);
-    else if (title === 'barchart & worksheet')                 await buildRangeCaptureSlides(pres, fd, barchartItems, 'Barchart & Worksheet', slideHidden);
+    else if (title === 'mom review')                           await buildRangeCaptureSlides(pres, fd, fd.momRangeImages, 'MOM Review', slideHidden);
+    else if (title === 'barchart & worksheet')                 await buildRangeCaptureSlides(pres, fd, fd.barchartRegisterItems, 'Barchart & Worksheet', slideHidden);
   }
 
   // ── 4. Thank You ─────────────────────────────────────────────────────────────
   await buildThankYouSlide(pres, fd);
 
   // ── Export ───────────────────────────────────────────────────────────────────
-  const base64 = await pres.write({ outputType: 'base64' });
+  let base64 = await pres.write({ outputType: 'base64' });
+  base64 = String(base64 || '');
+  const comma = base64.indexOf(',');
+  if (base64.startsWith('data:') && comma >= 0) base64 = base64.slice(comma + 1);
+  base64 = base64.replace(/\s/g, '');
+  if (!base64) throw new Error('Could not build the PowerPoint file');
   const binary  = atob(base64);
   const bytes   = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
