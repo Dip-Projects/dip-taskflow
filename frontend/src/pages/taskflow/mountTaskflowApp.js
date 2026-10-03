@@ -5303,18 +5303,14 @@ export async function mountTaskflowApp(opts = {}) {
   });
   els.leaveForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.leaveFormMsg.hidden = true;
-    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
-    if (!buddyId) {
-      els.leaveFormMsg.textContent = 'Please choose a buddy to cover your tasks';
-      els.leaveFormMsg.hidden = false;
-      return;
-    }
+    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value || null;
     const payload = {
       from_date: els.leaveFrom.value,
       to_date: els.leaveTo.value,
       is_half_day: els.leaveHalfDay.checked,
       reason: els.leaveReason.value.trim(),
-      buddy_id: buddyId,
+      // buddy is optional; only include when selected
+      ...(buddyId ? { buddy_id: buddyId } : {}),
     };
     try {
       const req = leaveRequestDays(payload);

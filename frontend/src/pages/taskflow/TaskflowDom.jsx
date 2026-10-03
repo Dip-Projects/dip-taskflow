@@ -2141,8 +2141,8 @@ export default function TaskflowDom() {
           <textarea id="leave-reason" rows={3} placeholder="Why are you taking leave..." required></textarea>
         </div>
         <div className="field">
-          <label htmlFor="leave-buddy">Buddy (task cover) <span className="req">*</span></label>
-          <select id="leave-buddy" required>
+          <label htmlFor="leave-buddy">Buddy (task cover)</label>
+          <select id="leave-buddy">
             <option value="">Select buddy…</option>
           </select>
           <p className="form-note" style={{marginTop: 6}}>
