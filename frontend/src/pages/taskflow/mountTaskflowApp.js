@@ -1463,10 +1463,17 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
 
+    const reportBtns = [
+      makeNavButton('site-report', '🏗️ Site Visit Report'),
+      makeNavButton('my-reports', '📄 My Reports'),
+    ];
     if (visOk('monthly-report')) {
+      reportBtns.push(makeNavButton('monthly-report', '📁 Monthly Report'));
+    }
+    if (reportBtns.length) {
       appendCollapsibleNav(
         'Reports',
-        [makeNavButton('monthly-report', '📁 Monthly Report')],
+        reportBtns,
         { collapsed: true, sectionId: 'reports' }
       );
     }
@@ -1500,7 +1507,7 @@ export async function mountTaskflowApp(opts = {}) {
     sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
     'daily-report': 'administration', 'mis-report': 'administration',
     'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
-    'monthly-report': 'reports',
+    'site-report': 'reports', 'my-reports': 'reports', 'monthly-report': 'reports',
     visibility: 'mis-support',
     applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
     'new-recruitment': 'hr-hiring',
@@ -1760,6 +1767,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
     state.activeView = viewKey;
+    window.__tfActiveView = viewKey;
     ensureNavSectionOpen(viewKey);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   
@@ -5303,14 +5311,18 @@ export async function mountTaskflowApp(opts = {}) {
   });
   els.leaveForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.leaveFormMsg.hidden = true;
-    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value || null;
+    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
+    if (!buddyId) {
+      els.leaveFormMsg.textContent = 'Please choose a buddy to cover your tasks';
+      els.leaveFormMsg.hidden = false;
+      return;
+    }
     const payload = {
       from_date: els.leaveFrom.value,
       to_date: els.leaveTo.value,
       is_half_day: els.leaveHalfDay.checked,
       reason: els.leaveReason.value.trim(),
-      // buddy is optional; only include when selected
-      ...(buddyId ? { buddy_id: buddyId } : {}),
+      buddy_id: buddyId,
     };
     try {
       const req = leaveRequestDays(payload);
@@ -10710,12 +10722,24 @@ export async function mountTaskflowApp(opts = {}) {
             if (row.answer) appendBotBubble('bot', row.answer);
           });
         } else {
-          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets.');
+          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets. Offer letter and Experience letter are the buttons above.');
         }
       } catch (_) {
-        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets.');
+        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets. Offer letter and Experience letter are the buttons above.');
       }
     }
+  }
+
+  function openBotLetter(tabKey) {
+    const kind = tabKey === 'letter-exp' ? 'exp' : 'offer';
+    window.dispatchEvent(new CustomEvent('dip-bot-letter', { detail: kind }));
+  }
+
+  function letterTabFromQuestion(q) {
+    const s = String(q || '').toLowerCase();
+    if (/\b(offer)\b/.test(s) && /\bletter\b/.test(s)) return 'letter-offer';
+    if (/\b(exp|experience)\b/.test(s) && /\b(letter|cert|certificate)\b/.test(s)) return 'letter-exp';
+    return '';
   }
 
   function bindBotAskForm() {
@@ -10729,6 +10753,16 @@ export async function mountTaskflowApp(opts = {}) {
       const input = document.getElementById('botAskInput');
       const q = (input?.value || '').trim();
       if (!q) return;
+      const letterTab = letterTabFromQuestion(q);
+      if (letterTab) {
+        appendBotBubble('you', q);
+        if (input) input.value = '';
+        appendBotBubble('bot', letterTab === 'letter-exp'
+          ? 'Experience letter form is open above.'
+          : 'Offer letter form is open above.');
+        openBotLetter(letterTab);
+        return;
+      }
       appendBotBubble('you', q);
       if (input) input.value = '';
       const askBtn = form.querySelector('button[type="submit"]');
