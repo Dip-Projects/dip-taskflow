@@ -1,0 +1,128 @@
+import { useEffect, memo } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
+import { isHr, isSitePortalOnlyStaff } from '../../lib/api';
+import TaskflowDom from './TaskflowDom';
+import { mountTaskflowApp, unmountTaskflowApp } from './mountTaskflowApp';
+import './taskflow.css';
+import '../SurfaceToggle.css';
+
+/** Prevent React from wiping legacy-filled #navList on parent re-renders */
+const StableTaskflowDom = memo(TaskflowDom, () => true);
+
+/**
+ * Office TaskFlow: Classic UI (same look as before).
+ */
+export default function TaskflowApp() {
+  const { user, token, isAuthenticated, logout, canToggleSite, canToggleMdo } = useAuth();
+  const navigate = useNavigate();
+  const userId = user?.id || '';
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    // Pure HR accounts belong on /hr — never start TaskFlow badge polling here
+    if (isHr(user) && String(user?.role || '').toLowerCase() !== 'admin') return;
+
+    let cancelled = false;
+    let tries = 0;
+
+    const tryMount = async () => {
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      await new Promise((r) => requestAnimationFrame(() => r()));
+      if (cancelled) return;
+
+      if (!document.getElementById('navList') || !document.getElementById('appScreen')) {
+        tries += 1;
+        if (tries < 10) setTimeout(tryMount, 50);
+        else console.error('[TaskflowApp] TaskflowDom never appeared');
+        return;
+      }
+
+      try {
+        await mountTaskflowApp({
+          getToken: () => localStorage.getItem('tf_token') || token,
+          getUser: () => {
+            try {
+              return JSON.parse(localStorage.getItem('tf_user') || 'null') || user;
+            } catch {
+              return user;
+            }
+          },
+          onLogout: () => {
+            logout();
+            navigate('/login', { replace: true });
+          },
+        });
+      } catch (err) {
+        console.error('[TaskflowApp] mount failed', err);
+      }
+    };
+
+    tryMount();
+    return () => {
+      cancelled = true;
+      unmountTaskflowApp();
+    };
+  }, [isAuthenticated, token, userId, logout, navigate]);
+
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  // HR portal is separate from Office TaskFlow
+  if (isHr(user) && String(user?.role || '').toLowerCase() !== 'admin') {
+    return <Navigate to="/hr" replace />;
+  }
+
+  const dept = (user?.department || '').trim().toLowerCase();
+  // Site field staff never stay on Office — Site portal only
+  if (isSitePortalOnlyStaff(user) && !canToggleSite) {
+    return <Navigate to="/site" replace />;
+  }
+  if ((user?.role || '').toLowerCase() === 'client' || dept === 'client') {
+    return <Navigate to="/client" replace />;
+  }
+
+  const goMdo = () => {
+    localStorage.setItem('tf_surface', 'mdo');
+    navigate('/mdo');
+  };
+  const goSite = () => {
+    localStorage.setItem('tf_surface', 'site');
+    navigate('/site');
+  };
+
+  return (
+    <div className="tf-shell">
+      {(canToggleMdo || canToggleSite) && (
+        <div className="tf-surface-bar">
+          <span className="tf-surface-label">Switch view</span>
+          {canToggleMdo && (
+            <div className="tf-surface-toggle">
+              <button type="button" onClick={goMdo}>
+                MDO
+              </button>
+              <button type="button" className="active" disabled>
+                Office
+              </button>
+            </div>
+          )}
+          {canToggleSite && (
+            <div className="tf-surface-toggle">
+              <button type="button" className="active" disabled>
+                Office
+              </button>
+              <button type="button" onClick={goSite}>
+                Site
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      <div
+        id="tf-react-root"
+        className="tf-legacy-frame"
+      >
+        <StableTaskflowDom />
+      </div>
+    </div>
+  );
+}

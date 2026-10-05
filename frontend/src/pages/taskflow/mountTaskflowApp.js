@@ -1,0 +1,12326 @@
+/**
+ * Adapted from backend/legacy/app.js for React (no iframe).
+ * Call mountTaskflowApp() once after TaskflowDom is in the document.
+ * Login UI is owned by React AuthContext.
+ */
+const API_BASE = '/api';
+
+let _onLogout = null;
+let _listenersBound = false;
+let _enterApp = null;
+let els = {};
+let state = {
+  token: null,
+  user: null,
+  master: { departments: [], projects: [], taskTypes: [], employees: [] },
+  activeView: null,
+  pendingTaskId: null,
+  pendingVerifierId: null,
+  pendingLeaveId: null
+};
+
+function collectEls() {
+  return {
+    loginScreen: document.getElementById('loginScreen'),
+    appScreen: document.getElementById('appScreen'),
+    loginForm: document.getElementById('loginForm'),
+    loginError: document.getElementById('loginError'),
+    loginBtn: document.getElementById('loginBtn'),
+    togglePassword: document.getElementById('togglePassword'),
+    passwordInput: document.getElementById('password'),
+    userName: document.getElementById('userName'),
+    userRoleTag: document.getElementById('userRoleTag'),
+    logoutBtn: document.getElementById('logoutBtn'),
+    menuToggle: document.getElementById('menuToggle'),
+    sidebar: document.getElementById('sidebar'),
+    sidebarOverlay: document.getElementById('sidebarOverlay'),
+    navList: document.getElementById('navList'),
+    addTaskForm: document.getElementById('addTaskForm'),
+    addTaskMsg: document.getElementById('addTaskMsg'),
+    fDepartment: document.getElementById('f-department'),
+    fEmployee: document.getElementById('f-employee'),
+    fProject: document.getElementById('f-project'),
+    fTaskType: document.getElementById('f-tasktype'),
+    filterDepartment: document.getElementById('filter-department'),
+    filterEmployee: document.getElementById('filter-employee'),
+    filterStatus: document.getElementById('filter-status'),
+    clearAllFilters: document.getElementById('clearAllFilters'),
+    allTasksList: document.getElementById('allTasksList'),
+    filterCreatedFrom: document.getElementById('filter-created-from'),
+    filterCreatedTo: document.getElementById('filter-created-to'),
+    dateRangeCount: document.getElementById('dateRangeCount'),
+    myTasksList: document.getElementById('myTasksList'),
+    myTasksTableBody: document.getElementById('myTasksTableBody'),
+    employeesTableBody: document.getElementById('employeesTableBody'),
+    employeesCards: document.getElementById('employeesCards'),
+    empFilterQ: document.getElementById('emp-filter-q'),
+    empFilterDepartment: document.getElementById('emp-filter-department'),
+    empFilterStatus: document.getElementById('emp-filter-status'),
+    clearEmpFilters: document.getElementById('clearEmpFilters'),
+    empFilterCount: document.getElementById('empFilterCount'),
+    openAddEmployee: document.getElementById('openAddEmployee'),
+    employeeModal: document.getElementById('employeeModal'),
+    employeeForm: document.getElementById('employeeForm'),
+    employeeFormMsg: document.getElementById('employeeFormMsg'),
+    closeEmployeeModal: document.getElementById('closeEmployeeModal'),
+    cancelEmployeeModal: document.getElementById('cancelEmployeeModal'),
+    empReportingHead: document.getElementById('emp-reporting-head'),
+    empSite: document.getElementById('emp-site'),
+    credsModal: document.getElementById('credsModal'),
+    credsUsername: document.getElementById('credsUsername'),
+    credsPassword: document.getElementById('credsPassword'),
+    closeCredsModal: document.getElementById('closeCredsModal'),
+    closeCredsModalBtn: document.getElementById('closeCredsModalBtn'),
+    editEmployeeModal: document.getElementById('editEmployeeModal'),
+    editEmployeeForm: document.getElementById('editEmployeeForm'),
+    editEmployeeFormMsg: document.getElementById('editEmployeeFormMsg'),
+    closeEditEmployeeModal: document.getElementById('closeEditEmployeeModal'),
+    cancelEditEmployeeModal: document.getElementById('cancelEditEmployeeModal'),
+    editEmpId: document.getElementById('edit-emp-id'),
+    editEmpFullname: document.getElementById('edit-emp-fullname'),
+    editEmpDepartment: document.getElementById('edit-emp-department'),
+    editEmpDesignation: document.getElementById('edit-emp-designation'),
+    editEmpRole: document.getElementById('edit-emp-role'),
+    editEmpReportingHead: document.getElementById('edit-emp-reporting-head'),
+    editEmpSite: document.getElementById('edit-emp-site'),
+    editEmpStatusToggle: document.getElementById('edit-emp-status-toggle'),
+    editEmpPassword: document.getElementById('edit-emp-password'),
+    toggleEditPassword: document.getElementById('toggleEditPassword'),
+    hierarchyTreeContainer: document.getElementById('hierarchyTreeContainer'),
+    permissionsTableBody: document.getElementById('permissionsTableBody'),
+    allTasksCards: document.getElementById('allTasksCards'),
+    overdueTasksList: document.getElementById('overdueTasksList'),
+    overdueTasksCards: document.getElementById('overdueTasksCards'),
+    overdueExtendModal: document.getElementById('overdueExtendModal'),
+    overdueExtendForm: document.getElementById('overdueExtendForm'),
+    overdueExtendDate: document.getElementById('overdue-extend-date'),
+    overdueExtendReason: document.getElementById('overdue-extend-reason'),
+    overdueExtendFormMsg: document.getElementById('overdueExtendFormMsg'),
+    closeOverdueExtendModal: document.getElementById('closeOverdueExtendModal'),
+    cancelOverdueExtendModal: document.getElementById('cancelOverdueExtendModal'),
+    overdueDrawerBackdrop: document.getElementById('overdueDrawerBackdrop'),
+    closeOverdueDrawer: document.getElementById('closeOverdueDrawer'),
+    overdueTabToday: document.getElementById('overdueTabToday'),
+    overdueTabPending: document.getElementById('overdueTabPending'),
+    overdueTabTodayCount: document.getElementById('overdueTabTodayCount'),
+    overdueTabPendingCount: document.getElementById('overdueTabPendingCount'),
+    overdueDrawerBody: document.getElementById('overdueDrawerBody'),
+    overdueFilterEmployee: document.getElementById('overdue-filter-employee'),
+    clearOverdueFilters: document.getElementById('clearOverdueFilters'),
+    departmentsTableBody: document.getElementById('departmentsTableBody'),
+    addDepartmentForm: document.getElementById('addDepartmentForm'),
+    addDepartmentMsg: document.getElementById('addDepartmentMsg'),
+    taskTypesTableBody: document.getElementById('taskTypesTableBody'),
+    addTaskTypeForm: document.getElementById('addTaskTypeForm'),
+    addTaskTypeMsg: document.getElementById('addTaskTypeMsg'),
+    verificationsList: document.getElementById('verificationsList'),
+    verificationsTableBody: document.getElementById('verificationsTableBody'),
+    verifyModal: document.getElementById('verifyModal'),
+    verifyForm: document.getElementById('verifyForm'),
+    verifyFormMsg: document.getElementById('verifyFormMsg'),
+    verifyPerson: document.getElementById('verify-person'),
+    closeVerifyModal: document.getElementById('closeVerifyModal'),
+    cancelVerifyModal: document.getElementById('cancelVerifyModal'),
+    forwardVerifyModal: document.getElementById('forwardVerifyModal'),
+    forwardVerifyForm: document.getElementById('forwardVerifyForm'),
+    forwardVerifyFormMsg: document.getElementById('forwardVerifyFormMsg'),
+    forwardVerifyPerson: document.getElementById('forward-verify-person'),
+    forwardVerifyHint: document.getElementById('forwardVerifyHint'),
+    closeForwardVerifyModal: document.getElementById('closeForwardVerifyModal'),
+    cancelForwardVerifyModal: document.getElementById('cancelForwardVerifyModal'),
+    ticketsList: document.getElementById('ticketsList'),
+    ticketsTableBody: document.getElementById('ticketsTableBody'),
+    openRaiseTicket: document.getElementById('openRaiseTicket'),
+    ticketModal: document.getElementById('ticketModal'),
+    ticketForm: document.getElementById('ticketForm'),
+    ticketFormMsg: document.getElementById('ticketFormMsg'),
+    ticketDescription: document.getElementById('ticket-description'),
+    closeTicketModal: document.getElementById('closeTicketModal'),
+    cancelTicketModal: document.getElementById('cancelTicketModal'),
+    myLeavesList: document.getElementById('myLeavesList'),
+    myLeavesTableBody: document.getElementById('myLeavesTableBody'),
+    openApplyLeave: document.getElementById('openApplyLeave'),
+    leaveModal: document.getElementById('leaveModal'),
+    leaveForm: document.getElementById('leaveForm'),
+    leaveFormMsg: document.getElementById('leaveFormMsg'),
+    leaveFrom: document.getElementById('leave-from'),
+    leaveTo: document.getElementById('leave-to'),
+    leaveHalfDay: document.getElementById('leave-halfday'),
+    leaveReason: document.getElementById('leave-reason'),
+    leaveBuddy: document.getElementById('leave-buddy'),
+    closeLeaveModal: document.getElementById('closeLeaveModal'),
+    cancelLeaveModal: document.getElementById('cancelLeaveModal'),
+    leaveTaskActionsModal: document.getElementById('leaveTaskActionsModal'),
+    leaveTaskActionsList: document.getElementById('leaveTaskActionsList'),
+    leaveTaskActionsIntro: document.getElementById('leaveTaskActionsIntro'),
+    leaveTaskActionsMsg: document.getElementById('leaveTaskActionsMsg'),
+    closeLeaveTaskActionsModal: document.getElementById('closeLeaveTaskActionsModal'),
+    skipLeaveTaskActions: document.getElementById('skipLeaveTaskActions'),
+    submitLeaveTaskActions: document.getElementById('submitLeaveTaskActions'),
+    leaveApprovalsList: document.getElementById('leaveApprovalsList'),
+    leaveApprovalsTableBody: document.getElementById('leaveApprovalsTableBody'),
+    buddyRequestsList: document.getElementById('buddyRequestsList'),
+    buddyRequestsTableBody: document.getElementById('buddyRequestsTableBody'),
+    leaveApprovalsStatusFilter: document.getElementById('leaveApprovalsStatusFilter'),
+    rejectLeaveModal: document.getElementById('rejectLeaveModal'),
+    rejectLeaveForm: document.getElementById('rejectLeaveForm'),
+    rejectLeaveFormMsg: document.getElementById('rejectLeaveFormMsg'),
+    rejectLeaveReason: document.getElementById('reject-leave-reason'),
+    closeRejectLeaveModal: document.getElementById('closeRejectLeaveModal'),
+    cancelRejectLeaveModal: document.getElementById('cancelRejectLeaveModal'),
+    leaveCoverModal: document.getElementById('leaveCoverModal'),
+    leaveCoverList: document.getElementById('leaveCoverList'),
+    leaveCoverIntro: document.getElementById('leaveCoverIntro'),
+    leaveCoverFormMsg: document.getElementById('leaveCoverFormMsg'),
+    closeLeaveCoverModal: document.getElementById('closeLeaveCoverModal'),
+    laterLeaveCoverModal: document.getElementById('laterLeaveCoverModal'),
+    correctionsList: document.getElementById('correctionsList'),
+    correctionsTableBody: document.getElementById('correctionsTableBody'),
+    correctionModal: document.getElementById('correctionModal'),
+    correctionForm: document.getElementById('correctionForm'),
+    correctionFormMsg: document.getElementById('correctionFormMsg'),
+    correctionNote: document.getElementById('correction-note'),
+    closeCorrectionModal: document.getElementById('closeCorrectionModal'),
+    cancelCorrectionModal: document.getElementById('cancelCorrectionModal'),
+    corrStartRecord: document.getElementById('corrStartRecord'),
+    corrStopRecord: document.getElementById('corrStopRecord'),
+    corrRecordStatus: document.getElementById('corrRecordStatus'),
+    corrVoicePlayback: document.getElementById('corrVoicePlayback'),
+    resendVerifyModal: document.getElementById('resendVerifyModal'),
+    resendVerifyForm: document.getElementById('resendVerifyForm'),
+    resendVerifyFormMsg: document.getElementById('resendVerifyFormMsg'),
+    resendVerifierName: document.getElementById('resendVerifierName'),
+    resendFiles: document.getElementById('resend-files'),
+    closeResendVerifyModal: document.getElementById('closeResendVerifyModal'),
+    cancelResendVerifyModal: document.getElementById('cancelResendVerifyModal'),
+    verifyFiles: document.getElementById('verify-files'),
+    rescheduleModal: document.getElementById('rescheduleModal'),
+    rescheduleForm: document.getElementById('rescheduleForm'),
+    rescheduleFormMsg: document.getElementById('rescheduleFormMsg'),
+    rescheduleDate: document.getElementById('reschedule-date'),
+    rescheduleReason: document.getElementById('reschedule-reason'),
+    closeRescheduleModal: document.getElementById('closeRescheduleModal'),
+    cancelRescheduleModal: document.getElementById('cancelRescheduleModal'),
+    reschedRequestModal: document.getElementById('reschedRequestModal'),
+    reschedRequestForm: document.getElementById('reschedRequestForm'),
+    reschedRequestFormMsg: document.getElementById('reschedRequestFormMsg'),
+    reschedreqDate: document.getElementById('reschedreq-date'),
+    reschedreqAdditionalHours: document.getElementById('reschedreq-additional-hours'),
+    reschedreqReason: document.getElementById('reschedreq-reason'),
+    closeReschedRequestModal: document.getElementById('closeReschedRequestModal'),
+    cancelReschedRequestModal: document.getElementById('cancelReschedRequestModal'),
+    reassignModal: document.getElementById('reassignModal'),
+    reassignForm: document.getElementById('reassignForm'),
+    reassignFormMsg: document.getElementById('reassignFormMsg'),
+    reassignEmployee: document.getElementById('reassign-employee'),
+    closeReassignModal: document.getElementById('closeReassignModal'),
+    cancelReassignModal: document.getElementById('cancelReassignModal'),
+    sitesTableBody: document.getElementById('sitesTableBody'),
+    siteFilterQ: document.getElementById('site-filter-q'),
+    siteFilterType: document.getElementById('site-filter-type'),
+    siteFilterStatus: document.getElementById('site-filter-status'),
+    clearSiteFilters: document.getElementById('clearSiteFilters'),
+    siteFilterCount: document.getElementById('siteFilterCount'),
+    openAddSite: document.getElementById('openAddSite'),
+    siteModal: document.getElementById('siteModal'),
+    siteForm: document.getElementById('siteForm'),
+    siteFormMsg: document.getElementById('siteFormMsg'),
+    closeSiteModal: document.getElementById('closeSiteModal'),
+    cancelSiteModal: document.getElementById('cancelSiteModal'),
+    siteTeamleader: document.getElementById('site-teamleader'),
+    siteCoordinator: document.getElementById('site-coordinator'),
+    siteIncharge: document.getElementById('site-incharge'),
+    sitePc: document.getElementById('site-pc'),
+    siteModalTitle: document.getElementById('siteModalTitle'),
+    siteFormSubmit: document.getElementById('siteFormSubmit'),
+    siteEditId: document.getElementById('site-edit-id'),
+    clientsTableBody: document.getElementById('clientsTableBody'),
+    clientFilterQ: document.getElementById('client-filter-q'),
+    clientFilterSite: document.getElementById('client-filter-site'),
+    clientFilterStatus: document.getElementById('client-filter-status'),
+    clearClientFilters: document.getElementById('clearClientFilters'),
+    clientFilterCount: document.getElementById('clientFilterCount'),
+    openAddClient: document.getElementById('openAddClient'),
+    clientModal: document.getElementById('clientModal'),
+    clientForm: document.getElementById('clientForm'),
+    clientFormMsg: document.getElementById('clientFormMsg'),
+    closeClientModal: document.getElementById('closeClientModal'),
+    cancelClientModal: document.getElementById('cancelClientModal'),
+    clientModalTitle: document.getElementById('clientModalTitle'),
+    clientFormSubmit: document.getElementById('clientFormSubmit'),
+    clientEditId: document.getElementById('client-edit-id'),
+    clientFullname: document.getElementById('client-fullname'),
+    clientSite: document.getElementById('client-site'),
+    clientHead: document.getElementById('client-head'),
+    clientCoordinator: document.getElementById('client-coordinator'),
+    clientPc: document.getElementById('client-pc'),
+    clientCredsNote: document.getElementById('clientCredsNote'),
+    toast: document.getElementById('toast')
+  };
+}
+
+
+/**
+ * @param {{ getToken?: () => string|null, getUser?: () => object|null, onLogout?: () => void }} [opts]
+ */
+export async function mountTaskflowApp(opts = {}) {
+  const { getToken, getUser, onLogout } = opts;
+  _onLogout = onLogout || null;
+  state.token = (typeof getToken === 'function' ? getToken() : null) || localStorage.getItem('tf_token') || null;
+  try {
+    state.user = (typeof getUser === 'function' ? getUser() : null) || JSON.parse(localStorage.getItem('tf_user') || 'null');
+  } catch {
+    state.user = null;
+  }
+
+  if (!state.token || !state.user?.id) {
+    console.warn('[mountTaskflowApp] skipped — no authenticated user');
+    return;
+  }
+
+  // Already on screen. Do not run enterApp again — that reloads Add Task
+  // dropdowns and wipes department / employee / project / task type mid-form.
+  if (_listenersBound && els.navList && els.navList.isConnected) {
+    return;
+  }
+  _listenersBound = false;
+  _enterApp = null;
+
+  els = collectEls();
+  if (!els.appScreen || !els.navList) {
+    console.error('[mountTaskflowApp] TaskflowDom not in document yet', {
+      appScreen: !!els.appScreen,
+      navList: !!els.navList,
+    });
+    return;
+  }
+
+  const __tfReadyFns = [];
+
+
+  /* els via collectEls() */
+
+  /* state module-scoped */
+
+  // ─── helpers ────────────────────────────────────────────────────────────────
+  function showToast(message, type = '') {
+    if (!els.toast) {
+      console.log('[toast]', type, message);
+      return;
+    }
+    els.toast.textContent = message;
+    els.toast.className = `toast ${type}`;
+    els.toast.hidden = false;
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => { els.toast.hidden = true; }, 3200);
+  }
+
+  function showCredsModal(username, password, { title, note } = {}) {
+    const titleEl = document.getElementById('credsModalTitle');
+    const noteEl = document.getElementById('credsModalNote');
+    if (titleEl) titleEl.textContent = title || 'Login created ✅';
+    if (noteEl) noteEl.textContent = note || "Share these login details — they won't be shown again.";
+    els.credsUsername.textContent = username;
+    els.credsPassword.textContent = password;
+    els.credsModal.hidden = false;
+  }
+
+  function hideFormMsg(el) {
+    if (el) el.hidden = true;
+  }
+  function showFormMsg(el, text) {
+    if (!el) {
+      showToast(text, 'error');
+      return;
+    }
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  async function api(path, { method = 'GET', body, isForm = false } = {}) {
+    const headers = {};
+    const tokenUsed = state.token || localStorage.getItem('tf_token') || '';
+    if (tokenUsed) headers.Authorization = `Bearer ${tokenUsed}`;
+    if (!isForm && body) headers['Content-Type'] = 'application/json';
+    const res = await fetch(`${API_BASE}${path}`, {
+      method, headers,
+      cache: 'no-store',
+      body: isForm ? body : (body ? JSON.stringify(body) : undefined)
+    });
+
+    // Sliding session: backend jab token expiry ke kareeb hota hai to naya
+    // token bhej deta hai — usko silently swap kar do
+    const newToken = res.headers.get('X-New-Token');
+    if (newToken) {
+      const current = localStorage.getItem('tf_token');
+      if (!current || current === tokenUsed) {
+        state.token = newToken;
+        localStorage.setItem('tf_token', newToken);
+      }
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      // Login attempt ke liye backend ka asli message dikhao (e.g. "Invalid
+      // username or password"), do not auto-logout — login has not succeeded yet.
+      if (path === '/auth/login') {
+        throw new Error(data.error || 'Invalid username or password');
+      }
+      const msg = String(data.error || data.message || '').toLowerCase();
+      // Only hard-logout on proven JWT death — and only if token wasn't replaced by a newer login
+      if (
+        /session expired|invalid token|jwt malformed|jwt expired|token expired/i.test(msg) &&
+        tokenUsed &&
+        localStorage.getItem('tf_token') === tokenUsed
+      ) {
+        logout();
+        throw new Error('Session expired, please log in again');
+      }
+      throw new Error(data.error || data.message || 'Request failed (401)');
+    }
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Something went wrong');
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+  function sortByLabel(items, labelKey = 'name') {
+    return [...(items || [])].sort((a, b) =>
+      String(a?.[labelKey] ?? a ?? '').localeCompare(String(b?.[labelKey] ?? b ?? ''), undefined, { sensitivity: 'base' })
+    );
+  }
+
+  function fillSelect(select, items, { placeholder, valueKey = 'id', labelKey = 'name', extraOption } = {}) {
+    if (!select) return;
+    const prev = select.value;
+    select.innerHTML = '';
+    if (placeholder) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = placeholder;
+      select.appendChild(opt);
+    }
+    sortByLabel(items, labelKey).forEach((item) => {
+      const opt = document.createElement('option');
+      opt.value = item[valueKey]; opt.textContent = item[labelKey];
+      select.appendChild(opt);
+    });
+    if (extraOption) {
+      const opt = document.createElement('option');
+      opt.value = extraOption.value; opt.textContent = extraOption.label;
+      select.appendChild(opt);
+    }
+    if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
+  }
+
+  function parseEmployeeSites(emp) {
+    const out = [];
+    const add = (s) => {
+      const v = String(s || '').trim();
+      if (v && !out.includes(v)) out.push(v);
+    };
+    if (Array.isArray(emp?.site_names)) emp.site_names.forEach(add);
+    else if (typeof emp?.site_names === 'string' && emp.site_names.trim()) {
+      try {
+        const parsed = JSON.parse(emp.site_names);
+        if (Array.isArray(parsed)) parsed.forEach(add);
+        else add(emp.site_names);
+      } catch { add(emp.site_names); }
+    }
+    add(emp?.site_name);
+    return out;
+  }
+
+  function getSelectedSites(root) {
+    if (!root) return [];
+    if (root._selectedSites instanceof Set) return [...root._selectedSites];
+    return [...root.querySelectorAll('.ms-list input[type="checkbox"]:checked')]
+      .map((cb) => cb.value)
+      .filter(Boolean);
+  }
+
+  function closeSiteMultiSelects(except) {
+    document.querySelectorAll('.multi-select.open').forEach((el) => {
+      if (except && el === except) return;
+      el.classList.remove('open');
+      const p = el.querySelector('.ms-panel');
+      if (p) p.hidden = true;
+      el.querySelector('.ms-toggle')?.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function fillSiteMultiSelect(root, projects, selected = []) {
+    if (!root) return;
+    const placeholder = root.dataset.placeholder || 'Select one or more sites';
+    const selectedSet = new Set((selected || []).map((s) => String(s).trim()).filter(Boolean));
+    root._selectedSites = selectedSet;
+    const names = [];
+    (projects || []).forEach((p) => {
+      const n = String(p?.name || '').trim();
+      if (n && !names.includes(n)) names.push(n);
+    });
+    selectedSet.forEach((s) => { if (!names.includes(s)) names.push(s); });
+    names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+    root.innerHTML = `
+      <button type="button" class="ms-toggle" id="${root.id}-toggle" aria-expanded="false" aria-haspopup="listbox">
+        <span class="ms-toggle-label is-placeholder"></span>
+        <span class="ms-caret">▾</span>
+      </button>
+      <div class="ms-panel" hidden>
+        <input type="search" class="ms-search" placeholder="Search sites…" autocomplete="off" />
+        <div class="ms-list" role="listbox"></div>
+      </div>
+      <div class="ms-chips"></div>
+    `;
+    const toggle = root.querySelector('.ms-toggle');
+    const label = root.querySelector('.ms-toggle-label');
+    const panel = root.querySelector('.ms-panel');
+    const search = root.querySelector('.ms-search');
+    const list = root.querySelector('.ms-list');
+    const chips = root.querySelector('.ms-chips');
+
+    function syncUi() {
+      const picked = names.filter((n) => selectedSet.has(n));
+      if (!picked.length) {
+        label.textContent = placeholder;
+        label.classList.add('is-placeholder');
+      } else if (picked.length === 1) {
+        label.textContent = picked[0];
+        label.classList.remove('is-placeholder');
+      } else {
+        label.textContent = `${picked.length} sites selected`;
+        label.classList.remove('is-placeholder');
+      }
+      chips.innerHTML = picked.map((n) =>
+        `<span class="ms-chip"><span title="${escapeHtml(n)}">${escapeHtml(n)}</span><button type="button" data-remove="${escapeHtml(n)}" aria-label="Remove">×</button></span>`
+      ).join('');
+      chips.querySelectorAll('button[data-remove]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedSet.delete(btn.dataset.remove);
+          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+            if (cb.value === btn.dataset.remove) cb.checked = false;
+          });
+          syncUi();
+        });
+      });
+    }
+
+    function renderList(filter = '') {
+      const q = filter.trim().toLowerCase();
+      const shown = names.filter((n) => !q || n.toLowerCase().includes(q));
+      if (!shown.length) {
+        list.innerHTML = `<div class="ms-empty">${names.length ? 'No matching sites' : 'No projects yet'}</div>`;
+        return;
+      }
+      list.innerHTML = shown.map((n) => `
+        <label class="ms-option">
+          <input type="checkbox" value="${escapeHtml(n)}" ${selectedSet.has(n) ? 'checked' : ''}>
+          <span>${escapeHtml(n)}</span>
+        </label>
+      `).join('');
+      list.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) selectedSet.add(cb.value);
+          else selectedSet.delete(cb.value);
+          syncUi();
+        });
+      });
+    }
+
+    function setOpen(open) {
+      if (open) closeSiteMultiSelects(root);
+      root.classList.toggle('open', open);
+      panel.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        search.value = '';
+        renderList('');
+        setTimeout(() => search.focus(), 0);
+      }
+    }
+
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      setOpen(panel.hidden);
+    });
+    search.addEventListener('input', () => renderList(search.value));
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); }
+    });
+
+    renderList('');
+    syncUi();
+  }
+
+  document.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.multi-select')) return;
+    closeSiteMultiSelects();
+  });
+
+  // JS parses a bare "YYYY-MM-DD" string (no time, no offset) as UTC midnight
+  // per the ISO-8601 spec — but a full timestamp like "...T10:15:00" (no
+  // timezone) is parsed as LOCAL time. target_date started life as a
+  // date-only field, so every plain date silently shifted by the browser's
+  // UTC offset once displayed (India = UTC+5:30, so midnight UTC → 5:30 AM
+  // IST — that's where the mystery "5:30 AM" was coming from, and why a
+  // date-only target_date and a reschedule's date+time target_date could
+  // disagree by hours even though both were "the same day"). This parses
+  // date-only strings as LOCAL midnight instead, so there's no shift.
+  function parseLocalDate(iso) {
+    if (!iso) return null;
+    if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(y, m - 1, d); // local midnight — no UTC shift
+    }
+    return new Date(iso);
+  }
+
+  function isRejectedTask(t) {
+    return String(t?.status || '').trim().toLowerCase() === 'rejected';
+  }
+
+  function isClosedOrRejectedTask(t) {
+    const st = String(t?.status || '').trim().toLowerCase();
+    const vs = String(t?.verification_status || '').trim().toLowerCase();
+    if (st === 'completed' || st === 'rejected') return true;
+    if (vs === 'verified' || vs === 'verification rejected') return true;
+    return false;
+  }
+
+  const VERIFICATION_SLA_HOURS = 2;
+
+  function verificationWorkDueDate(task) {
+    if (!task?.verification_started_at) return null;
+    const started = parseLocalDate(task.verification_started_at);
+    if (!started || Number.isNaN(started.getTime())) return null;
+    return addWorkingHours(started, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+  }
+
+  function verificationOverdueWorkingHours(task, now = new Date()) {
+    const due = verificationWorkDueDate(task);
+    if (!due || now <= due) return 0;
+    return Math.max(0, Math.round(elapsedWorkingHoursBetween(due, now) * 10) / 10);
+  }
+
+  function isVerificationOverdueTask(t, now = new Date()) {
+    if (t?.verification_status !== 'Pending Verification') return false;
+    const due = verificationWorkDueDate(t);
+    if (!due) return false;
+    return now > due;
+  }
+
+  const RESCHEDULE_ACTIONS = ['reschedule_approved', 'rescheduled_by_admin'];
+  const ACCEPT_ACTIONS = ['start_task', 'reaccept_task'];
+
+  function taskEventsOf(task) {
+    return Array.isArray(task?.task_events) ? task.task_events : [];
+  }
+
+  function lastEventAt(task, actions) {
+    let at = null;
+    taskEventsOf(task).forEach((e) => {
+      if (e && actions.includes(e.action) && e.at) {
+        if (!at || new Date(e.at) > new Date(at)) at = e.at;
+      }
+    });
+    return at;
+  }
+
+  /**
+   * An approved reschedule stops the timer until the employee accepts again.
+   * Falls back to the event log where the reaccept_required column is missing.
+   */
+  function needsReaccept(task) {
+    if (isClosedOrRejectedTask(task)) return false;
+    if (task?.reaccept_required !== undefined && task?.reaccept_required !== null) {
+      return !!task.reaccept_required;
+    }
+    if (task?.accepted_at) return false;
+    const movedAt = lastEventAt(task, RESCHEDULE_ACTIONS);
+    if (!movedAt) return false;
+    const acceptedAt = lastEventAt(task, ACCEPT_ACTIONS);
+    return !acceptedAt || new Date(acceptedAt) < new Date(movedAt);
+  }
+
+  /** The first plan date the admin set — kept even after a reschedule. */
+  function originalPlanDate(task) {
+    if (task?.original_target_date) return task.original_target_date;
+    const firstMove = taskEventsOf(task)
+      .filter((e) => e && RESCHEDULE_ACTIONS.includes(e.action) && e.from_target_date)
+      .sort((a, b) => new Date(a.at) - new Date(b.at))[0];
+    return firstMove?.from_target_date || task?.target_date || null;
+  }
+
+  /** The plan date in force now (after any approved reschedule). */
+  function activePlanDate(task) {
+    return task?.reschedule_approved_target_date || task?.target_date || task?.original_target_date || null;
+  }
+
+  /** True when an approved reschedule moved this task off its original plan. */
+  function wasRescheduledTask(task) {
+    if (task?.reschedule_approved_target_date) return true;
+    if (String(task?.reschedule_status || '') === 'Approved') return true;
+    return !!lastEventAt(task, RESCHEDULE_ACTIONS);
+  }
+
+  /** A plan date with no time means "by close of business" that day. */
+  function endOfPlanDay(planDateIso) {
+    if (!planDateIso) return null;
+    const d = parseLocalDate(planDateIso);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    const midnightish = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0;
+    if (!midnightish) return d;
+    const end = new Date(d);
+    end.setHours(18, 30, 0, 0);
+    return end;
+  }
+
+  function workTimerAnchor(task) {
+    if (task?.is_on_hold) return task.resumed_at || task.accepted_at || null;
+    if (task?.resumed_at) return task.resumed_at;
+    return task?.accepted_at || null;
+  }
+
+  function workTimerBudgetHours(task) {
+    if (task?.is_on_hold) {
+      const rem = Number(task.hold_remaining_hours);
+      if (rem > 0) return rem;
+      return Number(task.hours_to_complete) || 0;
+    }
+    if (task?.resumed_at && task.hold_remaining_hours != null) {
+      return Number(task.hold_remaining_hours) || 0;
+    }
+    return Number(task.hours_to_complete) || 0;
+  }
+
+  /** Hours the task was assigned with, before any hold trimmed the live budget. */
+  function assignedHoursOf(task) {
+    const orig = Number(task?.original_hours_to_complete);
+    if (task?.original_hours_to_complete != null && !Number.isNaN(orig)) return orig;
+    const cur = Number(task?.hours_to_complete);
+    return Number.isNaN(cur) ? null : cur;
+  }
+
+  /**
+   * Pre-accept deadline: assigned_at + assigned hours, in office time.
+   * This is what the Due column shows before Accept — never a plan date.
+   */
+  function employeeAssignedDeadline(task) {
+    const start = task?.assigned_at || task?.created_at;
+    const hours = assignedHoursOf(task);
+    if (!start || hours == null || hours <= 0) return null;
+    try {
+      return addWorkingHours(start, hours, { fromNowIfToday: false });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Work overdue. Two ways in:
+   *   1. Timer running and the work deadline passed.
+   *   2. A rescheduled task whose new plan date passed without a fresh Accept.
+   */
+  function isAssignmentOverdueTask(t, now = new Date()) {
+    if (isClosedOrRejectedTask(t)) return false;
+    if (t?.is_on_hold) return false;
+    if (t?.verification_status === 'Pending Verification') return false;
+
+    if (needsReaccept(t)) {
+      const planEnd = endOfPlanDay(activePlanDate(t));
+      return !!planEnd && now > planEnd;
+    }
+
+    if (!t?.accepted_at) return false;
+    const due = employeeWorkDueDate(t);
+    if (!due) return false;
+    return now > due;
+  }
+
+  function isDelegatedOverdueTask(t, now = new Date()) {
+    if (isClosedOrRejectedTask(t)) return false;
+    return isVerificationOverdueTask(t, now) || isAssignmentOverdueTask(t, now);
+  }
+
+  /** Live work deadline once accepted (and not waiting on a fresh Accept). */
+  function employeeWorkDueDate(task) {
+    if (needsReaccept(task)) return null;
+    if (!task?.accepted_at) return null;
+    if (task.work_due_at) {
+      const stored = parseLocalDate(task.work_due_at);
+      if (stored && !Number.isNaN(stored.getTime())) return stored;
+    }
+    const anchor = workTimerAnchor(task);
+    const hours = workTimerBudgetHours(task);
+    if (!anchor || !hours || hours <= 0) return null;
+    return addWorkingHours(anchor, hours, { fromNowIfToday: false });
+  }
+
+  /**
+   * The one date the employee sees in Due: a real work deadline, never the
+   * admin's plan/target date. Accept moves it from assign-based to accept-based.
+   */
+  function employeeDueDate(task) {
+    return employeeWorkDueDate(task) || employeeAssignedDeadline(task);
+  }
+
+  /** Whole calendar days a task has been overdue (0 = went overdue today). */
+  function overdueCalendarDays(task, now = new Date()) {
+    const since = task?.overdue_since_at
+      ? parseLocalDate(task.overdue_since_at)
+      : (needsReaccept(task) ? endOfPlanDay(activePlanDate(task)) : employeeWorkDueDate(task));
+    if (!since || Number.isNaN(since.getTime()) || now <= since) return 0;
+    const a = new Date(since.getFullYear(), since.getMonth(), since.getDate());
+    const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.max(0, Math.round((b - a) / 86400000));
+  }
+
+  function fmtOverdueDateCell(task, now = new Date()) {
+    if (isVerificationOverdueTask(task, now)) {
+      const due = verificationWorkDueDate(task);
+      const hrsPast = verificationOverdueWorkingHours(task, now);
+      return `
+        <div>Verify due: ${fmtDate(due.toISOString())}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
+      `;
+    }
+    // Rescheduled but never accepted again — the plan date is the miss here.
+    if (needsReaccept(task) && isAssignmentOverdueTask(task, now)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      const days = overdueCalendarDays(task, now);
+      return `
+        <div>Rescheduled to: ${planEnd ? fmtDate(planEnd.toISOString()) : '—'}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">Not accepted again${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''} 🔴</div>
+      `;
+    }
+    const workDue = employeeWorkDueDate(task);
+    if (workDue && isAssignmentOverdueTask(task, now)) {
+      const hrsLate = Math.max(0, Math.floor(elapsedWorkingHoursBetween(workDue, now)));
+      return `
+        <div>Work due: ${fmtDate(workDue.toISOString())}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsLate > 0 ? `${hrsLate}h work overdue 🔴` : 'Work overdue today 🔴'}</div>
+      `;
+    }
+    const plan = activePlanDate(task);
+    const daysOverdue = plan ? Math.floor((now - parseLocalDate(plan)) / 86400000) : 0;
+    return `
+      <div>${plan ? fmtDateOnly(plan) : '—'}</div>
+      <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
+    `;
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    return parseLocalDate(iso).toLocaleString(undefined, {
+      day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit'
+    });
+  }
+  function fmtDateOnly(iso) {
+    if (!iso) return '—';
+    return parseLocalDate(iso).toLocaleDateString(undefined, {
+      day: '2-digit', month: 'short', year: 'numeric'
+    });
+  }
+  function fmtSheetDateTime(iso) {
+    if (!iso) return '—';
+    const d = parseLocalDate(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  // Admin-facing deadline: ONLY the target date, no time. The employee-facing
+  // calculated deadline (fmtCalculatedDeadline / fmtDueDateFromCreated below)
+  // is the one that shows an actual time, since that's the real computed
+  // due-by moment; the raw target_date has no meaningful time of its own.
+  function fmtDeadlineDateOnlyWithHours(iso, hours) {
+    const d = fmtDateOnly(iso);
+    return hours != null ? `${d} · ${hours}h` : d;
+  }
+
+  // ── Office-hours-aware due date calculator ─────────────────────────────────
+  // Office hours: 9:30 AM – 6:30 PM, Monday–Saturday (Sunday off), with a
+  // 1-hour lunch break from 1:00 PM – 2:00 PM that doesn't count as work time.
+  // Due date = task's target date/time + hours_to_complete of *working* time,
+  // skipping nights, lunch, and Sundays.
+  const OFFICE_HOURS = {
+    startH: 9, startM: 30,
+    endH: 18, endM: 30,
+    lunchStartH: 13, lunchStartM: 0,
+    lunchEndH: 14, lunchEndM: 0
+  };
+
+  function atTime(date, h, m) {
+    const d = new Date(date);
+    d.setHours(h, m, 0, 0);
+    return d;
+  }
+
+  // Moves a moment forward to the next valid working instant: not on a Sunday,
+  // not before opening, not after closing, and not during lunch.
+  function snapToWorkingMoment(date) {
+    let d = new Date(date);
+    for (let guard = 0; guard < 30; guard++) { // guard against any edge-case infinite loop
+      if (d.getDay() === 0) { // Sunday — jump to Monday 9:30
+        d.setDate(d.getDate() + 1);
+        d = atTime(d, OFFICE_HOURS.startH, OFFICE_HOURS.startM);
+        continue;
+      }
+      const dayStart = atTime(d, OFFICE_HOURS.startH, OFFICE_HOURS.startM);
+      const dayEnd = atTime(d, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
+      const lunchStart = atTime(d, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
+      const lunchEnd = atTime(d, OFFICE_HOURS.lunchEndH, OFFICE_HOURS.lunchEndM);
+
+      if (d < dayStart) { d = dayStart; continue; }
+      if (d >= dayEnd) {
+        d.setDate(d.getDate() + 1);
+        d = atTime(d, OFFICE_HOURS.startH, OFFICE_HOURS.startM);
+        continue;
+      }
+      if (d >= lunchStart && d < lunchEnd) { d = new Date(lunchEnd); continue; }
+      return d; // valid working instant
+    }
+    return d;
+  }
+
+  // Adds `hours` of working time (office hours, minus lunch, Mon–Sat only) to
+  // a starting datetime and returns the resulting Date.
+  // function addWorkingHours(startDate, hours) {
+  //   let remainingMs = (Number(hours) || 0) * 3600000;
+  //   let current = snapToWorkingMoment(parseLocalDate(startDate));
+  //   if (remainingMs <= 0) return current;
+  function addWorkingHours(startDate, hours, { fromNowIfToday = true } = {}) {
+    let remainingMs = (Number(hours) || 0) * 3600000;
+    let current = snapToWorkingMoment(parseLocalDate(startDate));
+
+    // For a target date of today, start from "now" so the preview is not already
+    // in the past. Employee due dates pass fromNowIfToday:false so they stay
+    // anchored to the real assign/create time.
+    if (fromNowIfToday) {
+      const now = snapToWorkingMoment(new Date());
+      const targetDay = parseLocalDate(startDate);
+      const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
+        && targetDay.getMonth() === new Date().getMonth()
+        && targetDay.getDate() === new Date().getDate();
+      if (isSameCalendarDay && now > current) {
+        current = now;
+      }
+    }
+
+    if (remainingMs <= 0) return current;
+
+    for (let guard = 0; guard < 1000 && remainingMs > 0; guard++) {
+      const dayEnd = atTime(current, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
+      const lunchStart = atTime(current, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
+      const segmentEnd = current < lunchStart ? lunchStart : dayEnd;
+      const availableMs = segmentEnd - current;
+
+      if (remainingMs <= availableMs) {
+        current = new Date(current.getTime() + remainingMs);
+        remainingMs = 0;
+      } else {
+        remainingMs -= availableMs;
+        current = snapToWorkingMoment(segmentEnd);
+      }
+    }
+    return current;
+  }
+
+  /** Working hours elapsed between two instants (office hours, minus lunch, Sun off). */
+  function elapsedWorkingHoursBetween(startDate, endDate) {
+    const start = snapToWorkingMoment(parseLocalDate(startDate));
+    const end = snapToWorkingMoment(new Date(endDate));
+    if (!start || !end || end <= start) return 0;
+    let totalMs = 0;
+    let current = new Date(start);
+    for (let guard = 0; guard < 1000 && current < end; guard++) {
+      const dayEnd = atTime(current, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
+      const lunchStart = atTime(current, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
+      const segmentEnd = current < lunchStart ? lunchStart : dayEnd;
+      const effectiveEnd = end < segmentEnd ? end : segmentEnd;
+      if (effectiveEnd > current) totalMs += effectiveEnd - current;
+      if (end <= segmentEnd) break;
+      current = snapToWorkingMoment(segmentEnd);
+    }
+    return totalMs / 3600000;
+  }
+
+  function formatDurationShort(ms) {
+    if (!ms || ms <= 0) return '~0m';
+    const totalMin = Math.ceil(ms / 60000);
+    if (totalMin < 60) return `~${totalMin}m`;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m > 0 ? `~${h}h ${m}m` : `~${h}h`;
+  }
+
+  function formatHoursLabel(h) {
+    const n = Number(h);
+    if (!n || Number.isNaN(n)) return '—';
+    return n % 1 === 0 ? `${n}h` : `${n.toFixed(1)}h`;
+  }
+
+  /** Remaining working-time budget until due (excludes nights, lunch, Sunday). */
+  function workingTimeLeftMs(from, due) {
+    if (!due || !from) return 0;
+    const hours = elapsedWorkingHoursBetween(from, due);
+    return Math.max(0, hours * 3600000);
+  }
+
+  /**
+   * Employee My Tasks Due cell: always a work deadline plus live countdown.
+   * The admin's plan/target date is never shown here — before Accept it is
+   * assign time + hours, after Accept it is accept time + hours.
+   */
+  function fmtEmployeeTimerHtml(task, now = new Date()) {
+    if (task.is_on_hold) {
+      const rem = task.hold_remaining_hours ?? task.hours_to_complete;
+      return `
+        <div class="task-timer-hold">⏸ Timer paused</div>
+        <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
+      `;
+    }
+    // Rescheduled: plan moved, timer reset, waiting for a fresh Accept.
+    if (needsReaccept(task)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      const hrs = formatHoursLabel(assignedHoursOf(task));
+      if (isAssignmentOverdueTask(task, now)) {
+        const days = overdueCalendarDays(task, now);
+        return `
+          <div class="task-timer-due">Rescheduled to ${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'}</div>
+          <div class="task-timer-overdue">🔴 Not accepted${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''}</div>
+        `;
+      }
+      return `
+        <div class="task-timer-due">Rescheduled to ${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'}</div>
+        <div class="task-timer-sub">Accept again to start the ${hrs} timer</div>
+      `;
+    }
+    if (!task.accepted_at) {
+      const deadline = employeeAssignedDeadline(task);
+      const assignedAt = task.assigned_at || task.created_at;
+      if (deadline) {
+        return `<div class="task-timer-due">Due ${fmtDate(deadline.toISOString())}</div>`;
+      }
+      if (assignedAt) {
+        return `
+          <div class="task-timer-due">Assigned ${fmtDate(assignedAt)}</div>
+          <div class="task-timer-sub">No hours set · Accept to start after hours are added</div>
+        `;
+      }
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    }
+    if (task.verification_status === 'Pending Verification') {
+      return `
+        <div class="task-timer-due">Sent for verification</div>
+        <div class="task-timer-sub">Waiting on ${escapeHtml(task.verifier?.full_name ?? 'verifier')}</div>
+      `;
+    }
+    const hours = workTimerBudgetHours(task);
+    if (!hours || hours <= 0) {
+      return `<div class="task-timer-due">Accepted ${fmtDate(task.accepted_at)}</div>`;
+    }
+    const workDue = employeeWorkDueDate(task);
+    if (!workDue) {
+      return `<div class="task-timer-wait">Accept task to start timer</div>`;
+    }
+
+    if (isAssignmentOverdueTask(task, now)) {
+      const overdueMs = workingTimeLeftMs(workDue, now);
+      return `
+        <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
+        <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
+      `;
+    }
+
+    const msLeft = workingTimeLeftMs(now, workDue);
+    const urgent = msLeft < 30 * 60 * 1000;
+    return `
+      <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
+      <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
+    `;
+  }
+
+  // Employee due date plain text (fallback)
+  function fmtDueDateFromCreated(task) {
+    if (task.is_on_hold) {
+      return `⏸ On hold · ${formatHoursLabel(task.hold_remaining_hours ?? task.hours_to_complete)} saved`;
+    }
+    if (needsReaccept(task)) {
+      const planEnd = endOfPlanDay(activePlanDate(task));
+      return `${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'} · accept again to start timer`;
+    }
+    const due = employeeDueDate(task);
+    if (!due) return task.accepted_at ? fmtDate(task.accepted_at) : 'Accept task to start timer';
+    const hrsLabel = task.accepted_at
+      ? formatHoursLabel(workTimerBudgetHours(task))
+      : `${formatHoursLabel(assignedHoursOf(task))} deadline`;
+    return `${fmtDate(due.toISOString())} · ${hrsLabel}`;
+  }
+
+  let myTasksTimerCache = [];
+
+  /** Accepted / in-progress work that can justify Hold (switching between tasks). */
+  function isActiveAcceptedWorkTask(task) {
+    if (!task?.accepted_at) return false;
+    if (isRejectedTask(task) || task.status === 'Completed') return false;
+    if (task.status === 'Pending') return false;
+    if (task.verification_status === 'Pending Verification') return false;
+    return task.status === 'In Progress' || task.status === 'Ticket Raised' || !!task.is_on_hold;
+  }
+
+  function countMyActiveAcceptedTasks(extraTask) {
+    const uid = String(state.user?.id || '');
+    const byId = new Map();
+    (myTasksTimerCache || []).forEach((t) => {
+      const assignee = String(t.assigned_to_user?.id || t.assigned_to || '');
+      if (uid && assignee && assignee !== uid) return;
+      if (isActiveAcceptedWorkTask(t)) byId.set(String(t.id), t);
+    });
+    if (extraTask && isActiveAcceptedWorkTask(extraTask)) {
+      const assignee = String(extraTask.assigned_to_user?.id || extraTask.assigned_to || '');
+      if (!uid || !assignee || assignee === uid) byId.set(String(extraTask.id), extraTask);
+    }
+    return byId.size;
+  }
+
+  /** Hold only when 2+ accepted tasks. Resume always if already on hold (avoid stuck). */
+  function canShowHoldForTask(task) {
+    return countMyActiveAcceptedTasks(task) >= 2;
+  }
+
+  function canShowResumeForTask(task) {
+    if (!task?.is_on_hold) return false;
+    return true;
+  }
+
+  function refreshEmployeeTimerDisplays() {
+    const now = new Date();
+    document.querySelectorAll('[data-task-timer-id]').forEach((el) => {
+      const id = el.dataset.taskTimerId;
+      const task = myTasksTimerCache.find((t) => t.id === id);
+      if (task) el.innerHTML = fmtEmployeeTimerHtml(task, now);
+    });
+    document.querySelectorAll('[data-task-timer-card-id]').forEach((el) => {
+      const id = el.dataset.taskTimerCardId;
+      const task = myTasksTimerCache.find((t) => t.id === id);
+      if (task) el.innerHTML = fmtEmployeeTimerHtml(task, now);
+    });
+  }
+
+  function fmtCalculatedDeadline(targetDateIso, hours) {
+    if (!targetDateIso) return '—';
+    const due = addWorkingHours(targetDateIso, hours);
+    const d = fmtDate(due.toISOString());
+    return hours != null ? `${d} · ${hours}h` : d;
+  }
+
+  function toDatetimeLocalValue(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  function datetimeLocalToIso(value) {
+    if (!value) return '';
+    const [date, time] = String(value).split('T');
+    if (!date || !time) return '';
+    const [y, mo, d] = date.split('-').map(Number);
+    const [h, mi, se] = time.split(':').map(Number);
+    return new Date(y, mo - 1, d, h, mi || 0, se || 0).toISOString();
+  }
+  function syncDueActionFields(prefix) {
+    const action = document.getElementById(`${prefix}-due-action`)?.value || 'keep';
+    const extraWrap = document.getElementById(`${prefix}ExtraWrap`);
+    const dueWrap = document.getElementById(`${prefix}NewDueWrap`);
+    const unit = document.getElementById(`${prefix}-extra-unit`);
+    if (extraWrap) extraWrap.hidden = action !== 'hours' && action !== 'days';
+    if (dueWrap) dueWrap.hidden = action !== 'new';
+    if (unit) unit.value = action === 'hours' || action === 'days' ? action : '';
+  }
+  function fillDuePrompt(prefix, task) {
+    const label = document.getElementById(`${prefix}CurrentDue`);
+    const due = document.getElementById(`${prefix}-new-due`);
+    const action = document.getElementById(`${prefix}-due-action`);
+    const amount = document.getElementById(`${prefix}-extra-amount`);
+    if (label) {
+      label.innerHTML = task?.target_date
+        ? `This was your target date: <strong>${escapeHtml(fmtDate(task.target_date))}</strong>`
+        : 'This task has no target date yet.';
+    }
+    if (action) action.value = 'keep';
+    if (amount) amount.value = '';
+    if (due) due.value = toDatetimeLocalValue(task?.target_date);
+    syncDueActionFields(prefix);
+  }
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  // Builds the "Project: / Task Type: / Details: [/ Assigned to:]" block used
+  // in the Task Details column of both the All Tasks and My Tasks tables.
+  function buildTaskDetailsHtml(task, { showAssignee = false } = {}) {
+    const desc = task.description ?? '';
+    const shortDesc = desc.length > 100 ? desc.slice(0, 100) + '…' : desc;
+    let html = `
+      <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project?.name ?? '—')}</div>
+      <div class="task-detail-line"><span class="task-detail-label">Task Type:</span> ${escapeHtml(task.task_type?.name ?? '—')}</div>
+      <div class="task-detail-line"><span class="task-detail-label">Details:</span> ${escapeHtml(shortDesc)}</div>
+    `;
+    if (showAssignee) {
+      html += `<div class="task-detail-line"><span class="task-detail-label">Assigned to:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>`;
+    }
+    return html;
+  }
+
+  // ─── auth (login handled by React AuthContext) ────────────────────────────────
+  function logout() {
+    state.token = null; state.user = null;
+    localStorage.removeItem('tf_token'); localStorage.removeItem('tf_user');
+    if (window._badgeInterval) clearInterval(window._badgeInterval);
+    if (typeof _onLogout === 'function') _onLogout();
+  }
+  function bindAuthControls() {
+    if (els.logoutBtn) els.logoutBtn?.addEventListener('click', logout);
+  }
+  bindAuthControls();
+
+  // ─── sidebar toggle ─────────────────────────────────────────────────────────
+  function isMobileNav() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+  function closeSidebar() {
+    els.sidebar?.classList.remove('open');
+    if (els.sidebarOverlay) {
+      els.sidebarOverlay.hidden = true;
+      els.sidebarOverlay.setAttribute('hidden', '');
+    }
+    document.body.classList.remove('sidebar-open');
+  }
+  function openSidebar() {
+    els.sidebar?.classList.add('open');
+    // Overlay is visual-only on mobile; close only via ☰ (menuToggle).
+    if (els.sidebarOverlay) {
+      if (isMobileNav()) {
+        els.sidebarOverlay.hidden = false;
+        els.sidebarOverlay.removeAttribute('hidden');
+      } else {
+        els.sidebarOverlay.hidden = true;
+        els.sidebarOverlay.setAttribute('hidden', '');
+      }
+    }
+    document.body.classList.add('sidebar-open');
+  }
+  if (els.menuToggle) {
+    els.menuToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (els.sidebar?.classList.contains('open')) closeSidebar();
+      else openSidebar();
+    });
+  }
+  // Do not close on overlay / outside / main clicks — only ☰ toggles.
+  window.addEventListener('resize', () => {
+    if (els.sidebar?.classList.contains('open')) openSidebar();
+  });
+
+  // ─── app shell ───────────────────────────────────────────────────────────────
+  async function enterApp() {
+    if (!state.user?.id) {
+      console.warn('[enterApp] skipped — user missing');
+      return;
+    }
+    if (els.appScreen) els.appScreen.hidden = false;
+    if (els.userName) els.userName.textContent = state.user.full_name || state.user.username || '';
+    if (els.userRoleTag) {
+      els.userRoleTag.textContent = state.user.is_mis_executive
+        ? 'MIS executive'
+        : state.user.role || '';
+    }
+    try {
+      const vis = await api('/master/nav-visibility');
+      state.navVis = vis.map || {};
+      state.navModules = vis.modules || [];
+    } catch {
+      state.navVis = {};
+    }
+    buildNav();
+    setupTopbarQuick();
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => { });
+      }
+    } catch (_) { }
+    // Desktop: sidebar open by default; mobile: closed
+    if (isMobileNav()) closeSidebar();
+    else openSidebar();
+
+    // Refresh permissions from DB (e.g. Add task just enabled by admin)
+    try {
+      const me = await api('/auth/me');
+      if (me && me.id) {
+        state.user = { ...state.user, ...me };
+        localStorage.setItem('tf_user', JSON.stringify(state.user));
+        if (typeof window.dispatchEvent === 'function') {
+          window.dispatchEvent(new CustomEvent('tf:user-refreshed', { detail: state.user }));
+        }
+        buildNav();
+        setupTopbarQuick();
+      }
+    } catch (_) { /* keep cached user */ }
+
+    if (state.user.role === 'admin') {
+      await loadMasterData();
+      switchView('add');
+    } else {
+      // Employees with Add task need master dropdowns; always preload
+      await loadMasterData().catch(() => { });
+      switchView('my');
+    }
+    // Refresh badge counts now and every 15s
+    refreshNavBadges();
+    if (window._badgeInterval) clearInterval(window._badgeInterval);
+    window._badgeInterval = setInterval(refreshNavBadges, 15000);
+    if (window._timerInterval) clearInterval(window._timerInterval);
+    window._timerInterval = setInterval(() => {
+      if (state.activeView === 'my') refreshEmployeeTimerDisplays();
+    }, 60000);
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => { });
+      }
+    } catch (_) { }
+    // Head/admin: unresolved leave covers (buddy declined) — popup until resolved
+    checkLeaveCoverAlerts();
+  }
+
+  function viewerNavRole() {
+    const u = state.user || {};
+    const role = String(u.role || '').toLowerCase().trim();
+    const dept = String(u.department || '').toLowerCase().trim();
+    const desig = String(u.designation || '').toLowerCase().trim();
+    if (role === 'client' || dept === 'client') return 'client';
+    if (role === 'admin') return 'admin';
+    if (u.is_mis_executive || /\bmis\b/.test(`${u.department || ''} ${u.designation || ''}`)) {
+      return 'mis';
+    }
+    const blob = `${role} ${dept} ${desig}`;
+    const head =
+      !!u.is_head ||
+      role === 'head' ||
+      desig === 'head' ||
+      /site incharge|project head|site head/.test(blob);
+    if (
+      dept === 'site engineer' ||
+      /site engineer|jr\.?\s*site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+    ) {
+      return head ? 'site_head' : 'site';
+    }
+    if (head && /incharge|project head|\bhead\b/.test(blob)) return 'site_head';
+    return 'employee';
+  }
+
+  function visOk(key) {
+    const map = state.navVis || {};
+    const row = map[key];
+    const who = viewerNavRole();
+    if (who === 'client') return false;
+    // Admin always keeps Add / All / Overdue menus
+    if (who === 'admin' && (key === 'add' || key === 'all' || key === 'overdue')) return true;
+    // Per-user Add task flag (Permissions) overrides role map for "add"
+    if (key === 'add' && (state.user?.role === 'admin' || state.user?.can_add_task)) return true;
+    if (!row) return true;
+    return row[who] !== false;
+  }
+
+  function buildNav() {
+    const isAdmin = state.user.role === 'admin';
+    const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
+    const isChirag =
+      isAdmin
+      || (() => {
+        const uname = String(state.user?.username || '').toLowerCase().trim();
+        const name = String(state.user?.full_name || '').toLowerCase().trim();
+        return uname === 'chirag.s' || uname.startsWith('chirag') || name.includes('chirag');
+      })();
+    const canAddSite = isAdmin || !!state.user.can_add_site;
+    const canAddEmployee = isAdmin || !!state.user.can_add_employee;
+    const canAddTask = isAdmin || !!state.user.can_add_task;
+    const canResolveTickets = isAdmin || !!state.user.can_resolve_tickets;
+
+    const taskItems = [];
+    // Admin always; Permissions “Add task”; or Who sees what grants the role
+    if (isAdmin || canAddTask || visOk('add')) {
+      taskItems.push({ key: 'add', label: '➕ Add new task' });
+    }
+    if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
+    if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
+    if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
+    if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? '🔁 Recurring tasks' : '🔁 My recurring tasks' });
+    if (visOk('my')) taskItems.push({ key: 'task-history', label: '📜 Task History' });
+
+    els.navList.innerHTML = '';
+    if (taskItems.length) {
+      appendCollapsibleNav(
+        'Tasks',
+        taskItems.map((t) => makeNavButton(t.key, t.label)),
+        { collapsed: true, sectionId: 'tasks' }
+      );
+    }
+
+    const isMdoHead =
+      isMdoOfficeUser() &&
+      (!!state.user.is_head ||
+        /\bhead\b/i.test(String(state.user.designation || '')) ||
+        String(state.user.role || '').toLowerCase() === 'head');
+    if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis || isMdoHead)) {
+      appendCollapsibleNav(
+        'Verification',
+        [makeNavButton('verifications', '🔎 Verification requests')],
+        { collapsed: true, sectionId: 'verification' }
+      );
+    }
+
+    if (visOk('tickets')) {
+      appendCollapsibleNav(
+        isMis ? 'MIS — Ticket Tracking' : 'Support',
+        [makeNavButton('tickets-open', '🟠 Open Tickets'), makeNavButton('tickets-resolved', '✅ Resolved Tickets')],
+        { collapsed: true, sectionId: 'support' }
+      );
+    }
+
+    if (!isAdmin && visOk('corrections')) {
+      appendCollapsibleNav(
+        'Corrections',
+        [makeNavButton('corrections', '↩ Corrections'), makeNavButton('updations', '📝 Updations')],
+        { collapsed: true, sectionId: 'corrections' }
+      );
+    }
+
+    if (isAdmin && visOk('reschedule-requests') !== false) {
+      appendCollapsibleNav(
+        'Reschedule',
+        [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
+        { collapsed: true, sectionId: 'reschedule' }
+      );
+    }
+
+    const showAdminBlock = visOk('employees') && (isAdmin || canAddEmployee)
+      || visOk('sites') && (isAdmin || canAddSite)
+      || visOk('clients') && isAdmin
+      || visOk('hierarchy') && isAdmin
+      || visOk('project-mgmt') && isAdmin
+      || visOk('masterdata') && isAdmin
+      || visOk('permissions') && isAdmin
+      || visOk('daily-report') && (isAdmin || isMis)
+      || visOk('mis-report') && (isAdmin || isMis)
+      || visOk('time-dashboard') && (isAdmin || isMis)
+      || visOk('delay-report') && (isAdmin || isMis)
+      || visOk('fms') && (isAdmin || isMis)
+      || isChirag;
+
+    if (showAdminBlock) {
+      const adminBtns = [];
+      if (visOk('employees') && (isAdmin || canAddEmployee)) adminBtns.push(makeNavButton('employees', '👥 Manage employees'));
+      if (visOk('hierarchy') && isAdmin) {
+        adminBtns.push(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
+        if (visOk('project-mgmt')) adminBtns.push(makeNavButton('project-mgmt', '🗂️ Project management'));
+      }
+      if (visOk('sites') && (isAdmin || canAddSite)) adminBtns.push(makeNavButton('sites', '🏗️ Manage sites'));
+      if (visOk('clients') && isAdmin) adminBtns.push(makeNavButton('clients', '👤 Manage clients'));
+      if (visOk('masterdata') && isAdmin) adminBtns.push(makeNavButton('masterdata', '🗂️ Departments & task types'));
+      if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', '🔐 Permissions'));
+      if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
+      if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
+      if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
+      if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
+      if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
+      if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
+      appendCollapsibleNav(
+        isMis && !isAdmin ? 'MIS' : 'Administration',
+        adminBtns,
+        { collapsed: true, sectionId: 'administration' }
+      );
+    }
+
+    if (isMis && state.user?.role !== 'admin') {
+      appendCollapsibleNav(
+        'MIS Support',
+        [makeNavButton('visibility', '👁 Who sees what')],
+        { collapsed: true, sectionId: 'mis-support' }
+      );
+    }
+
+    if (visOk('drawings') && isAdmin) {
+      appendCollapsibleNav(
+        'Drawings',
+        [makeNavButton('drawings-add', '➕ Add Drawing'), makeNavButton('drawings-all', '📐 All Drawings')],
+        { collapsed: true, sectionId: 'drawings' }
+      );
+    }
+
+    const reportBtns = [
+      makeNavButton('site-report', '🏗️ Site Visit Report'),
+      makeNavButton('my-reports', '📄 My Reports'),
+    ];
+    if (visOk('monthly-report')) {
+      reportBtns.push(makeNavButton('monthly-report', '📁 Monthly Report'));
+    }
+    if (reportBtns.length) {
+      appendCollapsibleNav(
+        'Reports',
+        reportBtns,
+        { collapsed: true, sectionId: 'reports' }
+      );
+    }
+
+    const leaveBtns = [];
+    if (visOk('applyleave')) leaveBtns.push(makeNavButton('applyleave', '🌴 Apply Leave'));
+    if (visOk('buddyrequests')) leaveBtns.push(makeNavButton('buddyrequests', '🤝 Buddy requests'));
+    if (visOk('leaveapprovals') && isAdmin) leaveBtns.push(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+    if (leaveBtns.length) {
+      appendCollapsibleNav('Leave', leaveBtns, { collapsed: true, sectionId: 'leave' });
+    }
+
+    const isHeadUser =
+      state.user.role === 'head' ||
+      !!state.user.is_head ||
+      /\bhead\b|project head|team lead/i.test(`${state.user.designation || ''} ${state.user.department || ''}`);
+    if (isHeadUser || isAdmin) {
+      appendCollapsibleNav(
+        'HR / Hiring',
+        [makeNavButton('new-recruitment', '🧑‍💼 Hiring requirement')],
+        { collapsed: true, sectionId: 'hr-hiring' }
+      );
+    }
+  }
+
+  const NAV_SECTION_BY_VIEW = {
+    add: 'tasks', all: 'tasks', overdue: 'tasks', my: 'tasks', recurring: 'tasks', 'task-history': 'tasks',
+    verifications: 'verification',
+    'reschedule-requests': 'reschedule',
+    employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
+    sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
+    'daily-report': 'administration', 'mis-report': 'administration',
+    'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
+    'site-report': 'reports', 'my-reports': 'reports', 'monthly-report': 'reports',
+    visibility: 'mis-support',
+    applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
+    'new-recruitment': 'hr-hiring',
+    corrections: 'corrections', updations: 'corrections',
+    'tickets-open': 'support', 'tickets-resolved': 'support', tickets: 'support',
+    'drawings-add': 'drawings', 'drawings-all': 'drawings',
+  };
+
+  function appendCollapsibleNav(title, buttons, { collapsed = true, sectionId } = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-group' + (collapsed ? ' is-collapsed' : '');
+    wrap.dataset.section = sectionId || title.toLowerCase();
+    const hdr = document.createElement('button');
+    hdr.type = 'button';
+    hdr.className = 'nav-section-toggle';
+    hdr.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    hdr.innerHTML = `<span class="nav-section-toggle-label">${title}</span><span class="nav-section-chev" aria-hidden="true"></span>`;
+    const kids = document.createElement('div');
+    kids.className = 'nav-group-kids';
+    if (collapsed) kids.hidden = true;
+    buttons.forEach((b) => kids.appendChild(b));
+    hdr.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const shut = !kids.hidden;
+      if (!shut) setNavGroupOpen(wrap, true);
+      else setNavGroupOpen(wrap, false);
+    });
+    wrap.appendChild(hdr);
+    wrap.appendChild(kids);
+    els.navList.appendChild(wrap);
+  }
+
+  function setNavGroupOpen(group, open, { accordion = false } = {}) {
+    if (!group) return;
+    if (open && accordion) {
+      document.querySelectorAll('#appScreen .nav-group').forEach((g) => {
+        if (g === group) return;
+        setNavGroupOpen(g, false, { accordion: false });
+      });
+    }
+    const kids = group.querySelector('.nav-group-kids');
+    const hdr = group.querySelector('.nav-section-toggle');
+    if (kids) kids.hidden = !open;
+    group.classList.toggle('is-collapsed', !open);
+    hdr?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function ensureNavSectionOpen(viewKey) {
+    const sectionId = NAV_SECTION_BY_VIEW[viewKey];
+    if (!sectionId) return;
+    const group = document.querySelector(`#appScreen .nav-group[data-section="${sectionId}"]`);
+    if (!group) return;
+    setNavGroupOpen(group, true);
+  }
+
+  function makeNavButton(key, label, badge) {
+    const btn = document.createElement('button');
+    btn.className = 'nav-btn'; btn.dataset.view = key;
+    btn.dataset.label = label;
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'nav-btn-label';
+    labelSpan.textContent = label;
+    btn.appendChild(labelSpan);
+    if (badge != null && badge > 0) {
+      const bdg = document.createElement('span');
+      bdg.className = 'nav-badge';
+      bdg.textContent = badge > 99 ? '99+' : badge;
+      btn.appendChild(bdg);
+    }
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchView(key);
+      // Keep sidebar open until user taps ☰ — do not auto-close on nav item.
+    });
+    return btn;
+  }
+
+  // Updates badge on an existing nav button (or creates one if missing)
+  function setNavBadge(viewKey, count) {
+    if (viewKey === 'team-chat') {
+      const top = document.getElementById('topChatBadge');
+      if (top) {
+        if (!count || count <= 0) {
+          top.hidden = true;
+          top.textContent = '';
+        } else {
+          top.hidden = false;
+          top.textContent = count > 99 ? '99+' : String(count);
+        }
+      }
+    }
+    const btn = document.querySelector(`.nav-btn[data-view="${viewKey}"]`);
+    if (!btn) return;
+    let bdg = btn.querySelector('.nav-badge');
+    if (!count || count <= 0) {
+      if (bdg) bdg.remove();
+      return;
+    }
+    if (!bdg) {
+      bdg = document.createElement('span');
+      bdg.className = 'nav-badge';
+      btn.appendChild(bdg);
+    }
+    bdg.textContent = count > 99 ? '99+' : count;
+  }
+
+  function setupTopbarQuick() {
+    const isAdmin = state.user?.role === 'admin';
+    const dip = document.getElementById('topDipBotBtn');
+    const chat = document.getElementById('topChatBtn');
+    const mom = document.getElementById('topMomBtn');
+    const cal = document.getElementById('topCalBtn');
+    if (dip) {
+      dip.hidden = !visOk('ai-bot') || !isAdmin;
+      dip.onclick = () => switchView('ai-bot');
+    }
+    if (chat) {
+      chat.hidden = !visOk('team-chat');
+      chat.onclick = () => switchView('team-chat');
+    }
+    if (mom) {
+      mom.hidden = !visOk('meetings');
+      mom.onclick = () => switchView('meetings');
+    }
+    if (cal) {
+      cal.hidden = !visOk('calendar') || !!isAdmin;
+      cal.onclick = () => switchView('calendar');
+    }
+  }
+
+  // Poll badge counts from the API and update nav
+  async function refreshNavBadges() {
+    try {
+      // HR uses /hr portal — do not hammer TaskFlow APIs in the background
+      const roleLc = String(state.user?.role || '').toLowerCase();
+      if (roleLc === 'hr') return;
+
+      if (state.user?.role !== 'admin') {
+        // Employee: my tasks (pending), corrections, updations, verifications
+        const myTasks = await api('/tasks/my');
+        const pending = myTasks.filter(t => t.status === 'Pending' || t.status === 'In Progress').length;
+        const corrections = myTasks.filter(t => t.verification_status === 'Verification Rejected').length;
+        const updations = myTasks.filter(t => t.verification_status === 'Updation Required').length;
+        setNavBadge('my', pending);
+        setNavBadge('corrections', corrections);
+        setNavBadge('updations', updations);
+
+        // Verifications (if verifier)
+        if (state.user?.can_verify) {
+          const verifs = await api('/tasks/verifications');
+          setNavBadge('verifications', verifs.length);
+        }
+
+        // Reschedule requests are admin-only (approve/reject). Emp requests
+        // from the task menu and does not get a requests inbox.
+        setNavBadge('reschedule-requests', 0);
+
+        // My recurring tasks — count of instances still outstanding (today's
+        // due instance plus any backlog that hasn't been marked Completed yet)
+        const myRecurring = await api('/recurring-tasks/my').catch(() => []);
+        const recurringPending = myRecurring.filter(t => {
+          const st = t.instance?.status;
+          return st !== 'Completed' && st !== 'NotApplicable';
+        }).length;
+        setNavBadge('recurring', recurringPending);
+
+        // Open tickets
+        const tickets = await api('/tickets').catch(() => []);
+        const openTickets = tickets.filter(t => t.status === 'Open').length;
+        setNavBadge('tickets-open', openTickets);
+
+        const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
+        setNavBadge('buddyrequests', buddyReqs.length);
+
+        const chatUnreadEmp = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnreadEmp?.total || 0);
+      } else {
+        // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
+        const allTasks = await api('/tasks/all');
+        const now = new Date();
+        // Open delegated work: Pending + In Progress + ticket/verify queues
+        const pendingCount = allTasks.filter((t) => {
+          const st = String(t.status || '');
+          const vs = String(t.verification_status || '');
+          if (st === 'Completed' || st === 'Rejected') return false;
+          if (vs === 'Verified') return false;
+          return true;
+        }).length;
+        const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
+
+        const recurringAll = await api('/recurring-tasks/all').catch(() => []);
+        const overdueRecurringCount = recurringAll.filter(t => t.is_overdue).length;
+
+        setNavBadge('all', pendingCount);
+        setNavBadge('overdue', overdueCount + overdueRecurringCount);
+
+        // Admin's own "My tasks" — delegated + own recurring pending
+        const myTasks = await api('/tasks/my').catch(() => []);
+        const myPending = myTasks.filter(t => t.status === 'Pending' || t.status === 'In Progress').length;
+        const myRecurringAdmin = await api('/recurring-tasks/my').catch(() => []);
+        const myRecurringPending = (myRecurringAdmin || []).filter((t) => {
+          const st = t.instance?.status;
+          return st !== 'Completed' && st !== 'NotApplicable';
+        }).length;
+        setNavBadge('my', myPending + myRecurringPending);
+
+        // Verifications where THIS admin is the chosen verifier (admins can be
+        // picked as a verifier too — see /master/verifiers). This was missing
+        // before, so the badge never showed up for admins even when tasks were
+        // sitting in their verification queue.
+        const adminVerifs = await api('/tasks/verifications').catch(() => []);
+        setNavBadge('verifications', adminVerifs.length);
+
+        // Reschedule requests awaiting admin decision (API already Pending-only)
+        const reschedReqs = await api('/tasks/reschedule-requests?status=Pending').catch(() => []);
+        setNavBadge('reschedule-requests', reschedReqs.length);
+
+        // Open tickets
+        const tickets = await api('/tickets').catch(() => []);
+        const openTickets = tickets.filter(t => t.status === 'Open').length;
+        setNavBadge('tickets-open', openTickets);
+
+        // Pending leave requests awaiting approval
+        const pendingLeaves = await api('/leaves/all?status=Pending').catch(() => []);
+        const coverItems = await api('/leaves/unresolved-covers').catch(() => []);
+        setNavBadge('leaveapprovals', pendingLeaves.length + (Array.isArray(coverItems) ? coverItems.length : 0));
+
+        const buddyReqs = await api('/leaves/buddy-requests').catch(() => []);
+        setNavBadge('buddyrequests', buddyReqs.length);
+
+        const chatUnreadAdmin = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnreadAdmin?.total || 0);
+      }
+
+      const alerts = await api('/bot/alerts').catch(() => []);
+      const unreadMeet = (alerts || []).filter((a) => !a.is_read && /^Meeting started/i.test(String(a.title || '')));
+      setNavBadge('meetings', unreadMeet.length);
+      if (!window._seenMeetAlerts) window._seenMeetAlerts = new Set();
+      unreadMeet.forEach((a) => {
+        if (window._seenMeetAlerts.has(a.id)) return;
+        window._seenMeetAlerts.add(a.id);
+        const age = Date.now() - new Date(a.created_at || 0).getTime();
+        if (Number.isFinite(age) && age < 3 * 60 * 1000) fireSystemNotify(a.title, a.body);
+      });
+    } catch (e) { /* silently fail — badges are non-critical */ }
+  }
+
+  function switchView(viewKey) {
+    // DIP Bot is admin-only
+    if (viewKey === 'visibility') {
+      const misOnly = state.user?.role !== 'admin' && (
+        !!state.user?.is_mis_executive || /\bmis\b/i.test(`${state.user?.department || ''} ${state.user?.designation || ''}`)
+      );
+      if (!misOnly) {
+        showToast('Who sees what is only for MIS Support', 'error');
+        return;
+      }
+    }
+    state.activeView = viewKey;
+    window.__tfActiveView = viewKey;
+    ensureNavSectionOpen(viewKey);
+    document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
+
+    // tickets-open and tickets-resolved share the same view-tickets section
+    const htmlKey = (viewKey === 'tickets-open' || viewKey === 'tickets-resolved') ? 'tickets' : viewKey;
+    const viewEl = document.getElementById(`view-${htmlKey}`);
+    if (viewEl) viewEl.hidden = false;
+
+    document.querySelectorAll('.nav-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.view === viewKey);
+    });
+    if (viewKey === 'add') loadMasterData();
+    if (viewKey === 'all') loadAllTasks();
+    if (viewKey === 'overdue') loadOverdueTasks();
+    if (viewKey === 'my') loadMyTasks();
+    if (viewKey === 'employees') loadEmployees();
+    if (viewKey === 'hierarchy') loadHierarchy();
+    if (viewKey === 'sites') loadSites();
+    if (viewKey === 'clients') loadClients();
+    if (viewKey === 'masterdata') loadMasterDataView();
+    if (viewKey === 'permissions') loadPermissions();
+    if (viewKey === 'visibility') { loadVisibility(); loadReminderSettings(); }
+    if (viewKey === 'verifications') loadVerifications();
+    if (viewKey === 'reschedule-requests') loadRescheduleRequests();
+    if (viewKey === 'tickets') loadTickets();
+    if (viewKey === 'tickets-open') loadTicketsFiltered('Open');
+    if (viewKey === 'tickets-resolved') loadTicketsFiltered('Resolved');
+    if (viewKey === 'corrections') loadCorrections();
+    if (viewKey === 'updations') loadUpdations();
+    if (viewKey === 'recurring') loadRecurringView();
+    if (viewKey === 'task-history') loadTaskHistory();
+    if (viewKey === 'applyleave') loadMyLeaves();
+    if (viewKey === 'buddyrequests') loadBuddyRequests();
+    if (viewKey === 'leaveapprovals') { loadLeaveApprovals(); checkLeaveCoverAlerts(); }
+    if (viewKey === 'new-recruitment') loadHrRecruitmentMine();
+    if (viewKey === 'drawings-add') renderDrawingAddView();
+    if (viewKey === 'drawings-all') loadAllDrawings();
+    if (viewKey === 'daily-report') loadDailyReport();
+    if (viewKey === 'mis-report') loadMisReport();
+    if (viewKey === 'time-dashboard') loadTimeDashboard();
+    if (viewKey === 'delay-report') loadDelayReport();
+    if (viewKey === 'emp-report') loadEmpReport();
+    if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
+    if (viewKey === 'fms') loadFms();
+    if (viewKey === 'ai-bot') loadAiBot();
+    if (viewKey === 'team-chat') loadTeamChat();
+    if (viewKey === 'meetings') loadMeetings();
+    if (viewKey === 'calendar') loadCalendar();
+    if (viewKey === 'project-mgmt') loadProjectMgmt();
+  }
+
+  // ─── master data (admin) ─────────────────────────────────────────────────────
+  function normDeptName(s) {
+    return String(s || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  /** Employees whose users.department text matches the selected departments.name */
+  function employeesForDepartmentId(deptId) {
+    const all = state.master.employees || [];
+    if (!deptId) return [];
+    const dept = (state.master.departments || []).find((d) => d.id === deptId);
+    if (!dept) return [];
+    const target = normDeptName(dept.name);
+    return all.filter((e) => normDeptName(e.department) === target);
+  }
+
+  function syncTaskEmployeeDropdown() {
+    if (!els.fEmployee) return;
+    const deptId = els.fDepartment?.value || '';
+    let list = employeesForDepartmentId(deptId);
+    list = [...list].sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+    );
+    const prev = els.fEmployee.value;
+    fillSelect(els.fEmployee, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'Select employee'
+          : 'No employees in this department'
+        : 'Select department first',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) {
+      els.fEmployee.value = prev;
+    }
+  }
+
+  function syncFilterEmployeeDropdown() {
+    if (!els.filterEmployee) return;
+    const deptId = els.filterDepartment?.value || '';
+    const list = deptId ? employeesForDepartmentId(deptId) : state.master.employees || [];
+    const prev = els.filterEmployee.value;
+    fillSelect(els.filterEmployee, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'All employees in dept'
+          : 'No employees in this department'
+        : 'All employees',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) els.filterEmployee.value = prev;
+  }
+
+  function syncOverdueEmployeeDropdown() {
+    if (!els.overdueFilterEmployee) return;
+    const list = state.master.employees || [];
+    const prev = els.overdueFilterEmployee.value;
+    fillSelect(els.overdueFilterEmployee, list, {
+      placeholder: 'All employees',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) els.overdueFilterEmployee.value = prev;
+  }
+
+  function syncRecurringEmployeeDropdown() {
+    const empSel = recEls.employee?.();
+    const deptSel = recEls.department?.();
+    if (!empSel) return;
+    const deptId = deptSel?.value || '';
+    const list = employeesForDepartmentId(deptId);
+    const prev = empSel.value;
+    fillSelect(empSel, list, {
+      placeholder: deptId
+        ? list.length
+          ? 'Select Employee'
+          : 'No employees in this department'
+        : 'Select department first',
+      labelKey: 'full_name',
+    });
+    if (prev && list.some((e) => e.id === prev)) empSel.value = prev;
+  }
+
+  async function loadMasterData() {
+    try {
+      const [departments, projects, taskTypes, employees] = await Promise.all([
+        api('/master/departments'), api('/master/projects'),
+        api('/master/task-types'), api('/master/employees')
+      ]);
+      state.master = {
+        departments: sortByLabel(departments),
+        projects: sortByLabel(projects),
+        taskTypes: sortByLabel(taskTypes),
+        employees: sortByLabel((employees || []).filter((e) => !isClientUserRow(e)), 'full_name'),
+      };
+      fillSelect(els.fDepartment, state.master.departments, { placeholder: 'Select department' });
+      fillSelect(els.fProject, state.master.projects, { placeholder: 'Select project' });
+      fillSelect(els.fTaskType, state.master.taskTypes, { placeholder: 'Select task type' });
+      fillSelect(els.filterDepartment, state.master.departments, { placeholder: 'All departments' });
+      fillSitePeopleDropdowns(state.master.employees);
+      syncTaskEmployeeDropdown();
+      syncFilterEmployeeDropdown();
+      syncOverdueEmployeeDropdown();
+      fillRecurringDropdowns();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  // 17 july 2026
+  els.fDepartment?.addEventListener('change', () => {
+    const dept = state.master.departments.find(d => d.id === els.fDepartment.value);
+    const isMdoOffice = dept && dept.name === 'MDO OFFICE';
+    els.fProject.required = !isMdoOffice;
+    const reqStar = document.getElementById('f-project-req');
+    if (reqStar) reqStar.style.display = isMdoOffice ? 'none' : 'inline';
+    syncTaskEmployeeDropdown();
+  });
+
+  els.filterDepartment?.addEventListener('change', () => {
+    syncFilterEmployeeDropdown();
+  });
+
+
+  async function refreshEmployeeDropdowns() {
+    try {
+      const employees = sortByLabel(
+        (await api('/master/employees')).filter((e) => !isClientUserRow(e)),
+        'full_name'
+      );
+      state.master.employees = employees;
+      syncTaskEmployeeDropdown();
+      syncFilterEmployeeDropdown();
+      syncOverdueEmployeeDropdown();
+      syncRecurringEmployeeDropdown();
+      fillSelect(els.siteTeamleader, siteTeamLeaderOptions(employees), { placeholder: 'Select team incharge', labelKey: 'full_name' });
+      fillSelect(els.siteCoordinator, siteCoordinatorOptions(employees), { placeholder: 'Select coordinator', labelKey: 'full_name' });
+      fillSelect(els.siteIncharge, siteInchargeOptions(employees), { placeholder: 'Select head name', labelKey: 'full_name' });
+      fillSitePcDropdown(employees);
+      // Reporting Head — optional field on the employee form. Add form shows everyone;
+      // Edit form additionally excludes the employee being edited (can't report to self).
+      fillSelect(els.empReportingHead, employees, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // ─── Add New Task ────────────────────────────────────────────────────────────
+
+  // Live preview of the actual completion deadline while assigning a task —
+  // reuses the same office-hours-aware calculator (9:30 AM–6:30 PM, 1–2 PM
+  // lunch excluded, Sundays skipped) that's already used to show deadlines
+  // everywhere else in the app, so what the admin sees here always matches
+  // what employees/verifiers see later on the task itself.
+  function updateTaskDeadlinePreview() {
+    const previewEl = document.getElementById('f-deadline-preview');
+    if (!previewEl) return;
+    const hoursRaw = document.getElementById('f-hours').value;
+    const dateRaw = document.getElementById('f-targetdate').value;
+
+    if (!dateRaw) {
+      previewEl.innerHTML = '';
+      return;
+    }
+    const hours = hoursRaw === '' ? null : Number(hoursRaw);
+    if (hours == null || Number.isNaN(hours) || hours <= 0) {
+      previewEl.innerHTML = `Starts <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong> — add hours to see the calculated completion deadline.`;
+      return;
+    }
+    const due = addWorkingHours(dateRaw, hours);
+    previewEl.innerHTML = `⏱ With <strong>${hours}h</strong> of working time starting <strong>${escapeHtml(fmtDateOnly(dateRaw))}</strong>, this task is due by <strong>${escapeHtml(fmtDate(due.toISOString()))}</strong>.`;
+  }
+  document.getElementById('f-hours')?.addEventListener('input', updateTaskDeadlinePreview);
+  document.getElementById('f-targetdate')?.addEventListener('input', updateTaskDeadlinePreview);
+  updateTaskDeadlinePreview();
+
+  els.addTaskForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideFormMsg(els.addTaskMsg);
+    if (!els.fDepartment.value || !els.fEmployee.value || !els.fTaskType.value) {
+      showFormMsg(els.addTaskMsg, 'Please fill in all required fields');
+      return;
+    }
+    await openAssignCheckpointGate();
+  });
+
+  async function actuallyAssignTask(cpLabels) {
+    const formData = new FormData();
+    formData.append('department_id', els.fDepartment.value);
+    formData.append('assigned_to', els.fEmployee.value);
+    formData.append('project_id', els.fProject.value);
+    formData.append('task_type_id', els.fTaskType.value);
+    formData.append('description', document.getElementById('f-description').value);
+    formData.append('hours_to_complete', document.getElementById('f-hours').value);
+    formData.append('target_date', document.getElementById('f-targetdate').value);
+    formData.append('priority', document.getElementById('f-priority').value);
+    formData.append('rescheduling_possible', document.getElementById('f-reschedule').value);
+    const attachment = document.getElementById('f-attachment').files[0];
+    const voiceNote = document.getElementById('f-voicenote').files[0];
+    if (attachment) formData.append('attachment', attachment);
+    if (voiceNote) formData.append('voice_note', voiceNote);
+    if (cpLabels.length) formData.append('checkpoints', JSON.stringify(cpLabels));
+    const created = await api('/tasks', { method: 'POST', body: formData, isForm: true });
+    if (cpLabels.length && created?.id && !(created.checkpoints || []).length && !created.checkpoint_error) {
+      try {
+        await api(`/tasks/${created.id}/checkpoints`, {
+          method: 'POST',
+          body: { labels: cpLabels, task_type_id: els.fTaskType.value },
+        });
+      } catch (_) { /* table missing — task is still assigned */ }
+    }
+    showToast('Task assigned ✅', 'success');
+    els.addTaskForm.reset();
+    document.getElementById('f-priority').value = 'Medium';
+    document.getElementById('f-reschedule').value = 'false';
+    updateTaskDeadlinePreview();
+  }
+
+  function toggleInlineAdd(rowId) {
+    const row = document.getElementById(rowId);
+    if (!row) return;
+    row.hidden = !row.hidden;
+    if (!row.hidden) row.querySelector('input')?.focus();
+  }
+
+  document.getElementById('f-add-dept')?.addEventListener('click', () => toggleInlineAdd('f-add-dept-row'));
+  document.getElementById('f-add-project')?.addEventListener('click', () => toggleInlineAdd('f-add-project-row'));
+  document.getElementById('f-add-tasktype')?.addEventListener('click', () => toggleInlineAdd('f-add-tasktype-row'));
+
+  document.getElementById('f-save-dept')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-dept');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a department name', 'error');
+    try {
+      const created = await api('/master/departments', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fDepartment) els.fDepartment.value = created.id;
+      els.fDepartment?.dispatchEvent(new Event('change'));
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-dept-row');
+      if (row) row.hidden = true;
+      showToast('Department added', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('f-save-project')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-project');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a project name', 'error');
+    try {
+      const created = await api('/master/projects', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fProject) els.fProject.value = created.id;
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-project-row');
+      if (row) row.hidden = true;
+      showToast('Project added', 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  document.getElementById('f-save-tasktype')?.addEventListener('click', async () => {
+    const input = document.getElementById('f-new-tasktype');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter a task type name', 'error');
+    try {
+      const created = await api('/master/task-types', { method: 'POST', body: { name } });
+      await loadMasterData();
+      if (els.fTaskType) els.fTaskType.value = created.id;
+      if (input) input.value = '';
+      const row = document.getElementById('f-add-tasktype-row');
+      if (row) row.hidden = true;
+      showToast('Task type added', 'success');
+      openTypeCheckpointEditModal(created.id, created.name || name);
+    } catch (err) { showToast(err.message, 'error'); }
+  });
+
+  let _typeCpEditId = null;
+  function addTypeCpEditRow(value = '') {
+    const list = document.getElementById('typeCpEditList');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'checkpoint-row';
+    row.innerHTML = `
+      <input type="text" class="checkpoint-input type-cp-edit-input" placeholder="Checkpoint label…" value="${escapeHtml(value)}" />
+      <button type="button" class="ghost-btn-text type-cp-edit-remove">Remove</button>
+    `;
+    row.querySelector('.type-cp-edit-remove').addEventListener('click', () => row.remove());
+    list.appendChild(row);
+    row.querySelector('input')?.focus();
+  }
+  function openTypeCheckpointEditModal(typeId, typeName) {
+    _typeCpEditId = typeId;
+    const modal = document.getElementById('typeCpEditModal');
+    const title = document.getElementById('typeCpEditTitle');
+    const list = document.getElementById('typeCpEditList');
+    const msg = document.getElementById('typeCpEditMsg');
+    if (title) title.textContent = `Add checkpoints — ${typeName || 'task type'}`;
+    if (list) list.innerHTML = '';
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
+    addTypeCpEditRow();
+    if (modal) modal.hidden = false;
+  }
+  function closeTypeCpEditModal() {
+    const modal = document.getElementById('typeCpEditModal');
+    if (modal) modal.hidden = true;
+    _typeCpEditId = null;
+  }
+  document.getElementById('typeCpEditAdd')?.addEventListener('click', () => addTypeCpEditRow());
+  document.getElementById('closeTypeCpEditModal')?.addEventListener('click', closeTypeCpEditModal);
+  document.getElementById('cancelTypeCpEditModal')?.addEventListener('click', closeTypeCpEditModal);
+  document.getElementById('saveTypeCpEditModal')?.addEventListener('click', async () => {
+    const msg = document.getElementById('typeCpEditMsg');
+    const labels = [...document.querySelectorAll('#typeCpEditList .type-cp-edit-input')]
+      .map((el) => el.value.trim())
+      .filter(Boolean);
+    if (!_typeCpEditId) return closeTypeCpEditModal();
+    if (!labels.length) return closeTypeCpEditModal();
+    try {
+      await api(`/master/task-types/${_typeCpEditId}/checkpoints`, { method: 'PUT', body: { labels } });
+      showToast('Checkpoints saved on this task type', 'success');
+      closeTypeCpEditModal();
+    } catch (err) {
+      if (msg) { msg.textContent = err.message || 'Could not save'; msg.hidden = false; }
+    }
+  });
+
+  // ─── All Delegated Tasks ──────────────────────────────────────────────────────
+  function buildAllTasksQuery() {
+    const params = new URLSearchParams();
+    if (els.filterDepartment.value) params.set('department_id', els.filterDepartment.value);
+    if (els.filterEmployee.value) params.set('employee_id', els.filterEmployee.value);
+    const st = els.filterStatus.value;
+    if (st && st !== 'open') params.set('status', st);
+    return params.toString();
+  }
+
+  async function loadAllTasks() {
+    const tbody = els.allTasksList;
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading tasks…</td></tr>`;
+    els.allTasksCards.innerHTML = `<div class="empty-state">Loading tasks…</div>`;
+    try {
+      const query = buildAllTasksQuery();
+      let tasks = await api(`/tasks/all${query ? `?${query}` : ''}`);
+
+      if (els.filterStatus.value === 'open') {
+        tasks = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
+      }
+
+      const from = els.filterCreatedFrom.value ? new Date(els.filterCreatedFrom.value) : null;
+      const to = els.filterCreatedTo.value ? new Date(els.filterCreatedTo.value + 'T23:59:59') : null;
+      if (from || to) {
+        const before = tasks.length;
+        tasks = tasks.filter((t) => {
+          const d = new Date(t.created_at);
+          if (from && d < from) return false;
+          if (to && d > to) return false;
+          return true;
+        });
+        const hidden = before - tasks.length;
+        els.dateRangeCount.textContent = `${tasks.length} task${tasks.length !== 1 ? 's' : ''} in range${hidden ? ` · ${hidden} hidden` : ''}`;
+        els.dateRangeCount.hidden = false;
+      } else {
+        els.dateRangeCount.hidden = true;
+      }
+
+      renderAllTasksTable(tbody, tasks);
+      renderTaskList(els.allTasksCards, tasks, { showAssignee: true, allowActions: true });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  [els.filterDepartment, els.filterEmployee, els.filterStatus].forEach((sel) =>
+    sel.addEventListener('change', loadAllTasks)
+  );
+  [els.filterCreatedFrom, els.filterCreatedTo].forEach((inp) =>
+    inp.addEventListener('change', loadAllTasks)
+  );
+  els.clearAllFilters?.addEventListener('click', () => {
+    els.filterDepartment.value = ''; els.filterEmployee.value = '';
+    els.filterStatus.value = 'open'; els.filterCreatedFrom.value = '';
+    els.filterCreatedTo.value = ''; els.dateRangeCount.hidden = true;
+    loadAllTasks();
+  });
+
+  // renders the admin "All delegated tasks" as a table (desktop)
+  function assignedHoursLabel(task) {
+    const orig = task.original_hours_to_complete != null && task.original_hours_to_complete !== ''
+      ? Number(task.original_hours_to_complete)
+      : null;
+    const cur = task.hours_to_complete != null && task.hours_to_complete !== ''
+      ? Number(task.hours_to_complete)
+      : null;
+    const display = orig != null && !Number.isNaN(orig) ? orig : cur;
+    if (display == null || Number.isNaN(display)) return '—';
+    return `${display}h`;
+  }
+
+  /**
+   * Admin plan cell. Shows the date in force now; when a reschedule moved it,
+   * the original plan stays underneath so history is never hidden.
+   */
+  function plannedDateCellHtml(task) {
+    const current = activePlanDate(task);
+    if (!current) return '—';
+    const currentLabel = fmtDateOnly(current);
+    const original = originalPlanDate(task);
+    const moved = wasRescheduledTask(task)
+      && original
+      && fmtDateOnly(original) !== currentLabel;
+    if (!moved) return escapeHtml(currentLabel);
+    return `
+      <div>${escapeHtml(currentLabel)}</div>
+      <div style="font-size:0.75rem;color:#888">was ${escapeHtml(fmtDateOnly(original))}</div>
+      ${task.reaccept_required ? `<div style="font-size:0.72rem;color:#c47f00;font-weight:600">awaiting re-accept</div>` : ''}
+    `;
+  }
+
+  function renderAllTasksTable(tbody, tasks) {
+    if (!tasks || tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+      const statusClass = task.status.replace(/\s/g, '');
+
+      // Sr No
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
+
+      // Task details
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: true });
+
+      // Planned date — current plan, with the original kept visible after a move
+      const tdDate = document.createElement('td');
+      tdDate.style.wordBreak = 'break-word';
+      tdDate.innerHTML = plannedDateCellHtml(task);
+
+      // Hrs to complete (original assigned when available)
+      const tdHrs = document.createElement('td');
+      tdHrs.style.textAlign = 'center';
+      tdHrs.style.fontWeight = '600';
+      tdHrs.textContent = assignedHoursLabel(task);
+
+      // Assigned to
+      const tdAssigned = document.createElement('td');
+      tdAssigned.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
+
+      // Voice note
+      const tdVoice = document.createElement('td');
+      tdVoice.style.textAlign = 'center';
+      if (task.voice_note_url) {
+        const a = document.createElement('a');
+        a.href = task.voice_note_url; a.target = '_blank'; a.rel = 'noopener';
+        a.className = 'media-link'; a.title = 'Play voice note'; a.textContent = '🎤';
+        tdVoice.appendChild(a);
+      } else {
+        tdVoice.innerHTML = `<span class="media-none">—</span>`;
+      }
+
+      // Attachment
+      const tdAttach = document.createElement('td');
+      tdAttach.style.textAlign = 'center';
+      if (task.attachment_url) {
+        const a = document.createElement('a');
+        a.href = task.attachment_url; a.target = '_blank'; a.rel = 'noopener';
+        a.className = 'media-link'; a.title = 'View attachment'; a.textContent = '📎';
+        tdAttach.appendChild(a);
+      } else {
+        tdAttach.innerHTML = `<span class="media-none">—</span>`;
+      }
+
+      // Priority
+      const tdPriority = document.createElement('td');
+      tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
+
+      // Status (with verification badge if applicable)
+      const tdStatus = document.createElement('td');
+      let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
+        statusHtml += verifyingStatusPillHtml(task);
+      } else if (task.verification_status === 'Verified') {
+        statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
+      } else if (task.verification_status === 'Verification Rejected') {
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+      }
+      tdStatus.innerHTML = statusHtml;
+
+      // Actions
+      const tdActions = document.createElement('td');
+      tdActions.className = 'row-actions';
+      buildPrimaryStatusButtons(task, { showAssignee: true, allowActions: true }).forEach((btn) => tdActions.appendChild(btn));
+      tdActions.appendChild(buildCardMenuElement(task, { showAssignee: true }));
+
+      tr.append(tdSr, tdDetails, tdDate, tdHrs, tdAssigned, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ─── Overdue Tasks (admin) ───────────────────────────────────────────────────
+  // Reuses the same /tasks/all data as "All delegated tasks". A task counts as
+  // overdue when its target_date has passed and it hasn't actually finished
+  // (Rejected tasks never show here at all). Within that set:
+  //   - "source" tells you whether it's overdue because it's still sitting
+  //     unfinished from assignment, or because it's stuck waiting on a verifier.
+  //   - if an admin has set an overdue_extended_until that's still in the
+  //     future, the task moves to the "Pending" tab inside the drawer (it's
+  //     still overdue against the real target_date, but someone already
+  //     acknowledged it and gave the employee more time). Once that extended
+  //     time itself passes, it falls back into "Today" — needs attention again.
+  let overdueTasksCache = [];
+  let overdueDrawerTab = 'today';
+
+  function taskOverdueSource(task) {
+    if (isVerificationOverdueTask(task)) return 'verification';
+    if (isAssignmentOverdueTask(task)) return 'assignment';
+    return 'assignment';
+  }
+
+  function isOverdueExtensionActive(task) {
+    return !!task.overdue_extended_until && new Date(task.overdue_extended_until) > new Date();
+  }
+
+  function overdueAssigneeId(task) {
+    return task.assigned_to || task.assigned_to_user?.id || '';
+  }
+
+  async function loadOverdueTasks() {
+    els.overdueTasksList.innerHTML = `<tr><td colspan="9" class="empty-state">Loading overdue tasks…</td></tr>`;
+    els.overdueTasksCards.innerHTML = `<div class="empty-state">Loading overdue tasks…</div>`;
+    try {
+      syncOverdueEmployeeDropdown();
+      const empId = els.overdueFilterEmployee?.value || '';
+      const tasks = await api('/tasks/all');
+      const now = new Date();
+      const overdue = tasks.filter((t) => {
+        if (!isDelegatedOverdueTask(t, now)) return false;
+        if (empId && overdueAssigneeId(t) !== empId) return false;
+        return true;
+      }).sort((a, b) => {
+        const aVerify = isVerificationOverdueTask(a, now) ? 0 : 1;
+        const bVerify = isVerificationOverdueTask(b, now) ? 0 : 1;
+        if (aVerify !== bVerify) return aVerify - bVerify;
+        const aDue = employeeWorkDueDate(a) || parseLocalDate(a.target_date) || now;
+        const bDue = employeeWorkDueDate(b) || parseLocalDate(b.target_date) || now;
+        return aDue - bDue;
+      });
+
+      overdueTasksCache = overdue;
+      renderOverdueTasksTable(els.overdueTasksList, overdue);
+      renderTaskList(els.overdueTasksCards, overdue, { showAssignee: true, allowActions: true });
+      setBadge('overdueTaskBadge', overdue.length);
+
+      // Recurring tasks that have missed a due date also count as "overdue"
+      // for the admin — kept in their own "Recurring Task" tab since they're
+      // a different kind of record (instances, not delegated tasks).
+      const recurringAll = await api('/recurring-tasks/all').catch(() => []);
+      const overdueRecurring = recurringAll
+        .filter((t) => t.is_overdue && (!empId || overdueAssigneeId(t) === empId))
+        .sort((a, b) => b.overdue_days - a.overdue_days);
+      renderOverdueRecurringSection(overdueRecurring);
+      setBadge('overdueRecurringBadge', overdueRecurring.length);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  els.overdueFilterEmployee?.addEventListener('change', () => {
+    if (state.activeView === 'overdue') loadOverdueTasks();
+  });
+  els.clearOverdueFilters?.addEventListener('click', () => {
+    if (els.overdueFilterEmployee) els.overdueFilterEmployee.value = '';
+    if (state.activeView === 'overdue') loadOverdueTasks();
+  });
+
+  // ─── Overdue tab switching: Task ↔ Recurring Task ──────────────────────────
+  __tfReadyFns.push(() => {
+    document.querySelectorAll('#overdueTabBar .my-tasks-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#overdueTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.overduetab;
+        const taskPanel = document.getElementById('overdueTaskTabPanel');
+        const recPanel = document.getElementById('overdueRecurringTabPanel');
+        if (taskPanel) taskPanel.hidden = tab !== 'task';
+        if (recPanel) recPanel.hidden = tab !== 'recurring';
+      });
+    });
+  });
+
+  function renderOverdueRecurringSection(tasks) {
+    const tbody = document.getElementById('overdueRecurringTableBody');
+    const cards = document.getElementById('overdueRecurringCards');
+    if (!tbody || !cards) return;
+
+    if (tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</td></tr>`;
+      cards.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</div>`;
+      return;
+    }
+
+    tbody.innerHTML = '';
+    cards.innerHTML = '';
+    tasks.forEach((task) => {
+      const projectName = task.project?.name || '—';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
+        <td><strong style="font-weight:600">${escapeHtml(projectName)}</strong></td>
+        <td>${escapeHtml(task.description ?? '')}</td>
+        <td>${escapeHtml(freqLabel(task))}</td>
+        <td>${escapeHtml(fmtDateOnly(task.oldest_overdue_date))}</td>
+        <td><span class="pill pill-Rejected">${task.overdue_days} day${task.overdue_days > 1 ? 's' : ''}</span></td>
+      `;
+      tbody.appendChild(tr);
+
+      const card = document.createElement('div');
+      card.className = 'task-card';
+      card.innerHTML = `
+        <div class="task-card-header">
+          <span class="pill pill-Rejected">${task.overdue_days} day${task.overdue_days > 1 ? 's' : ''} overdue</span>
+          <span style="font-size:12px;color:#888">${escapeHtml(freqLabel(task))}</span>
+        </div>
+        <div class="task-card-body">
+          <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(projectName)}</div>
+          <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+          <div class="task-detail-line"><span class="task-detail-label">Overdue since:</span> ${escapeHtml(fmtDateOnly(task.oldest_overdue_date))}</div>
+        </div>
+      `;
+      cards.appendChild(card);
+    });
+  }
+
+  // renders the admin "Overdue tasks" as a table (desktop) — adds a Verifier
+  // column and a Source badge, and clicking a row opens the Today/Pending
+  // detail drawer for that task.
+  function renderOverdueTasksTable(tbody, tasks) {
+    if (!tasks || tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">🎉</span>No overdue tasks</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      const statusClass = task.status.replace(/\s/g, '');
+      const source = taskOverdueSource(task);
+
+      // Sr No
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
+
+      // Task details
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: true });
+
+      // Source — why is this overdue: stuck before submission, or stuck in verification?
+      const tdSource = document.createElement('td');
+      tdSource.innerHTML = source === 'verification'
+        ? `<span class="source-badge source-verification">⏳ Verification</span>`
+        : `<span class="source-badge source-assignment">📋 Assignment</span>`;
+
+      // Overdue detail (assignment work hours or verification 2h SLA)
+      const tdDate = document.createElement('td');
+      tdDate.style.wordBreak = 'break-word';
+      tdDate.innerHTML = fmtOverdueDateCell(task);
+      if (isOverdueExtensionActive(task)) {
+        tdDate.innerHTML += `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>`;
+      }
+
+      // Assigned to
+      const tdAssigned = document.createElement('td');
+      tdAssigned.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
+
+      // Verifier — who must verify (highlight when verification overdue)
+      const tdVerifier = document.createElement('td');
+      if (task.verifier?.full_name) {
+        const verifyNote = isVerificationOverdueTask(task)
+          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2h</div>`
+          : (task.verification_status === 'Pending Verification' && !task.verification_started_at
+            ? `<div style="color:var(--muted);font-size:0.75rem;margin-top:2px">Not started yet</div>`
+            : '');
+        tdVerifier.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier.full_name)}</strong>${verifyNote}`;
+      } else {
+        tdVerifier.innerHTML = `<span class="media-none">—</span>`;
+      }
+
+      // Priority
+      const tdPriority = document.createElement('td');
+      tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
+
+      // Status (with verification badge if applicable)
+      const tdStatus = document.createElement('td');
+      let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
+        statusHtml += verifyingStatusPillHtml(task);
+      } else if (task.verification_status === 'Verification Rejected') {
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+      }
+      tdStatus.innerHTML = statusHtml;
+
+      // Actions — overdue view only offers "Mark as done" + "Set extended time"
+      const tdActions = document.createElement('td');
+      tdActions.className = 'row-actions';
+      tdActions.addEventListener('click', (e) => e.stopPropagation()); // don't open drawer when using the menu
+      tdActions.appendChild(buildOverdueMenuElement(task));
+
+      tr.append(tdSr, tdDetails, tdSource, tdDate, tdAssigned, tdVerifier, tdPriority, tdStatus, tdActions);
+      tr.addEventListener('click', () => openOverdueDrawer(task.id));
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Dedicated 3-dot menu for the Overdue view — intentionally just these two
+  // actions (not the full reschedule/reassign/reject menu used elsewhere),
+  // since "deal with it from here" in this view means either finish it or
+  // buy it more time.
+  function buildOverdueMenuElement(task) {
+    const wrap = document.createElement('div'); wrap.className = 'card-menu';
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button'; menuBtn.className = 'card-menu-btn';
+    menuBtn.setAttribute('aria-label', 'More options'); menuBtn.textContent = '⋮';
+    const menuList = document.createElement('div');
+    menuList.className = 'card-menu-list'; menuList.hidden = true;
+
+    const items = [];
+    if (task.status !== 'Completed') {
+      items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
+    }
+    items.push({ label: '⏱ Set extended time', onClick: () => openOverdueExtendModal(task) });
+
+    items.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'card-menu-item'; btn.textContent = item.label;
+      btn.addEventListener('click', () => { menuList.hidden = true; item.onClick(); });
+      menuList.appendChild(btn);
+    });
+
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.card-menu-list').forEach((l) => { if (l !== menuList) l.hidden = true; });
+      const willShow = menuList.hidden;
+      menuList.hidden = !menuList.hidden;
+      if (willShow) positionCardMenu(menuBtn, menuList);
+    });
+    wrap.appendChild(menuBtn); wrap.appendChild(menuList);
+    return wrap;
+  }
+
+  // ─── Set extended time modal ──────────────────────────────────────────────
+  function openOverdueExtendModal(task) {
+    state.pendingTaskId = task.id;
+    els.overdueExtendFormMsg.hidden = true;
+    els.overdueExtendDate.value = task.overdue_extended_until ? toDatetimeLocalValue(task.overdue_extended_until) : '';
+    els.overdueExtendReason.value = task.overdue_extension_reason ?? '';
+    els.overdueExtendModal.hidden = false;
+  }
+  els.closeOverdueExtendModal?.addEventListener('click', () => { els.overdueExtendModal.hidden = true; });
+  els.cancelOverdueExtendModal?.addEventListener('click', () => { els.overdueExtendModal.hidden = true; });
+  els.overdueExtendForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.overdueExtendFormMsg.hidden = true;
+    try {
+      await api(`/tasks/${state.pendingTaskId}/overdue-extend`, {
+        method: 'PATCH',
+        body: { extended_until: els.overdueExtendDate.value, reason: els.overdueExtendReason.value }
+      });
+      showToast('Extended time saved ⏱', 'success');
+      els.overdueExtendModal.hidden = true;
+      if (state.activeView === 'overdue') loadOverdueTasks();
+    } catch (err) { els.overdueExtendFormMsg.textContent = err.message; els.overdueExtendFormMsg.hidden = false; }
+  });
+
+  // ─── Overdue detail drawer (Today / Pending tabs) ─────────────────────────
+  // "Today" = needs attention right now (no active extension, or the
+  // extension itself has already lapsed). "Pending" = an admin already gave
+  // the employee more time and that window hasn't passed yet.
+  function openOverdueDrawer(taskId) {
+    const task = overdueTasksCache.find((t) => t.id === taskId);
+    if (!task) return;
+    overdueDrawerTab = isOverdueExtensionActive(task) ? 'pending' : 'today';
+    renderOverdueDrawer();
+    els.overdueDrawerBackdrop.hidden = false;
+  }
+  els.closeOverdueDrawer?.addEventListener('click', () => { els.overdueDrawerBackdrop.hidden = true; });
+  els.overdueDrawerBackdrop?.addEventListener('click', (e) => {
+    if (e.target === els.overdueDrawerBackdrop) els.overdueDrawerBackdrop.hidden = true;
+  });
+  els.overdueTabToday?.addEventListener('click', () => { overdueDrawerTab = 'today'; renderOverdueDrawer(); });
+  els.overdueTabPending?.addEventListener('click', () => { overdueDrawerTab = 'pending'; renderOverdueDrawer(); });
+
+  function renderOverdueDrawer() {
+    const today = overdueTasksCache.filter((t) => !isOverdueExtensionActive(t));
+    const pending = overdueTasksCache.filter((t) => isOverdueExtensionActive(t));
+
+    els.overdueTabTodayCount.textContent = today.length;
+    els.overdueTabPendingCount.textContent = pending.length;
+    els.overdueTabToday.classList.toggle('active', overdueDrawerTab === 'today');
+    els.overdueTabPending.classList.toggle('active', overdueDrawerTab === 'pending');
+
+    const list = overdueDrawerTab === 'today' ? today : pending;
+    const body = els.overdueDrawerBody;
+
+    if (!list.length) {
+      body.innerHTML = `<div class="empty-state">${overdueDrawerTab === 'today' ? 'Nothing needs attention right now 🎉' : 'No tasks on extended time'}</div>`;
+      return;
+    }
+
+    body.innerHTML = '';
+    list.forEach((task) => {
+      const source = taskOverdueSource(task);
+      const item = document.createElement('div');
+      item.className = 'drawer-task-item';
+      item.innerHTML = `
+        ${source === 'verification'
+          ? `<span class="source-badge source-verification">⏳ Verification</span>`
+          : `<span class="source-badge source-assignment">📋 Assignment</span>`}
+        <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+        <div class="task-detail-line"><span class="task-detail-label">Assigned to:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
+        ${task.verifier?.full_name ? `<div class="task-detail-line"><span class="task-detail-label">Verifier:</span> ${escapeHtml(task.verifier.full_name)}</div>` : ''}
+        <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDateOnly(task.target_date))}</div>
+        ${overdueDrawerTab === 'pending' ? `
+          <div class="drawer-extension-note">
+            ⏱ Extended to <strong>${escapeHtml(fmtDate(task.overdue_extended_until))}</strong>
+            ${task.overdue_extension_reason ? `<br>Reason: ${escapeHtml(task.overdue_extension_reason)}` : ''}
+          </div>
+        ` : ''}
+        <div class="drawer-task-actions"></div>
+      `;
+      const actionsEl = item.querySelector('.drawer-task-actions');
+      if (task.status !== 'Completed') {
+        actionsEl.appendChild(makeActionBtn('action-complete', '✅ Mark as done', () => updateStatus(task.id, 'Completed')));
+      }
+      actionsEl.appendChild(makeActionBtn('action-start', '⏱ Set extended time', () => openOverdueExtendModal(task)));
+      body.appendChild(item);
+    });
+  }
+
+  // ─── My Tasks (day-wise Mon…Sun + Open/Done) ───────────────────────────────
+  function istYmdLocal(d = new Date()) {
+    return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  }
+  function weekMondayLocal(ymd) {
+    const [Y, M, D] = ymd.split('-').map(Number);
+    const d = new Date(Y, M - 1, D);
+    const wd = d.getDay();
+    const diff = wd === 0 ? -6 : 1 - wd;
+    d.setDate(d.getDate() + diff);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function addDaysLocal(ymd, n) {
+    const [Y, M, D] = ymd.split('-').map(Number);
+    const d = new Date(Y, M - 1, D);
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function taskDueYmdLocal(task) {
+    const raw = task?.target_date;
+    if (!raw) return null;
+    const s = String(raw);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    try { return istYmdLocal(new Date(s)); } catch { return null; }
+  }
+
+  let officeMyDayYmd = istYmdLocal();
+  let officeMyShowDone = false;
+  let officeMyAllTasks = [];
+  let officeMyRecurringTasks = [];
+
+  function renderOfficeDayRow() {
+    const row = document.getElementById('officeMyTasksDayRow');
+    if (!row) return;
+    const today = istYmdLocal();
+    const mon = weekMondayLocal(today);
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    row.innerHTML = '';
+    row.style.cssText = 'display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;';
+    names.forEach((label, i) => {
+      const ymd = addDaysLocal(mon, i);
+      const [Y, M, D] = ymd.split('-').map(Number);
+      const dayNum = new Date(Y, M - 1, D).getDate();
+      const openN = officeMyAllTasks.filter((t) => {
+        const due = taskDueYmdLocal(t);
+        if (t.status === 'Completed' || isRejectedTask(t)) return false;
+        if (!due) return ymd === today;
+        return due === ymd || (ymd === today && due < today);
+      }).length;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const act = ymd === officeMyDayYmd;
+      btn.style.cssText = `flex:0 0 auto;min-width:52px;padding:8px;border-radius:12px;border:1px solid ${ymd === today ? '#c96a10' : '#e8e2d8'};background:${act ? 'linear-gradient(135deg,#7a2e00,#c96a10)' : '#fff'};color:${act ? '#fff' : '#3d1200'};cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;`;
+      btn.innerHTML = `<span style="font-size:11px;font-weight:700">${label}</span><span style="font-size:15px;font-weight:800">${dayNum}</span><span style="font-size:9px">${openN ? openN + ' open' : '—'}</span>`;
+      btn.addEventListener('click', () => {
+        officeMyDayYmd = ymd;
+        officeMyShowDone = false;
+        document.getElementById('officeMyOpenBtn')?.classList.add('active');
+        document.getElementById('officeMyDoneBtn')?.classList.remove('active');
+        paintOfficeMyTasks();
+        renderOfficeDayRow();
+      });
+      row.appendChild(btn);
+    });
+  }
+
+  function filterOfficeMyByDay(tasks) {
+    const today = istYmdLocal();
+    const dayYmd = officeMyDayYmd;
+    return (tasks || []).filter((t) => {
+      const due = taskDueYmdLocal(t);
+      const done = t.status === 'Completed';
+      if (officeMyShowDone) {
+        if (!done) return false;
+        if (due === dayYmd) return true;
+        if (t.completed_at && istYmdLocal(t.completed_at) === dayYmd) return true;
+        return false;
+      }
+      if (done || isRejectedTask(t)) return false;
+      if (!due) return dayYmd === today;
+      if (due === dayYmd) return true;
+      if (dayYmd === today && due < today) return true;
+      return false;
+    });
+  }
+
+  function paintOfficeMyTasks() {
+    const dayRow = document.getElementById('officeMyTasksDayRow');
+    if (dayRow) dayRow.hidden = true;
+    const odBar = document.getElementById('myTasksOpenDoneBar');
+    if (odBar) odBar.hidden = true;
+
+    // Classic My Tasks: open work only — Completed is admin All-delegated history
+    const visibleTasks = (Array.isArray(officeMyAllTasks) ? officeMyAllTasks : [])
+      .filter((t) => t.status !== 'Completed' && !isRejectedTask(t));
+    myTasksTimerCache = visibleTasks;
+    renderMyTasksTable(els.myTasksTableBody, visibleTasks, []);
+    els.myTasksList.innerHTML = '';
+    els.myTasksList.classList.add('task-list');
+    visibleTasks.forEach((t) =>
+      els.myTasksList.appendChild(renderTaskCard(t, { showAssignee: false, allowActions: true, useCreatedDueDate: true }))
+    );
+    if (!visibleTasks.length) {
+      els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
+      els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks</div>`;
+    }
+  }
+
+  function updateMyRecurringBadge() {
+    const badge = document.getElementById('myRecurringBadge');
+    if (!badge) return;
+    const n = (Array.isArray(officeMyRecurringTasks) ? officeMyRecurringTasks : []).filter((t) => {
+      const st = t.instance?.status;
+      return st !== 'Completed' && st !== 'NotApplicable';
+    }).length;
+    if (n > 0) {
+      badge.hidden = false;
+      badge.textContent = String(n);
+    } else {
+      badge.hidden = true;
+      badge.textContent = '0';
+    }
+  }
+
+  async function paintMyRecurringInMyTasks() {
+    const tbody = document.getElementById('myTasksRecurringTableBody');
+    const list = document.getElementById('myTasksRecurringList');
+    if (!tbody) return;
+
+    const refresh = async () => {
+      try {
+        const refreshed = await api('/recurring-tasks/my');
+        officeMyRecurringTasks = Array.isArray(refreshed) ? refreshed : [];
+        paintMyRecurringInMyTasks();
+        updateMyRecurringBadge();
+        refreshNavBadges();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    };
+
+    const tasks = Array.isArray(officeMyRecurringTasks) ? officeMyRecurringTasks : [];
+    const showRows = tasks.filter((t) => {
+      const st = t.instance?.status;
+      if (st === 'Completed' || st === 'NotApplicable') return !!t.is_today;
+      return true;
+    });
+
+    updateMyRecurringBadge();
+
+    if (!showRows.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No recurring tasks assigned to you</td></tr>`;
+      if (list) list.innerHTML = `<div class="empty-state">No recurring tasks assigned to you</div>`;
+      return;
+    }
+
+    renderEmployeeRecurringTable(showRows, tbody, refresh);
+    if (list) {
+      list.innerHTML = '';
+      renderEmployeeRecurringList(showRows, list, refresh);
+    }
+  }
+
+  async function loadMyTasks() {
+    els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading tasks…</td></tr>`;
+    els.myTasksList.innerHTML = '<div class="empty-state">Loading tasks…</div>';
+
+    const isAdmin = state.user.role === 'admin';
+    const tabBar = document.getElementById('myTasksTabBar');
+    const otherBtn = document.getElementById('otherPendingTabBtn');
+    const recurringBtn = document.getElementById('myRecurringTabBtn');
+    const myPanel = document.getElementById('myTaskTabPanel');
+    const recPanel = document.getElementById('myRecurringTabPanel');
+    const otherPanel = document.getElementById('otherPendingTabPanel');
+
+    // Recurring + Other Pending tabs are admin-only (employees use sidebar "My recurring tasks")
+    if (recurringBtn) recurringBtn.hidden = !isAdmin;
+    if (otherBtn) otherBtn.hidden = !isAdmin;
+    if (tabBar) tabBar.hidden = !isAdmin;
+    if (!isAdmin) {
+      if (myPanel) myPanel.hidden = false;
+      if (recPanel) recPanel.hidden = true;
+      if (otherPanel) otherPanel.hidden = true;
+      document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.mytab === 'mytask');
+      });
+    } else if (tabBar) {
+      tabBar.hidden = false;
+    }
+
+    const recBody = document.getElementById('myTasksRecurringTableBody');
+    if (recBody) recBody.innerHTML = `<tr><td colspan="4" class="empty-state">Loading recurring…</td></tr>`;
+
+    try {
+      const [allTasks, recurring] = await Promise.all([
+        api('/tasks/my'),
+        isAdmin ? api('/recurring-tasks/my').catch(() => []) : Promise.resolve([]),
+      ]);
+      officeMyAllTasks = Array.isArray(allTasks) ? allTasks : [];
+      officeMyRecurringTasks = Array.isArray(recurring) ? recurring : [];
+      paintOfficeMyTasks();
+      if (isAdmin) paintMyRecurringInMyTasks();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  __tfReadyFns.push(() => {
+    // Open/Done day-list UI removed — keep stub ids harmless if referenced
+  });
+
+  // ─── "My Tasks" tabs: My Task | My Recurring Task | Other Pending (admin) ───
+  __tfReadyFns.push(() => {
+    document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#myTasksTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.mytab;
+        const myPanel = document.getElementById('myTaskTabPanel');
+        const recPanel = document.getElementById('myRecurringTabPanel');
+        const otherPanel = document.getElementById('otherPendingTabPanel');
+        if (myPanel) myPanel.hidden = tab !== 'mytask';
+        if (recPanel) recPanel.hidden = tab !== 'recurring';
+        if (otherPanel) otherPanel.hidden = tab !== 'other';
+        if (tab === 'recurring') paintMyRecurringInMyTasks();
+        if (tab === 'other') loadOtherPendingWork();
+      });
+    });
+
+    // Other Pending Work has its own 3 sub-tabs: Leave / Verification / Tickets
+    document.querySelectorAll('#otherPendingSubTabBar .my-tasks-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#otherPendingSubTabBar .my-tasks-tab-btn').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        const sub = btn.dataset.subtab;
+        const leaves = document.getElementById('otherPendingLeavesList');
+        const verifs = document.getElementById('otherPendingVerificationsWrap');
+        const ticks = document.getElementById('otherPendingTicketsList');
+        if (leaves) leaves.hidden = sub !== 'leave';
+        if (verifs) verifs.hidden = sub !== 'verification';
+        if (ticks) ticks.hidden = sub !== 'tickets';
+      });
+    });
+  });
+
+  // Read-only summary of things pending elsewhere that need the admin's
+  // attention — leave requests, verifications, open tickets. Nothing can be
+  // actioned from here on purpose; approve/verify/resolve from the real
+  // pages, and an item disappears from this list on its own the moment it's
+  // no longer pending (next time this tab loads).
+  async function loadOtherPendingWork() {
+    const leavesWrap = document.getElementById('otherPendingLeavesList');
+    const verifWrap = document.getElementById('otherPendingVerificationsList');
+    const verifTableBody = document.getElementById('otherPendingVerificationsTableBody');
+    const ticketsWrap = document.getElementById('otherPendingTicketsList');
+    if (!leavesWrap || !verifWrap || !ticketsWrap) return;
+
+    leavesWrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    verifWrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
+    ticketsWrap.innerHTML = '<div class="empty-state">Loading…</div>';
+
+    try {
+      const [leaves, verifications, tickets] = await Promise.all([
+        api('/leaves/all?status=Pending'),
+        api('/tasks/verifications'),
+        api('/tickets')
+      ]);
+      const openTickets = tickets.filter((t) => t.status === 'Open');
+
+      renderOtherPendingLeaves(leaves, leavesWrap);
+      renderOtherPendingVerifications(verifications, verifWrap);
+      // Same renderer used by the main "Verification requests" page — so
+      // Verify / Send for Correction / Updation all work identically from here.
+      if (verifTableBody) renderVerificationsTable(verifTableBody, verifications);
+      renderOtherPendingTickets(openTickets, ticketsWrap);
+
+      setBadge('otherPendingLeaveBadge', leaves.length);
+      setBadge('otherPendingVerificationBadge', verifications.length);
+      setBadge('otherPendingTicketsBadge', openTickets.length);
+
+      const total = leaves.length + verifications.length + openTickets.length;
+      setBadge('otherPendingBadge', total);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // Small helper for the badge spans on tab buttons (not the sidebar nav
+  // badges — those go through setNavBadge).
+  function setBadge(elementId, count) {
+    const badge = document.getElementById(elementId);
+    if (!badge) return;
+    badge.hidden = count <= 0;
+    badge.textContent = count > 99 ? '99+' : count;
+  }
+
+  function renderOtherPendingLeaves(leaves, wrap) {
+    if (!leaves.length) {
+      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No pending leave requests</div>`;
+      return;
+    }
+    wrap.innerHTML = '';
+    leaves.forEach((leave) => {
+      const card = document.createElement('div');
+      card.className = 'ticket-card';
+      card.innerHTML = `
+        <div class="ticket-top">
+          <span class="pill ${leavePillClass(leave.status)}">${escapeHtml(leave.status)}</span>
+        </div>
+        <div class="ticket-desc"><strong>${escapeHtml(leave.user?.full_name ?? '—')}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+        <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
+        <div class="ticket-meta">Applied ${fmtDate(leave.created_at)}</div>
+      `;
+      wrap.appendChild(card);
+    });
+  }
+
+  function renderOtherPendingVerifications(tasks, wrap) {
+    if (!tasks.length) {
+      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No pending verifications</div>`;
+      return;
+    }
+    renderTaskList(wrap, tasks, { showAssignee: true, allowActions: false, verificationMode: true });
+  }
+
+  function renderOtherPendingTickets(tickets, wrap) {
+    if (!tickets.length) {
+      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No open tickets</div>`;
+      return;
+    }
+    wrap.innerHTML = '';
+    tickets.forEach((ticket) => {
+      const card = document.createElement('div');
+      card.className = 'ticket-card';
+      const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
+      card.innerHTML = `
+        <div class="ticket-top">
+          <div class="ticket-top-left">
+            <span class="pill pill-Pending">${escapeHtml(ticket.status)}</span>
+            ${catLabel ? `<span class="ticket-category-chip">${escapeHtml(catLabel)}</span>` : ''}
+          </div>
+        </div>
+        <p class="ticket-desc">${escapeHtml(ticket.description)}</p>
+        <div class="ticket-meta">Raised by <strong>${escapeHtml(ticket.raised_by_user?.full_name ?? '—')}</strong> · ${fmtDate(ticket.created_at)}</div>
+      `;
+      wrap.appendChild(card);
+    });
+  }
+
+  // renders "My tasks" as a table (desktop). Same columns as All Tasks, minus
+  // "Assigned to" (it's always you), since this is the employee's own task list.
+  function renderMyTasksTable(tbody, tasks, recurringTasks = []) {
+    if ((!tasks || tasks.length === 0) && recurringTasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+      const statusClass = task.status.replace(/\s/g, '');
+
+      // Sr No
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
+
+      // Task details
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: false });
+
+      // Due date + live timer (office-hours aware)
+      const tdDate = document.createElement('td');
+      tdDate.className = 'task-timer-cell';
+      tdDate.style.wordBreak = 'break-word';
+      tdDate.dataset.taskTimerId = task.id;
+      tdDate.innerHTML = fmtEmployeeTimerHtml(task);
+
+      // Voice note
+      const tdVoice = document.createElement('td');
+      tdVoice.style.textAlign = 'center';
+      if (task.voice_note_url) {
+        const a = document.createElement('a');
+        a.href = task.voice_note_url; a.target = '_blank'; a.rel = 'noopener';
+        a.className = 'media-link'; a.title = 'Play voice note'; a.textContent = '🎤';
+        tdVoice.appendChild(a);
+      } else {
+        tdVoice.innerHTML = `<span class="media-none">—</span>`;
+      }
+
+      // Attachment
+      const tdAttach = document.createElement('td');
+      tdAttach.style.textAlign = 'center';
+      if (task.attachment_url) {
+        const a = document.createElement('a');
+        a.href = task.attachment_url; a.target = '_blank'; a.rel = 'noopener';
+        a.className = 'media-link'; a.title = 'View attachment'; a.textContent = '📎';
+        tdAttach.appendChild(a);
+      } else {
+        tdAttach.innerHTML = `<span class="media-none">—</span>`;
+      }
+
+      // Priority
+      const tdPriority = document.createElement('td');
+      tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
+
+      // Status (with verification badge if applicable)
+      const tdStatus = document.createElement('td');
+      let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
+      if (task.is_on_hold) {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+      } else if (task.verification_status === 'Pending Verification') {
+        statusHtml += verifyingStatusPillHtml(task);
+      } else if (task.verification_status === 'Verified') {
+        statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
+      } else if (task.verification_status === 'Verification Rejected') {
+        statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
+      } else if (task.verification_status === 'Updation Required') {
+        statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+      }
+      tdStatus.innerHTML = statusHtml;
+
+      // Actions
+      const tdActions = document.createElement('td');
+      tdActions.className = 'row-actions';
+      buildPrimaryStatusButtons(task, { showAssignee: false, allowActions: true }).forEach((btn) => tdActions.appendChild(btn));
+      tdActions.appendChild(buildCardMenuElement(task, { showAssignee: false }));
+
+      tr.append(tdSr, tdDetails, tdDate, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
+      tbody.appendChild(tr);
+    });
+
+    // Recurring tasks assigned to the admin personally — merged into this
+    // same table (continuing the Sr No count) rather than a separate section,
+    // with a 🔁 marker on the task details so they're still easy to spot.
+    recurringTasks.forEach((task, i) => {
+      const tr = document.createElement('tr');
+      const inst = task.instance;
+      const checkpoints = (task.checkpoints || []).sort((a, b) => a.sort_order - b.sort_order);
+      const completedIds = inst
+        ? (inst.recurring_task_checkpoint_completions || []).map((c) => c.checkpoint_id)
+        : [];
+      const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+      const isNa = inst?.status === 'NotApplicable';
+      const isOverdue = !task.is_today && !isCompleted;
+      const statusText = isNa ? 'Not Applicable'
+        : isCompleted ? 'Completed'
+          : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+            : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+      const pillClass = isNa ? 'pill-InProgress'
+        : isCompleted ? 'pill-Completed'
+          : isOverdue ? 'pill-Rejected'
+            : 'pill-InProgress';
+
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${tasks.length + i + 1}</span>`;
+
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = `
+        <div class="task-detail-line"><span class="pill pill-InProgress" style="font-size:10px">🔁 Recurring</span></div>
+        <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+        ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
+        ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
+      `;
+
+      const tdDate = document.createElement('td');
+      tdDate.style.wordBreak = 'break-word';
+      tdDate.textContent = fmtDateOnly(task.due_date);
+
+      const tdVoice = document.createElement('td');
+      tdVoice.style.textAlign = 'center';
+      tdVoice.innerHTML = `<span class="media-none">—</span>`;
+
+      const tdAttach = document.createElement('td');
+      tdAttach.style.textAlign = 'center';
+      tdAttach.innerHTML = `<span class="media-none">—</span>`;
+
+      const tdPriority = document.createElement('td');
+      tdPriority.innerHTML = `<span class="media-none">—</span>`;
+
+      const tdStatus = document.createElement('td');
+      tdStatus.innerHTML = `<span class="pill ${pillClass}">${escapeHtml(statusText)}</span>`;
+
+      const tdActions = document.createElement('td');
+      tdActions.className = 'row-actions';
+      if (!isCompleted) {
+        appendRecurringActionButtons(tdActions, task, inst, checkpoints, loadMyTasks);
+      }
+
+      tr.append(tdSr, tdDetails, tdDate, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ─── shared task card rendering (My Tasks / Verifications) ───────────────────
+  function renderTaskList(container, tasks, { showAssignee, allowActions, verificationMode = false }) {
+    if (!tasks || tasks.length === 0) {
+      container.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks found</div>`;
+      return;
+    }
+    container.classList.add('task-list');
+    container.innerHTML = '';
+    tasks.forEach((task) => container.appendChild(renderTaskCard(task, { showAssignee, allowActions, verificationMode })));
+  }
+
+  function getDeadlineHtml(task, showAssignee, useCreatedDate = false) {
+    if (useCreatedDate) return fmtEmployeeTimerHtml(task);
+    return plannedDateCellHtml(task);
+  }
+
+  function verifyingStatusPillHtml(task) {
+    const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
+    const label = who
+      ? `⏳ Verifying · ${escapeHtml(who)}`
+      : '⏳ Verifying';
+    return `<br><span class="pill pill-PendingVerification" style="margin-top:4px" title="${who ? `Verifier: ${escapeHtml(who)}` : ''}">${label}</span>`;
+  }
+
+  function verificationBadgeHtml(task) {
+    if (task.verification_status === 'Updation Required') {
+      return `<span class="pill pill-Pending" style="font-size:0.7rem">📝 Updation Required</span>`;
+    }
+    if (task.status === 'Ticket Raised') {
+      return `<span class="pill pill-Pending" style="font-size:0.7rem">🎫 Ticket Raised</span>`;
+    }
+    if (task.verification_status === 'Pending Verification') {
+      return `<div class="verify-badge pending">⏳ Sent for verification to <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>`;
+    }
+    if (task.verification_status === 'Verification Rejected') {
+      return `<div class="verify-badge rejected">Correction${task.verification_note ? `: ${escapeHtml(task.verification_note)}` : ''}</div>`;
+    }
+    if (task.verification_status === 'Verified') {
+      return `<div class="verify-badge verified">✅ Verified by <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>`;
+    }
+    return '';
+  }
+
+  function isMdoOfficeUser(user = state.user) {
+    const dept = String(user?.department || '').toLowerCase().trim();
+    return dept === 'mdo office' || /\bmdo\b/.test(dept);
+  }
+
+  function buildCardMenuItems(task, { showAssignee }) {
+    const isActuallyMine = task.assigned_to_user?.id === state.user.id;
+    const canManageThisTask = state.user.role === 'admin' || isActuallyMine;
+    const isPendingVerification = task.verification_status === 'Pending Verification';
+    const isOnHold = !!task.is_on_hold;
+    const isAdminManaging = showAssignee && state.user.role === 'admin';
+    const isMdoOffice = isMdoOfficeUser();
+    const isTicketRaised = task.status === 'Ticket Raised';
+    const isReschedulePending = task.reschedule_status === 'Pending';
+    const items = [];
+
+    if (!isAdminManaging && !isMdoOffice && task.status === 'Pending') {
+      return items;
+    }
+
+    // Admin (all tasks) + MDO OFFICE emp (own tasks): mark complete like admin
+    if (
+      task.status !== 'Completed'
+      && (isAdminManaging || (isMdoOffice && isActuallyMine))
+    ) {
+      items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
+    }
+
+    if (isAdminManaging) {
+      items.push({ label: '🗓️ Reschedule', onClick: () => openRescheduleModal(task.id, task.target_date) });
+      items.push({ label: '🔁 Reassign', onClick: () => openReassignModal(task.id) });
+      if (task.status !== 'Rejected') {
+        items.push({
+          label: '❌ Reject task', onClick: () => {
+            const reason = prompt('Reason for rejecting this task (optional):') || '';
+            updateStatus(task.id, 'Rejected', reason);
+          }
+        });
+      }
+    } else if (isOnHold && isActuallyMine && canShowResumeForTask(task)) {
+      items.push({ label: '▶️ Resume task', onClick: () => resumeTask(task.id) });
+    } else if (
+      !isOnHold
+      && task.status === 'In Progress'
+      && isActuallyMine
+      && task.accepted_at
+      && Number(task.hours_to_complete) > 0
+      && !isPendingVerification
+      && !isTicketRaised
+      && !isReschedulePending
+      && canShowHoldForTask(task)
+    ) {
+      items.push({ label: '⏸ Hold task', onClick: () => holdTask(task.id) });
+    }
+
+    // Emp-only: request reschedule (admin uses direct Reschedule above — no approve step)
+    if (
+      !isAdminManaging
+      && state.user.role !== 'admin'
+      && task.rescheduling_possible
+      && task.status !== 'Completed'
+      && !isPendingVerification
+      && !isOnHold
+      && canManageThisTask
+    ) {
+      if (isTicketRaised) {
+        items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
+      } else if (isReschedulePending) {
+        items.push({ label: '🗓️ Reschedule request pending…', disabled: true });
+      } else {
+        items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
+      }
+    }
+
+    if (task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
+      if (isTicketRaised) {
+        items.push({ label: '🔎 Verification blocked — ticket raised', disabled: true });
+      } else if (isReschedulePending) {
+        items.push({ label: '🔎 Verification blocked — reschedule pending', disabled: true });
+      } else {
+        items.push({ label: '🔎 Send for verification', onClick: () => openVerifyModal(task.id) });
+      }
+    }
+    items.push({ label: '🎫 Raise a ticket', onClick: () => openTicketModal(task.id, task.description, task.project?.name) });
+    return items;
+  }
+
+  function buildPrimaryStatusButtons(task, { showAssignee, allowActions }) {
+    const isOwnTask = state.user.role !== 'admin' || (showAssignee === false);
+    const isPendingVerification = task.verification_status === 'Pending Verification';
+    const isOnHold = !!task.is_on_hold;
+    const isAdminManaging = showAssignee && state.user.role === 'admin';
+    const canAct = allowActions && (state.user.role === 'admin' || isOwnTask)
+      && task.status !== 'Completed' && !isPendingVerification && !isAdminManaging;
+    const buttons = [];
+    if (!canAct) return buttons;
+    // Always allow Resume when on hold so a lone held task never gets stuck
+    if (isOnHold && isOwnTask) {
+      buttons.push(makeActionBtn('action-start', '▶ Resume', () => resumeTask(task.id)));
+      return buttons;
+    }
+    if (task.status === 'Pending') {
+      buttons.push(makeActionBtn('action-start', 'Accept', () => updateStatus(task.id, 'In Progress')));
+      buttons.push(makeActionBtn('action-reject', 'Reject', () => {
+        const reason = prompt('Reason for rejecting this task (optional):') || '';
+        updateStatus(task.id, 'Rejected', reason);
+      }));
+    }
+    if (task.status === 'In Progress' && (state.user.role === 'admin' || isMdoOfficeUser())) {
+      buttons.push(makeActionBtn('action-complete', 'Mark complete', () => updateStatus(task.id, 'Completed')));
+    }
+    if (task.status === 'Rejected' && state.user.role === 'admin') {
+      buttons.push(makeActionBtn('action-start', 'Re-open', () => updateStatus(task.id, 'Pending')));
+    }
+    return buttons;
+  }
+
+  function buildCardMenuElement(task, { showAssignee }) {
+    const items = buildCardMenuItems(task, { showAssignee });
+    const wrap = document.createElement('div'); wrap.className = 'card-menu';
+    if (items.length === 0) return wrap; // nothing to show — keep an empty wrapper for layout
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button'; menuBtn.className = 'card-menu-btn';
+    menuBtn.setAttribute('aria-label', 'More options'); menuBtn.textContent = '⋮';
+    const menuList = document.createElement('div');
+    menuList.className = 'card-menu-list'; menuList.hidden = true;
+
+    items.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'card-menu-item'; btn.textContent = item.label;
+      if (item.disabled) {
+        btn.disabled = true;
+      } else {
+        btn.addEventListener('click', () => { menuList.hidden = true; item.onClick(); });
+      }
+      menuList.appendChild(btn);
+    });
+
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.card-menu-list').forEach((l) => { if (l !== menuList) l.hidden = true; });
+      const willShow = menuList.hidden;
+      menuList.hidden = !menuList.hidden;
+      if (willShow) positionCardMenu(menuBtn, menuList);
+    });
+    wrap.appendChild(menuBtn); wrap.appendChild(menuList);
+    return wrap;
+  }
+
+  function renderTaskCard(task, { showAssignee, allowActions, verificationMode = false, useCreatedDueDate = false }) {
+    const card = document.createElement('div');
+    card.className = `task-card priority-${task.priority}`;
+    const statusClass = task.status.replace(/\s/g, '');
+    card.innerHTML = `
+      <div class="task-card-top">
+        <div>
+          <div class="task-card-project">${escapeHtml(task.project?.name ?? '—')}</div>
+          <div class="task-card-type">${escapeHtml(task.task_type?.name ?? '—')} · ${escapeHtml(task.department?.name ?? '—')}</div>
+        </div>
+        <span class="pill pill-${task.priority}">${task.priority}</span>
+      </div>
+      <p class="task-card-desc">${escapeHtml(task.description)}</p>
+      <div class="task-meta task-meta-due">
+        <span class="task-meta-due-label">Due</span>
+        <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : plannedDateCellHtml(task)}</div>
+      </div>
+      ${verificationMode ? `<div class="assigned-line">Sent for verification: <strong>${escapeHtml(
+      (task.sent_for_verification_at || task.first_sent_for_verification_at)
+        ? fmtSheetDateTime(task.sent_for_verification_at || task.first_sent_for_verification_at)
+        : '—'
+    )}</strong></div>` : ''}
+      ${verificationMode ? `<div class="assigned-line">Pending with: <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>` : ''}
+      <div class="task-meta task-meta-files">
+        ${task.attachment_url ? `<a class="attachment-link" href="${task.attachment_url}" target="_blank" rel="noopener">📎 Attachment</a>` : ''}
+        ${task.voice_note_url ? `<a class="attachment-link" href="${task.voice_note_url}" target="_blank" rel="noopener">🎤 Voice note</a>` : ''}
+      </div>
+      ${showAssignee ? `<div class="assigned-line">Assigned to <strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong> by ${escapeHtml(task.assigned_by_user?.full_name ?? '—')}</div>` : ''}
+      ${task.status_note ? `<div class="assigned-line">${escapeHtml(task.status_note)}</div>` : ''}
+      ${verificationBadgeHtml(task)}
+      <div class="task-card-footer">
+        <span class="pill pill-${statusClass}">${task.status}</span>
+        <div class="task-actions"></div>
+      </div>
+    `;
+    if (allowActions && !verificationMode) {
+      card.querySelector('.task-card-top').appendChild(buildCardMenuElement(task, { showAssignee }));
+    }
+    const actionsEl = card.querySelector('.task-actions');
+    if (verificationMode) {
+      if (verificationHasStarted(task)) {
+        startVerificationInline(task, actionsEl);
+      } else {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
+          await clickStartVerification(task, actionsEl, startBtn);
+        });
+        actionsEl.appendChild(startBtn);
+        appendForwardVerificationBtn(actionsEl, task);
+      }
+      return card;
+    }
+
+    buildPrimaryStatusButtons(task, { showAssignee, allowActions }).forEach((btn) => actionsEl.appendChild(btn));
+    return card;
+  }
+  // The dropdown menu (.card-menu-list) is position:fixed with no explicit
+  // top/left, so it relies on the browser's implicit "static position" —
+  // fragile, and it can end up off-screen or collapsed to nothing whenever an
+  // ancestor's layout/width changes (e.g. table column width tweaks). This
+  // sets real viewport coordinates instead, so it always shows up right next
+  // to the button that opened it, regardless of table layout.
+  function positionCardMenu(menuBtn, menuList) {
+    const rect = menuBtn.getBoundingClientRect();
+    const menuWidth = menuList.offsetWidth || 200;
+    let left = rect.right - menuWidth;
+    left = Math.min(left, window.innerWidth - menuWidth - 8);
+    left = Math.max(8, left);
+
+    let top = rect.bottom + 4;
+    const menuHeight = menuList.offsetHeight || 160;
+    if (top + menuHeight > window.innerHeight - 8) {
+      top = rect.top - menuHeight - 4;
+      if (top < 8) top = 8;
+    }
+    menuList.style.top = `${top}px`;
+    menuList.style.left = `${left}px`;
+  }
+
+  function makeActionBtn(cls, label, onClick) {
+    const btn = document.createElement('button');
+    btn.className = `action-btn ${cls}`; btn.textContent = label;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  const VERIFY_ICON_START = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.2 8.4v7.2L16.2 12 10.2 8.4z" fill="currentColor"/></svg>';
+  const VERIFY_ICON_SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h12.5M12.5 7l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function makeIconActionBtn(cls, label, icon, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `action-btn ${cls}`;
+    btn.innerHTML = `${icon}<span>${label}</span>`;
+    btn.addEventListener('click', onClick);
+    return btn;
+  }
+
+  function fillStartVerificationBtn(btn) {
+    if (!btn) return;
+    btn.innerHTML = `${VERIFY_ICON_START}<span>Start Verification</span>`;
+  }
+
+  async function updateStatus(taskId, status, status_note) {
+    try {
+      await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
+      showToast('Task updated ✅', 'success'); reloadCurrentTaskView(); refreshNavBadges();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function holdTask(taskId) {
+    try {
+      await api(`/tasks/${taskId}/hold`, { method: 'PATCH' });
+      showToast('Task on hold — timer paused ⏸', 'success');
+      reloadCurrentTaskView();
+      refreshNavBadges();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function resumeTask(taskId) {
+    try {
+      await api(`/tasks/${taskId}/resume`, { method: 'PATCH' });
+      showToast('Task resumed — countdown restarted ▶', 'success');
+      reloadCurrentTaskView();
+      refreshNavBadges();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function reloadCurrentTaskView() {
+    if (state.activeView === 'all') loadAllTasks();
+    else if (state.activeView === 'my') loadMyTasks();
+    else if (state.activeView === 'overdue') loadOverdueTasks();
+    else if (state.activeView === 'verifications') loadVerifications();
+    else if (state.activeView === 'reschedule-requests') loadRescheduleRequests();
+  }
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.card-menu-list').forEach((l) => { l.hidden = true; });
+  });
+
+  async function openAssignCheckpointGate() {
+    const typeId = els.fTaskType.value;
+    const typeName = els.fTaskType.options[els.fTaskType.selectedIndex]?.text || 'this task type';
+    const modal = document.getElementById('taskCpModal');
+    const listEl = document.getElementById('taskCpModalList');
+    const msgEl = document.getElementById('taskCpModalMsg');
+    const titleEl = document.getElementById('taskCpModalTitle');
+    const assignBtn = document.getElementById('submitTaskCpModal');
+    if (!modal || !listEl) {
+      showFormMsg(els.addTaskMsg, 'Could not open checkpoint popup');
+      return;
+    }
+    if (titleEl) titleEl.textContent = `Checkpoints — ${typeName}`;
+    if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+    listEl.innerHTML = '<p class="form-note">Loading checkpoints…</p>';
+    if (assignBtn) { assignBtn.disabled = true; assignBtn.hidden = false; }
+    modal.hidden = false;
+
+    let labels = [];
+    try {
+      const template = await api(`/master/task-types/${typeId}/checkpoints`);
+      labels = (template || []).map((r) => r.label).filter(Boolean);
+    } catch (err) {
+      listEl.innerHTML = '';
+      const hint = /permission|403|add task/i.test(err.message || '')
+        ? ' (Add task permission ke baad logout → login zaroor karo.)'
+        : '';
+      if (msgEl) { msgEl.textContent = (err.message || 'Could not load checkpoints') + hint; msgEl.hidden = false; }
+      if (assignBtn) assignBtn.disabled = true;
+      return;
+    }
+
+    if (!labels.length) {
+      listEl.innerHTML = '<p class="form-note">No checkpoints for this task type. You can assign it now.</p>';
+      if (assignBtn) assignBtn.disabled = false;
+      return;
+    }
+
+    listEl.innerHTML = `<div class="checkpoint-list">${labels.map((label, i) => `
+      <label class="checkpoint-item">
+        <input type="checkbox" data-cp-label="${escapeHtml(label)}" data-cp-i="${i}" />
+        <span>${escapeHtml(label)}</span>
+      </label>`).join('')}</div>`;
+
+    const syncAssignBtn = () => {
+      const boxes = [...listEl.querySelectorAll('input[type=checkbox]')];
+      const allTicked = boxes.length > 0 && boxes.every((b) => b.checked);
+      if (assignBtn) assignBtn.disabled = !allTicked;
+      if (msgEl) {
+        if (allTicked) {
+          msgEl.hidden = true;
+          msgEl.textContent = '';
+        } else {
+          msgEl.textContent = 'Tick every checkpoint to assign this task.';
+          msgEl.hidden = false;
+        }
+      }
+    };
+    listEl.querySelectorAll('input[type=checkbox]').forEach((box) => {
+      box.addEventListener('change', () => {
+        box.closest('.checkpoint-item')?.classList.toggle('cp-done', box.checked);
+        syncAssignBtn();
+      });
+    });
+    syncAssignBtn();
+  }
+
+  function closeTaskCpModal() {
+    const modal = document.getElementById('taskCpModal');
+    if (modal) modal.hidden = true;
+  }
+  document.getElementById('closeTaskCpModal')?.addEventListener('click', closeTaskCpModal);
+  document.getElementById('cancelTaskCpModal')?.addEventListener('click', closeTaskCpModal);
+  document.getElementById('submitTaskCpModal')?.addEventListener('click', async () => {
+    const msgEl = document.getElementById('taskCpModalMsg');
+    const assignBtn = document.getElementById('submitTaskCpModal');
+    const boxes = [...document.querySelectorAll('#taskCpModalList input[type=checkbox]')];
+    const labels = boxes.map((b) => b.dataset.cpLabel || '').filter(Boolean);
+    if (boxes.length && !boxes.every((b) => b.checked)) {
+      if (msgEl) { msgEl.textContent = 'Tick every checkpoint to assign this task.'; msgEl.hidden = false; }
+      return;
+    }
+    if (assignBtn) assignBtn.disabled = true;
+    try {
+      await actuallyAssignTask(labels);
+      closeTaskCpModal();
+    } catch (err) {
+      if (msgEl) { msgEl.textContent = err.message || 'Could not assign task'; msgEl.hidden = false; }
+      if (assignBtn) assignBtn.disabled = false;
+    }
+  });
+
+  // ─── Send for verification ───────────────────────────────────────────────────
+  async function openVerifyModal(taskId) {
+    state.pendingTaskId = taskId;
+    hideFormMsg(els.verifyFormMsg);
+    els.verifyPerson.innerHTML = '<option value="">Loading…</option>';
+    if (els.verifyFiles) els.verifyFiles.value = '';
+    if (els.verifyModal) els.verifyModal.hidden = false;
+    try {
+      const verifiers = await api('/master/verifiers');
+      fillSelect(els.verifyPerson, verifiers, { placeholder: 'Select a verifier', labelKey: 'full_name' });
+    } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
+  }
+  els.closeVerifyModal?.addEventListener('click', () => { if (els.verifyModal) els.verifyModal.hidden = true; });
+  els.cancelVerifyModal?.addEventListener('click', () => { if (els.verifyModal) els.verifyModal.hidden = true; });
+  els.verifyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideFormMsg(els.verifyFormMsg);
+    try {
+      const formData = new FormData();
+      formData.append('verifier_id', els.verifyPerson.value);
+      const files = els.verifyFiles ? [...els.verifyFiles.files].slice(0, 3) : [];
+      files.forEach((f) => formData.append('verification_files', f));
+      const sent = await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
+        method: 'PATCH', body: formData, isForm: true
+      });
+      const wa = sent?._whatsapp;
+      const parts = (wa?.recipients || []).map((r) => {
+        if (r.ok) return `${r.label} ✓`;
+        if (r.reason === 'shared_placeholder_number') {
+          return `${r.label} ✗ (WhatsApp number shared/default — update in Employees)`;
+        }
+        return `${r.label} ✗${r.reason ? ` (${r.reason})` : ''}`;
+      });
+      const summary = parts.join(' · ') || wa?.to || '—';
+      if (wa?.ok) {
+        showToast(`Sent for verification ✅ WhatsApp → ${summary}`, 'success');
+      } else {
+        showToast(
+          `Task sent, but verifier WhatsApp issue → ${summary}`,
+          'error'
+        );
+      }
+      if (els.verifyModal) els.verifyModal.hidden = true;
+      reloadCurrentTaskView();
+    } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
+  });
+
+  // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
+  // Called when verifier clicks "Start Verification" on a card/row.
+  // We toggle the card's action area to show the two choice buttons.
+  function canForwardVerification(task) {
+    const vid = task?.verifier?.id || task?.verifier_id || null;
+    return state.user?.role === 'admin' || (!!vid && state.user?.id === vid);
+  }
+
+  function makeForwardVerificationBtn(task) {
+    if (!canForwardVerification(task)) return null;
+    const btn = makeIconActionBtn('action-forward', 'Send to another', VERIFY_ICON_SEND, () => openForwardVerificationModal(task));
+    btn.title = 'Send this task to a different verifier';
+    return btn;
+  }
+
+  function appendForwardVerificationBtn(actionsEl, task) {
+    const btn = makeForwardVerificationBtn(task);
+    if (btn) actionsEl.appendChild(btn);
+  }
+
+  async function openForwardVerificationModal(task) {
+    state.pendingTaskId = task?.id || null;
+    state.pendingForwardFromId = task?.verifier?.id || task?.verifier_id || null;
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    if (els.forwardVerifyHint) {
+      const who = task?.verifier?.full_name || 'the current verifier';
+      els.forwardVerifyHint.textContent = `This leaves ${who}. The person you pick will verify it.`;
+    }
+    if (els.forwardVerifyPerson) els.forwardVerifyPerson.innerHTML = '<option value="">Loading…</option>';
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = false;
+    try {
+      const verifiers = await api('/master/verifiers');
+      const choices = (verifiers || []).filter((v) => v.id && v.id !== state.pendingForwardFromId);
+      fillSelect(els.forwardVerifyPerson, choices, { placeholder: 'Select a verifier', labelKey: 'full_name' });
+      if (!choices.length && els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'No other verifier is available';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+    }
+  }
+
+  function closeForwardVerificationModal() {
+    if (els.forwardVerifyModal) els.forwardVerifyModal.hidden = true;
+  }
+
+  els.closeForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.cancelForwardVerifyModal?.addEventListener('click', closeForwardVerificationModal);
+  els.forwardVerifyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (els.forwardVerifyFormMsg) els.forwardVerifyFormMsg.hidden = true;
+    const verifierId = els.forwardVerifyPerson?.value || '';
+    if (!state.pendingTaskId || !verifierId) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = 'Please choose who should verify this task';
+        els.forwardVerifyFormMsg.hidden = false;
+      }
+      return;
+    }
+    try {
+      const sent = await api(`/tasks/${state.pendingTaskId}/forward-verification`, {
+        method: 'PATCH',
+        body: { verifier_id: verifierId },
+      });
+      const who = els.forwardVerifyPerson?.selectedOptions?.[0]?.textContent || 'the new verifier';
+      if (sent?._whatsapp?.ok) {
+        showToast(`Sent for verification to ${who} ✅`, 'success');
+      } else {
+        showToast(`Sent to ${who}. WhatsApp was not delivered.`, 'success');
+      }
+      closeForwardVerificationModal();
+      loadVerifications();
+      refreshNavBadges();
+    } catch (err) {
+      if (els.forwardVerifyFormMsg) {
+        els.forwardVerifyFormMsg.textContent = err.message;
+        els.forwardVerifyFormMsg.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
+  function startVerificationInline(task, actionsEl) {
+    const taskId = task?.id || task;
+    actionsEl.innerHTML = '';
+    actionsEl.appendChild(makeActionBtn('action-complete', '✅ Verify', () => {
+      if (confirm('Mark this task as Verified?')) verifyApprove(taskId);
+    }));
+    actionsEl.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
+    actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+    appendForwardVerificationBtn(actionsEl, task);
+  }
+
+  async function verifyApprove(taskId) {
+    try {
+      await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: { approved: true } });
+      showToast('Task verified ✅', 'success');
+      loadVerifications();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // ─── Correction Modal (verifier sends correction note + optional voice) ────────
+  let corrVoiceBlob = null;
+  let corrMediaRecorder = null;
+
+  function openCorrectionModal(taskOrId) {
+    const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
+    state.pendingTaskId = task.id;
+    if (els.correctionNote) els.correctionNote.value = '';
+    if (els.correctionFormMsg) els.correctionFormMsg.hidden = true;
+    if (els.corrVoicePlayback) {
+      els.corrVoicePlayback.hidden = true;
+      els.corrVoicePlayback.src = '';
+    }
+    if (els.corrRecordStatus) els.corrRecordStatus.textContent = '';
+    if (els.corrStartRecord) els.corrStartRecord.disabled = false;
+    if (els.corrStopRecord) els.corrStopRecord.disabled = true;
+    corrVoiceBlob = null;
+    fillDuePrompt('correction', task);
+    if (els.correctionModal) els.correctionModal.hidden = false;
+  }
+
+  els.closeCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
+  els.cancelCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
+  document.getElementById('correction-due-action')?.addEventListener('change', () => syncDueActionFields('correction'));
+  document.getElementById('updation-due-action')?.addEventListener('change', () => syncDueActionFields('updation'));
+  function stopCorrectionRecordingAndClose() {
+    if (corrMediaRecorder && corrMediaRecorder.state !== 'inactive') corrMediaRecorder.stop();
+    const modal = els.correctionModal || document.getElementById('correctionModal');
+    if (modal) modal.hidden = true;
+  }
+
+  // Voice recording for correction modal
+  els.corrStartRecord?.addEventListener('click', async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      corrMediaRecorder = new MediaRecorder(stream);
+      corrMediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      corrMediaRecorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        corrVoiceBlob = new Blob(chunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(corrVoiceBlob);
+        if (els.corrVoicePlayback) {
+          els.corrVoicePlayback.src = url;
+          els.corrVoicePlayback.hidden = false;
+        }
+        if (els.corrRecordStatus) els.corrRecordStatus.textContent = '✅ Recording saved';
+        if (els.corrStartRecord) els.corrStartRecord.disabled = false;
+        if (els.corrStopRecord) els.corrStopRecord.disabled = true;
+      };
+      corrMediaRecorder.start();
+      if (els.corrStartRecord) els.corrStartRecord.disabled = true;
+      if (els.corrStopRecord) els.corrStopRecord.disabled = false;
+      if (els.corrRecordStatus) els.corrRecordStatus.textContent = '🔴 Recording…';
+      if (els.corrVoicePlayback) els.corrVoicePlayback.hidden = true;
+    } catch (err) {
+      if (els.corrRecordStatus) els.corrRecordStatus.textContent = '❌ Microphone access denied';
+    }
+  });
+  els.corrStopRecord?.addEventListener('click', () => {
+    if (corrMediaRecorder && corrMediaRecorder.state !== 'inactive') corrMediaRecorder.stop();
+  });
+
+  els.correctionForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = els.correctionFormMsg || document.getElementById('correctionFormMsg');
+    if (msg) msg.hidden = true;
+    const note = (els.correctionNote?.value || '').trim();
+    if (!note) {
+      if (msg) {
+        msg.textContent = 'Please write a correction note before sending';
+        msg.hidden = false;
+      } else {
+        showToast('Please write a correction note before sending', 'error');
+      }
+      return;
+    }
+    try {
+      const formData = new FormData();
+      formData.append('note', note);
+      const action = document.getElementById('correction-due-action')?.value || 'keep';
+      if (action === 'hours' || action === 'days') {
+        const extraAmount = document.getElementById('correction-extra-amount')?.value || '';
+        if (!extraAmount || Number(extraAmount) <= 0) {
+          if (msg) {
+            msg.textContent = 'Enter how much extra time to give';
+            msg.hidden = false;
+          }
+          return;
+        }
+        formData.append('extra_unit', action);
+        formData.append('extra_amount', extraAmount);
+      }
+      if (action === 'new') {
+        const newDue = document.getElementById('correction-new-due')?.value || '';
+        if (!newDue) {
+          if (msg) {
+            msg.textContent = 'Pick the new due date and time';
+            msg.hidden = false;
+          }
+          return;
+        }
+        formData.append('new_target_date', datetimeLocalToIso(newDue));
+      }
+      if (corrVoiceBlob) {
+        formData.append('correction_voice', corrVoiceBlob, 'correction_voice.webm');
+      }
+      await api(`/tasks/${state.pendingTaskId}/send-correction`, {
+        method: 'PATCH', body: formData, isForm: true
+      });
+      showToast('Correction sent ✅', 'success');
+      const modal = els.correctionModal || document.getElementById('correctionModal');
+      if (modal) modal.hidden = true;
+      loadVerifications();
+    } catch (err) {
+      if (msg) {
+        msg.textContent = err.message;
+        msg.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
+  const _startVerifyBusy = new Set();
+
+  function showBusyOverlay(msg) {
+    let el = document.getElementById('tfBusyOverlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'tfBusyOverlay';
+      el.className = 'tf-busy-overlay';
+      el.innerHTML = '<div class="tf-busy-card"><div class="tf-busy-spinner"></div><span class="tf-busy-msg"></span></div>';
+      (document.getElementById('appScreen') || document.body).appendChild(el);
+    }
+    const msgEl = el.querySelector('.tf-busy-msg');
+    if (msgEl) msgEl.textContent = msg || 'Loading…';
+    el.hidden = false;
+  }
+
+  function hideBusyOverlay() {
+    const el = document.getElementById('tfBusyOverlay');
+    if (el) el.hidden = true;
+  }
+
+  function verificationHasStarted(task) {
+    return !!(task?.verification_started_at || task?.verification_started_by);
+  }
+
+  async function startVerification(taskId) {
+    return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
+  }
+
+  async function clickStartVerification(task, actionsEl, btn) {
+    const id = task?.id;
+    if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
+    _startVerifyBusy.add(id);
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+      btn.style.pointerEvents = 'none';
+      btn.innerHTML = `${VERIFY_ICON_START}<span>Starting…</span>`;
+    }
+    showBusyOverlay('Starting verification…');
+    try {
+      const updated = await startVerification(id);
+      const next = {
+        ...task,
+        ...(updated || {}),
+        verification_started_at: updated?.verification_started_at || new Date().toISOString(),
+        verification_started_by: updated?.verification_started_by || state.user?.id,
+      };
+      startVerificationInline(next, actionsEl);
+      showToast('Verification started', 'success');
+      await loadVerifications({ quiet: true });
+    } catch (err) {
+      if (btn) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        btn.style.pointerEvents = '';
+        fillStartVerificationBtn(btn);
+      }
+      showToast(err.message, 'error');
+    } finally {
+      _startVerifyBusy.delete(id);
+      hideBusyOverlay();
+    }
+  }
+
+  async function loadVerifications(opts = {}) {
+    if (!opts.quiet) {
+      if (els.verificationsTableBody) {
+        els.verificationsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
+      }
+      if (els.verificationsList) {
+        els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
+      }
+    }
+    try {
+      const tasks = await api('/tasks/verifications');
+      renderVerificationsTable(els.verificationsTableBody, tasks);
+      renderTaskList(els.verificationsList, tasks, { showAssignee: true, allowActions: false, verificationMode: true });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // ─── Reschedule requests ────────────────────────────────────────────────────
+  // Admin inbox + history: Pending / Approved / Rejected stay visible.
+  // Admin direct Reschedule updates the date immediately (no request row).
+  async function loadRescheduleRequests() {
+    const wrap = document.getElementById('reschedRequestsList');
+    const sub = document.getElementById('reschedViewSub');
+    const filterEl = document.getElementById('resched-filter-status');
+    const filtersCard = document.getElementById('reschedFiltersCard');
+    const isAdmin = state.user.role === 'admin';
+    if (!isAdmin) {
+      if (filtersCard) filtersCard.hidden = true;
+      if (sub) sub.textContent = 'Only admins review reschedule requests.';
+      if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
+      const tbody = document.getElementById('reschedRequestsTableBody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
+      return;
+    }
+    if (filtersCard) filtersCard.hidden = false;
+    if (sub) {
+      sub.textContent = "Employees' date-change requests — Pending need action; Approved / Rejected stay here for history. Admin direct reschedule updates immediately (no request row).";
+    }
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
+    const tbody = document.getElementById('reschedRequestsTableBody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading…</td></tr>`;
+    try {
+      const st = filterEl?.value ?? 'Pending';
+      const qs = st ? `?status=${encodeURIComponent(st)}` : '';
+      const tasks = await api(`/tasks/reschedule-requests${qs}`);
+      const list = Array.isArray(tasks) ? tasks : [];
+      const emptyMsg = st === 'Pending'
+        ? 'No reschedule requests pending'
+        : st === 'Approved'
+          ? 'No approved reschedule requests'
+          : st === 'Rejected'
+            ? 'No rejected reschedule requests'
+            : 'No reschedule requests';
+      renderRescheduleRequests(wrap, list, true, emptyMsg);
+      if (tbody) renderRescheduleRequestsTable(tbody, list, true, emptyMsg);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  __tfReadyFns.push(() => {
+    document.getElementById('resched-filter-status')?.addEventListener('change', () => {
+      if (state.activeView === 'reschedule-requests') loadRescheduleRequests();
+    });
+  });
+
+  // Desktop table view — was previously missing, so the desktop table stayed
+  // empty forever even though the nav badge and the mobile card list both had
+  // the right count/data.
+  function renderRescheduleRequestsTable(tbody, tasks, isAdmin, emptyMsg) {
+    if (!tasks || tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+
+      const tdSr = document.createElement('td');
+      tdSr.textContent = index + 1;
+
+      const tdEmployee = document.createElement('td');
+      tdEmployee.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
+
+      const tdTask = document.createElement('td');
+      tdTask.textContent = task.description ?? '—';
+
+      const tdCurrentDate = document.createElement('td');
+      tdCurrentDate.textContent = fmtDate(task.target_date);
+
+      const tdRequestedDate = document.createElement('td');
+      tdRequestedDate.textContent = fmtDateOnly(task.reschedule_requested_date);
+
+      const tdAdditionalHours = document.createElement('td');
+      const additionalHours = task.reschedule_requested_additional_hours;
+      tdAdditionalHours.textContent = additionalHours == null || additionalHours === ''
+        ? 'Not saved'
+        : fmtHrsLabel(additionalHours);
+
+      const tdReason = document.createElement('td');
+      tdReason.textContent = task.reschedule_reason || '—';
+
+      const tdStatus = document.createElement('td');
+      const statusPill = task.reschedule_status === 'Pending' ? 'pill-Pending'
+        : task.reschedule_status === 'Approved' ? 'pill-Completed'
+          : 'pill-Rejected';
+      tdStatus.innerHTML = `<span class="pill ${statusPill}">${escapeHtml(task.reschedule_status)}</span>`;
+
+      const tdDecidedBy = document.createElement('td');
+      if (task.reschedule_status !== 'Pending' && task.reschedule_decided_by_user) {
+        tdDecidedBy.innerHTML = `${escapeHtml(task.reschedule_decided_by_user.full_name)} · ${escapeHtml(fmtDate(task.reschedule_decided_at))}`;
+      } else {
+        tdDecidedBy.textContent = '—';
+      }
+
+      const tdActions = document.createElement('td');
+      tdActions.className = 'row-actions';
+      if (isAdmin && task.reschedule_status === 'Pending') {
+        tdActions.appendChild(makeActionBtn('action-complete', '✅ Approve', () => decideRescheduleRequest(task.id, 'approve', task)));
+        tdActions.appendChild(makeActionBtn('action-reject', '❌ Reject', () => decideRescheduleRequest(task.id, 'reject', task)));
+      } else {
+        tdActions.textContent = '—';
+      }
+
+      tr.append(tdSr, tdEmployee, tdTask, tdCurrentDate, tdRequestedDate, tdAdditionalHours, tdReason, tdStatus, tdDecidedBy, tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderRescheduleRequests(wrap, tasks, isAdmin, emptyMsg) {
+    if (!tasks.length) {
+      wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</div>`;
+      return;
+    }
+    wrap.innerHTML = '';
+    tasks.forEach((task) => {
+      const card = document.createElement('div');
+      card.className = 'task-card';
+      const statusPill = task.reschedule_status === 'Pending' ? 'pill-Pending'
+        : task.reschedule_status === 'Approved' ? 'pill-Completed'
+          : 'pill-Rejected';
+      card.innerHTML = `
+        <div class="task-card-header">
+          <span class="pill ${statusPill}">${escapeHtml(task.reschedule_status)}</span>
+          <span style="font-size:12px;color:#888">${escapeHtml(task.project?.name ?? '')}</span>
+        </div>
+        <div class="task-card-body">
+          ${isAdmin ? `<div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>` : ''}
+          <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+          <div class="task-detail-line"><span class="task-detail-label">Current date:</span> ${escapeHtml(fmtDate(task.target_date))}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Requested date:</span> ${escapeHtml(fmtDateOnly(task.reschedule_requested_date))}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Additional hours:</span> ${task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === '' ? 'Not saved' : escapeHtml(fmtHrsLabel(task.reschedule_requested_additional_hours))}</div>
+          ${task.reschedule_reason ? `<div class="task-detail-line"><span class="task-detail-label">Reason:</span> ${escapeHtml(task.reschedule_reason)}</div>` : ''}
+          ${task.reschedule_status !== 'Pending' && task.reschedule_decided_by_user ? `<div class="task-detail-line"><span class="task-detail-label">Decided by:</span> ${escapeHtml(task.reschedule_decided_by_user.full_name)} · ${escapeHtml(fmtDate(task.reschedule_decided_at))}</div>` : ''}
+        </div>
+        ${isAdmin && task.reschedule_status === 'Pending' ? `
+        <div class="task-card-actions">
+          <button class="action-btn action-complete resched-approve-btn">✅ Approve</button>
+          <button class="action-btn action-reject resched-reject-btn">❌ Reject</button>
+        </div>` : ''}
+      `;
+      if (isAdmin && task.reschedule_status === 'Pending') {
+        card.querySelector('.resched-approve-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'approve', task));
+        card.querySelector('.resched-reject-btn').addEventListener('click', () => decideRescheduleRequest(task.id, 'reject', task));
+      }
+      wrap.appendChild(card);
+    });
+  }
+
+  async function decideRescheduleRequest(taskId, decision, taskHint) {
+    if (decision === 'reject') {
+      const reason = prompt('Reason for rejecting this reschedule request (optional):') || '';
+      try {
+        await api(`/tasks/${taskId}/reschedule-request/reject`, {
+          method: 'PATCH', body: { reason }
+        });
+        showToast('Reschedule rejected', 'success');
+        loadRescheduleRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+      return;
+    }
+    // Always open hours + date popup — never silent-approve.
+    try {
+      await openReschedApproveModal(taskHint || { id: taskId });
+    } catch (err) {
+      console.error('[reschedApprove]', err);
+      showToast(err.message || 'Could not open approve popup', 'error');
+    }
+  }
+
+  let _reschedApproveTask = null;
+
+  function reschedHoursSummary(task) {
+    try {
+      const assigned = assignedHoursOf(task);
+      const assignedN = Number(assigned) || 0;
+      if (!task?.accepted_at) {
+        return { assigned, done: 0, remaining: assignedN };
+      }
+      if (task.is_on_hold) {
+        const remaining = Math.max(
+          0,
+          Number(task.hold_remaining_hours != null ? task.hold_remaining_hours : assignedN) || 0
+        );
+        const done = Math.max(0, Math.round((assignedN - remaining) * 100) / 100);
+        return { assigned, done, remaining };
+      }
+      // Office-hours worked since accept, minus recorded hold pauses
+      let done = elapsedWorkingHoursBetween(task.accepted_at, new Date());
+      const holdSec = Number(task.total_hold_seconds) || 0;
+      if (holdSec > 0) done = Math.max(0, done - holdSec / 3600);
+      done = Math.max(0, Math.round(done * 100) / 100);
+      if (done > assignedN) done = assignedN;
+      const remaining = Math.max(0, Math.round((assignedN - done) * 100) / 100);
+      return { assigned, done, remaining };
+    } catch (_) {
+      return { assigned: null, done: null, remaining: null };
+    }
+  }
+
+  function fmtHrsLabel(h) {
+    if (h == null || Number.isNaN(Number(h))) return '—';
+    const n = Number(h);
+    if (n < 1) return `${Math.round(n * 60)}m`;
+    const hrs = Math.floor(n);
+    const mins = Math.round((n - hrs) * 60);
+    return mins ? `${hrs}h ${mins}m` : `${hrs}h`;
+  }
+
+  function showReschedApproveModalEl(modal) {
+    if (!modal) return;
+    // Escape .tf-legacy-frame overflow so fixed overlay always covers the screen
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    modal.removeAttribute('hidden');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '5000';
+  }
+
+  function hideReschedApproveModalEl(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.display = 'none';
+    modal.setAttribute('hidden', '');
+  }
+
+  async function openReschedApproveModal(taskIn) {
+    let task = taskIn || {};
+    // Prefer list payload; optional enrich if hours missing (no dedicated GET /tasks/:id)
+    if (task.id && task.hours_to_complete == null && task.original_hours_to_complete == null) {
+      try {
+        const list = await api('/tasks/reschedule-requests?status=Pending').catch(() => []);
+        const hit = (Array.isArray(list) ? list : []).find((t) => String(t.id) === String(task.id));
+        if (hit) task = { ...task, ...hit };
+      } catch (_) { /* use hint */ }
+    }
+    _reschedApproveTask = task;
+    const modal = document.getElementById('reschedApproveModal');
+    if (!modal) {
+      showToast('Approve popup missing — hard refresh (Ctrl+Shift+R) and try again', 'error');
+      return;
+    }
+    const msg = document.getElementById('reschedApproveFormMsg');
+    if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
+    const sum = reschedHoursSummary(task);
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('reschedApproveTaskLabel', `${task.assigned_to_user?.full_name || 'Employee'} — ${task.description || 'Task'}`);
+    set('reschedApproveAssigned', fmtHrsLabel(sum.assigned));
+    set('reschedApproveDone', fmtHrsLabel(sum.done));
+    set('reschedApproveRemaining', fmtHrsLabel(sum.remaining));
+    set('reschedApproveAdditionalHours', task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === ''
+      ? 'Not saved'
+      : fmtHrsLabel(task.reschedule_requested_additional_hours));
+    let reqLabel = '—';
+    try { reqLabel = fmtDateOnly(task.reschedule_requested_date) || '—'; } catch (_) { /* ignore */ }
+    set('reschedApproveRequested', reqLabel);
+    const useEmp = document.getElementById('reschedApproveUseEmp');
+    const useAdmin = document.getElementById('reschedApproveUseAdmin');
+    const wrap = document.getElementById('reschedApproveCustomWrap');
+    const dt = document.getElementById('reschedApproveDatetime');
+    if (useEmp) useEmp.checked = true;
+    if (useAdmin) useAdmin.checked = false;
+    if (wrap) wrap.style.display = 'none';
+    if (dt) {
+      const req = String(task.reschedule_requested_date || '').slice(0, 10);
+      dt.value = req ? `${req}T18:30` : '';
+    }
+    showReschedApproveModalEl(modal);
+  }
+
+  function closeReschedApproveModal() {
+    hideReschedApproveModalEl(document.getElementById('reschedApproveModal'));
+    _reschedApproveTask = null;
+  }
+
+  async function confirmReschedApprove() {
+    const task = _reschedApproveTask;
+    if (!task?.id) return;
+    const msg = document.getElementById('reschedApproveFormMsg');
+    const useAdmin = document.getElementById('reschedApproveUseAdmin')?.checked;
+    const dt = document.getElementById('reschedApproveDatetime')?.value;
+    if (useAdmin && !dt) {
+      if (msg) { msg.style.display = ''; msg.textContent = 'Please pick date and time for the new deadline.'; }
+      return;
+    }
+    const body = useAdmin
+      ? { use_employee_date: false, target_date: new Date(dt).toISOString() }
+      : { use_employee_date: true };
+    try {
+      await api(`/tasks/${task.id}/reschedule-request/approve`, { method: 'PATCH', body });
+      closeReschedApproveModal();
+      showToast('Reschedule approved — deadline updated (no re-accept) ✅', 'success');
+      loadRescheduleRequests();
+      refreshNavBadges();
+    } catch (err) {
+      if (msg) { msg.style.display = ''; msg.textContent = err.message; }
+      else showToast(err.message, 'error');
+    }
+  }
+
+  __tfReadyFns.push(() => {
+    const bindOnce = (id, evt, fn) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.tfBound === '1') return;
+      el.dataset.tfBound = '1';
+      el.addEventListener(evt, fn);
+    };
+    bindOnce('closeReschedApproveModal', 'click', closeReschedApproveModal);
+    bindOnce('cancelReschedApproveModal', 'click', closeReschedApproveModal);
+    bindOnce('confirmReschedApproveBtn', 'click', () => { confirmReschedApprove(); });
+    bindOnce('reschedApproveUseEmp', 'change', () => {
+      const wrap = document.getElementById('reschedApproveCustomWrap');
+      if (wrap) wrap.style.display = 'none';
+    });
+    bindOnce('reschedApproveUseAdmin', 'change', () => {
+      const wrap = document.getElementById('reschedApproveCustomWrap');
+      if (wrap) wrap.style.display = '';
+    });
+  });
+
+  // ─── Corrections view (employee) ──────────────────────────────────────────────
+  async function loadCorrections() {
+    if (els.correctionsTableBody) {
+      els.correctionsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Loading corrections…</td></tr>`;
+    }
+    if (els.correctionsList) {
+      els.correctionsList.innerHTML = '<div class="empty-state">Loading corrections…</div>';
+    }
+    try {
+      const allTasks = await api('/tasks/my');
+      const corrections = allTasks.filter((t) => t.verification_status === 'Verification Rejected');
+      renderCorrectionsTable(corrections);
+      renderCorrectionsList(corrections);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // Desktop table view — same data as the card view below, just laid out as rows.
+  function renderCorrectionsTable(tasks) {
+    const tbody = els.correctionsTableBody;
+    if (!tbody) return;
+    if (!tasks.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><span class="emoji">✅</span>No corrections — you're all good!</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
+
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: false });
+
+      const tdNote = document.createElement('td');
+      tdNote.innerHTML = `
+        <div class="correction-note-box" style="margin:0">
+          <div class="correction-note-label">↩ From <strong>${escapeHtml(task.verifier?.full_name ?? 'Verifier')}</strong>:</div>
+          <div class="correction-note-text">${escapeHtml(task.verification_note ?? '(no note)')}</div>
+          ${task.correction_voice_url ? `<a href="${task.correction_voice_url}" target="_blank" rel="noopener" class="attachment-link" style="margin-top:6px;display:inline-block">🎤 Voice note</a>` : ''}
+        </div>
+      `;
+
+      const tdPriority = document.createElement('td');
+      tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
+
+      const tdStatus = document.createElement('td');
+      tdStatus.innerHTML = `<span class="pill pill-InProgress">${escapeHtml(task.status)}</span>`;
+
+      const tdActions = document.createElement('td');
+      const actionsWrap = document.createElement('div');
+      actionsWrap.className = 'task-actions';
+      actionsWrap.appendChild(makeActionBtn('action-start', '🔄 Resend for Verification', () => openResendVerifyModal(task)));
+      tdActions.appendChild(actionsWrap);
+
+      tr.append(tdSr, tdDetails, tdNote, tdPriority, tdStatus, tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderCorrectionsList(tasks) {
+    if (!tasks.length) {
+      els.correctionsList.innerHTML = `<div class="empty-state"><span class="emoji">✅</span>No corrections — you're all good!</div>`;
+      return;
+    }
+    els.correctionsList.innerHTML = '';
+    tasks.forEach((task) => {
+      const card = document.createElement('div');
+      card.className = `task-card priority-${task.priority}`;
+      card.innerHTML = `
+        <div class="task-card-top">
+          <div>
+            <div class="task-card-project">${escapeHtml(task.project?.name ?? '—')}</div>
+            <div class="task-card-type">${escapeHtml(task.task_type?.name ?? '—')} · ${escapeHtml(task.department?.name ?? '—')}</div>
+          </div>
+          <span class="pill pill-Rejected">Correction Needed</span>
+        </div>
+        <p class="task-card-desc">${escapeHtml(task.description)}</p>
+        <div class="correction-note-box">
+          <div class="correction-note-label">↩ Correction note from <strong>${escapeHtml(task.verifier?.full_name ?? 'Verifier')}</strong>:</div>
+          <div class="correction-note-text">${escapeHtml(task.verification_note ?? '(no note)')}</div>
+          ${task.correction_voice_url ? `<a href="${task.correction_voice_url}" target="_blank" rel="noopener" class="attachment-link" style="margin-top:6px;display:inline-block">🎤 Voice note from verifier</a>` : ''}
+        </div>
+        ${task.verification_attachment_urls?.length ? `<div class="task-meta">${task.verification_attachment_urls.map((u, i) => `<a href="${u}" target="_blank" rel="noopener" class="attachment-link">📎 Your file ${i + 1}</a>`).join(' ')}</div>` : ''}
+        <div class="task-card-footer">
+          <span class="pill pill-InProgress">${task.status}</span>
+          <div class="task-actions" id="corr-actions-${task.id}"></div>
+        </div>
+      `;
+      const actionsEl = card.querySelector(`#corr-actions-${task.id}`);
+      actionsEl.appendChild(makeActionBtn('action-start', '🔄 Resend for Verification', () => openResendVerifyModal(task)));
+      els.correctionsList.appendChild(card);
+    });
+  }
+
+  // Resend for verification (employee after correction — verifier is already known)
+  function openResendVerifyModal(task) {
+    state.pendingTaskId = task.id;
+    state.pendingVerifierId = task.verifier?.id ?? null;
+    els.resendVerifierName.textContent = task.verifier?.full_name ?? 'the verifier';
+    els.resendVerifyFormMsg.hidden = true;
+    els.resendFiles.value = '';
+    els.resendVerifyModal.hidden = false;
+  }
+  els.closeResendVerifyModal?.addEventListener('click', () => { els.resendVerifyModal.hidden = true; });
+  els.cancelResendVerifyModal?.addEventListener('click', () => { els.resendVerifyModal.hidden = true; });
+  els.resendVerifyForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.resendVerifyFormMsg.hidden = true;
+    try {
+      if (!state.pendingVerifierId) {
+        throw new Error('Verifier not found — please contact your admin');
+      }
+      const formData = new FormData();
+      formData.append('verifier_id', state.pendingVerifierId);
+      const files = [...els.resendFiles.files].slice(0, 3);
+      files.forEach((f) => formData.append('verification_files', f));
+      const sent = await api(`/tasks/${state.pendingTaskId}/send-for-verification`, {
+        method: 'PATCH', body: formData, isForm: true
+      });
+      const wa = sent?._whatsapp;
+      const parts = (wa?.recipients || []).map((r) => {
+        if (r.ok) return `${r.label} ✓`;
+        if (r.reason === 'shared_placeholder_number') {
+          return `${r.label} ✗ (WhatsApp number shared/default — update in Employees)`;
+        }
+        return `${r.label} ✗${r.reason ? ` (${r.reason})` : ''}`;
+      });
+      const summary = parts.join(' · ') || wa?.to || '—';
+      if (wa?.ok) {
+        showToast(`Resent for verification ✅ WhatsApp → ${summary}`, 'success');
+      } else {
+        showToast(`Resent, but verifier WhatsApp issue → ${summary}`, 'error');
+      }
+      els.resendVerifyModal.hidden = true;
+      loadCorrections();
+    } catch (err) { els.resendVerifyFormMsg.textContent = err.message; els.resendVerifyFormMsg.hidden = false; }
+  });
+
+  function renderVerificationsTable(tbody, tasks) {
+    if (!tasks || tasks.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task, index) => {
+      const tr = document.createElement('tr');
+
+      // Task Sr No
+      const tdSr = document.createElement('td');
+      tdSr.className = 'col-tasksr';
+      tdSr.textContent = index + 1;
+
+      // Project
+      const tdProject = document.createElement('td');
+      tdProject.className = 'col-vproject';
+      tdProject.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.project?.name ?? '—')}</strong>`;
+
+      // Task Type
+      const tdTaskType = document.createElement('td');
+      tdTaskType.className = 'col-vtasktype';
+      tdTaskType.textContent = task.task_type?.name ?? '—';
+
+      // Description / task details
+      const tdDesc = document.createElement('td');
+      tdDesc.className = 'col-vdesc';
+      tdDesc.textContent = task.description || '—';
+      if (task.description) tdDesc.title = task.description;
+
+      // Submitted By (person who did the task and sent for verification)
+      const tdSubmittedBy = document.createElement('td');
+      tdSubmittedBy.className = 'col-vsubmitted';
+      tdSubmittedBy.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
+
+      // Pending with — who currently holds verification
+      const tdPendingWith = document.createElement('td');
+      tdPendingWith.className = 'col-vpending';
+      tdPendingWith.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier?.full_name ?? '—')}</strong>`;
+
+      // Attachments
+      const tdAttach = document.createElement('td');
+      tdAttach.className = 'col-vattach';
+      const links = [];
+      if (task.attachment_url) {
+        links.push(`<a href="${task.attachment_url}" target="_blank" rel="noopener" class="media-link" title="View attachment">📎</a>`);
+      }
+      if (task.voice_note_url) {
+        links.push(`<a href="${task.voice_note_url}" target="_blank" rel="noopener" class="media-link" title="Play voice note">🎤</a>`);
+      }
+      tdAttach.innerHTML = links.length ? links.join(' ') : `<span class="media-none">—</span>`;
+
+      // Sent for verification date/time (when employee clicked Send for verification)
+      const tdDate = document.createElement('td');
+      tdDate.className = 'col-vdate';
+      const sentAt =
+        task.sent_for_verification_at ||
+        task.first_sent_for_verification_at ||
+        null;
+      tdDate.textContent = sentAt ? fmtSheetDateTime(sentAt) : '—';
+
+      // Actions — Verify / Correction / Updation, shown directly (no gate)
+      const tdActions = document.createElement('td');
+      tdActions.className = 'col-vactions row-actions';
+
+      function showVerifyActions() {
+        tdActions.innerHTML = '';
+        tdActions.appendChild(makeActionBtn('action-complete', '✅ Verify', () => {
+          if (confirm('Mark this task as Verified?')) verifyApprove(task.id);
+        }));
+        tdActions.appendChild(makeActionBtn('action-reject', '↩ Correction', () => openCorrectionModal(task)));
+        tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
+        appendForwardVerificationBtn(tdActions, task);
+      }
+
+      // Actions — "Start Verification" → then Verify or Send for Correction
+      if (verificationHasStarted(task)) {
+        // Already started (recorded on the task itself) — show verify/correction buttons directly
+        showVerifyActions();
+      } else {
+        const startBtn = makeIconActionBtn('action-start', 'Start Verification', VERIFY_ICON_START, async () => {
+          await clickStartVerification(task, tdActions, startBtn);
+        });
+        tdActions.appendChild(startBtn);
+        appendForwardVerificationBtn(tdActions, task);
+      }
+      tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdAttach, tdDate, tdActions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ─── Reschedule ───────────────────────────────────────────────────────────────
+  function openRescheduleModal(taskId, currentTargetDate) {
+    //   state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
+    //   els.rescheduleDate.value = toDatetimeLocalValue(currentTargetDate);
+    //   els.rescheduleModal.hidden = false;
+    // }
+    // els.closeRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+    // els.cancelRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+    // els.rescheduleForm?.addEventListener('submit', async (e) => {
+    //   e.preventDefault(); els.rescheduleFormMsg.hidden = true;
+    //   try {
+    //     await api(`/tasks/${state.pendingTaskId}/reschedule`, {
+    //       method: 'PATCH', body: { target_date: els.rescheduleDate.value }
+    //     });
+    //     showToast('Task rescheduled ✅', 'success');
+    //     els.rescheduleModal.hidden = true; reloadCurrentTaskView(); refreshNavBadges();
+    //   } catch (err) { els.rescheduleFormMsg.textContent = err.message; els.rescheduleFormMsg.hidden = false; }
+    // });
+
+
+    state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
+    els.rescheduleDate.value = toDatetimeLocalValue(currentTargetDate);
+    els.rescheduleReason.value = '';
+    els.rescheduleModal.hidden = false;
+  };
+  els.closeRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+  els.cancelRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+  els.rescheduleForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.rescheduleFormMsg.hidden = true;
+    try {
+      await api(`/tasks/${state.pendingTaskId}/reschedule`, {
+        method: 'PATCH', body: { target_date: els.rescheduleDate.value, reason: els.rescheduleReason.value }
+      });
+      showToast('Task rescheduled ✅', 'success');
+      els.rescheduleModal.hidden = true; els.rescheduleReason.value = ''; reloadCurrentTaskView(); refreshNavBadges();
+    } catch (err) { els.rescheduleFormMsg.textContent = err.message; els.rescheduleFormMsg.hidden = false; }
+  });
+
+
+  //17th july chg above
+  // ─── Reschedule request (employee — goes to admin for approval) ───────────────
+  function openReschedRequestModal(taskId) {
+    state.pendingTaskId = taskId; els.reschedRequestFormMsg.hidden = true;
+    els.reschedreqDate.value = ''; els.reschedreqAdditionalHours.value = ''; els.reschedreqReason.value = '';
+    els.reschedRequestModal.hidden = false;
+  }
+  els.closeReschedRequestModal?.addEventListener('click', () => { els.reschedRequestModal.hidden = true; });
+  els.cancelReschedRequestModal?.addEventListener('click', () => { els.reschedRequestModal.hidden = true; });
+  els.reschedRequestForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.reschedRequestFormMsg.hidden = true;
+    try {
+      const additionalHours = Number(els.reschedreqAdditionalHours.value);
+      const request = await api(`/tasks/${state.pendingTaskId}/reschedule-request`, {
+        method: 'POST',
+        body: {
+          requested_date: els.reschedreqDate.value,
+          additional_hours: additionalHours,
+          reason: els.reschedreqReason.value
+        }
+      });
+      if (Number(request.reschedule_requested_additional_hours) !== additionalHours) {
+        els.reschedRequestModal.hidden = true;
+        reloadCurrentTaskView();
+        refreshNavBadges();
+        showToast('Request was submitted, but the server did not save the additional hours. Ask an admin to reject it, then retry after the backend is updated.', 'error');
+        return;
+      }
+      showToast('Reschedule request sent ✅', 'success');
+      els.reschedRequestModal.hidden = true; reloadCurrentTaskView(); refreshNavBadges();
+    } catch (err) { els.reschedRequestFormMsg.textContent = err.message; els.reschedRequestFormMsg.hidden = false; }
+  });
+
+  // ─── Reassign ─────────────────────────────────────────────────────────────────
+  function openReassignModal(taskId) {
+    state.pendingTaskId = taskId; els.reassignFormMsg.hidden = true;
+    fillSelect(els.reassignEmployee, state.master.employees, { placeholder: 'Select employee', labelKey: 'full_name' });
+    els.reassignModal.hidden = false;
+  }
+  els.closeReassignModal?.addEventListener('click', () => { els.reassignModal.hidden = true; });
+  els.cancelReassignModal?.addEventListener('click', () => { els.reassignModal.hidden = true; });
+  els.reassignForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.reassignFormMsg.hidden = true;
+    try {
+      await api(`/tasks/${state.pendingTaskId}/reassign`, {
+        method: 'PATCH', body: { assigned_to: els.reassignEmployee.value }
+      });
+      showToast('Task reassigned ✅', 'success');
+      els.reassignModal.hidden = true; reloadCurrentTaskView();
+    } catch (err) { els.reassignFormMsg.textContent = err.message; els.reassignFormMsg.hidden = false; }
+  });
+
+  // ─── Tickets ──────────────────────────────────────────────────────────────────
+
+  const TICKET_CATEGORY_LABELS = {
+    'Technical': '🔧 Technical',
+    'Task': '📋 Task related',
+    'Access': '🔑 Access / Login',
+    'Other': '📌 Other',
+    'General': '📌 General'
+  };
+
+  // Categories that require screenshot / screen recording
+  const TICKET_NEEDS_MEDIA = new Set(['Technical', 'Access']);
+
+  function openTicketModal(taskId, taskDescription) {
+    state.pendingTaskId = taskId || null;
+    els.ticketFormMsg.hidden = true;
+    els.ticketDescription.value = '';
+    document.getElementById('ticket-category').value = '';
+    document.getElementById('ticketMediaFields').hidden = true;
+    const mediaInput = document.getElementById('ticket-media');
+    if (mediaInput) mediaInput.value = '';
+
+    // Task banner
+    const banner = document.getElementById('ticketTaskBanner');
+    const bannerText = document.getElementById('ticketTaskBannerText');
+    if (taskId && taskDescription) {
+      bannerText.textContent = taskDescription.length > 80
+        ? taskDescription.slice(0, 80) + '…'
+        : taskDescription;
+      banner.hidden = false;
+      document.getElementById('ticket-category').value = 'Task';
+      document.getElementById('ticketMediaFields').hidden = true;
+    } else {
+      banner.hidden = true;
+    }
+
+    els.ticketModal.hidden = false;
+  }
+
+  // Show/hide media upload when category changes
+  document.getElementById('ticket-category')?.addEventListener('change', function () {
+    const mediaWrap = document.getElementById('ticketMediaFields');
+    mediaWrap.hidden = !TICKET_NEEDS_MEDIA.has(this.value);
+    if (mediaWrap.hidden) {
+      const mi = document.getElementById('ticket-media');
+      if (mi) mi.value = '';
+    }
+  });
+
+  els.openRaiseTicket?.addEventListener('click', () => openTicketModal(null));
+  els.closeTicketModal?.addEventListener('click', () => { els.ticketModal.hidden = true; });
+  els.cancelTicketModal?.addEventListener('click', () => { els.ticketModal.hidden = true; });
+
+  els.ticketForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    els.ticketFormMsg.hidden = true;
+
+    const category = document.getElementById('ticket-category').value;
+    const description = els.ticketDescription.value.trim();
+    if (!category) { els.ticketFormMsg.textContent = 'Please select a category'; els.ticketFormMsg.hidden = false; return; }
+    if (!description) { els.ticketFormMsg.textContent = 'Please describe the issue'; els.ticketFormMsg.hidden = false; return; }
+
+    try {
+      const mediaInput = document.getElementById('ticket-media');
+      const hasMedia = mediaInput && mediaInput.files[0] && TICKET_NEEDS_MEDIA.has(category);
+
+      if (hasMedia) {
+        // Use FormData so the media file goes through the backend (same pattern as task attachments)
+        const formData = new FormData();
+        formData.append('task_id', state.pendingTaskId || '');
+        formData.append('category', category);
+        formData.append('description', description);
+        formData.append('media', mediaInput.files[0]);
+        await api('/tickets', { method: 'POST', body: formData, isForm: true });
+      } else {
+        await api('/tickets', { method: 'POST', body: { task_id: state.pendingTaskId, category, description } });
+      }
+
+      showToast('Ticket raised ✅', 'success');
+      els.ticketModal.hidden = true;
+      if (state.activeView === 'tickets') loadTickets();
+      reloadCurrentTaskView();
+      refreshNavBadges();
+    } catch (err) {
+      els.ticketFormMsg.textContent = err.message;
+      els.ticketFormMsg.hidden = false;
+    }
+  });
+
+  // ─── Updation Modal (verifier/admin → employee: request task updation) ──────────
+  function openUpdationModal(taskOrId) {
+    const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
+    state.pendingTaskId = task.id;
+    const note = document.getElementById('updation-note');
+    const msg = document.getElementById('updationFormMsg');
+    const modal = document.getElementById('updationModal');
+    if (note) note.value = '';
+    if (msg) msg.hidden = true;
+    fillDuePrompt('updation', task);
+    if (modal) modal.hidden = false;
+  }
+
+  function closeUpdationModal() {
+    const modal = document.getElementById('updationModal');
+    if (modal) modal.hidden = true;
+  }
+  document.getElementById('closeUpdationModal')?.addEventListener('click', closeUpdationModal);
+  document.getElementById('cancelUpdationModal')?.addEventListener('click', closeUpdationModal);
+  document.getElementById('updationForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const note = (document.getElementById('updation-note')?.value || '').trim();
+    const msgEl = document.getElementById('updationFormMsg');
+    if (msgEl) msgEl.hidden = true;
+    if (!note) {
+      if (msgEl) {
+        msgEl.textContent = 'Please write an updation note before sending';
+        msgEl.hidden = false;
+      }
+      return;
+    }
+    try {
+      await api(`/tasks/${state.pendingTaskId}/send-updation`, {
+        method: 'PATCH',
+        body: (() => {
+          const action = document.getElementById('updation-due-action')?.value || 'keep';
+          const payload = { note };
+          if (action === 'hours' || action === 'days') {
+            payload.extra_unit = action;
+            payload.extra_amount = document.getElementById('updation-extra-amount')?.value || '';
+          }
+          if (action === 'new') {
+            payload.new_target_date = datetimeLocalToIso(document.getElementById('updation-new-due')?.value || '');
+          }
+          return payload;
+        })(),
+      });
+      showToast('Updation request sent ✅', 'success');
+      closeUpdationModal();
+      loadVerifications();
+    } catch (err) {
+      if (msgEl) {
+        msgEl.textContent = err.message;
+        msgEl.hidden = false;
+      } else {
+        showToast(err.message, 'error');
+      }
+    }
+  });
+
+  // ─── Load & Render Updations (employee view) ──────────────────────────────────
+  async function loadUpdations() {
+    const listEl = document.getElementById('updationsList');
+    if (listEl) listEl.innerHTML = '<div class="empty-state">Loading updations…</div>';
+    try {
+      const allTasks = await api('/tasks/my');
+      const updations = allTasks.filter((t) => t.verification_status === 'Updation Required');
+      renderUpdationsList(updations);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function renderUpdationsList(tasks) {
+    const listEl = document.getElementById('updationsList');
+    if (!listEl) return;
+    if (!tasks.length) {
+      listEl.innerHTML = `<div class="empty-state"><span class="emoji">📝</span>No updations pending — you're all good!</div>`;
+      return;
+    }
+    listEl.innerHTML = '';
+    tasks.forEach((task) => {
+      const card = document.createElement('div');
+      card.className = `task-card priority-${task.priority}`;
+      card.innerHTML = `
+        <div class="task-card-top">
+          <div>
+            <div class="task-card-project">${escapeHtml(task.project?.name ?? '—')}</div>
+            <div class="task-card-type">${escapeHtml(task.task_type?.name ?? '—')} · ${escapeHtml(task.department?.name ?? '—')}</div>
+          </div>
+          <span class="pill pill-Pending">📝 Updation Required</span>
+        </div>
+        <p class="task-card-desc">${escapeHtml(task.description)}</p>
+        <div class="correction-note-box">
+          <div class="correction-note-label">📝 Updation note from <strong>${escapeHtml(task.verifier?.full_name ?? 'Verifier')}</strong>:</div>
+          <div class="correction-note-text">${escapeHtml(task.updation_note ?? '(no note)')}</div>
+        </div>
+        <div class="task-card-footer">
+          <span class="pill pill-InProgress">${task.status}</span>
+          <div class="task-actions" id="upd-actions-${task.id}"></div>
+        </div>
+      `;
+      const actionsEl = card.querySelector(`#upd-actions-${task.id}`);
+      actionsEl.appendChild(makeActionBtn('action-start', '🔄 Resend for Verification', () => openResendVerifyModal(task)));
+      listEl.appendChild(card);
+    });
+  }
+
+  // ─── Solution Modal (admin / resolver) ───────────────────────────────────────
+  let _solvingTicketId = null;
+
+  function openSolutionModal(ticket) {
+    _solvingTicketId = ticket.id;
+    document.getElementById('solution-text').value = '';
+    document.getElementById('solutionFormMsg').hidden = true;
+
+    const info = document.getElementById('solutionTicketInfo');
+    info.innerHTML = `
+      <div class="solution-ticket-summary">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <span class="pill pill-Pending pill-sm">Open</span>
+          <span class="ticket-category-chip">${escapeHtml(TICKET_CATEGORY_LABELS[ticket.category] || ticket.category)}</span>
+        </div>
+        <p class="solution-ticket-desc">"${escapeHtml(ticket.description.length > 120 ? ticket.description.slice(0, 120) + '…' : ticket.description)}"</p>
+        <p class="solution-ticket-meta">
+          Raised by <strong>${escapeHtml(ticket.raised_by_user?.full_name ?? '—')}</strong>
+          ${ticket.task ? ` · Task: <em>${escapeHtml(ticket.task.description.slice(0, 60))}${ticket.task.description.length > 60 ? '…' : ''}</em>` : ''}
+          · ${fmtDate(ticket.created_at)}
+        </p>
+        ${ticket.attachment_url ? `<div style="margin-top:6px"><a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ghost-btn-text" style="font-size:0.8rem">📎 View attached screenshot/recording</a></div>` : ''}
+      </div>
+    `;
+    document.getElementById('solutionModal').hidden = false;
+  }
+
+  document.getElementById('closeSolutionModal')?.addEventListener('click', () => { document.getElementById('solutionModal').hidden = true; });
+  document.getElementById('cancelSolutionModal')?.addEventListener('click', () => { document.getElementById('solutionModal').hidden = true; });
+
+  document.getElementById('submitSolutionBtn')?.addEventListener('click', async () => {
+    const solution = document.getElementById('solution-text').value.trim();
+    const msgEl = document.getElementById('solutionFormMsg');
+    msgEl.hidden = true;
+    if (!solution) { msgEl.textContent = 'Please write a solution before submitting'; msgEl.hidden = false; return; }
+    try {
+      await api(`/tickets/${_solvingTicketId}/solve`, { method: 'PATCH', body: { solution } });
+      showToast('Solution submitted & ticket resolved ✅', 'success');
+      document.getElementById('solutionModal').hidden = true;
+      loadTickets();
+    } catch (err) {
+      msgEl.textContent = err.message;
+      msgEl.hidden = false;
+    }
+  });
+
+  // ─── Load & Render ────────────────────────────────────────────────────────────
+  async function loadTickets() {
+    const titleEl = document.getElementById('ticketsViewTitle');
+    const subEl = document.getElementById('ticketsViewSub');
+    if (titleEl) titleEl.textContent = '🎫 Tickets';
+    if (subEl) subEl.textContent = 'Raise and track support issues.';
+    els.ticketsList.innerHTML = '<div class="empty-state">Loading tickets…</div>';
+    if (els.ticketsTableBody) {
+      els.ticketsTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading tickets…</td></tr>';
+    }
+    try {
+      const tickets = await api('/tickets');
+      renderTicketsList(tickets);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function loadTicketsFiltered(statusFilter) {
+    // Update view heading dynamically
+    const titleEl = document.getElementById('ticketsViewTitle');
+    const subEl = document.getElementById('ticketsViewSub');
+    if (titleEl) titleEl.textContent = statusFilter === 'Open' ? '🟠 Open Tickets' : '✅ Resolved Tickets';
+    if (subEl) subEl.textContent = statusFilter === 'Open'
+      ? 'All open tickets pending resolution.'
+      : 'All resolved / closed tickets.';
+
+    els.ticketsList.innerHTML = `<div class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</div>`;
+    if (els.ticketsTableBody) {
+      els.ticketsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</td></tr>`;
+    }
+    try {
+      const tickets = await api('/tickets');
+      const filtered = tickets.filter(t => t.status === statusFilter);
+      renderTicketsList(filtered, statusFilter);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function renderTicketsList(tickets, statusFilter) {
+    const emptyMsg = statusFilter === 'Open' ? '🟠 No open tickets right now'
+      : statusFilter === 'Resolved' ? '✅ No resolved tickets yet'
+        : '🎫 No tickets yet';
+    if (!tickets.length) {
+      if (els.ticketsList) {
+        els.ticketsList.innerHTML = `<div class="empty-state"><span class="emoji">🎫</span>${emptyMsg}</div>`;
+      }
+      if (els.ticketsTableBody) {
+        els.ticketsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">${emptyMsg}</td></tr>`;
+      }
+      return;
+    }
+    if (els.ticketsList) els.ticketsList.innerHTML = '';
+    if (els.ticketsTableBody) els.ticketsTableBody.innerHTML = '';
+
+    const canSolve = state.user.role === 'admin' || !!state.user.can_resolve_tickets || !!state.user.is_mis_executive;
+
+    tickets.forEach((ticket, idx) => {
+      const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
+      const raisedBy = ticket.raised_by_user?.full_name ?? '—';
+      const descShort = ticket.description.length > 100
+        ? `${ticket.description.slice(0, 100)}…`
+        : ticket.description;
+      const taskRef = ticket.task
+        ? `${ticket.task.project?.name ? `${ticket.task.project.name} · ` : ''}Task: ${ticket.task.description.slice(0, 60)}${ticket.task.description.length > 60 ? '…' : ''}`
+        : '';
+
+      // Mobile card
+      const card = document.createElement('div');
+      card.className = 'ticket-card';
+      card.innerHTML = `
+        <div class="ticket-top">
+          <div class="ticket-top-left">
+            <span class="pill ${ticket.status === 'Open' ? 'pill-Pending' : 'pill-Completed'}">${ticket.status}</span>
+            ${catLabel ? `<span class="ticket-category-chip">${escapeHtml(catLabel)}</span>` : ''}
+          </div>
+          <div class="row-actions"></div>
+        </div>
+        ${taskRef ? `<div class="ticket-task-ref">🔗 ${escapeHtml(taskRef)}</div>` : ''}
+        <p class="ticket-desc">${escapeHtml(ticket.description)}</p>
+        ${ticket.attachment_url ? `
+          <div class="ticket-media-row">
+            <a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ticket-media-link">📎 Screenshot / Recording</a>
+          </div>` : ''}
+        <div class="ticket-meta">
+          Raised by <strong>${escapeHtml(raisedBy)}</strong>
+          · ${fmtDate(ticket.created_at)}
+        </div>
+        ${ticket.solution ? `
+          <div class="ticket-solution-box">
+            <div class="ticket-solution-header">💡 Solution</div>
+            <p class="ticket-solution-text">${escapeHtml(ticket.solution)}</p>
+            <div class="ticket-solution-meta">
+              By <strong>${escapeHtml(ticket.solved_by_user?.full_name ?? '—')}</strong>
+              · ${fmtDate(ticket.solution_at)}
+            </div>
+          </div>` : ''}
+      `;
+      const cardActions = card.querySelector('.row-actions');
+      if (canSolve && ticket.status === 'Open') {
+        const solveBtn = document.createElement('button');
+        solveBtn.className = 'action-btn action-verify';
+        solveBtn.textContent = '💡 Solution';
+        solveBtn.addEventListener('click', () => openSolutionModal(ticket));
+        cardActions.appendChild(solveBtn);
+      }
+      els.ticketsList?.appendChild(card);
+
+      // Desktop table row
+      if (els.ticketsTableBody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-sr">${idx + 1}</td>
+          <td>
+            <div class="cell-primary">${escapeHtml(descShort)}</div>
+            ${taskRef ? `<div class="cell-muted">${escapeHtml(taskRef)}</div>` : ''}
+            ${ticket.attachment_url ? `<a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ticket-media-link">📎 Attachment</a>` : ''}
+            ${ticket.solution ? `<div class="cell-muted" style="margin-top:4px">💡 ${escapeHtml(ticket.solution.slice(0, 80))}${ticket.solution.length > 80 ? '…' : ''}</div>` : ''}
+          </td>
+          <td>${escapeHtml(catLabel || '—')}</td>
+          <td>${escapeHtml(raisedBy)}<div class="cell-muted">${fmtDate(ticket.created_at)}</div></td>
+          <td class="col-status"><span class="pill ${ticket.status === 'Open' ? 'pill-Pending' : 'pill-Completed'}">${ticket.status}</span></td>
+          <td class="col-actions"><div class="row-actions"></div></td>
+        `;
+        const rowActions = tr.querySelector('.row-actions');
+        if (canSolve && ticket.status === 'Open') {
+          const solveBtn = document.createElement('button');
+          solveBtn.className = 'action-btn action-verify';
+          solveBtn.textContent = '💡 Solution';
+          solveBtn.addEventListener('click', () => openSolutionModal(ticket));
+          rowActions.appendChild(solveBtn);
+        } else {
+          rowActions.textContent = '—';
+        }
+        els.ticketsTableBody.appendChild(tr);
+      }
+    });
+  }
+
+  // ─── Leave: apply (everyone) ───────────────────────────────────────────────────
+  async function fillLeaveBuddySelect() {
+    const sel = els.leaveBuddy || document.getElementById('leave-buddy');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Loading buddies…</option>';
+    sel.disabled = true;
+    try {
+      // Dedicated endpoint (any employee). Prefer same department (e.g. Engineering).
+      let employees = await api('/leaves/buddies').catch(() => null);
+      if (!employees) {
+        // Fallback for older deploys
+        employees = await api('/master/employees');
+      }
+      sel.innerHTML = '<option value="">Select buddy…</option>';
+      const list = (employees || [])
+        .filter((e) => e.is_active !== false && e.id !== state.user.id && (e.role || '').toLowerCase() !== 'client')
+        .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+      if (!list.length) {
+        sel.innerHTML = '<option value="">No colleagues in your department</option>';
+        if (els.leaveFormMsg) {
+          els.leaveFormMsg.textContent =
+            'No buddy found in your department. Check that colleagues have the same department name (e.g. MDO OFFICE).';
+          els.leaveFormMsg.hidden = false;
+        }
+        return;
+      }
+      list.forEach((e) => {
+        const opt = document.createElement('option');
+        opt.value = e.id;
+        const dept = e.department ? ` · ${e.department}` : '';
+        const desig = e.designation ? ` (${e.designation})` : '';
+        opt.textContent = `${e.full_name}${dept}${desig}`;
+        sel.appendChild(opt);
+      });
+    } catch (err) {
+      console.warn('buddy list', err.message);
+      sel.innerHTML = '<option value="">Could not load buddies</option>';
+      if (els.leaveFormMsg) {
+        els.leaveFormMsg.textContent = err.message || 'Could not load buddy list';
+        els.leaveFormMsg.hidden = false;
+      }
+    } finally {
+      sel.disabled = false;
+    }
+  }
+
+  function buddyStatusLabel(leave) {
+    const name = leave.buddy?.full_name || '—';
+    const st = leave.buddy_status || 'None';
+    return `${name} (${st})`;
+  }
+
+  function isOfficeLeaveEmployee() {
+    const dept = String(state.user?.department || '').trim().toLowerCase();
+    return dept !== 'site engineer';
+  }
+
+  let _leaveTaskPlanLeaveId = null;
+  let _leaveTaskPlanBuddyName = '';
+
+  function closeLeaveTaskActionsModal() {
+    if (els.leaveTaskActionsModal) els.leaveTaskActionsModal.hidden = true;
+    _leaveTaskPlanLeaveId = null;
+    if (els.leaveTaskActionsList) els.leaveTaskActionsList.innerHTML = '';
+    if (els.leaveTaskActionsMsg) els.leaveTaskActionsMsg.hidden = true;
+  }
+
+  async function openLeaveTaskActionsModal(leave) {
+    if (!leave?.id || !isOfficeLeaveEmployee()) return false;
+    _leaveTaskPlanLeaveId = leave.id;
+    _leaveTaskPlanBuddyName = leave.buddy?.full_name || 'your buddy';
+    if (els.leaveTaskActionsMsg) els.leaveTaskActionsMsg.hidden = true;
+    if (els.leaveTaskActionsList) {
+      els.leaveTaskActionsList.innerHTML = '<div class="empty-state">Loading your tasks…</div>';
+    }
+    if (els.leaveTaskActionsModal) els.leaveTaskActionsModal.hidden = false;
+    try {
+      const data = await api(`/leaves/${leave.id}/open-tasks`);
+      const tasks = data?.tasks || [];
+      if (!tasks.length) {
+        closeLeaveTaskActionsModal();
+        return false;
+      }
+      if (els.leaveTaskActionsIntro) {
+        els.leaveTaskActionsIntro.textContent =
+          `Leave ${String(leave.from_date).slice(0, 10)} → ${String(leave.to_date).slice(0, 10)}. ` +
+          `For each task pick: assign to ${_leaveTaskPlanBuddyName}, keep on hold, or request a reschedule.`;
+      }
+      renderLeaveTaskActionsList(tasks, leave);
+      return true;
+    } catch (err) {
+      closeLeaveTaskActionsModal();
+      showToast(err.message || 'Could not load tasks for leave planning', 'error');
+      return false;
+    }
+  }
+
+  function renderLeaveTaskActionsList(tasks, leave) {
+    const list = els.leaveTaskActionsList;
+    if (!list) return;
+    list.innerHTML = '';
+    const defaultResched = (() => {
+      try {
+        const d = new Date(String(leave.to_date).slice(0, 10) + 'T12:00:00');
+        d.setDate(d.getDate() + 1);
+        return d.toISOString().slice(0, 10);
+      } catch (_) {
+        return String(leave.to_date).slice(0, 10);
+      }
+    })();
+
+    tasks.forEach((t) => {
+      const row = document.createElement('div');
+      row.className = 'leave-task-action-row';
+      row.dataset.taskId = t.id;
+      const canResched = !!t.rescheduling_possible && t.reschedule_status !== 'Pending'
+        && t.status !== 'Ticket Raised' && t.verification_status !== 'Pending Verification';
+      const proj = t.project?.name ? ` · ${t.project.name}` : '';
+      const windowTag = t.in_leave_window
+        ? '<span class="pill pill-Pending" style="font-size:10px;margin-left:6px">In leave window</span>'
+        : '';
+      row.innerHTML = `
+        <div class="leave-task-action-head">
+          <strong>${escapeHtml(t.description || 'Task')}</strong>${windowTag}
+          <div class="cell-muted" style="font-size:0.78rem;margin-top:2px">
+            ${escapeHtml(t.status)}${escapeHtml(proj)}
+            · due ${escapeHtml(fmtDateOnly(t.target_date) || '—')}
+            · ${escapeHtml(t.priority || '')}
+          </div>
+        </div>
+        <div class="leave-task-action-opts">
+          <label class="leave-task-opt">
+            <input type="radio" name="leave-act-${t.id}" value="buddy" checked />
+            Plan for buddy (${escapeHtml(_leaveTaskPlanBuddyName)}) — moves only after buddy Accepts
+          </label>
+          <label class="leave-task-opt">
+            <input type="radio" name="leave-act-${t.id}" value="hold" />
+            Keep on hold with me
+          </label>
+          <label class="leave-task-opt${canResched ? '' : ' is-disabled'}">
+            <input type="radio" name="leave-act-${t.id}" value="reschedule" ${canResched ? '' : 'disabled'} />
+            Reschedule request
+          </label>
+          <div class="leave-task-resched-wrap" hidden>
+            <label class="filter-label">New target date</label>
+            <input type="date" class="leave-task-resched-date" value="${defaultResched}" ${canResched ? '' : 'disabled'} />
+          </div>
+        </div>
+      `;
+      const radios = row.querySelectorAll(`input[name="leave-act-${t.id}"]`);
+      const wrap = row.querySelector('.leave-task-resched-wrap');
+      radios.forEach((r) => {
+        r.addEventListener('change', () => {
+          if (wrap) wrap.hidden = row.querySelector(`input[name="leave-act-${t.id}"]:checked`)?.value !== 'reschedule';
+        });
+      });
+      list.appendChild(row);
+    });
+  }
+
+  async function submitLeaveTaskActions() {
+    if (!_leaveTaskPlanLeaveId) return;
+    const msg = els.leaveTaskActionsMsg;
+    if (msg) msg.hidden = true;
+    const rows = [...(els.leaveTaskActionsList?.querySelectorAll('.leave-task-action-row') || [])];
+    const actions = [];
+    for (const row of rows) {
+      const taskId = row.dataset.taskId;
+      const choice = row.querySelector(`input[name="leave-act-${taskId}"]:checked`)?.value;
+      if (!choice) continue;
+      if (choice === 'reschedule') {
+        const requested_date = row.querySelector('.leave-task-resched-date')?.value;
+        if (!requested_date) {
+          if (msg) {
+            msg.textContent = 'Pick a new date for every reschedule choice';
+            msg.hidden = false;
+          }
+          return;
+        }
+        actions.push({ task_id: taskId, action: 'reschedule', requested_date });
+      } else {
+        actions.push({ task_id: taskId, action: choice });
+      }
+    }
+    if (!actions.length) {
+      closeLeaveTaskActionsModal();
+      return;
+    }
+    try {
+      if (els.submitLeaveTaskActions) els.submitLeaveTaskActions.disabled = true;
+      const res = await api(`/leaves/${_leaveTaskPlanLeaveId}/task-actions`, {
+        method: 'POST',
+        body: { actions },
+      });
+      const failed = (res.results || []).filter((r) => !r.ok);
+      const queued = (res.results || []).filter((r) => r.ok && r.queued).length;
+      if (failed.length) {
+        showToast(
+          `Saved ${res.applied || 0} task plan(s); ${failed.length} failed (e.g. reschedule not allowed)`,
+          'error'
+        );
+      } else if (queued) {
+        showToast(
+          `Task plans saved ✅ ${queued} stay with you until buddy Accepts`,
+          'success'
+        );
+      } else {
+        showToast(`Task plans saved for leave (${res.applied || actions.length}) ✅`, 'success');
+      }
+      closeLeaveTaskActionsModal();
+      if (state.activeView === 'my') loadMyTasks();
+      refreshNavBadges();
+    } catch (err) {
+      if (msg) {
+        msg.textContent = err.message || 'Could not save task plans';
+        msg.hidden = false;
+      } else showToast(err.message, 'error');
+    } finally {
+      if (els.submitLeaveTaskActions) els.submitLeaveTaskActions.disabled = false;
+    }
+  }
+
+  let _leaveBalanceCache = null;
+  let _leaveDeficitResolver = null;
+
+  function leaveRequestDays(payload) {
+    if (payload?.is_half_day) return 0.5;
+    const a = String(payload?.from_date || '').slice(0, 10);
+    const b = String(payload?.to_date || payload?.from_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+    const t0 = Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10));
+    const t1 = Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10));
+    if (t1 < t0) return null;
+    return Math.round((t1 - t0) / 86400000) + 1;
+  }
+
+  function fmtLeaveBalNum(v) {
+    if (v == null || Number.isNaN(Number(v))) return '—';
+    const n = Number(v);
+    if (n > 0) return `+${n}`;
+    return String(n);
+  }
+
+  function updateLeaveFormBalancePreview() {
+    const availEl = document.getElementById('leaveFormBalAvail');
+    const reqEl = document.getElementById('leaveFormBalReq');
+    const afterEl = document.getElementById('leaveFormBalAfter');
+    const warnEl = document.getElementById('leaveFormBalWarn');
+    if (!availEl || !reqEl || !afterEl) return;
+    const bal = _leaveBalanceCache;
+    const payload = {
+      from_date: els.leaveFrom?.value,
+      to_date: els.leaveTo?.value,
+      is_half_day: !!els.leaveHalfDay?.checked,
+    };
+    const req = leaveRequestDays(payload);
+    const avail = bal?.available;
+    availEl.textContent = fmtLeaveBalNum(avail);
+    availEl.style.color = avail < 0 ? '#C2410C' : avail === 0 ? '#6B7280' : '#15803D';
+    reqEl.textContent = req == null ? '—' : `${req} day(s)`;
+    if (avail == null || req == null) {
+      afterEl.textContent = '—';
+      afterEl.style.color = '#6B7280';
+      if (warnEl) { warnEl.hidden = true; warnEl.textContent = ''; }
+      return;
+    }
+    const after = Math.round((Number(avail) - Number(req)) * 10) / 10;
+    afterEl.textContent = fmtLeaveBalNum(after);
+    afterEl.style.color = after < 0 ? '#C2410C' : after === 0 ? '#6B7280' : '#15803D';
+    const needsWarn = avail < req || avail < 0 || after < 0;
+    if (warnEl) {
+      if (needsWarn) {
+        warnEl.hidden = false;
+        warnEl.textContent = after < 0 || avail < 0
+          ? `Balance will be in minus (${fmtLeaveBalNum(after)}). Submit pe Yes/No confirm aayega.`
+          : `Not enough balance for this request. Submit pe Yes/No confirm aayega.`;
+      } else {
+        warnEl.hidden = true;
+        warnEl.textContent = '';
+      }
+    }
+  }
+
+  function showLeaveDeficitModalEl(modal) {
+    if (!modal) return;
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    modal.removeAttribute('hidden');
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex';
+    modal.style.zIndex = '5100';
+  }
+
+  function hideLeaveDeficitModalEl(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.display = 'none';
+    modal.setAttribute('hidden', '');
+  }
+
+  function closeLeaveDeficitModal(answer) {
+    hideLeaveDeficitModalEl(document.getElementById('leaveDeficitModal'));
+    const resolve = _leaveDeficitResolver;
+    _leaveDeficitResolver = null;
+    if (resolve) resolve(!!answer);
+  }
+
+  function askLeaveDeficitConfirm({ message, available, requested, after }) {
+    return new Promise((resolve) => {
+      _leaveDeficitResolver = resolve;
+      const modal = document.getElementById('leaveDeficitModal');
+      const msg = document.getElementById('leaveDeficitMsg');
+      const stats = document.getElementById('leaveDeficitStats');
+      if (msg) {
+        msg.textContent = message || (
+          available < 0
+            ? `Your leave balance is already in minus (${fmtLeaveBalNum(available)}). Still want to apply?`
+            : 'Not enough leave balance. Still want to apply?'
+        );
+      }
+      if (stats) {
+        stats.innerHTML = `
+          <div><strong>Available now:</strong> <span style="color:${available < 0 ? '#C2410C' : '#15803D'}">${fmtLeaveBalNum(available)}</span></div>
+          <div><strong>This request:</strong> ${requested != null ? `${requested} day(s)` : '—'}</div>
+          <div><strong>After apply:</strong> <span style="color:${after < 0 ? '#C2410C' : '#15803D'}">${fmtLeaveBalNum(after)}</span>${after < 0 ? ' <em>(minus)</em>' : ''}</div>
+        `;
+      }
+      if (!modal) {
+        const ok = confirm(`${message || 'Not enough leave balance. Apply anyway?'}\n\nOK = Yes · Cancel = No`);
+        resolve(!!ok);
+        return;
+      }
+      showLeaveDeficitModalEl(modal);
+    });
+  }
+
+  function showLeaveApplyResultBanner(bal) {
+    const el = document.getElementById('leaveApplyResultBanner');
+    if (!el || !bal) return;
+    const used = bal.total_used_approved ?? 0;
+    const pending = bal.total_used_pending ?? 0;
+    const rem = bal.available;
+    el.hidden = false;
+    el.classList.toggle('is-minus', rem < 0);
+    el.innerHTML = `Leave applied ✅ · <strong>Used</strong> ${used}${pending ? ` · <strong>Pending</strong> ${pending}` : ''} · <strong>Remaining</strong> <span style="font-size:15px">${fmtLeaveBalNum(rem)}</span>${rem < 0 ? ' (in minus)' : ''}`;
+  }
+
+  async function openLeaveModal() {
+    els.leaveFormMsg.hidden = true;
+    els.leaveForm.reset();
+    fillLeaveBuddySelect();
+    try {
+      _leaveBalanceCache = await api('/leaves/balance');
+      renderLeaveBalance(_leaveBalanceCache);
+    } catch (_) {
+      _leaveBalanceCache = null;
+    }
+    updateLeaveFormBalancePreview();
+    els.leaveModal.hidden = false;
+  }
+  els.openApplyLeave?.addEventListener('click', openLeaveModal);
+  els.closeLeaveModal?.addEventListener('click', () => { els.leaveModal.hidden = true; });
+  els.cancelLeaveModal?.addEventListener('click', () => { els.leaveModal.hidden = true; });
+  els.closeLeaveTaskActionsModal?.addEventListener('click', closeLeaveTaskActionsModal);
+  els.skipLeaveTaskActions?.addEventListener('click', () => {
+    closeLeaveTaskActionsModal();
+    showToast('Leave submitted — you can still cover tasks later via buddy approval', 'success');
+  });
+  els.submitLeaveTaskActions?.addEventListener('click', submitLeaveTaskActions);
+  ['leave-from', 'leave-to', 'leave-halfday'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', updateLeaveFormBalancePreview);
+    document.getElementById(id)?.addEventListener('input', updateLeaveFormBalancePreview);
+  });
+  els.leaveForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.leaveFormMsg.hidden = true;
+    const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
+    if (!buddyId) {
+      els.leaveFormMsg.textContent = 'Please choose a buddy to cover your tasks';
+      els.leaveFormMsg.hidden = false;
+      return;
+    }
+    const payload = {
+      from_date: els.leaveFrom.value,
+      to_date: els.leaveTo.value,
+      is_half_day: els.leaveHalfDay.checked,
+      reason: els.leaveReason.value.trim(),
+      buddy_id: buddyId,
+    };
+    try {
+      const req = leaveRequestDays(payload);
+      let bal = _leaveBalanceCache;
+      if (!bal) {
+        try { bal = await api('/leaves/balance'); _leaveBalanceCache = bal; } catch (_) { /* ignore */ }
+      }
+      if (bal && req != null) {
+        const after = Math.round((Number(bal.available) - Number(req)) * 10) / 10;
+        if (bal.available < req || bal.in_deficit || after < 0) {
+          const ok = await askLeaveDeficitConfirm({
+            message: bal.available < 0 || bal.in_deficit
+              ? `Your leave balance is ${fmtLeaveBalNum(bal.available)} (in minus). Still want to apply for ${req} day(s)?`
+              : `You have ${fmtLeaveBalNum(bal.available)} leave day(s) left but this request is ${req} day(s). Still want to apply?`,
+            available: bal.available,
+            requested: req,
+            after,
+          });
+          if (!ok) {
+            els.leaveFormMsg.textContent = 'Leave not submitted — not enough balance';
+            els.leaveFormMsg.hidden = false;
+            return;
+          }
+          await submitOfficeLeave(payload, true);
+          return;
+        }
+      }
+      await submitOfficeLeave(payload, false);
+    } catch (err) {
+      els.leaveFormMsg.textContent = err.message;
+      els.leaveFormMsg.hidden = false;
+    }
+  });
+
+  async function submitOfficeLeave(payload, acknowledgeNegative) {
+    try {
+      const created = await api('/leaves', {
+        method: 'POST',
+        body: { ...payload, acknowledge_negative: !!acknowledgeNegative },
+      });
+      els.leaveModal.hidden = true;
+
+      let bal = null;
+      try { bal = await api('/leaves/balance'); _leaveBalanceCache = bal; } catch (_) { /* ignore */ }
+      if (bal) {
+        renderLeaveBalance(bal);
+        showLeaveApplyResultBanner(bal);
+      }
+      try {
+        const leaves = await api('/leaves/my');
+        renderMyLeavesList(leaves);
+      } catch (_) { /* ignore */ }
+      if (state.activeView === 'buddyrequests') loadBuddyRequests();
+      refreshNavBadges();
+
+      const used = bal?.total_used_approved;
+      const pending = bal?.total_used_pending;
+      const rem = bal?.available;
+      const balLine = bal
+        ? ` · Used ${used ?? '—'} · Remaining ${rem == null ? '—' : rem}${pending ? ` · Pending ${pending}` : ''}${rem < 0 ? ' (in minus)' : ''}`
+        : '';
+
+      let openedPlan = false;
+      if (isOfficeLeaveEmployee()) {
+        openedPlan = await openLeaveTaskActionsModal(created);
+      }
+      if (!openedPlan) {
+        const wa = created?._whatsapp;
+        const waOk = wa?.ok;
+        const waBits = (wa?.stakeholders || [])
+          .map((r) => `${r.label}:${r.ok ? 'ok' : (r.reason || 'fail')}`)
+          .join(', ');
+        showToast(
+          waOk
+            ? `Leave submitted ✅ WhatsApp: ${waBits || 'sent'}${balLine}`
+            : `Leave submitted ✅ but WhatsApp may have failed (${waBits || wa?.buddy?.reason || 'check numbers'})${balLine}`,
+          waOk ? 'success' : 'error'
+        );
+      } else {
+        showToast(`Leave submitted — choose open-task actions.${balLine}`, 'success');
+      }
+      return created;
+    } catch (err) {
+      if (err.status === 409 || err.data?.error === 'insufficient_leave_balance' || /insufficient_leave_balance|Still want to apply|in minus/i.test(err.message || '')) {
+        const d = err.data || {};
+        const avail = d.balance?.available;
+        const reqDays = d.requested_days ?? leaveRequestDays(payload);
+        const after = d.balance_after != null
+          ? d.balance_after
+          : (avail != null && reqDays != null ? Math.round((avail - reqDays) * 10) / 10 : null);
+        const ok = await askLeaveDeficitConfirm({
+          message: d.message || err.message,
+          available: avail,
+          requested: reqDays,
+          after,
+        });
+        if (ok) return submitOfficeLeave(payload, true);
+        throw new Error('Leave not submitted — not enough balance');
+      }
+      throw err;
+    }
+  }
+
+  __tfReadyFns.push(() => {
+    const bindOnce = (id, evt, fn) => {
+      const el = document.getElementById(id);
+      if (!el || el.dataset.tfLeaveDefBound === '1') return;
+      el.dataset.tfLeaveDefBound = '1';
+      el.addEventListener(evt, fn);
+    };
+    bindOnce('closeLeaveDeficitModal', 'click', () => closeLeaveDeficitModal(false));
+    bindOnce('leaveDeficitNoBtn', 'click', () => closeLeaveDeficitModal(false));
+    bindOnce('leaveDeficitYesBtn', 'click', () => closeLeaveDeficitModal(true));
+  });
+
+  function attachBuddyRespondButtons(container, leave) {
+    if (!container) return;
+    const yesBtn = document.createElement('button');
+    yesBtn.className = 'action-btn action-complete';
+    yesBtn.textContent = '✅ Yes, I\'ll cover';
+    yesBtn.addEventListener('click', async () => {
+      try {
+        const res = await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: true } });
+        const n = res.tasks_moved || 0;
+        showToast(n ? `${n} task(s) moved to you — due dates unchanged` : 'You accepted buddy cover ✅', 'success');
+        loadBuddyRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+    const noBtn = document.createElement('button');
+    noBtn.className = 'action-btn action-reject';
+    noBtn.textContent = '✕ No';
+    noBtn.addEventListener('click', async () => {
+      if (!confirm('Decline this buddy request?')) return;
+      try {
+        await api(`/leaves/${leave.id}/buddy-respond`, { method: 'PATCH', body: { accept: false } });
+        showToast('Declined — admin can reassign or change the target date', 'success');
+        loadBuddyRequests();
+        refreshNavBadges();
+      } catch (err) { showToast(err.message, 'error'); }
+    });
+    container.appendChild(yesBtn);
+    container.appendChild(noBtn);
+  }
+
+  async function loadBuddyRequests() {
+    const wrap = els.buddyRequestsList || document.getElementById('buddyRequestsList');
+    const tbody = els.buddyRequestsTableBody || document.getElementById('buddyRequestsTableBody');
+    if (!wrap && !tbody) return;
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Loading buddy requests…</div>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Loading buddy requests…</td></tr>';
+    try {
+      const rows = await api('/leaves/buddy-requests');
+      if (!rows.length) {
+        if (wrap) wrap.innerHTML = `<div class="empty-state"><span class="emoji">🤝</span>No pending buddy requests</div>`;
+        if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No pending buddy requests</td></tr>`;
+        return;
+      }
+      if (wrap) wrap.innerHTML = '';
+      if (tbody) tbody.innerHTML = '';
+      rows.forEach((leave, idx) => {
+        const fromName = leave.user?.full_name || 'Colleague';
+        if (wrap) {
+          const card = document.createElement('div');
+          card.className = 'ticket-card';
+          card.innerHTML = `
+            <div class="ticket-top">
+              <span class="pill pill-Pending">Buddy request</span>
+              <div class="row-actions"></div>
+            </div>
+            <div class="ticket-desc"><strong>${escapeHtml(fromName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+            <p class="ticket-desc">${escapeHtml(leave.reason || '')}</p>
+            <div class="ticket-meta">Say Yes to cover their open tasks due in this window after leave is approved.</div>
+          `;
+          attachBuddyRespondButtons(card.querySelector('.row-actions'), leave);
+          wrap.appendChild(card);
+        }
+        if (tbody) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="col-sr">${idx + 1}</td>
+            <td>${escapeHtml(fromName)}</td>
+            <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
+            <td>${escapeHtml(leave.reason || '—')}</td>
+            <td class="col-actions"><div class="row-actions"></div></td>
+          `;
+          attachBuddyRespondButtons(tr.querySelector('.row-actions'), leave);
+          tbody.appendChild(tr);
+        }
+      });
+    } catch (err) {
+      if (wrap) wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  async function loadMyLeaves() {
+    const hist = document.getElementById('myLeavesHistory');
+    if (hist) hist.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
+    if (els.myLeavesList) els.myLeavesList.innerHTML = '';
+    if (els.myLeavesTableBody) {
+      els.myLeavesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">Loading your leave requests…</td></tr>';
+    }
+    try {
+      const [leaves, balance] = await Promise.all([
+        api('/leaves/my'),
+        api('/leaves/balance').catch(() => null),
+      ]);
+      renderLeaveBalance(balance);
+      renderMyLeavesList(leaves);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function renderLeaveBalance(bal) {
+    const fyEl = document.getElementById('leaveBalFyLabel');
+    const subEl = document.getElementById('leaveBalSub');
+    const availEl = document.getElementById('leaveBalAvailable');
+    const accruedEl = document.getElementById('leaveBalAccrued');
+    const usedEl = document.getElementById('leaveBalUsed');
+    const pendingEl = document.getElementById('leaveBalPending');
+    const list = document.getElementById('leaveBalanceMonthList');
+    if (!list) return;
+    _leaveBalanceCache = bal || _leaveBalanceCache;
+
+    const setStat = (el, v, { signed = false } = {}) => {
+      if (!el) return;
+      if (v == null || Number.isNaN(Number(v))) {
+        el.textContent = '—';
+        el.classList.remove('is-minus', 'is-zero', 'is-ok');
+        return;
+      }
+      const n = Number(v);
+      el.textContent = signed && n > 0 ? `+${n}` : String(n);
+      el.classList.toggle('is-minus', n < 0);
+      el.classList.toggle('is-zero', n === 0);
+      el.classList.toggle('is-ok', n > 0);
+    };
+
+    if (!bal) {
+      if (fyEl) fyEl.textContent = 'Leave balance';
+      if (subEl) subEl.textContent = 'Could not load balance';
+      setStat(availEl, null);
+      setStat(accruedEl, null);
+      setStat(usedEl, null);
+      setStat(pendingEl, null);
+      list.innerHTML = '<tr><td colspan="5" class="empty-state">Balance unavailable</td></tr>';
+      return;
+    }
+    if (fyEl) fyEl.textContent = `Leave balance · ${bal.fy_label || ''}`;
+    if (subEl) {
+      subEl.textContent = `+${bal.monthly_accrual || 1} leave / month · financial year April → March · unused months carry forward`;
+    }
+    setStat(accruedEl, bal.total_accrued, { signed: true });
+    setStat(usedEl, bal.total_used_approved);
+    setStat(pendingEl, bal.total_used_pending);
+    setStat(availEl, bal.available, { signed: true });
+
+    const rows = bal.monthly || [];
+    list.innerHTML = rows.map((m) => {
+      const cls = [m.is_current ? 'is-current' : '', m.is_future ? 'is-future' : ''].filter(Boolean).join(' ');
+      const balCls = m.balance_after < 0 ? 'is-minus' : m.balance_after > 0 ? 'is-ok' : '';
+      const balTxt = `${m.balance_after > 0 ? '+' : ''}${m.balance_after}`;
+      const monthLabel = `${escapeHtml(m.short || m.label || '')}${m.is_current ? ' · now' : ''}`;
+      return `<tr class="${cls}">
+        <td>${monthLabel}</td>
+        <td class="lb-num">${m.accrued ? `+${m.accrued}` : '—'}</td>
+        <td class="lb-num">${m.used_approved ? m.used_approved : '—'}</td>
+        <td class="lb-num">${m.used_pending ? m.used_pending : '—'}</td>
+        <td class="lb-num lb-bal ${balCls}">${balTxt}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty-state">No months</td></tr>';
+  }
+
+  async function loadHrRecruitmentMine() {
+    const body = document.getElementById('hrRecruitMineBody');
+    if (body) body.innerHTML = '<tr><td colspan="5" class="empty-state">Loading…</td></tr>';
+    try {
+      const data = await api('/hr/recruitments');
+      const rows = (data.recruitments || []).filter((r) => {
+        if (r.kind === 'requirement' || r.source === 'office_requirement') return true;
+        // legacy office rows without kind (not QR candidates)
+        if (r.application || r.source === 'public_qr') return false;
+        if (r.designation && r.experience_required) return true;
+        return false;
+      });
+      if (!body) return;
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="5" class="empty-state">No requirements sent yet</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map((r) => `
+        <tr>
+          <td>${escapeHtml(r.designation || r.role_applied || r.candidate_name || '—')}</td>
+          <td>${escapeHtml(r.experience_required || '—')}</td>
+          <td>${escapeHtml(String(r.openings != null ? r.openings : '—'))}</td>
+          <td>${escapeHtml(r.status || '')}</td>
+          <td>${escapeHtml((r.created_at || '').slice(0, 10))}</td>
+        </tr>`).join('');
+    } catch (err) {
+      if (body) body.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  function resolveHrRecDesignation() {
+    const sel = document.getElementById('hr-rec-designation');
+    const custom = document.getElementById('hr-rec-designation-custom');
+    const v = sel?.value?.trim() || '';
+    if (v === '__custom__' || (custom && !custom.hidden)) {
+      return custom?.value?.trim() || '';
+    }
+    return v;
+  }
+
+  function showHrRecCustomDesig(show) {
+    const sel = document.getElementById('hr-rec-designation');
+    const custom = document.getElementById('hr-rec-designation-custom');
+    if (!custom) return;
+    custom.hidden = !show;
+    if (show) {
+      if (sel) sel.value = '__custom__';
+      custom.required = true;
+      custom.focus();
+    } else {
+      custom.required = false;
+      custom.value = '';
+      if (sel && sel.value === '__custom__') sel.value = 'Site Engineer';
+    }
+  }
+
+  document.getElementById('hr-rec-desig-plus')?.addEventListener('click', () => {
+    const custom = document.getElementById('hr-rec-designation-custom');
+    showHrRecCustomDesig(!!custom?.hidden);
+  });
+  document.getElementById('hr-rec-designation')?.addEventListener('change', (e) => {
+    showHrRecCustomDesig(e.target.value === '__custom__');
+  });
+
+  document.getElementById('hrRecruitForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById('hrRecruitMsg');
+    if (msg) { msg.hidden = true; msg.textContent = ''; }
+    const designation = resolveHrRecDesignation();
+    const experience = document.getElementById('hr-rec-experience')?.value?.trim();
+    const openingsRaw = document.getElementById('hr-rec-openings')?.value;
+    const openings = Math.max(1, Math.min(50, parseInt(openingsRaw, 10) || 1));
+    if (!designation || !experience) {
+      if (msg) { msg.textContent = 'Designation and experience are required'; msg.hidden = false; }
+      return;
+    }
+    try {
+      // JSON (not FormData) — reliable on Vercel; no CV file on requirement form
+      await api('/hr/recruitments', {
+        method: 'POST',
+        body: {
+          kind: 'requirement',
+          designation,
+          role_applied: designation,
+          experience_required: experience,
+          openings,
+          department: document.getElementById('hr-rec-department')?.value?.trim() || '',
+          location: document.getElementById('hr-rec-location')?.value?.trim() || '',
+          skills: document.getElementById('hr-rec-skills')?.value?.trim() || '',
+          urgency: document.getElementById('hr-rec-urgency')?.value || 'Normal',
+          notes: document.getElementById('hr-rec-notes')?.value?.trim() || '',
+        },
+      });
+      e.target.reset();
+      showHrRecCustomDesig(false);
+      const openingsEl = document.getElementById('hr-rec-openings');
+      if (openingsEl) openingsEl.value = '1';
+      const urg = document.getElementById('hr-rec-urgency');
+      if (urg) urg.value = 'Normal';
+      const desigSel = document.getElementById('hr-rec-designation');
+      if (desigSel) desigSel.value = 'Site Engineer';
+      showToast('Requirement sent to HR', 'success');
+      loadHrRecruitmentMine();
+    } catch (err) {
+      if (msg) { msg.textContent = err.message; msg.hidden = false; }
+      else showToast(err.message, 'error');
+    }
+  });
+
+  function leavePillClass(status) {
+    if (status === 'Approved') return 'pill-Completed';
+    if (status === 'Rejected') return 'pill-Rejected';
+    return 'pill-Pending';
+  }
+
+  function leaveDateRangeLabel(leave) {
+    const from = fmtDateOnly(leave.from_date);
+    const to = fmtDateOnly(leave.to_date);
+    const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
+    return leave.is_half_day ? `${range} (Half day)` : range;
+  }
+
+  function leaveMonthKey(leave) {
+    const s = String(leave?.from_date || leave?.created_at || '').slice(0, 7);
+    return /^\d{4}-\d{2}$/.test(s) ? s : 'unknown';
+  }
+
+  function leaveMonthTitle(key) {
+    if (!/^\d{4}-\d{2}$/.test(key)) return 'Other';
+    const [y, m] = key.split('-').map(Number);
+    const d = new Date(y, m - 1, 1);
+    return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  }
+
+  function renderMyLeavesList(leaves) {
+    const hist = document.getElementById('myLeavesHistory');
+    if (!leaves.length) {
+      if (hist) hist.innerHTML = `<div class="empty-state"><span class="emoji">🌴</span>No leave requests yet</div>`;
+      if (els.myLeavesList) els.myLeavesList.innerHTML = '';
+      if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
+      return;
+    }
+
+    const groups = new Map();
+    leaves.forEach((leave) => {
+      const key = leaveMonthKey(leave);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(leave);
+    });
+    const keys = [...groups.keys()].sort((a, b) => b.localeCompare(a));
+
+    if (hist) {
+      hist.innerHTML = '';
+      keys.forEach((key) => {
+        const block = document.createElement('div');
+        block.className = 'leave-hist-month-block';
+        block.innerHTML = `<div class="leave-hist-month-label">${escapeHtml(leaveMonthTitle(key))}</div>`;
+
+        groups.get(key).forEach((leave) => {
+          const card = document.createElement('div');
+          card.className = 'leave-hist-card';
+          card.innerHTML = `
+            <div class="leave-hist-card-top">
+              <div class="leave-hist-dates">${escapeHtml(leaveDateRangeLabel(leave))}</div>
+              <span class="pill ${leavePillClass(leave.status)}">${escapeHtml(leave.status)}</span>
+            </div>
+            <p class="leave-hist-reason">${escapeHtml(leave.reason || '—')}</p>
+            <div class="leave-hist-meta">
+              <span>Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></span>
+              <span>Applied: <strong>${escapeHtml(fmtDate(leave.created_at))}</strong></span>
+              ${leave.decision_note ? `<span>Note: <strong>${escapeHtml(leave.decision_note)}</strong></span>` : ''}
+            </div>
+            <div class="leave-hist-actions"></div>
+          `;
+          const actions = card.querySelector('.leave-hist-actions');
+          if (leave.status === 'Pending' && actions) {
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'action-btn action-reject';
+            cancelBtn.textContent = '✕ Cancel';
+            cancelBtn.addEventListener('click', async (ev) => {
+              ev.stopPropagation();
+              if (!confirm('Cancel this leave request?')) return;
+              try {
+                await api(`/leaves/${leave.id}`, { method: 'DELETE' });
+                showToast('Leave request cancelled', 'success');
+                loadMyLeaves();
+              } catch (err) { showToast(err.message, 'error'); }
+            });
+            actions.appendChild(cancelBtn);
+          }
+          block.appendChild(card);
+        });
+        hist.appendChild(block);
+      });
+    }
+
+    if (els.myLeavesList) els.myLeavesList.innerHTML = '';
+    if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
+  }
+
+  // ─── Leave: approvals (admin) ──────────────────────────────────────────────────
+  async function loadLeaveApprovals() {
+    els.leaveApprovalsList.innerHTML = '<div class="empty-state">Loading leave requests…</div>';
+    if (els.leaveApprovalsTableBody) {
+      els.leaveApprovalsTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading leave requests…</td></tr>';
+    }
+    try {
+      const status = els.leaveApprovalsStatusFilter.value;
+      const leaves = await api(`/leaves/all${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+      renderLeaveApprovalsList(leaves);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  els.leaveApprovalsStatusFilter?.addEventListener('change', loadLeaveApprovals);
+
+  function renderLeaveApprovalsList(leaves) {
+    if (!leaves.length) {
+      if (els.leaveApprovalsList) {
+        els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
+      }
+      if (els.leaveApprovalsTableBody) {
+        els.leaveApprovalsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests found</td></tr>`;
+      }
+      return;
+    }
+    if (els.leaveApprovalsList) els.leaveApprovalsList.innerHTML = '';
+    if (els.leaveApprovalsTableBody) els.leaveApprovalsTableBody.innerHTML = '';
+
+    leaves.forEach((leave, idx) => {
+      const empName = leave.user?.full_name ?? '—';
+      const card = document.createElement('div');
+      card.className = 'ticket-card';
+      card.innerHTML = `
+        <div class="ticket-top">
+          <span class="pill ${leavePillClass(leave.status)}">${leave.status}</span>
+          <div class="row-actions"></div>
+        </div>
+        <div class="ticket-desc"><strong>${escapeHtml(empName)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+        <p class="ticket-desc">${escapeHtml(leave.reason)}</p>
+        <div class="ticket-meta">Buddy: <strong>${escapeHtml(buddyStatusLabel(leave))}</strong></div>
+        ${leave.decision_note ? `<div class="ticket-meta">Decision note: ${escapeHtml(leave.decision_note)}</div>` : ''}
+        <div class="ticket-meta">
+          Applied ${fmtDate(leave.created_at)}
+          ${leave.decided_at ? ` · Decided by <strong>${escapeHtml(leave.decided_by_user?.full_name ?? '—')}</strong> on ${fmtDate(leave.decided_at)}` : ''}
+        </div>
+      `;
+      if (leave.status === 'Pending') {
+        const actionsCell = card.querySelector('.row-actions');
+        const approveBtn = document.createElement('button');
+        approveBtn.className = 'action-btn action-complete';
+        approveBtn.textContent = '✅ Approve';
+        approveBtn.addEventListener('click', async () => {
+          try {
+            const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
+            const n = res.tasks_transferred || 0;
+            if (res.cover_needed) {
+              showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
+              checkLeaveCoverAlerts();
+            } else if (n) {
+              showToast(`Leave approved — ${n} task(s) moved to buddy ✅`, 'success');
+            } else {
+              showToast('Leave approved ✅ (tasks move only after buddy Accepts)', 'success');
+            }
+            loadLeaveApprovals();
+          } catch (err) { showToast(err.message, 'error'); }
+        });
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'action-btn action-reject';
+        rejectBtn.textContent = '✕ Reject';
+        rejectBtn.addEventListener('click', () => openRejectLeaveModal(leave.id));
+        actionsCell.appendChild(approveBtn);
+        actionsCell.appendChild(rejectBtn);
+      }
+      els.leaveApprovalsList?.appendChild(card);
+
+      if (els.leaveApprovalsTableBody) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="col-sr">${idx + 1}</td>
+          <td>${escapeHtml(empName)}</td>
+          <td>${escapeHtml(leaveDateRangeLabel(leave))}</td>
+          <td>
+            <div class="cell-primary">${escapeHtml(leave.reason)}</div>
+            ${leave.decision_note ? `<div class="cell-muted">${escapeHtml(leave.decision_note)}</div>` : ''}
+          </td>
+          <td>${escapeHtml(buddyStatusLabel(leave))}</td>
+          <td class="col-status"><span class="pill ${leavePillClass(leave.status)}">${leave.status}</span></td>
+          <td class="col-actions"><div class="row-actions"></div></td>
+        `;
+        const rowActions = tr.querySelector('.row-actions');
+        if (leave.status === 'Pending') {
+          const approveBtn = document.createElement('button');
+          approveBtn.className = 'action-btn action-complete';
+          approveBtn.textContent = '✅ Approve';
+          approveBtn.addEventListener('click', async () => {
+            try {
+              const res = await api(`/leaves/${leave.id}/approve`, { method: 'PATCH' });
+              const n = res.tasks_transferred || 0;
+              if (res.cover_needed) {
+                showToast('Leave approved — buddy declined; resolve task cover in the popup', 'success');
+                checkLeaveCoverAlerts();
+              } else if (n) {
+                showToast(`Leave approved — ${n} task(s) moved to buddy ✅`, 'success');
+              } else {
+                showToast('Leave approved ✅ (tasks move only after buddy Accepts)', 'success');
+              }
+              loadLeaveApprovals();
+            } catch (err) { showToast(err.message, 'error'); }
+          });
+          const rejectBtn = document.createElement('button');
+          rejectBtn.className = 'action-btn action-reject';
+          rejectBtn.textContent = '✕ Reject';
+          rejectBtn.addEventListener('click', () => openRejectLeaveModal(leave.id));
+          rowActions.appendChild(approveBtn);
+          rowActions.appendChild(rejectBtn);
+        } else {
+          rowActions.textContent = '—';
+        }
+        els.leaveApprovalsTableBody.appendChild(tr);
+      }
+    });
+  }
+
+  // ─── Leave cover alerts (buddy declined, leave approved) ─────────────────────
+  let _leaveCoverItems = [];
+  async function checkLeaveCoverAlerts() {
+    try {
+      const items = await api('/leaves/unresolved-covers');
+      _leaveCoverItems = Array.isArray(items) ? items : [];
+      if (!_leaveCoverItems.length) {
+        if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+        return;
+      }
+      renderLeaveCoverModal(_leaveCoverItems);
+    } catch (err) {
+      console.warn('Leave cover check:', err.message);
+    }
+  }
+
+  function renderLeaveCoverModal(items) {
+    if (!els.leaveCoverModal || !els.leaveCoverList) return;
+    els.leaveCoverFormMsg.hidden = true;
+    els.leaveCoverList.innerHTML = '';
+    items.forEach((item, idx) => {
+      const leave = item.leave || {};
+      const name = item.applicant?.full_name || 'Employee';
+      const block = document.createElement('div');
+      block.className = 'ticket-card';
+      block.style.marginBottom = '12px';
+      const taskLines = (item.tasks || [])
+        .map((t) => `<li>${escapeHtml((t.description || 'Task').slice(0, 120))} · ${escapeHtml(String(t.target_date || '').slice(0, 10))}</li>`)
+        .join('');
+      const assigneeOpts = sortByLabel(item.assignees || [], 'full_name')
+        .map((u) => `<option value="${u.id}">${escapeHtml(u.full_name)}</option>`)
+        .join('');
+      block.innerHTML = `
+        <div class="ticket-desc"><strong>${escapeHtml(name)}</strong> · ${escapeHtml(leaveDateRangeLabel(leave))}</div>
+        <div class="ticket-meta">Buddy: <strong>${escapeHtml(item.buddy?.full_name || '—')}</strong> (declined)</div>
+        <ul style="margin:8px 0;padding-left:18px;">${taskLines || '<li>No open tasks in leave window</li>'}</ul>
+        <div class="field">
+          <label>Reassign tasks to</label>
+          <select class="leave-cover-assignee" data-idx="${idx}">
+            <option value="">Select employee…</option>
+            ${assigneeOpts}
+          </select>
+        </div>
+        <div class="field">
+          <label>Or change target date</label>
+          <input type="date" class="leave-cover-date" data-idx="${idx}" />
+        </div>
+        <div class="row-actions" style="margin-top:8px;gap:8px;display:flex;flex-wrap:wrap;"></div>
+      `;
+      const actions = block.querySelector('.row-actions');
+      const transferBtn = document.createElement('button');
+      transferBtn.type = 'button';
+      transferBtn.className = 'action-btn action-complete';
+      transferBtn.textContent = 'Reassign tasks';
+      transferBtn.addEventListener('click', async () => {
+        const sel = block.querySelector('.leave-cover-assignee');
+        const assignee_id = sel?.value;
+        if (!assignee_id) {
+          els.leaveCoverFormMsg.textContent = 'Select an employee to transfer to';
+          els.leaveCoverFormMsg.hidden = false;
+          return;
+        }
+        try {
+          const res = await api(`/leaves/${leave.id}/resolve-cover`, {
+            method: 'POST',
+            body: { action: 'reassign', assignee_id },
+          });
+          showToast(`Transferred ${res.updated || 0} task(s)`, 'success');
+          checkLeaveCoverAlerts();
+        } catch (err) {
+          els.leaveCoverFormMsg.textContent = err.message;
+          els.leaveCoverFormMsg.hidden = false;
+        }
+      });
+      const reschedBtn = document.createElement('button');
+      reschedBtn.type = 'button';
+      reschedBtn.className = 'action-btn';
+      reschedBtn.textContent = 'Change target date';
+      reschedBtn.addEventListener('click', async () => {
+        const dateEl = block.querySelector('.leave-cover-date');
+        const target_date = dateEl?.value;
+        if (!target_date) {
+          els.leaveCoverFormMsg.textContent = 'Pick a new target date';
+          els.leaveCoverFormMsg.hidden = false;
+          return;
+        }
+        try {
+          const res = await api(`/leaves/${leave.id}/resolve-cover`, {
+            method: 'POST',
+            body: { action: 'reschedule', target_date },
+          });
+          showToast(`Rescheduled ${res.updated || 0} task(s)`, 'success');
+          checkLeaveCoverAlerts();
+        } catch (err) {
+          els.leaveCoverFormMsg.textContent = err.message;
+          els.leaveCoverFormMsg.hidden = false;
+        }
+      });
+      actions.appendChild(transferBtn);
+      actions.appendChild(reschedBtn);
+      els.leaveCoverList.appendChild(block);
+    });
+    els.leaveCoverModal.hidden = false;
+  }
+
+  els.closeLeaveCoverModal?.addEventListener('click', () => {
+    if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+  });
+  els.laterLeaveCoverModal?.addEventListener('click', () => {
+    if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
+    showToast('Reminder will show again next time you open TaskFlow', '');
+  });
+
+  function openRejectLeaveModal(leaveId) {
+    state.pendingLeaveId = leaveId;
+    els.rejectLeaveFormMsg.hidden = true;
+    els.rejectLeaveReason.value = '';
+    els.rejectLeaveModal.hidden = false;
+  }
+  els.closeRejectLeaveModal?.addEventListener('click', () => { els.rejectLeaveModal.hidden = true; });
+  els.cancelRejectLeaveModal?.addEventListener('click', () => { els.rejectLeaveModal.hidden = true; });
+  els.rejectLeaveForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.rejectLeaveFormMsg.hidden = true;
+    try {
+      await api(`/leaves/${state.pendingLeaveId}/reject`, {
+        method: 'PATCH',
+        body: { reason: els.rejectLeaveReason.value.trim() }
+      });
+      showToast('Leave rejected', 'success');
+      els.rejectLeaveModal.hidden = true;
+      loadLeaveApprovals();
+    } catch (err) { els.rejectLeaveFormMsg.textContent = err.message; els.rejectLeaveFormMsg.hidden = false; }
+  });
+
+  // ─── Manage Employees ─────────────────────────────────────────────────────────
+  function isClientUserRow(u) {
+    const role = String(u?.role || '').toLowerCase().trim();
+    const dept = String(u?.department || '').toLowerCase().trim();
+    const des = String(u?.designation || '').toLowerCase().trim();
+    return role === 'client' || dept === 'client' || des === 'client';
+  }
+
+  let employeesCache = [];
+  let sitesCache = [];
+  let clientsCache = [];
+
+  async function loadEmployees() {
+    els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading employees…</td></tr>`;
+    els.employeesCards.innerHTML = `<div class="empty-state">Loading employees…</div>`;
+    try {
+      const all = await api('/employees');
+      // Clients belong only in Manage clients — never here
+      employeesCache = sortByLabel((all || []).filter((e) => !isClientUserRow(e)), 'full_name');
+      fillEmpDepartmentFilter(employeesCache);
+      applyEmployeesFilter();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function fillEmpDepartmentFilter(employees) {
+    const sel = els.empFilterDepartment;
+    if (!sel) return;
+    const prev = sel.value;
+    const depts = [...new Set((employees || []).map((e) => e.department).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    sel.innerHTML = '<option value="">All departments</option>';
+    depts.forEach((d) => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    });
+    if (prev && depts.includes(prev)) sel.value = prev;
+  }
+
+  function getFilteredEmployees() {
+    const q = (els.empFilterQ?.value || '').trim().toLowerCase();
+    const dept = els.empFilterDepartment?.value || '';
+    const status = els.empFilterStatus?.value || '';
+    return employeesCache.filter((emp) => {
+      if (dept && String(emp.department || '') !== dept) return false;
+      if (status === 'active' && !emp.is_active) return false;
+      if (status === 'inactive' && emp.is_active) return false;
+      if (q) {
+        const hay = [
+          emp.full_name, emp.username, emp.department, emp.designation,
+          emp.role, emp.reporting_head?.full_name, emp.site_name, ...(parseEmployeeSites(emp))
+        ].map((x) => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applyEmployeesFilter() {
+    const filtered = getFilteredEmployees();
+    renderEmployeesTable(filtered);
+    renderEmployeesCards(filtered);
+    if (els.empFilterCount) {
+      const active = !!(els.empFilterQ?.value?.trim() || els.empFilterDepartment?.value || els.empFilterStatus?.value);
+      if (active) {
+        els.empFilterCount.hidden = false;
+        els.empFilterCount.textContent = `Showing ${filtered.length} of ${employeesCache.length} employees`;
+      } else {
+        els.empFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearEmployeesFilter() {
+    if (els.empFilterQ) els.empFilterQ.value = '';
+    if (els.empFilterDepartment) els.empFilterDepartment.value = '';
+    if (els.empFilterStatus) els.empFilterStatus.value = '';
+    applyEmployeesFilter();
+  }
+
+  function renderEmployeesTable(employees) {
+    if (!employees.length) {
+      const emptyMsg = employeesCache.length ? 'No matching employees' : 'No employees yet';
+      els.employeesTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyMsg}</td></tr>`;
+      return;
+    }
+    els.employeesTableBody.innerHTML = '';
+    employees.forEach((emp) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="font-weight:600">${escapeHtml(emp.full_name)}</strong></td>
+        <td>${escapeHtml(emp.department ?? '—')}</td>
+        <td>${escapeHtml(emp.designation ?? '—')}</td>
+        <td>${escapeHtml(emp.reporting_head?.full_name ?? '—')}</td>
+        <td><span class="role-pill ${emp.role}">${emp.role}</span></td>
+        <td style="font-family:var(--font-mono);font-size:0.8rem">${escapeHtml(emp.username)}</td>
+        <td></td><td></td><td class="row-actions"></td>
+      `;
+      const statusCell = tr.children[6];
+      const statusBtn = document.createElement('button');
+      statusBtn.className = `status-toggle ${emp.is_active ? 'active' : 'inactive'}`;
+      statusBtn.textContent = emp.is_active ? 'Active' : 'Inactive';
+      statusBtn.addEventListener('click', () => toggleEmployeeStatus(emp));
+      statusCell.appendChild(statusBtn);
+
+      const verifierCell = tr.children[7];
+      const verifierBtn = document.createElement('button');
+      verifierBtn.className = `status-toggle ${emp.can_verify ? 'active' : 'inactive'}`;
+      verifierBtn.textContent = emp.can_verify ? 'Yes' : 'No';
+      verifierBtn.addEventListener('click', () => toggleEmployeeVerifier(emp));
+      verifierCell.appendChild(verifierBtn);
+
+      const actionsCell = tr.children[8];
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-start';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openEditEmployeeModal(emp));
+      actionsCell.appendChild(editBtn);
+
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'action-btn action-start';
+      resetBtn.textContent = '🔑 Reset password';
+      resetBtn.addEventListener('click', () => resetEmployeePassword(emp));
+      actionsCell.appendChild(resetBtn);
+
+      els.employeesTableBody.appendChild(tr);
+    });
+  }
+
+  // renders the "Manage employees" view as cards (shown on mobile)
+  function renderEmployeesCards(employees) {
+    if (!employees.length) {
+      const emptyMsg = employeesCache.length ? 'No matching employees' : 'No employees yet';
+      els.employeesCards.innerHTML = `<div class="empty-state"><span class="emoji">👥</span>${emptyMsg}</div>`;
+      return;
+    }
+    els.employeesCards.innerHTML = '';
+    employees.forEach((emp) => {
+      const card = document.createElement('div');
+      card.className = 'employee-card';
+      card.innerHTML = `
+        <div class="employee-card-top">
+          <div>
+            <strong>${escapeHtml(emp.full_name)}</strong>
+            <span class="employee-card-meta">${escapeHtml(emp.designation ?? '—')} · ${escapeHtml(emp.department ?? '—')}</span>
+          </div>
+          <span class="role-pill ${emp.role}">${emp.role}</span>
+        </div>
+        <div class="employee-card-row">
+          <span class="employee-card-label">Username</span>
+          <span class="employee-card-value mono">${escapeHtml(emp.username)}</span>
+        </div>
+        <div class="employee-card-row">
+          <span class="employee-card-label">Reporting Head</span>
+          <span class="employee-card-value">${escapeHtml(emp.reporting_head?.full_name ?? '—')}</span>
+        </div>
+        <div class="employee-card-toggles"></div>
+        <div class="employee-card-actions"></div>
+      `;
+
+      const togglesEl = card.querySelector('.employee-card-toggles');
+      const statusBtn = document.createElement('button');
+      statusBtn.className = `status-toggle ${emp.is_active ? 'active' : 'inactive'}`;
+      statusBtn.textContent = emp.is_active ? 'Active' : 'Inactive';
+      statusBtn.addEventListener('click', () => toggleEmployeeStatus(emp));
+      togglesEl.appendChild(statusBtn);
+
+      const verifierBtn = document.createElement('button');
+      verifierBtn.className = `status-toggle ${emp.can_verify ? 'active' : 'inactive'}`;
+      verifierBtn.textContent = emp.can_verify ? 'Verifier: Yes' : 'Verifier: No';
+      verifierBtn.addEventListener('click', () => toggleEmployeeVerifier(emp));
+      togglesEl.appendChild(verifierBtn);
+
+      const actionsEl = card.querySelector('.employee-card-actions');
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-start';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openEditEmployeeModal(emp));
+      actionsEl.appendChild(editBtn);
+
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'action-btn action-start';
+      resetBtn.textContent = '🔑 Reset password';
+      resetBtn.addEventListener('click', () => resetEmployeePassword(emp));
+      actionsEl.appendChild(resetBtn);
+
+      els.employeesCards.appendChild(card);
+    });
+  }
+
+  els.empFilterQ?.addEventListener('input', applyEmployeesFilter);
+  els.empFilterDepartment?.addEventListener('change', applyEmployeesFilter);
+  els.empFilterStatus?.addEventListener('change', applyEmployeesFilter);
+  els.clearEmpFilters?.addEventListener('click', clearEmployeesFilter);
+
+  async function toggleEmployeeStatus(emp) {
+    try {
+      await api(`/employees/${emp.id}`, { method: 'PATCH', body: { is_active: !emp.is_active } });
+      showToast(`${emp.full_name} marked ${!emp.is_active ? 'active' : 'inactive'} ✅`, 'success');
+      loadEmployees(); refreshEmployeeDropdowns();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  async function toggleEmployeeVerifier(emp) {
+    try {
+      await api(`/employees/${emp.id}`, { method: 'PATCH', body: { can_verify: !emp.can_verify } });
+      showToast(`${emp.full_name} ${!emp.can_verify ? 'can now verify tasks' : 'is no longer a verifier'} ✅`, 'success');
+      loadEmployees();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  async function resetEmployeePassword(emp) {
+    if (!confirm(`Reset password for ${emp.full_name}?`)) return;
+    try {
+      const { generated_password } = await api(`/employees/${emp.id}/reset-password`, { method: 'POST' });
+      showCredsModal(emp.username, generated_password, {
+        title: 'Password reset ✅',
+        note: 'Share the new password with them — it won’t be shown again.',
+      });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  els.openAddEmployee?.addEventListener('click', () => {
+    els.employeeForm.reset(); els.employeeFormMsg.hidden = true;
+    fillSiteMultiSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], []);
+    els.employeeModal.hidden = false;
+  });
+  els.closeEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.employeeModal.hidden = true; });
+  els.cancelEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.employeeModal.hidden = true; });
+  els.employeeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.employeeFormMsg.hidden = true;
+    const sites = getSelectedSites(els.empSite || document.getElementById('emp-site'));
+    const role = document.getElementById('emp-role').value;
+    let department = document.getElementById('emp-department').value.trim();
+    if (role === 'client' && !department) department = 'Client';
+    if (role === 'client' && !sites.length) {
+      els.employeeFormMsg.textContent = 'Please select at least one project for this client';
+      els.employeeFormMsg.hidden = false;
+      return;
+    }
+    const body = {
+      full_name: document.getElementById('emp-fullname').value.trim(),
+      department,
+      designation: document.getElementById('emp-designation').value.trim(),
+      role,
+      is_head: role === 'head',
+      reporting_head_id: els.empReportingHead.value || null,
+      site_name: sites[0] || null,
+      site_names: sites.length ? sites : null,
+      whatsapp_number: (document.getElementById('emp-whatsapp')?.value || '').trim() || null
+    };
+    try {
+      const created = await api('/employees', { method: 'POST', body });
+      els.employeeModal.hidden = true;
+      showCredsModal(created.username, created.generated_password, {
+        title: 'Employee added ✅',
+        note: 'Share these login details with the employee — they won’t be shown again.',
+      });
+      loadEmployees(); refreshEmployeeDropdowns();
+    } catch (err) { els.employeeFormMsg.textContent = err.message; els.employeeFormMsg.hidden = false; }
+  });
+  els.closeCredsModal?.addEventListener('click', () => { els.credsModal.hidden = true; });
+  els.closeCredsModalBtn?.addEventListener('click', () => { els.credsModal.hidden = true; });
+
+  // ─── Edit employee (designation + role + department + optional new password) ─
+  function openEditEmployeeModal(emp) {
+    els.editEmployeeFormMsg.hidden = true;
+    els.editEmpId.value = emp.id;
+    els.editEmpFullname.value = emp.full_name || '';
+    els.editEmpDepartment.value = emp.department || '';
+    els.editEmpDesignation.value = emp.designation || '';
+    els.editEmpRole.value = emp.role || 'employee';
+    // Reporting Head — can't be your own reporting head, so exclude self from the list.
+    const headOptions = (state.master.employees || []).filter((e) => e.id !== emp.id);
+    fillSelect(els.editEmpReportingHead, headOptions, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
+    els.editEmpReportingHead.value = emp.reporting_head_id || '';
+    fillSiteMultiSelect(
+      els.editEmpSite || document.getElementById('edit-emp-site'),
+      state.master.projects || [],
+      parseEmployeeSites(emp)
+    );
+    const waEl = document.getElementById('edit-emp-whatsapp');
+    if (waEl) waEl.value = emp.whatsapp_number || '';
+    setEditStatusToggle(emp.is_active !== false);
+    els.editEmpPassword.value = '';
+    els.editEmployeeModal.hidden = false;
+  }
+  // Reflects the given active/inactive state onto the toggle button's look + dataset.
+  function setEditStatusToggle(isActive) {
+    els.editEmpStatusToggle.dataset.active = isActive ? 'true' : 'false';
+    els.editEmpStatusToggle.className = `status-toggle ${isActive ? 'active' : 'inactive'}`;
+    els.editEmpStatusToggle.textContent = isActive ? 'Active' : 'Inactive';
+  }
+  els.editEmpStatusToggle?.addEventListener('click', () => {
+    setEditStatusToggle(els.editEmpStatusToggle.dataset.active !== 'true');
+  });
+  els.closeEditEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.editEmployeeModal.hidden = true; });
+  els.cancelEditEmployeeModal?.addEventListener('click', () => { closeSiteMultiSelects(); els.editEmployeeModal.hidden = true; });
+  els.toggleEditPassword?.addEventListener('click', () => {
+    const isPw = els.editEmpPassword.type === 'password';
+    els.editEmpPassword.type = isPw ? 'text' : 'password';
+    els.toggleEditPassword.textContent = isPw ? '🙈' : '👁';
+  });
+  els.editEmployeeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.editEmployeeFormMsg.hidden = true;
+    const newPassword = els.editEmpPassword.value;
+    if (newPassword && newPassword.length < 6) {
+      els.editEmployeeFormMsg.textContent = 'Password must be at least 6 characters';
+      els.editEmployeeFormMsg.hidden = false;
+      return;
+    }
+    const role = els.editEmpRole.value;
+    let department = els.editEmpDepartment.value.trim();
+    if (role === 'client' && !department) department = 'Client';
+    const body = {
+      full_name: els.editEmpFullname.value.trim(),
+      department,
+      designation: els.editEmpDesignation.value.trim(),
+      role,
+      is_head: role === 'head',
+      reporting_head_id: els.editEmpReportingHead.value || null, // optional — blank clears it
+      is_active: els.editEmpStatusToggle.dataset.active === 'true'
+    };
+    const sites = getSelectedSites(els.editEmpSite || document.getElementById('edit-emp-site'));
+    if (role === 'client' && !sites.length) {
+      els.editEmployeeFormMsg.textContent = 'Please select at least one project for this client';
+      els.editEmployeeFormMsg.hidden = false;
+      return;
+    }
+    body.site_name = sites[0] || null;
+    body.site_names = sites.length ? sites : null;
+    body.whatsapp_number = (document.getElementById('edit-emp-whatsapp')?.value || '').trim() || null;
+    if (newPassword) body.new_password = newPassword;
+    try {
+      await api(`/employees/${els.editEmpId.value}`, { method: 'PATCH', body });
+      showToast('Employee updated ✅', 'success');
+      els.editEmployeeModal.hidden = true;
+      loadEmployees(); refreshEmployeeDropdowns();
+    } catch (err) { els.editEmployeeFormMsg.textContent = err.message; els.editEmployeeFormMsg.hidden = false; }
+  });
+
+  // ─── Org Hierarchy (admin only) ────────────────────────────────────────────────
+  // Root = whoever has no reporting_head_id (normally just Chirag Sir). Everyone
+  // else nests under their reporting_head_id, however many levels deep. Inactive
+  // employees are filtered out entirely before the tree is built, so deactivating
+  // someone removes them (and, naturally, their own sub-tree moves up as orphans
+  // — see buildOrgTree below) from the view immediately.
+  // Enhanced: site-supervisor nesting, peer-row under Chirag, fit-to-view, PDF print.
+  async function loadHierarchy() {
+    els.hierarchyTreeContainer.innerHTML = `<div class="empty-state">Loading hierarchy…</div>`;
+    ensureHierarchyDownloadButton();
+    try {
+      const [employees, sites] = await Promise.all([
+        api('/employees'),
+        api('/sites').catch(() => []),
+      ]);
+      const active = uniqueHierarchyEmployees(
+        employees.filter((e) => e.is_active !== false && !isClientUserRow(e)),
+      );
+      const siteSupervisorMap = buildSiteSupervisorMap(active, sites);
+      renderOrgTree(active, siteSupervisorMap);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function ensureHierarchyDownloadButton() {
+    const view = document.getElementById('view-hierarchy');
+    if (!view || !els.hierarchyTreeContainer) return;
+
+    let btn = document.getElementById('orgDownloadPdfBtn');
+    if (!btn) {
+      const bar = document.createElement('div');
+      bar.id = 'orgDownloadPdfBar';
+      bar.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:12px;';
+      bar.innerHTML = '<button type="button" id="orgDownloadPdfBtn" class="primary-btn primary-btn-inline">Download as PDF</button>';
+      els.hierarchyTreeContainer.parentElement?.insertBefore(bar, els.hierarchyTreeContainer);
+      btn = document.getElementById('orgDownloadPdfBtn');
+    }
+    if (!btn) return;
+
+    // Always re-bind so HMR / remount does not leave a dead click handler.
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      downloadOrgChartPdf();
+    };
+  }
+
+  /**
+   * Pack the org chart into a layout slot, then scale so:
+   * - screen: full chart visible (no clipped leftmost Head)
+   * - print: as large as possible on a single A3 landscape page
+   */
+  function fitOrgChartToView(mode = 'screen') {
+    const wrap = els.hierarchyTreeContainer;
+    if (!wrap) return;
+    let slot = wrap.querySelector('.org-tree-slot');
+    const fit = wrap.querySelector('.org-tree-fit');
+    const treeEl = wrap.querySelector('.org-tree');
+    if (!fit || !treeEl) return;
+
+    if (!slot) {
+      slot = document.createElement('div');
+      slot.className = 'org-tree-slot';
+      fit.parentNode.insertBefore(slot, fit);
+      slot.appendChild(fit);
+    }
+
+    // A3 landscape usable area (~5mm margins) at 96dpi — bigger sheet so
+    // one-page PDF stays readable (A4 forces the chart too small).
+    const pageW = 1540;
+    const pageH = 1060;
+    const containerW = Math.max(wrap.clientWidth - 16, 280);
+
+    fit.style.transform = 'none';
+    fit.style.transformOrigin = 'top left';
+    fit.style.zoom = '';
+    fit.style.marginRight = '0';
+    fit.style.marginBottom = '0';
+    fit.style.width = 'max-content';
+    fit.style.maxWidth = 'none';
+    slot.style.width = 'max-content';
+    slot.style.height = 'auto';
+    slot.style.overflow = 'visible';
+    slot.style.margin = '0 auto';
+    slot.style.maxWidth = 'none';
+
+    void fit.offsetWidth;
+
+    if (typeof window.__drawOrgTreeLines === 'function') {
+      window.__drawOrgTreeLines(treeEl, fit);
+    }
+
+    const natW = Math.max(fit.scrollWidth, fit.offsetWidth, 1);
+    const natH = Math.max(fit.scrollHeight, fit.offsetHeight, 1);
+
+    const availW = mode === 'print' ? pageW : containerW;
+    const availH = mode === 'print'
+      ? pageH
+      : Math.max(window.innerHeight - wrap.getBoundingClientRect().top - 28, 360);
+
+    // Screen: fit width. Print: largest scale that still fits one page (fill the sheet).
+    let scale = Math.min(1, availW / natW);
+    if (mode === 'print') {
+      scale = Math.min(availW / natW, availH / natH);
+    }
+
+    const outW = Math.ceil(natW * scale);
+    const outH = Math.ceil(natH * scale);
+
+    fit.style.transformOrigin = 'top left';
+    if (mode === 'print') {
+      // `zoom` shrinks/grows layout size so print stays on one page.
+      fit.style.transform = 'none';
+      fit.style.zoom = String(Number(scale.toFixed(4)));
+      fit.style.marginRight = '0';
+      fit.style.marginBottom = '0';
+    } else if (scale < 0.999) {
+      fit.style.zoom = '';
+      fit.style.transform = `scale(${scale.toFixed(4)})`;
+      fit.style.marginRight = `${Math.ceil(-natW * (1 - scale))}px`;
+      fit.style.marginBottom = `${Math.ceil(-natH * (1 - scale))}px`;
+    } else {
+      fit.style.zoom = '';
+      fit.style.transform = 'none';
+    }
+
+    slot.style.width = `${outW}px`;
+    slot.style.height = `${outH}px`;
+    slot.style.overflow = 'hidden';
+    slot.style.maxWidth = '100%';
+    slot.style.margin = '0 auto';
+    wrap.scrollLeft = 0;
+    wrap.style.minHeight = `${outH + 8}px`;
+    wrap.style.overflowX = 'hidden';
+
+    if (mode === 'print') {
+      wrap.style.overflow = 'hidden';
+      wrap.style.maxHeight = `${outH + 8}px`;
+      wrap.style.height = `${outH + 8}px`;
+    } else {
+      wrap.style.height = '';
+      wrap.style.maxHeight = '';
+    }
+  }
+
+  function restoreOrgChartAfterPrint() {
+    const wrap = els.hierarchyTreeContainer;
+    const marker = window.__orgPrintMarker;
+    if (wrap && marker && marker.parentNode) {
+      marker.parentNode.insertBefore(wrap, marker);
+      marker.remove();
+    }
+    window.__orgPrintMarker = null;
+    document.body.classList.remove('org-print-mode');
+    if (wrap) {
+      wrap.style.overflow = '';
+      wrap.style.overflowX = 'hidden';
+      wrap.style.maxHeight = '';
+      wrap.style.height = '';
+      const fit = wrap.querySelector('.org-tree-fit');
+      if (fit) fit.style.zoom = '';
+    }
+    const view = document.getElementById('view-hierarchy');
+    if (view) view.style.display = '';
+    fitOrgChartToView('screen');
+  }
+
+  function downloadOrgChartPdf() {
+    try {
+      const wrap = els.hierarchyTreeContainer;
+      if (!wrap || !wrap.querySelector('.org-tree-fit')) {
+        showToast('Open Org Hierarchy first, then download.', 'error');
+        return;
+      }
+      // Isolate chart as body child so other UI cannot create phantom print pages.
+      if (!window.__orgPrintMarker) {
+        const marker = document.createComment('org-print-placeholder');
+        wrap.parentNode.insertBefore(marker, wrap);
+        window.__orgPrintMarker = marker;
+        document.body.appendChild(wrap);
+      }
+      document.body.classList.add('org-print-mode');
+      const view = document.getElementById('view-hierarchy');
+      if (view) {
+        view.hidden = false;
+        view.style.display = 'block';
+      }
+      fitOrgChartToView('print');
+      setTimeout(() => {
+        try {
+          fitOrgChartToView('print');
+          window.print();
+        } catch (err) {
+          console.error('[org-chart] print failed', err);
+          restoreOrgChartAfterPrint();
+          showToast(err.message || 'PDF download failed', 'error');
+        }
+      }, 150);
+    } catch (err) {
+      console.error('[org-chart] download failed', err);
+      restoreOrgChartAfterPrint();
+      showToast(err.message || 'PDF download failed', 'error');
+    }
+  }
+
+  function uniqueHierarchyEmployees(employees) {
+    const seenIds = new Set();
+    const seenNames = new Set();
+    const duplicates = [];
+    const unique = employees.filter((employee) => {
+      const nameKey = String(employee.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const isDuplicate = (employee.id && seenIds.has(employee.id)) || (nameKey && seenNames.has(nameKey));
+      if (isDuplicate) {
+        duplicates.push(employee.full_name || employee.id);
+        return false;
+      }
+      if (employee.id) seenIds.add(employee.id);
+      if (nameKey) seenNames.add(nameKey);
+      return true;
+    });
+    if (duplicates.length) console.warn('[org-chart] duplicate employee rows ignored:', duplicates);
+    return unique;
+  }
+
+  function orgRoleRank(employee) {
+    const blob = [employee?.role, employee?.designation, employee?.department]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ')
+      .replace(/[.-]/g, ' ');
+    if (/\badmin\b/.test(String(employee?.role || '').toLowerCase())) return 0;
+    if (employee?.is_head || /\bhead\b|project head|site head/.test(blob)) return 1;
+    if (/co[-\s]*ordinator/.test(blob)) return 2;
+    if (/incharge/.test(blob)) return 3;
+    if (/jr\s+(?:site\s+)?engineer|junior\s+(?:site\s+)?engineer/.test(blob)) return 5;
+    if (/engineer/.test(blob)) return 4;
+    return 6;
+  }
+
+  function orgRoleLabel(rank) {
+    return ['Admin', 'Head', 'Co-ordinator', 'Incharge', 'Engineer', 'Jr. Engineer', 'Other'][rank] || 'Other';
+  }
+
+  function orgNodeMeta(node) {
+    if (node.isOrgDept) return 'Department';
+    if (node.orgRoleRank >= 0 && node.orgRoleRank < 6) return orgRoleLabel(node.orgRoleRank);
+    return String(node.designation || '').trim() || 'Office';
+  }
+
+  function orgNodeSitesLabel(node) {
+    if (!node || node.isOrgDept || node.isOrgGroup) return '';
+    return parseEmployeeSites(node).join(', ');
+  }
+
+  function sortOrgNodes(a, b) {
+    return (a.orgRoleRank - b.orgRoleRank)
+      || String(a.full_name || '').localeCompare(String(b.full_name || ''));
+  }
+
+  function normalizeSiteKey(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function buildSiteSupervisorMap(employees, sites) {
+    const byName = new Map();
+    (sites || []).forEach((s) => {
+      const key = normalizeSiteKey(s.name);
+      if (key) byName.set(key, s);
+    });
+    const byId = new Map(employees.map((e) => [e.id, e]));
+    const map = new Map();
+    const unmatched = [];
+
+    employees.forEach((emp) => {
+      const empSites = parseEmployeeSites(emp);
+      if (!empSites.length) return; // office staff, no site — expected, not a bug
+      let matched = false;
+      for (const name of empSites) {
+        const site = byName.get(normalizeSiteKey(name));
+        if (!site) continue;
+        const coordinatorId = site.coordinator_id && byId.has(site.coordinator_id) ? site.coordinator_id : null;
+        const inchargeId = site.team_leader_id && byId.has(site.team_leader_id) ? site.team_leader_id : null;
+        if (coordinatorId || inchargeId) {
+          map.set(emp.id, { coordinatorId, inchargeId });
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) unmatched.push({ name: emp.full_name, sites: empSites });
+    });
+
+    if (unmatched.length) {
+      console.warn('[org-chart] no site/supervisor match for:', unmatched);
+    }
+    return map;
+  }
+
+  function isCarDriverOrOfficeBoy(node) {
+    const blob = [node?.role, node?.designation, node?.department, node?.full_name]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+    return /car\s*drivers?|office\s*boys?|officeboy/.test(blob);
+  }
+
+  function isHrPerson(node) {
+    const blob = [node?.role, node?.designation, node?.department, node?.full_name]
+      .map((value) => String(value || '').toLowerCase())
+      .join(' ');
+    if (node?.isOrgDept) return false;
+    return /\bhr\b|human\s*resources?/.test(blob);
+  }
+
+  function isChiragShah(node) {
+    return String(node?.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'chirag shah';
+  }
+
+  /** Remove matching nodes from a subtree; collect them into `out`. */
+  function detachMatching(node, predicate, out) {
+    if (!node?.children?.length) return;
+    const keep = [];
+    node.children.forEach((child) => {
+      detachMatching(child, predicate, out);
+      if (predicate(child)) out.push(child);
+      else keep.push(child);
+    });
+    node.children = keep;
+  }
+
+  function normalizeHeadBranch(head, byId, siteSupervisorMap) {
+    const branch = [];
+    const visit = (node) => {
+      (node.children || []).forEach((child) => {
+        branch.push(child);
+        visit(child);
+      });
+    };
+    visit(head);
+    branch.forEach((node) => { node.children = []; });
+    head.children = [];
+
+    const byRank = new Map();
+    branch.forEach((node) => {
+      if (!byRank.has(node.orgRoleRank)) byRank.set(node.orgRoleRank, []);
+      byRank.get(node.orgRoleRank).push(node);
+    });
+
+    const TIER_RANKS = [2, 3, 4, 5];
+    let primaryRank = null;
+    for (const r of TIER_RANKS) {
+      if ((byRank.get(r) || []).length) { primaryRank = r; break; }
+    }
+    const primaryTier = primaryRank != null ? (byRank.get(primaryRank) || []) : [];
+    const primaryTierIds = new Set(primaryTier.map((n) => n.id));
+    const placed = new Set();
+    const lifted = [];
+
+    const takeLifted = (node) => {
+      if (isCarDriverOrOfficeBoy(node) || isHrPerson(node)) {
+        lifted.push(node);
+        placed.add(node.id);
+        return true;
+      }
+      return false;
+    };
+
+    if (primaryRank != null) {
+      TIER_RANKS.filter((r) => r > primaryRank).forEach((r) => {
+        (byRank.get(r) || []).forEach((node) => {
+          if (placed.has(node.id)) return;
+          if (takeLifted(node)) return;
+          const sup = siteSupervisorMap.get(node.id);
+          let parent = null;
+          if (sup?.coordinatorId && primaryTierIds.has(sup.coordinatorId)) {
+            parent = byId.get(sup.coordinatorId);
+          } else if (sup?.inchargeId && primaryTierIds.has(sup.inchargeId)) {
+            parent = byId.get(sup.inchargeId);
+          }
+          if (!parent) parent = primaryTier.length === 1 ? primaryTier[0] : head;
+          parent.children.push(node);
+          placed.add(node.id);
+        });
+      });
+    }
+
+    primaryTier.forEach((node) => {
+      if (placed.has(node.id)) return;
+      if (takeLifted(node)) return;
+      head.children.push(node);
+      placed.add(node.id);
+    });
+
+    (byRank.get(6) || []).forEach((node) => {
+      if (placed.has(node.id)) return;
+      if (takeLifted(node)) return;
+      head.children.push(node);
+      placed.add(node.id);
+    });
+
+    branch.forEach((node) => {
+      if (placed.has(node.id)) return;
+      takeLifted(node);
+    });
+
+    return lifted;
+  }
+
+  function buildOrgTree(employees, siteSupervisorMap = new Map()) {
+    const nodes = employees.map((employee) => ({
+      ...employee,
+      orgRoleRank: orgRoleRank(employee),
+      children: [],
+    }));
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const roots = [];
+    nodes.forEach((node) => {
+      const parent = node.reporting_head_id ? byId.get(node.reporting_head_id) : null;
+      if (parent && parent.id !== node.id) parent.children.push(node);
+      else roots.push(node);
+    });
+    const chirag = nodes.find((node) => isChiragShah(node));
+    const mainHeads = chirag
+      ? chirag.children.filter((node) => node.orgRoleRank === 0 || node.orgRoleRank === 1)
+      : nodes.filter((node) => {
+        if (node.orgRoleRank !== 1) return false;
+        const parent = node.reporting_head_id ? byId.get(node.reporting_head_id) : null;
+        return parent?.orgRoleRank === 1;
+      });
+
+    const lifted = [];
+    mainHeads.forEach((head) => {
+      head.orgRoleRank = 1;
+      lifted.push(...normalizeHeadBranch(head, byId, siteSupervisorMap));
+    });
+
+    // Under Chirag Shah — ONE level: Heads + HR + Car Driver + Office Boy (same row).
+    if (chirag) {
+      mainHeads.forEach((head) => {
+        detachMatching(head, (n) => isCarDriverOrOfficeBoy(n) || isHrPerson(n), lifted);
+      });
+      detachMatching(chirag, (n) => isCarDriverOrOfficeBoy(n) || isHrPerson(n), lifted);
+
+      for (let i = roots.length - 1; i >= 0; i -= 1) {
+        const node = roots[i];
+        if (node === chirag || node.orgRoleRank <= 1) continue;
+        if (!isHrPerson(node) && !isCarDriverOrOfficeBoy(node)) continue;
+        lifted.push(node);
+        roots.splice(i, 1);
+      }
+
+      const heads = [];
+      chirag.children.forEach((child) => {
+        if (child.isOrgDept) return;
+        if (child.orgRoleRank === 0 || child.orgRoleRank === 1) heads.push(child);
+        else lifted.push(child);
+      });
+
+      const seen = new Set();
+      const uniq = (list) => {
+        const out = [];
+        list.forEach((node) => {
+          const key = node.id || String(node.full_name || '').trim().toLowerCase();
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          out.push(node);
+        });
+        return out;
+      };
+
+      const hrPeople = uniq(lifted.filter((n) => isHrPerson(n)));
+      const drivers = uniq(lifted.filter((n) => {
+        const blob = [n.role, n.designation, n.department].map((v) => String(v || '').toLowerCase()).join(' ');
+        return /car\s*drivers?/.test(blob);
+      }));
+      const officeBoys = uniq(lifted.filter((n) => {
+        const blob = [n.role, n.designation, n.department].map((v) => String(v || '').toLowerCase()).join(' ');
+        return /office\s*boys?|officeboy/.test(blob);
+      }));
+      const otherPeers = uniq(lifted.filter((n) =>
+        !isHrPerson(n) && !isCarDriverOrOfficeBoy(n) && n.orgRoleRank > 1));
+
+      // HR person(s) on the same peer row — not a department with someone hanging below.
+      const hrPeers = hrPeople.length
+        ? hrPeople
+        : [{
+          id: `org-dept-hr-${chirag.id}`,
+          full_name: 'HR',
+          designation: 'Department',
+          department: 'HR',
+          orgRoleRank: 1,
+          isOrgDept: true,
+          children: [],
+        }];
+
+      chirag.children = [
+        ...uniq(heads).sort(sortOrgNodes),
+        ...hrPeers,
+        ...drivers,
+        ...officeBoys,
+        ...otherPeers,
+      ];
+      chirag._orgPeerRow = true;
+    }
+
+    const sortTree = (node) => {
+      if (!node._orgPeerRow) node.children.sort(sortOrgNodes);
+      node.children.forEach(sortTree);
+    };
+    roots.sort(sortOrgNodes).forEach(sortTree);
+    return roots;
+  }
+
+  function orgInitials(name) {
+    return (name || '?').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
+  }
+
+  function shouldStackChildren(children, parentNode = null) {
+    if (!children?.length) return false;
+    const allLeaves = children.every((child) => !child.children?.length);
+    // Heads: left spine even when some children have their own nested teams.
+    if (parentNode?.orgRoleRank === 1 && !parentNode?.isOrgDept && children.length >= 1) {
+      return true;
+    }
+    if (allLeaves && children.length >= 2) return true;
+    const leafHeavy = children.filter((child) => !child.children?.length || child.children.length <= 1).length;
+    return children.length >= 4 && leafHeavy >= Math.ceil(children.length * 0.75);
+  }
+
+  function renderOrgNode(node, depth = 0, renderedIds = new Set()) {
+    const nodeKey = node.id || String(node.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (renderedIds.has(nodeKey)) return null;
+    renderedIds.add(nodeKey);
+    const branch = document.createElement('div');
+    branch.className = 'org-branch';
+
+    const nodeEl = document.createElement('div');
+    const level = Math.min(depth, 3);
+    if (node.isOrgGroup) {
+      nodeEl.className = 'org-node-group-anchor';
+    } else {
+      const deptClass = node.isOrgDept ? ' org-node-dept' : '';
+      nodeEl.className = `org-node org-node-d${level}${depth === 0 ? ' org-node-root' : ''}${deptClass}`;
+      const meta = orgNodeMeta(node);
+      const sitesLabel = orgNodeSitesLabel(node);
+      const titleParts = [node.full_name, meta, sitesLabel].filter(Boolean);
+      nodeEl.title = titleParts.join(' — ');
+      const avatar = node.isOrgDept ? 'HR' : orgInitials(node.full_name);
+      nodeEl.innerHTML = `
+        <div class="org-node-avatar">${escapeHtml(avatar)}</div>
+        <div class="org-node-info">
+          <span class="org-node-name">${escapeHtml(node.full_name)}</span>
+          <span class="org-node-meta">${escapeHtml(meta)}</span>
+          ${sitesLabel ? `<span class="org-node-sites">${escapeHtml(sitesLabel)}</span>` : ''}
+        </div>
+      `;
+    }
+    branch.appendChild(nodeEl);
+
+    if (node.children && node.children.length) {
+      const childrenWrap = document.createElement('div');
+      const peerRow = !!node._orgPeerRow || isChiragShah(node);
+      if (peerRow) {
+        childrenWrap.className = 'org-branch-children org-branch-children-peers';
+      } else {
+        childrenWrap.className = shouldStackChildren(node.children, node)
+          ? 'org-branch-children org-branch-children-stack'
+          : 'org-branch-children';
+      }
+      const kids = peerRow ? node.children : [...node.children].sort(sortOrgNodes);
+      kids.forEach((child) => {
+        const childBranch = renderOrgNode(child, depth + 1, renderedIds);
+        if (childBranch) childrenWrap.appendChild(childBranch);
+      });
+      if (!childrenWrap.children.length) return branch;
+      branch.appendChild(childrenWrap);
+    }
+    return branch;
+  }
+
+  /** Scale chart to container width so the user never needs horizontal scroll. */
+  function renderOrgTree(employees, siteSupervisorMap = new Map()) {
+    const roots = buildOrgTree(employees, siteSupervisorMap);
+
+    els.hierarchyTreeContainer.innerHTML = '';
+    if (!roots.length) {
+      els.hierarchyTreeContainer.innerHTML = `<div class="org-tree-empty">No active employees to show yet.</div>`;
+      return;
+    }
+    const fitEl = document.createElement('div');
+    fitEl.className = 'org-tree-fit';
+    const treeEl = document.createElement('div');
+    treeEl.className = 'org-tree';
+    const renderedIds = new Set();
+    roots.forEach((root) => {
+      const rootBranch = renderOrgNode(root, 0, renderedIds);
+      if (rootBranch) treeEl.appendChild(rootBranch);
+    });
+    fitEl.appendChild(treeEl);
+    els.hierarchyTreeContainer.appendChild(fitEl);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => fitOrgChartToView('screen'));
+    });
+  }
+
+  function drawOrgTreeLines(treeEl, fitEl = null) {
+    const host = fitEl || treeEl.parentElement || els.hierarchyTreeContainer;
+    const existing = host.querySelector('.org-tree-svg');
+    if (existing) existing.remove();
+
+    const hostRect = host.getBoundingClientRect();
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('class', 'org-tree-svg');
+    const width = Math.max(host.scrollWidth, treeEl.scrollWidth, 1);
+    const height = Math.max(host.scrollHeight, treeEl.scrollHeight, 1);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+
+    const addLine = (d) => {
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('class', 'org-line');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('d', d);
+      svg.appendChild(path);
+    };
+
+    const curveToChild = (px, py, cx, cy) => {
+      const midY = py + Math.max(8, (cy - py) * 0.42);
+      const bend = Math.min(14, Math.abs(cx - px) * 0.3);
+      if (Math.abs(cx - px) < 2) return `M ${px} ${py} V ${cy}`;
+      return `M ${px} ${py} V ${midY - bend} C ${px} ${midY}, ${cx} ${midY}, ${cx} ${midY + bend} V ${cy}`;
+    };
+
+    treeEl.querySelectorAll('.org-branch').forEach((branch) => {
+      const parentNode = branch.querySelector(':scope > .org-node, :scope > .org-node-group-anchor');
+      const childrenWrap = branch.querySelector(':scope > .org-branch-children');
+      if (!parentNode || !childrenWrap) return;
+
+      const pRect = parentNode.getBoundingClientRect();
+      const px = pRect.left + pRect.width / 2 - hostRect.left;
+      const py = pRect.bottom - hostRect.top;
+      const kids = Array.from(childrenWrap.children)
+        .map((childBranch) => childBranch.querySelector(':scope > .org-node, :scope > .org-node-group-anchor'))
+        .filter(Boolean);
+
+      if (childrenWrap.classList.contains('org-branch-children-stack') && kids.length) {
+        const first = kids[0].getBoundingClientRect();
+        const last = kids[kids.length - 1].getBoundingClientRect();
+        const wrapRect = childrenWrap.getBoundingClientRect();
+        // Spine lives inside the stack’s padding gutter — never outside the chart (no clip).
+        const spineX = wrapRect.left - hostRect.left + 8;
+        const elbowY = py + 12;
+        const firstCy = first.top + first.height / 2 - hostRect.top;
+        const lastCy = last.top + last.height / 2 - hostRect.top;
+        const spineBot = Math.max(firstCy, lastCy);
+        addLine(`M ${px} ${py} V ${elbowY} H ${spineX} V ${spineBot}`);
+        kids.forEach((childNode) => {
+          const cRect = childNode.getBoundingClientRect();
+          const cy = cRect.top + cRect.height / 2 - hostRect.top;
+          const cleft = cRect.left - hostRect.left;
+          addLine(`M ${spineX} ${cy} H ${Math.max(cleft, spineX)}`);
+        });
+        return;
+      }
+
+      kids.forEach((childNode) => {
+        const cRect = childNode.getBoundingClientRect();
+        const cx = cRect.left + cRect.width / 2 - hostRect.left;
+        const cy = cRect.top - hostRect.top;
+        addLine(curveToChild(px, py, cx, cy));
+      });
+    });
+
+    host.insertBefore(svg, treeEl);
+  }
+
+  // Re-bind after drawOrgTreeLines is defined
+  window.__drawOrgTreeLines = drawOrgTreeLines;
+
+  let orgTreeResizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (state.activeView !== 'hierarchy') return;
+    clearTimeout(orgTreeResizeTimer);
+    orgTreeResizeTimer = setTimeout(() => fitOrgChartToView('screen'), 120);
+  });
+  window.addEventListener('afterprint', () => {
+    restoreOrgChartAfterPrint();
+  });
+
+  // ─── Permissions (admin only) ──────────────────────────────────────────────────
+  async function loadPermissions() {
+    els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading employees…</td></tr>`;
+    try {
+      const employees = (await api('/employees'))
+        .filter((e) => !isClientUserRow(e) && e.is_active !== false)
+        .sort((a, b) =>
+          String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+        );
+      renderPermissionsTable(employees);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  function renderPermissionsTable(employees) {
+    if (!employees.length) {
+      els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">No employees yet</td></tr>`;
+      return;
+    }
+    els.permissionsTableBody.innerHTML = '';
+    const sorted = [...employees].sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+    );
+    sorted.forEach((emp) => {
+      const tr = document.createElement('tr');
+      const isAdminRow = emp.role === 'admin';
+      tr.innerHTML = `
+        <td><strong style="font-weight:600">${escapeHtml(emp.full_name)}</strong></td>
+        <td><span class="role-pill ${emp.role}">${emp.role}</span></td>
+      `;
+      const flags = [
+        ['can_add_task', 'Add task'],
+        ['can_add_site', 'Add site'],
+        ['can_add_employee', 'Add employee'],
+        ['can_resolve_tickets', 'Resolve tickets'],
+        ['can_verify', 'Verify tasks'],
+        ['is_mis_executive', 'MIS Executive'],
+        ['can_switch_office_site', 'Office ↔ Site'],
+        ['can_switch_office_mdo', 'Office ↔ MDO'],
+      ];
+      flags.forEach(([flag, label]) => {
+        const td = document.createElement('td');
+        td.className = 'perm-col';
+        const btn = document.createElement('button');
+        // Office↔Site also shows Yes when Head role / is_head already grants it
+        const autoSite =
+          flag === 'can_switch_office_site' &&
+          (emp.role === 'head' || !!emp.is_head);
+        const autoMdo =
+          flag === 'can_switch_office_mdo' &&
+          /process controller/i.test(`${emp.designation || ''} ${emp.role || ''} ${emp.department || ''}`);
+        const checked = isAdminRow || autoSite || autoMdo || !!emp[flag];
+        btn.className = `status-toggle ${checked ? 'active' : 'inactive'}`;
+        btn.textContent = checked ? 'Yes' : 'No';
+        btn.title = isAdminRow
+          ? 'Admins already have full access'
+          : autoSite
+            ? 'Head role already has Office ↔ Site'
+            : autoMdo
+              ? 'Process Controller already has Office ↔ MDO'
+              : `Toggle "${label}" for ${emp.full_name}`;
+        if (isAdminRow || autoSite || autoMdo) {
+          btn.disabled = true;
+        } else {
+          btn.addEventListener('click', () => togglePermission(emp, flag));
+        }
+        td.appendChild(btn);
+        tr.appendChild(td);
+      });
+      els.permissionsTableBody.appendChild(tr);
+    });
+  }
+  async function togglePermission(emp, flag) {
+    try {
+      const next = !emp[flag];
+      const body = { [flag]: next };
+      await api(`/employees/${emp.id}`, { method: 'PATCH', body });
+      emp[flag] = next;
+      showToast(`Permission updated for ${emp.full_name} ✅`, 'success');
+      loadPermissions();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function loadVisibility() {
+    const body = document.getElementById('visibilityTableBody');
+    if (!body) return;
+    body.innerHTML = `<tr><td colspan="6" class="empty-state">Loading…</td></tr>`;
+    try {
+      const data = await api('/master/nav-visibility');
+      state.navVis = data.map || {};
+      const roles = data.roles || ['admin', 'mis', 'employee', 'site', 'site_head'];
+      const modules = [...(data.modules || [])].sort((a, b) =>
+        String(a.label || a.key || '').localeCompare(String(b.label || b.key || ''), undefined, { sensitivity: 'base' })
+      );
+      body.innerHTML = '';
+      modules.forEach((mod) => {
+        const tr = document.createElement('tr');
+        const name = document.createElement('td');
+        const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
+        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${adminLocked ? ' · Admin always on; other roles editable' : ''
+          }</div>`;
+        tr.appendChild(name);
+        const row = state.navVis[mod.key] || {};
+        roles.forEach((r) => {
+          const td = document.createElement('td');
+          td.className = 'perm-col';
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          const adminAlways = adminLocked && r === 'admin';
+          cb.checked = adminAlways ? true : row[r] !== false;
+          cb.dataset.mod = mod.key;
+          cb.dataset.role = r;
+          if (adminAlways) {
+            cb.disabled = true;
+            cb.title = 'Admin always has this screen';
+          }
+          td.appendChild(cb);
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+    } catch (err) {
+      body.innerHTML = `<tr><td colspan="6" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  document.getElementById('visibilitySaveBtn')?.addEventListener('click', async () => {
+    const body = document.getElementById('visibilityTableBody');
+    if (!body) return;
+    const map = {};
+    body.querySelectorAll('input[type="checkbox"][data-mod]').forEach((cb) => {
+      const k = cb.dataset.mod;
+      if (!map[k]) map[k] = {};
+      if (cb.disabled && (k === 'add' || k === 'all' || k === 'overdue') && cb.dataset.role === 'admin') {
+        map[k].admin = true;
+        return;
+      }
+      map[k][cb.dataset.role] = cb.checked;
+    });
+    try {
+      const saved = await api('/master/nav-visibility', { method: 'PUT', body: { map } });
+      state.navVis = saved.map || map;
+      showToast('Visibility saved. Reloading menus…', 'success');
+      buildNav();
+      setupTopbarQuick();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ─── Automatic WhatsApp reminder switches (MIS) ───────────────────────────
+  async function loadReminderSettings() {
+    const wrap = document.getElementById('reminderSettings');
+    if (!wrap) return;
+    try {
+      const data = await api('/master/reminder-settings');
+      const s = data.settings || {};
+      const set = (id, prop, value) => {
+        const el = document.getElementById(id);
+        if (el) el[prop] = value;
+      };
+      set('rsDailyOverdue', 'checked', s.daily_overdue_whatsapp !== false);
+      set('rsAcceptNudge', 'checked', s.accept_nudge_whatsapp !== false);
+      set('rsAcceptMinutes', 'value', s.accept_nudge_minutes ?? 20);
+      set('rsAcceptMaxHours', 'value', s.accept_nudge_max_hours ?? 4);
+      set('rsOverdueSince', 'value', String(s.overdue_since_date || '').slice(0, 10));
+    } catch (_) { /* defaults already rendered */ }
+  }
+
+  document.getElementById('reminderSettingsSaveBtn')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const settings = {
+      daily_overdue_whatsapp: !!document.getElementById('rsDailyOverdue')?.checked,
+      accept_nudge_whatsapp: !!document.getElementById('rsAcceptNudge')?.checked,
+      accept_nudge_minutes: Number(document.getElementById('rsAcceptMinutes')?.value) || 20,
+      accept_nudge_max_hours: Number(document.getElementById('rsAcceptMaxHours')?.value) || 4,
+      overdue_since_date: document.getElementById('rsOverdueSince')?.value || undefined,
+    };
+    btn.disabled = true;
+    try {
+      await api('/master/reminder-settings', { method: 'PUT', body: { settings } });
+      showToast('Reminder settings saved', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ─── Master data ──────────────────────────────────────────────────────────────
+  async function loadMasterDataView() {
+    try {
+      const [departments, taskTypes] = await Promise.all([
+        api('/master/departments'), api('/master/task-types')
+      ]);
+      renderSimpleNameTable(els.departmentsTableBody, departments);
+      renderSimpleNameTable(els.taskTypesTableBody, taskTypes);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  function renderSimpleNameTable(tbody, items) {
+    const sorted = sortByLabel(items);
+    if (!sorted.length) {
+      tbody.innerHTML = `<tr><td class="empty-state">None yet — add one above</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    sorted.forEach((item) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(item.name)}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+  els.addDepartmentForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.addDepartmentMsg.hidden = true;
+    const nameInput = document.getElementById('new-department-name');
+    try {
+      await api('/master/departments', { method: 'POST', body: { name: nameInput.value.trim() } });
+      showToast('Department added ✅', 'success'); nameInput.value = '';
+      loadMasterDataView(); loadMasterData();
+    } catch (err) { els.addDepartmentMsg.textContent = err.message; els.addDepartmentMsg.hidden = false; }
+  });
+  els.addTaskTypeForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.addTaskTypeMsg.hidden = true;
+    const nameInput = document.getElementById('new-tasktype-name');
+    try {
+      await api('/master/task-types', { method: 'POST', body: { name: nameInput.value.trim() } });
+      showToast('Task type added ✅', 'success'); nameInput.value = '';
+      loadMasterDataView(); loadMasterData();
+    } catch (err) { els.addTaskTypeMsg.textContent = err.message; els.addTaskTypeMsg.hidden = false; }
+  });
+
+  // ─── Manage Sites ─────────────────────────────────────────────────────────────
+  const DEFAULT_SITE_PROJECT_TYPES = ['Commercial', 'Industrial', 'Institutional', 'Residential'];
+  let siteProjectTypeOptions = [...DEFAULT_SITE_PROJECT_TYPES];
+
+  function mergeSiteProjectTypesFromSites(sites) {
+    const set = new Set(DEFAULT_SITE_PROJECT_TYPES);
+    (sites || []).forEach((s) => {
+      const t = String(s.project_type || '').trim();
+      if (t) set.add(t);
+    });
+    siteProjectTypeOptions = [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  function fillSiteProjectTypeSelect(selected) {
+    const sel = document.getElementById('site-type');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Select project type</option>';
+    siteProjectTypeOptions.forEach((name) => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if (selected) sel.value = selected;
+  }
+
+  function dateInputValue(raw) {
+    if (!raw) return '';
+    return String(raw).slice(0, 10);
+  }
+
+  function empRoleBlob(emp) {
+    return [emp?.department, emp?.designation, emp?.role]
+      .map((s) => String(s || '').toLowerCase())
+      .join(' ');
+  }
+
+  function isClientEmployee(emp) {
+    const role = String(emp?.role || '').toLowerCase();
+    const dept = String(emp?.department || '').toLowerCase();
+    return role === 'client' || dept === 'client';
+  }
+
+  function isMdoEmployee(emp) {
+    const blob = empRoleBlob(emp);
+    return /\bmdo\b/.test(blob) || blob.includes('mdo office');
+  }
+
+  function isHeadEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const role = String(emp?.role || '').toLowerCase();
+    if (role === 'head' || emp?.is_head) return true;
+    const des = String(emp?.designation || '').toLowerCase().trim();
+    if (des === 'head' || des === 'project head' || des === 'site head') return true;
+    return /project head|site head/.test(empRoleBlob(emp));
+  }
+
+  function isSitePeopleEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const blob = empRoleBlob(emp);
+    if (/site engineer|site incharge|site coordinator|site execution|team leader|\bsite\b/.test(blob)) return true;
+    if (emp?.site_name || parseEmployeeSites(emp).length) return true;
+    return false;
+  }
+
+  function isCoordinatorEmployee(emp) {
+    if (isMdoEmployee(emp) || isClientEmployee(emp)) return false;
+    const blob = empRoleBlob(emp);
+    return /co-?ordinator|coordinator/.test(blob);
+  }
+
+  function isPcEmployee(emp) {
+    if (isClientEmployee(emp)) return false;
+    const role = String(emp?.role || '').toLowerCase().trim();
+    const des = String(emp?.designation || '').toLowerCase().trim();
+    if (role === 'pc' || des === 'pc') return true;
+    const blob = `${role} ${des}`;
+    if (/\bpc\b/.test(blob)) return true;
+    if (blob.includes('process controller')) return true;
+    return false;
+  }
+
+  function keepSelected(list, employees, keepId) {
+    if (!keepId || list.some((e) => e.id === keepId)) return list;
+    const extra = (employees || []).find((e) => e.id === keepId);
+    return extra ? [extra, ...list] : list;
+  }
+
+  /** Team leader: all site people + heads (no MDO). */
+  function siteTeamLeaderOptions(employees, keepId) {
+    const list = (employees || []).filter((e) => isSitePeopleEmployee(e) || isHeadEmployee(e));
+    return keepSelected(list, employees, keepId);
+  }
+
+  /** Co-ordinator: coordinators + site people + heads (no MDO). */
+  function siteCoordinatorOptions(employees, keepId) {
+    const list = (employees || []).filter(
+      (e) => isCoordinatorEmployee(e) || isSitePeopleEmployee(e) || isHeadEmployee(e)
+    );
+    return keepSelected(list, employees, keepId);
+  }
+
+  /** Site incharge (Head slot): heads only (no MDO). */
+  function siteInchargeOptions(employees, keepId) {
+    const list = (employees || []).filter((e) => isHeadEmployee(e));
+    return keepSelected(list, employees, keepId);
+  }
+
+  function fillSitePeopleDropdowns(employees, keep = {}) {
+    const emps = employees || state.master.employees || [];
+    fillSelect(els.siteTeamleader, siteTeamLeaderOptions(emps, keep.team_leader_id), {
+      placeholder: 'Select team incharge', labelKey: 'full_name',
+    });
+    fillSelect(els.siteCoordinator, siteCoordinatorOptions(emps, keep.coordinator_id), {
+      placeholder: 'Select coordinator', labelKey: 'full_name',
+    });
+    fillSelect(els.siteIncharge, siteInchargeOptions(emps, keep.site_incharge_id), {
+      placeholder: 'Select head name', labelKey: 'full_name',
+    });
+    fillSitePcDropdown(emps, keep.pc_id);
+    if (keep.team_leader_id && els.siteTeamleader) els.siteTeamleader.value = keep.team_leader_id;
+    if (keep.coordinator_id && els.siteCoordinator) els.siteCoordinator.value = keep.coordinator_id;
+    if (keep.site_incharge_id && els.siteIncharge) els.siteIncharge.value = keep.site_incharge_id;
+    if (keep.pc_id && els.sitePc) els.sitePc.value = keep.pc_id;
+  }
+
+  function fillSitePcDropdown(employees, keepId) {
+    const pcs = keepSelected((employees || []).filter(isPcEmployee), employees, keepId);
+    fillSelect(els.sitePc, pcs, { placeholder: 'Select PC', labelKey: 'full_name' });
+  }
+
+  function openSiteModal(site) {
+    els.siteForm?.reset();
+    if (els.siteFormMsg) els.siteFormMsg.hidden = true;
+    fillSitePeopleDropdowns(state.master.employees || [], site ? {
+      team_leader_id: site.team_leader_id,
+      coordinator_id: site.coordinator_id,
+      site_incharge_id: site.site_incharge_id,
+      pc_id: site.pc_id,
+    } : {});
+    fillSiteProjectTypeSelect(site?.project_type || '');
+    if (site) {
+      if (els.siteEditId) els.siteEditId.value = site.id;
+      if (els.siteModalTitle) els.siteModalTitle.textContent = 'Edit site';
+      if (els.siteFormSubmit) els.siteFormSubmit.textContent = 'Save changes';
+      document.getElementById('site-client').value = site.client_name || '';
+      document.getElementById('site-name').value = site.name || '';
+      document.getElementById('site-type').value = site.project_type || '';
+      document.getElementById('site-location').value = site.location || '';
+      document.getElementById('site-start').value = dateInputValue(site.start_date);
+      document.getElementById('site-end').value = dateInputValue(site.expected_end_date);
+      document.getElementById('site-description').value = site.description || '';
+    } else {
+      if (els.siteEditId) els.siteEditId.value = '';
+      if (els.siteModalTitle) els.siteModalTitle.textContent = 'Add new construction site';
+      if (els.siteFormSubmit) els.siteFormSubmit.textContent = 'Add site';
+    }
+    els.siteModal.hidden = false;
+  }
+
+  async function loadSites() {
+    els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
+    try {
+      sitesCache = await api('/sites') || [];
+      mergeSiteProjectTypesFromSites(sitesCache);
+      fillSiteFilterOptions(sitesCache);
+      applySitesFilter();
+    }
+    catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function fillSiteFilterOptions(sites) {
+    const typeSel = els.siteFilterType;
+    const statusSel = els.siteFilterStatus;
+    if (typeSel) {
+      const prev = typeSel.value;
+      const types = [...new Set((sites || []).map((s) => s.project_type).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      typeSel.innerHTML = '<option value="">All types</option>';
+      types.forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        typeSel.appendChild(opt);
+      });
+      if (prev && types.includes(prev)) typeSel.value = prev;
+    }
+    if (statusSel) {
+      const prev = statusSel.value;
+      const statuses = [...new Set((sites || []).map((s) => s.status).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+      statusSel.innerHTML = '<option value="">All statuses</option>';
+      statuses.forEach((st) => {
+        const opt = document.createElement('option');
+        opt.value = st;
+        opt.textContent = st;
+        statusSel.appendChild(opt);
+      });
+      if (prev && statuses.includes(prev)) statusSel.value = prev;
+    }
+  }
+
+  function getFilteredSites() {
+    const q = (els.siteFilterQ?.value || '').trim().toLowerCase();
+    const type = els.siteFilterType?.value || '';
+    const status = els.siteFilterStatus?.value || '';
+    return sitesCache.filter((site) => {
+      if (type && String(site.project_type || '') !== type) return false;
+      if (status && String(site.status || '') !== status) return false;
+      if (q) {
+        const hay = [
+          site.name, site.client_name, site.location, site.project_type,
+          site.status, site.team_leader?.full_name
+        ].map((x) => String(x || '').toLowerCase()).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function applySitesFilter() {
+    const filtered = getFilteredSites();
+    renderSitesTable(filtered);
+    if (els.siteFilterCount) {
+      const active = !!(els.siteFilterQ?.value?.trim() || els.siteFilterType?.value || els.siteFilterStatus?.value);
+      if (active) {
+        els.siteFilterCount.hidden = false;
+        els.siteFilterCount.textContent = `Showing ${filtered.length} of ${sitesCache.length} sites`;
+      } else {
+        els.siteFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearSitesFilter() {
+    if (els.siteFilterQ) els.siteFilterQ.value = '';
+    if (els.siteFilterType) els.siteFilterType.value = '';
+    if (els.siteFilterStatus) els.siteFilterStatus.value = '';
+    applySitesFilter();
+  }
+
+  function renderSitesTable(sites) {
+    if (!sites.length) {
+      const emptyMsg = sitesCache.length ? 'No matching sites' : 'No sites yet';
+      els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">${emptyMsg}</td></tr>`;
+      return;
+    }
+    els.sitesTableBody.innerHTML = '';
+    sites.forEach((site) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="font-weight:600">${escapeHtml(site.name)}</strong></td>
+        <td>${escapeHtml(site.client_name ?? '—')}</td>
+        <td>${escapeHtml(site.location ?? '—')}</td>
+        <td>${escapeHtml(site.project_type ?? '—')}</td>
+        <td><span class="pill pill-Pending">${escapeHtml(site.status)}</span></td>
+        <td>${escapeHtml(site.team_leader?.full_name ?? '—')}</td>
+        <td class="row-actions"></td>
+      `;
+      const actionsCell = tr.children[6];
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-accept';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openSiteModal(site));
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'action-btn action-reject'; deleteBtn.textContent = '🗑️ Delete';
+      deleteBtn.addEventListener('click', () => deleteSite(site));
+      actionsCell.appendChild(editBtn);
+      actionsCell.appendChild(deleteBtn);
+      els.sitesTableBody.appendChild(tr);
+    });
+  }
+  els.siteFilterQ?.addEventListener('input', applySitesFilter);
+  els.siteFilterType?.addEventListener('change', applySitesFilter);
+  els.siteFilterStatus?.addEventListener('change', applySitesFilter);
+  els.clearSiteFilters?.addEventListener('click', clearSitesFilter);
+
+  async function deleteSite(site) {
+    if (!confirm(`Delete site "${site.name}"? This cannot be undone.`)) return;
+    try {
+      await api(`/sites/${site.id}`, { method: 'DELETE' });
+      showToast('Site deleted', 'success'); loadSites(); loadMasterData();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  els.openAddSite?.addEventListener('click', () => openSiteModal(null));
+  document.getElementById('site-add-type')?.addEventListener('click', () => toggleInlineAdd('site-add-type-row'));
+  document.getElementById('site-save-type')?.addEventListener('click', () => {
+    const input = document.getElementById('site-new-type');
+    const name = (input?.value || '').trim();
+    if (!name) return showToast('Enter project type name', 'error');
+    if (!siteProjectTypeOptions.some((t) => t.toLowerCase() === name.toLowerCase())) {
+      siteProjectTypeOptions.push(name);
+      siteProjectTypeOptions.sort((a, b) => a.localeCompare(b));
+    }
+    fillSiteProjectTypeSelect(name);
+    if (input) input.value = '';
+    const row = document.getElementById('site-add-type-row');
+    if (row) row.hidden = true;
+    showToast('Project type added', 'success');
+  });
+  els.closeSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
+  els.cancelSiteModal?.addEventListener('click', () => { els.siteModal.hidden = true; });
+  els.siteForm?.addEventListener('submit', async (e) => {
+    e.preventDefault(); els.siteFormMsg.hidden = true;
+    const editId = (els.siteEditId?.value || '').trim();
+    const body = {
+      client_name: document.getElementById('site-client').value.trim(),
+      name: document.getElementById('site-name').value.trim(),
+      project_type: document.getElementById('site-type').value,
+      location: document.getElementById('site-location').value.trim(),
+      start_date: document.getElementById('site-start').value,
+      expected_end_date: document.getElementById('site-end').value || null,
+      team_leader_id: els.siteTeamleader.value,
+      coordinator_id: els.siteCoordinator.value,
+      site_incharge_id: els.siteIncharge.value,
+      pc_id: els.sitePc?.value || '',
+      description: document.getElementById('site-description').value.trim()
+    };
+    try {
+      if (editId) {
+        await api(`/sites/${editId}`, { method: 'PATCH', body });
+        showToast('Site updated ✅', 'success');
+        els.siteModal.hidden = true;
+      } else {
+        const created = await api('/sites', { method: 'POST', body });
+        els.siteModal.hidden = true;
+        showToast('Site added ✅', 'success');
+        if (created?.client_login?.username && created?.client_login?.generated_password) {
+          showCredsModal(created.client_login.username, created.client_login.generated_password, {
+            title: 'Client login created ✅',
+            note: 'Share these client portal login details — they won’t be shown again.',
+          });
+        } else {
+          showToast('Site added, but client login was not created — add from Manage clients', 'error');
+        }
+      }
+      loadSites(); loadMasterData();
+    } catch (err) { els.siteFormMsg.textContent = err.message; els.siteFormMsg.hidden = false; }
+  });
+
+  // ─── Manage Clients ───────────────────────────────────────────────────────────
+  function fillClientPeopleDropdowns(employees) {
+    const list = employees || state.master.employees || [];
+    fillSelect(els.clientHead, list, { placeholder: 'Select head', labelKey: 'full_name' });
+    fillSelect(els.clientCoordinator, list, { placeholder: 'Select coordinator', labelKey: 'full_name' });
+    fillSitePcDropdownFor(els.clientPc, list);
+  }
+
+  function fillSitePcDropdownFor(selectEl, employees, keepId) {
+    const pcs = (employees || []).filter(isPcEmployee);
+    if (keepId && !pcs.some((e) => e.id === keepId)) {
+      const extra = (employees || []).find((e) => e.id === keepId);
+      if (extra) pcs.unshift(extra);
+    }
+    fillSelect(selectEl, pcs, { placeholder: 'Select PC', labelKey: 'full_name' });
+  }
+
+  function matchEmployeeIdByName(employees, name) {
+    const n = String(name || '').trim().toLowerCase();
+    if (!n) return '';
+    const hit = (employees || []).find((e) => String(e.full_name || '').trim().toLowerCase() === n);
+    return hit?.id || '';
+  }
+
+  function openClientModal(client) {
+    els.clientForm?.reset();
+    if (els.clientFormMsg) els.clientFormMsg.hidden = true;
+    fillSelect(els.clientSite, state.master.projects || [], {
+      placeholder: 'Select project', labelKey: 'name', valueKey: 'name'
+    });
+    fillClientPeopleDropdowns(state.master.employees || []);
+    if (client) {
+      if (els.clientEditId) els.clientEditId.value = client.id;
+      if (els.clientModalTitle) els.clientModalTitle.textContent = 'Edit client';
+      if (els.clientFormSubmit) els.clientFormSubmit.textContent = 'Save changes';
+      if (els.clientCredsNote) els.clientCredsNote.textContent = 'Username stays the same. Use Reset password from the list if needed.';
+      if (els.clientFullname) els.clientFullname.value = client.full_name || '';
+      if (els.clientSite) els.clientSite.value = client.site_name || '';
+      const sc = client.site_contacts || {};
+      const emps = state.master.employees || [];
+      if (els.clientHead) els.clientHead.value = matchEmployeeIdByName(emps, sc.head_name);
+      if (els.clientCoordinator) els.clientCoordinator.value = matchEmployeeIdByName(emps, sc.incharge_name);
+      fillSitePcDropdownFor(els.clientPc, emps, matchEmployeeIdByName(emps, sc.pc_name));
+      if (els.clientPc) els.clientPc.value = matchEmployeeIdByName(emps, sc.pc_name);
+    } else {
+      if (els.clientEditId) els.clientEditId.value = '';
+      if (els.clientModalTitle) els.clientModalTitle.textContent = 'Add client';
+      if (els.clientFormSubmit) els.clientFormSubmit.textContent = 'Add client';
+      if (els.clientCredsNote) els.clientCredsNote.textContent = 'Username and password will be auto-generated after save.';
+    }
+    if (els.clientModal) els.clientModal.hidden = false;
+  }
+
+  async function loadClients() {
+    if (!els.clientsTableBody) return;
+    els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading clients…</td></tr>`;
+    try {
+      clientsCache = await api('/clients') || [];
+      fillClientFilterOptions(clientsCache);
+      applyClientsFilter();
+    } catch (err) {
+      showToast(err.message, 'error');
+      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+    }
+  }
+
+  function fillClientFilterOptions(clients) {
+    const sel = els.clientFilterSite;
+    if (!sel) return;
+    const prev = sel.value;
+    const sites = [...new Set((clients || []).map((c) => c.site_name).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    sel.innerHTML = '<option value="">All projects</option>';
+    sites.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s;
+      sel.appendChild(opt);
+    });
+    if (prev && sites.includes(prev)) sel.value = prev;
+  }
+
+  function getFilteredClients() {
+    const q = (els.clientFilterQ?.value || '').trim().toLowerCase();
+    const site = els.clientFilterSite?.value || '';
+    const status = els.clientFilterStatus?.value || '';
+    return clientsCache
+      .filter((c) => {
+        if (site && String(c.site_name || '') !== site) return false;
+        if (status === 'active' && c.is_active === false) return false;
+        if (status === 'inactive' && c.is_active !== false) return false;
+        if (q) {
+          const sc = c.site_contacts || {};
+          const hay = [
+            c.full_name, c.username, c.site_name,
+            sc.head_name, sc.incharge_name, sc.pc_name
+          ].map((x) => String(x || '').toLowerCase()).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) =>
+        String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
+      );
+  }
+
+  function applyClientsFilter() {
+    const filtered = getFilteredClients();
+    renderClientsTable(filtered);
+    if (els.clientFilterCount) {
+      const active = !!(els.clientFilterQ?.value?.trim() || els.clientFilterSite?.value || els.clientFilterStatus?.value);
+      if (active) {
+        els.clientFilterCount.hidden = false;
+        els.clientFilterCount.textContent = `Showing ${filtered.length} of ${clientsCache.length} clients`;
+      } else {
+        els.clientFilterCount.hidden = true;
+      }
+    }
+  }
+
+  function clearClientsFilter() {
+    if (els.clientFilterQ) els.clientFilterQ.value = '';
+    if (els.clientFilterSite) els.clientFilterSite.value = '';
+    if (els.clientFilterStatus) els.clientFilterStatus.value = '';
+    applyClientsFilter();
+  }
+
+  function renderClientsTable(clients) {
+    if (!clients.length) {
+      const emptyMsg = clientsCache.length ? 'No matching clients' : 'No clients yet';
+      els.clientsTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${emptyMsg}</td></tr>`;
+      return;
+    }
+    els.clientsTableBody.innerHTML = '';
+    clients.forEach((c) => {
+      const sc = c.site_contacts || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong style="font-weight:600">${escapeHtml(c.full_name || '—')}</strong></td>
+        <td>${escapeHtml(c.username || '—')}</td>
+        <td>${escapeHtml(c.site_name || '—')}</td>
+        <td>${escapeHtml(sc.head_name || '—')}</td>
+        <td>${escapeHtml(sc.incharge_name || '—')}</td>
+        <td>${escapeHtml(sc.pc_name || '—')}</td>
+        <td></td>
+        <td class="row-actions"></td>
+      `;
+      const statusCell = tr.children[6];
+      const statusBtn = document.createElement('button');
+      statusBtn.className = `status-toggle ${c.is_active === false ? 'inactive' : 'active'}`;
+      statusBtn.textContent = c.is_active === false ? 'Inactive' : 'Active';
+      statusBtn.title = 'Click to toggle. Inactive clients cannot open client portal.';
+      statusBtn.addEventListener('click', () => toggleClientStatus(c));
+      statusCell.appendChild(statusBtn);
+
+      const actions = tr.children[7];
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-accept';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openClientModal(c));
+      const resetBtn = document.createElement('button');
+      resetBtn.className = 'action-btn action-start';
+      resetBtn.textContent = '🔑 Reset password';
+      resetBtn.addEventListener('click', () => resetClientPassword(c));
+      actions.appendChild(editBtn);
+      actions.appendChild(resetBtn);
+      els.clientsTableBody.appendChild(tr);
+    });
+  }
+
+  els.clientFilterQ?.addEventListener('input', applyClientsFilter);
+  els.clientFilterSite?.addEventListener('change', applyClientsFilter);
+  els.clientFilterStatus?.addEventListener('change', applyClientsFilter);
+  els.clearClientFilters?.addEventListener('click', clearClientsFilter);
+
+  async function toggleClientStatus(client) {
+    const next = client.is_active === false;
+    try {
+      await api(`/clients/${client.id}`, { method: 'PATCH', body: { is_active: next } });
+      showToast(
+        `${client.full_name} marked ${next ? 'active' : 'inactive'} ✅` +
+        (next ? '' : ' — client portal login blocked'),
+        'success'
+      );
+      loadClients();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  async function resetClientPassword(client) {
+    if (!confirm(`Reset password for ${client.full_name}?`)) return;
+    try {
+      const { generated_password } = await api(`/employees/${client.id}/reset-password`, { method: 'POST' });
+      showCredsModal(client.username, generated_password, {
+        title: 'Password reset ✅',
+        note: 'Share the new password with the client — it won’t be shown again.',
+      });
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  els.openAddClient?.addEventListener('click', () => openClientModal(null));
+  els.closeClientModal?.addEventListener('click', () => { if (els.clientModal) els.clientModal.hidden = true; });
+  els.cancelClientModal?.addEventListener('click', () => { if (els.clientModal) els.clientModal.hidden = true; });
+  els.clientForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (els.clientFormMsg) els.clientFormMsg.hidden = true;
+    const editId = (els.clientEditId?.value || '').trim();
+    const body = {
+      full_name: els.clientFullname?.value.trim() || '',
+      site_name: els.clientSite?.value || '',
+      head_id: els.clientHead?.value || '',
+      coordinator_id: els.clientCoordinator?.value || '',
+      pc_id: els.clientPc?.value || '',
+    };
+    try {
+      if (editId) {
+        await api(`/clients/${editId}`, { method: 'PATCH', body });
+        showToast('Client updated ✅', 'success');
+        if (els.clientModal) els.clientModal.hidden = true;
+        loadClients();
+      } else {
+        const created = await api('/clients', { method: 'POST', body });
+        if (els.clientModal) els.clientModal.hidden = true;
+        showCredsModal(created.username, created.generated_password, {
+          title: 'Client added ✅',
+          note: 'Share these client portal login details — they won’t be shown again.',
+        });
+        loadClients();
+      }
+    } catch (err) {
+      if (els.clientFormMsg) {
+        els.clientFormMsg.textContent = err.message;
+        els.clientFormMsg.hidden = false;
+      } else showToast(err.message, 'error');
+    }
+  });
+
+  // boot deferred to mountTaskflowApp
+
+  // ─── RECURRING TASKS ──────────────────────────────────────────────────────────
+
+  // Elem references (recurring modal)
+  const recEls = {
+    modal: () => document.getElementById('recurringModal'),
+    modalTitle: () => document.getElementById('recurringModalTitle'),
+    editId: () => document.getElementById('recurring-edit-id'),
+    department: () => document.getElementById('rec-department'),
+    employee: () => document.getElementById('rec-employee'),
+    taskType: () => document.getElementById('rec-tasktype'),
+    project: () => document.getElementById('rec-project'),
+    description: () => document.getElementById('rec-description'),
+    priority: () => document.getElementById('rec-priority'),
+    weeklyField: () => document.getElementById('weeklyDaysField'),
+    monthlyField: () => document.getElementById('monthlyDayField'),
+    monthlyDay: () => document.getElementById('rec-monthly-day'),
+    monthlyFrom: () => document.getElementById('rec-monthly-from'),
+    monthlyTo: () => document.getElementById('rec-monthly-to'),
+    startDate: () => document.getElementById('rec-start'),
+    endDate: () => document.getElementById('rec-end'),
+    checkpointsList: () => document.getElementById('checkpointsList'),
+    formMsg: () => document.getElementById('recurringFormMsg'),
+    saveBtn: () => document.getElementById('saveRecurringBtn'),
+    openBtn: () => document.getElementById('openAddRecurring'),
+    adminWrap: () => document.getElementById('adminRecurringWrap'),
+    empWrap: () => document.getElementById('employeeRecurringWrap'),
+    empList: () => document.getElementById('employeeRecurringList'),
+    adminTable: () => document.getElementById('recurringTasksTableBody'),
+    adminCards: () => document.getElementById('adminRecurringCards'),
+    newTaskTypeRow: () => document.getElementById('recNewTaskTypeRow'),
+    newTaskTypeInput: () => document.getElementById('recNewTaskTypeInput'),
+    newTaskTypeSave: () => document.getElementById('recNewTaskTypeSave'),
+    newTaskTypeCancel: () => document.getElementById('recNewTaskTypeCancel'),
+    taskTypeMsg: () => document.getElementById('recTaskTypeMsg'),
+  };
+
+  let recurringSelectedFreq = '';
+
+  function syncRecurringFreqFields() {
+    if (recEls.weeklyField()) recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
+    if (recEls.monthlyField()) recEls.monthlyField().hidden = recurringSelectedFreq !== 'Monthly';
+  }
+
+  function parseMonthlyDuration(raw, fallbackDay = 1) {
+    const text = String(raw || '').trim();
+    const rangeMatch = text.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+    let from;
+    let to;
+    if (rangeMatch) {
+      from = Number(rangeMatch[1]);
+      to = Number(rangeMatch[2]);
+    } else {
+      const first = Number(text.split(',')[0].trim());
+      from = first;
+      to = first;
+    }
+    if (!Number.isFinite(from) || from < 1 || from > 31) from = fallbackDay;
+    if (!Number.isFinite(to) || to < 1 || to > 31) to = from;
+    from = Math.min(31, Math.max(1, Math.floor(from)));
+    to = Math.min(31, Math.max(1, Math.floor(to)));
+    if (to < from) {
+      const swap = from;
+      from = to;
+      to = swap;
+    }
+    return { from, to };
+  }
+
+  function setMonthlyDurationFields(from, to) {
+    const f = Math.min(31, Math.max(1, Number(from) || 1));
+    let t = Math.min(31, Math.max(1, Number(to) || f));
+    if (t < f) t = f;
+    if (recEls.monthlyDay()) recEls.monthlyDay().value = String(f);
+    if (recEls.monthlyFrom()) recEls.monthlyFrom().value = String(f);
+    if (recEls.monthlyTo()) recEls.monthlyTo().value = String(t);
+  }
+
+  function initRecurringModal() {
+    // Frequency buttons
+    document.querySelectorAll('.freq-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        recurringSelectedFreq = btn.dataset.freq;
+        syncRecurringFreqFields();
+        // Default monthly duration from start date (or keep 1–1)
+        if (recurringSelectedFreq === 'Monthly') {
+          const d = Number(String(recEls.startDate()?.value || '').slice(8, 10));
+          const day = d >= 1 && d <= 31 ? d : Number(recEls.monthlyDay()?.value || 1) || 1;
+          setMonthlyDurationFields(day, day);
+        }
+      });
+    });
+    recEls.startDate()?.addEventListener('change', () => {
+      if (recurringSelectedFreq !== 'Monthly') return;
+      const d = Number(String(recEls.startDate().value || '').slice(8, 10));
+      if (d >= 1 && d <= 31) {
+        // Only nudge "from" / day-of-month; keep existing "to" if still valid
+        const to = Number(recEls.monthlyTo()?.value || d);
+        setMonthlyDurationFields(d, Math.max(d, to));
+      }
+    });
+    recEls.monthlyDay()?.addEventListener('change', () => {
+      const day = Number(recEls.monthlyDay()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || day);
+      setMonthlyDurationFields(day, Math.max(day, to));
+    });
+    recEls.monthlyFrom()?.addEventListener('change', () => {
+      const from = Number(recEls.monthlyFrom()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      setMonthlyDurationFields(from, Math.max(from, to));
+    });
+    recEls.monthlyTo()?.addEventListener('change', () => {
+      const from = Number(recEls.monthlyFrom()?.value || 1);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      setMonthlyDurationFields(from, Math.max(from, to));
+    });
+
+    // Add checkpoint
+    document.getElementById('addCheckpointBtn')?.addEventListener('click', () => {
+      addCheckpointRow('');
+    });
+
+    // Save button
+    recEls.saveBtn().addEventListener('click', saveRecurringTask);
+
+    // Close/cancel
+    document.getElementById('closeRecurringModal')?.addEventListener('click', closeRecurringModal);
+    document.getElementById('cancelRecurringModal')?.addEventListener('click', closeRecurringModal);
+
+    // Open Add button (admin only)
+    recEls.openBtn().addEventListener('click', () => openRecurringModal(null));
+
+    // Task type changed → either open the inline "add new" row, or
+    // auto-load that type's saved checkpoint template.
+    recEls.taskType().addEventListener('change', async () => {
+      const taskTypeId = recEls.taskType().value;
+
+      if (taskTypeId === '__add_new__') {
+        recEls.taskTypeMsg().hidden = true;
+        recEls.newTaskTypeInput().value = '';
+        recEls.newTaskTypeRow().hidden = false;
+        recEls.newTaskTypeInput().focus();
+        // Reset selection back to placeholder so "+ Add new task type…"
+        // doesn't stay selected as if it were a real task type.
+        recEls.taskType().value = '';
+        return;
+      }
+
+      recEls.newTaskTypeRow().hidden = true;
+      if (!taskTypeId) return;
+
+      const hasExisting = recEls.checkpointsList().children.length > 0;
+      if (hasExisting) {
+        const ok = confirm("Load this task type's saved checkpoints? This will replace the current checkpoint list.");
+        if (!ok) return;
+      }
+      try {
+        const template = await api(`/recurring-tasks/checkpoint-templates/${taskTypeId}`);
+        recEls.checkpointsList().innerHTML = '';
+        template
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .forEach(cp => addCheckpointRow(cp.label));
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+
+    recEls.newTaskTypeCancel().addEventListener('click', () => {
+      recEls.newTaskTypeRow().hidden = true;
+    });
+    recEls.newTaskTypeSave().addEventListener('click', saveNewTaskTypeFromModal);
+    recEls.newTaskTypeInput().addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveNewTaskTypeFromModal(); }
+    });
+  }
+
+  // Adds a new task type from inside the recurring-task modal, then refreshes
+  // every task-type dropdown in the app (including this modal's) and selects
+  // the freshly created type so the admin can keep going without re-opening
+  // the modal.
+  async function saveNewTaskTypeFromModal() {
+    const name = recEls.newTaskTypeInput().value.trim();
+    recEls.taskTypeMsg().hidden = true;
+    if (!name) {
+      recEls.taskTypeMsg().textContent = 'Please enter a task type name';
+      recEls.taskTypeMsg().hidden = false;
+      return;
+    }
+    recEls.newTaskTypeSave().disabled = true;
+    try {
+      await api('/master/task-types', { method: 'POST', body: { name } });
+      // Refresh master task types everywhere (admin add-task form, filters, this modal)
+      const taskTypes = await api('/master/task-types');
+      state.master.taskTypes = taskTypes;
+      fillSelect(els.fTaskType, taskTypes, { placeholder: 'Select task type' });
+      fillSelect(recEls.taskType(), taskTypes, {
+        placeholder: 'Select Task Type',
+        extraOption: { value: '__add_new__', label: '+ Add new task type…' }
+      });
+      const created = taskTypes.find(t => t.name === name);
+      if (created) recEls.taskType().value = created.id;
+      recEls.newTaskTypeRow().hidden = true;
+      showToast(`Task type "${name}" added ✅`, 'success');
+    } catch (err) {
+      recEls.taskTypeMsg().textContent = err.message;
+      recEls.taskTypeMsg().hidden = false;
+    } finally {
+      recEls.newTaskTypeSave().disabled = false;
+    }
+  }
+
+  function addCheckpointRow(value) {
+    const list = recEls.checkpointsList();
+    const row = document.createElement('div');
+    row.className = 'checkpoint-row';
+    row.innerHTML = `
+      <input type="text" class="checkpoint-input" placeholder="Checkpoint label…" value="${escapeHtml(value)}" />
+      <button type="button" class="ghost-btn-text cp-remove" style="color:#e53e3e">✕</button>
+    `;
+    row.querySelector('.cp-remove').addEventListener('click', () => row.remove());
+    list.appendChild(row);
+  }
+
+  function getCheckpointValues() {
+    return [...document.querySelectorAll('.checkpoint-input')]
+      .map(i => i.value.trim())
+      .filter(Boolean);
+  }
+
+  function openRecurringModal(task) {
+    recEls.formMsg().hidden = true;
+    recEls.checkpointsList().innerHTML = '';
+    document.querySelectorAll('.freq-btn').forEach(b => b.classList.remove('selected'));
+    if (recEls.weeklyField()) recEls.weeklyField().hidden = true;
+    if (recEls.monthlyField()) recEls.monthlyField().hidden = true;
+    recEls.newTaskTypeRow().hidden = true;
+    recEls.taskTypeMsg().hidden = true;
+    // uncheck all days
+    document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => c.checked = false);
+    if (recEls.monthlyDay()) recEls.monthlyDay().value = '1';
+    if (recEls.monthlyFrom()) recEls.monthlyFrom().value = '1';
+    if (recEls.monthlyTo()) recEls.monthlyTo().value = '1';
+
+    if (task) {
+      // Edit mode
+      recEls.modalTitle().textContent = '✏️ Edit Recurring Task';
+      recEls.saveBtn().textContent = 'Save Changes';
+      recEls.editId().value = task.id;
+      recEls.description().value = task.description || '';
+      recEls.priority().value = task.priority || 'Medium';
+      recEls.startDate().value = task.start_date || '';
+      recEls.endDate().value = task.end_date || '';
+      if (task.department?.id) recEls.department().value = task.department.id;
+      if (task.project?.id) recEls.project().value = task.project.id;
+      if (task.task_type?.id) recEls.taskType().value = task.task_type.id;
+      if (task.assigned_to_user?.id) recEls.employee().value = task.assigned_to_user.id;
+      // Frequency
+      recurringSelectedFreq = task.frequency || '';
+      const freqBtn = document.querySelector(`.freq-btn[data-freq="${recurringSelectedFreq}"]`);
+      if (freqBtn) freqBtn.classList.add('selected');
+      syncRecurringFreqFields();
+      if (recurringSelectedFreq === 'Weekly') {
+        const days = (task.frequency_days || '').split(',').map(Number);
+        document.querySelectorAll('#weeklyDaysField input[type=checkbox]').forEach(c => {
+          c.checked = days.includes(Number(c.value));
+        });
+      }
+      if (recurringSelectedFreq === 'Monthly') {
+        const fallback = Number(String(task.start_date || '').slice(8, 10)) || 1;
+        const { from, to } = parseMonthlyDuration(task.frequency_days, fallback);
+        setMonthlyDurationFields(from, to);
+      }
+      // Checkpoints
+      (task.checkpoints || [])
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .forEach(cp => addCheckpointRow(cp.label));
+    } else {
+      // Create mode
+      recEls.modalTitle().textContent = '🔁 Create Recurring Task';
+      recEls.saveBtn().textContent = 'Create Recurring Task';
+      recEls.editId().value = '';
+      recEls.description().value = '';
+      recEls.department().value = '';
+      recEls.employee().value = '';
+      recEls.taskType().value = '';
+      recEls.project().value = '';
+      recEls.priority().value = 'Medium';
+      recEls.startDate().value = '';
+      recEls.endDate().value = '';
+      recurringSelectedFreq = '';
+    }
+
+    recEls.modal().hidden = false;
+  }
+
+  function closeRecurringModal() {
+    recEls.modal().hidden = true;
+  }
+
+  async function saveRecurringTask() {
+    recEls.formMsg().hidden = true;
+    const editId = recEls.editId().value;
+
+    if (!recEls.employee().value) {
+      recEls.formMsg().textContent = 'Please select an employee'; recEls.formMsg().hidden = false; return;
+    }
+    if (!recEls.description().value.trim()) {
+      recEls.formMsg().textContent = 'Please enter a task description'; recEls.formMsg().hidden = false; return;
+    }
+    if (!recurringSelectedFreq) {
+      recEls.formMsg().textContent = 'Please select a frequency'; recEls.formMsg().hidden = false; return;
+    }
+    if (!recEls.startDate().value) {
+      recEls.formMsg().textContent = 'Please select a start date'; recEls.formMsg().hidden = false; return;
+    }
+
+    const freqDays = [];
+    if (recurringSelectedFreq === 'Weekly') {
+      document.querySelectorAll('#weeklyDaysField input[type=checkbox]:checked').forEach(c => {
+        freqDays.push(Number(c.value));
+      });
+      if (!freqDays.length) {
+        recEls.formMsg().textContent = 'Please select at least one day'; recEls.formMsg().hidden = false; return;
+      }
+    }
+    if (recurringSelectedFreq === 'Monthly') {
+      const from = Number(recEls.monthlyFrom()?.value || recEls.monthlyDay()?.value || 0);
+      const to = Number(recEls.monthlyTo()?.value || from);
+      if (!Number.isFinite(from) || from < 1 || from > 31 || !Number.isFinite(to) || to < 1 || to > 31) {
+        recEls.formMsg().textContent = 'Please select a valid duration (from/to days 1–31)';
+        recEls.formMsg().hidden = false;
+        return;
+      }
+      if (to < from) {
+        recEls.formMsg().textContent = 'Duration "to" must be on or after "from"';
+        recEls.formMsg().hidden = false;
+        return;
+      }
+      // Send [from, to] — backend stores as "14-17" and fires daily in that window
+      freqDays.push(from, to);
+    }
+
+    const body = {
+      assigned_to: recEls.employee().value,
+      department_id: recEls.department().value || null,
+      project_id: recEls.project().value || null,
+      task_type_id: recEls.taskType().value || null,
+      description: recEls.description().value.trim(),
+      priority: recEls.priority().value,
+      frequency: recurringSelectedFreq,
+      frequency_days: freqDays,
+      start_date: recEls.startDate().value,
+      end_date: recEls.endDate().value || null,
+      checkpoints: getCheckpointValues()
+    };
+
+    recEls.saveBtn().disabled = true;
+    try {
+      if (editId) {
+        await api(`/recurring-tasks/${editId}`, { method: 'PATCH', body });
+        showToast('Recurring task updated ✅', 'success');
+      } else {
+        await api('/recurring-tasks', { method: 'POST', body });
+        showToast('Recurring task created ✅', 'success');
+      }
+      closeRecurringModal();
+      loadRecurringView();
+    } catch (err) {
+      recEls.formMsg().textContent = err.message;
+      recEls.formMsg().hidden = false;
+    } finally {
+      recEls.saveBtn().disabled = false;
+    }
+  }
+
+
+  async function loadRecurringView() {
+    const isAdmin = state.user.role === 'admin';
+    // NOTE: this used to also check state.user.can_add_employee, which is an
+    // "Add employee" permission unrelated to recurring tasks. That caused any
+    // employee granted that one permission to also get the admin recurring
+    // task view (Add Recurring Task button, edit/delete, etc.), even though
+    // the backend only allows actual admins to create/edit/delete recurring
+    // tasks (see requireAdmin in recurring_tasks.js). Gate on isAdmin only.
+    const canManageRecurring = isAdmin;
+    recEls.openBtn().hidden = !canManageRecurring;
+    recEls.adminWrap().hidden = !canManageRecurring;
+    recEls.empWrap().hidden = canManageRecurring;
+
+    if (canManageRecurring) {
+      await loadAdminRecurringTasks();
+    } else {
+      await loadEmployeeRecurringTasks();
+    }
+  }
+  // ─── Admin view ───────────────────────────────────────────────────────────────
+
+  async function loadAdminRecurringTasks() {
+    const tbody = recEls.adminTable();
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
+    recEls.adminCards().innerHTML = `<div class="empty-state">Loading…</div>`;
+    try {
+      const tasks = await api('/recurring-tasks/all');
+      renderAdminRecurringTable(tasks);
+      renderAdminRecurringCards(tasks);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function freqLabel(task) {
+    if (task.frequency === 'Weekly' && task.frequency_days) {
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const days = task.frequency_days.split(',').map(Number).map(d => dayNames[d]).join(', ');
+      return `Weekly (${days})`;
+    }
+    if (task.frequency === 'Monthly') {
+      const fallback = Number(String(task.start_date || '').slice(8, 10)) || 1;
+      const { from, to } = parseMonthlyDuration(task.frequency_days, fallback);
+      const suf = (n) =>
+        n === 1 || n === 21 || n === 31 ? 'st'
+          : n === 2 || n === 22 ? 'nd'
+            : n === 3 || n === 23 ? 'rd'
+              : 'th';
+      if (from === to) return `Monthly (${from}${suf(from)})`;
+      return `Monthly (${from}${suf(from)}–${to}${suf(to)})`;
+    }
+    return task.frequency;
+  }
+
+  function renderAdminRecurringTable(tasks) {
+    const tbody = recEls.adminTable();
+    if (!tasks.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No recurring tasks yet</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach(task => {
+      const tr = document.createElement('tr');
+      const cpCount = (task.checkpoints || []).length;
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
+        <td style="max-width:200px">${escapeHtml(task.description?.slice(0, 80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
+        <td>${escapeHtml(freqLabel(task))}</td>
+        <td style="font-size:12px">${escapeHtml(task.start_date ?? '—')} → ${escapeHtml(task.end_date ?? 'ongoing')}</td>
+        <td>${cpCount ? `${cpCount} checkpoint${cpCount > 1 ? 's' : ''}` : '<span style="color:#aaa">None</span>'}</td>
+        <td><span class="pill ${task.is_active ? 'pill-In-Progress' : 'pill-Rejected'}">${task.is_active ? 'Active' : 'Inactive'}</span></td>
+        <td class="row-actions"></td>
+      `;
+      const actCell = tr.lastElementChild;
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn action-accept'; editBtn.textContent = '✏️ Edit';
+      editBtn.addEventListener('click', () => openRecurringModal(task));
+      const delBtn = document.createElement('button');
+      delBtn.className = 'action-btn action-reject'; delBtn.textContent = '🗑️ Delete';
+      delBtn.addEventListener('click', () => deleteRecurringTask(task));
+      actCell.appendChild(editBtn); actCell.appendChild(delBtn);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderAdminRecurringCards(tasks) {
+    const wrap = recEls.adminCards();
+    if (!tasks.length) { wrap.innerHTML = `<div class="empty-state">No recurring tasks yet</div>`; return; }
+    wrap.innerHTML = '';
+    tasks.forEach(task => {
+      const cpCount = (task.checkpoints || []).length;
+      const card = document.createElement('div');
+      card.className = 'task-card';
+      card.innerHTML = `
+        <div class="task-card-header">
+          <span class="pill ${task.is_active ? 'pill-In-Progress' : 'pill-Rejected'}">${task.is_active ? 'Active' : 'Inactive'}</span>
+          <span style="font-size:12px;color:#888">${escapeHtml(freqLabel(task))}</span>
+        </div>
+        <div class="task-card-body">
+          <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Task:</span> ${escapeHtml(task.description?.slice(0, 100) ?? '—')}${task.description?.length > 100 ? '…' : ''}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Period:</span> ${escapeHtml(task.start_date)} → ${escapeHtml(task.end_date ?? 'ongoing')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Checkpoints:</span> ${cpCount ? `${cpCount}` : 'None'}</div>
+        </div>
+        <div class="task-card-actions">
+          <button class="action-btn action-accept edit-rec-btn">✏️ Edit</button>
+          <button class="action-btn action-reject del-rec-btn">🗑️ Delete</button>
+        </div>
+      `;
+      card.querySelector('.edit-rec-btn').addEventListener('click', () => openRecurringModal(task));
+      card.querySelector('.del-rec-btn').addEventListener('click', () => deleteRecurringTask(task));
+      wrap.appendChild(card);
+    });
+  }
+
+  async function deleteRecurringTask(task) {
+    if (!confirm(`Delete recurring task "${task.description?.slice(0, 60)}"? This cannot be undone.`)) return;
+    try {
+      await api(`/recurring-tasks/${task.id}`, { method: 'DELETE' });
+      showToast('Recurring task deleted', 'success');
+      loadRecurringView();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // ─── Employee view ────────────────────────────────────────────────────────────
+
+  // async function loadEmployeeRecurringTasks() {
+  //   const wrap = recEls.empList();
+  //   wrap.innerHTML = `<div class="empty-state">Loading your recurring tasks…</div>`;
+  //   try {
+  //     const tasks = await api('/recurring-tasks/my');
+  //     renderEmployeeRecurringList(tasks);
+  //   } catch (err) { showToast(err.message, 'error'); }
+  // }
+
+  async function loadEmployeeRecurringTasks() {
+    const wrap = recEls.empList();
+    const tbody = document.getElementById('employeeRecurringTableBody');
+    wrap.innerHTML = `<div class="empty-state">Loading your recurring tasks…</div>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" class="empty-state">Loading…</td></tr>`;
+    try {
+      const tasks = await api('/recurring-tasks/my');
+      renderEmployeeRecurringList(tasks);
+      renderEmployeeRecurringTable(tasks);
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  // Default refresh used after marking a recurring task done from the main
+  // "My recurring tasks" page. (The admin's own recurring tasks inside "My
+  // Tasks" are merged into that table directly and refresh via loadMyTasks.)
+  async function refreshMainRecurringView() {
+    const refreshed = await api('/recurring-tasks/my');
+    renderEmployeeRecurringList(refreshed);
+    renderEmployeeRecurringTable(refreshed);
+  }
+
+  // Desktop table view — same data as the card list above, laid out as rows.
+  // tbody/refreshFn are overridable so this same renderer can also be reused
+  // for an admin's own recurring tasks inside the "My Tasks" tab.
+  function renderEmployeeRecurringTable(allTasks, tbody = document.getElementById('employeeRecurringTableBody'), refreshFn = refreshMainRecurringView) {
+    if (!tbody) return;
+    // Backend already sends exactly the rows that belong here: one per
+    // pending due date (including any missed/backdated days, each keeping
+    // its own row), plus today's if it just got marked done. Nothing to
+    // filter here — a missed day like the 6th shows alongside the 7th
+    // instead of disappearing once the 7th's instance is created.
+    const tasks = allTasks;
+    if (!tasks.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No recurring tasks assigned to you</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    tasks.forEach((task) => {
+      const tr = document.createElement('tr');
+      const inst = task.instance;
+      const checkpoints = (task.checkpoints || []).sort((a, b) => a.sort_order - b.sort_order);
+      const completedIds = inst
+        ? (inst.recurring_task_checkpoint_completions || []).map((c) => c.checkpoint_id)
+        : [];
+      const allDone = checkpoints.length > 0 && completedIds.length === checkpoints.length;
+      const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+      const isNa = inst?.status === 'NotApplicable';
+      const isOverdue = !task.is_today && !isCompleted;
+      const canAct = !isCompleted;
+      const statusText = isNa ? 'Not Applicable'
+        : isCompleted ? 'Completed'
+          : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+            : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+      const pillClass = isNa ? 'pill-InProgress'
+        : isCompleted ? 'pill-Completed'
+          : isOverdue ? 'pill-Rejected'
+            : 'pill-InProgress';
+
+      const tdTask = document.createElement('td');
+      tdTask.innerHTML = `
+        <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+        ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
+        ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
+      `;
+
+      const tdFreq = document.createElement('td');
+      tdFreq.textContent = freqLabel(task);
+
+      // Each row is its own due date now — the 6th's missed instance shows
+      // "6 Jul" here while the 7th's shows "7 Jul", side by side as separate rows.
+      const tdDate = document.createElement('td');
+      tdDate.style.whiteSpace = 'nowrap';
+      tdDate.textContent = fmtDateOnly(task.due_date);
+
+      const tdStatus = document.createElement('td');
+      tdStatus.innerHTML = `<span class="pill ${pillClass}">${escapeHtml(statusText)}</span>`;
+      if (canAct) {
+        const actions = document.createElement('div');
+        actions.style.marginTop = '6px';
+        actions.style.display = 'flex';
+        actions.style.gap = '6px';
+        actions.style.flexWrap = 'wrap';
+        appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
+        tdStatus.appendChild(actions);
+      }
+
+      tr.append(tdTask, tdFreq, tdDate, tdStatus);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Shared "Done" / "Not Applicable" buttons for recurring instances
+  function appendRecurringActionButtons(container, task, inst, checkpoints, refreshFn) {
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'action-btn action-accept';
+    doneBtn.textContent = '✅ Done';
+    doneBtn.addEventListener('click', () => openRecurringDoneFlow(task, inst, checkpoints, refreshFn));
+    container.appendChild(doneBtn);
+
+    const naBtn = document.createElement('button');
+    naBtn.className = 'action-btn action-reject';
+    naBtn.textContent = '⊘ Not Applicable';
+    naBtn.title = 'Not applicable for this due date only — next week still appears';
+    naBtn.addEventListener('click', () => markRecurringNotApplicable(inst, refreshFn));
+    container.appendChild(naBtn);
+  }
+
+  async function markRecurringNotApplicable(inst, refresh = refreshMainRecurringView) {
+    if (!inst) return;
+    if (!confirm('Mark Not Applicable for this due date only?\n\nNext weekly occurrence will still appear.')) return;
+    try {
+      await api(`/recurring-tasks/instances/${inst.id}/not-applicable`, { method: 'POST' });
+      await refresh();
+      showToast('Marked Not Applicable for this date ⊘', 'success');
+      refreshNavBadges();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  // Shared "Done" flow for a recurring task instance, used by both the table
+  // and card views. Always opens a modal: tick checkpoints (if any) + optional
+  // photo, then Submit. Photo is never required.
+  async function openRecurringDoneFlow(task, inst, checkpoints, refresh = refreshMainRecurringView) {
+    if (!inst) return;
+
+    const completedIds = (inst.recurring_task_checkpoint_completions || []).map(c => c.checkpoint_id);
+    const modal = document.getElementById('checkpointModal');
+    const titleEl = document.getElementById('checkpointModalTitle');
+    const listEl = document.getElementById('checkpointModalList');
+    const msgEl = document.getElementById('checkpointModalMsg');
+    const submitBtn = document.getElementById('submitCheckpointModal');
+    const photoInput = document.getElementById('checkpointModalPhoto');
+
+    titleEl.textContent = task.description || 'Mark done';
+    msgEl.hidden = true;
+    if (photoInput) photoInput.value = '';
+
+    if (checkpoints.length === 0) {
+      listEl.innerHTML = `<p class="form-note">Mark this due date as done. You can attach a photo if you want.</p>`;
+    } else {
+      listEl.innerHTML = `<div class="checkpoint-list">` + checkpoints.map(cp => {
+        const done = completedIds.includes(cp.id);
+        return `
+          <label class="checkpoint-item ${done ? 'cp-done' : ''}" data-cp="${cp.id}">
+            <input type="checkbox" class="cp-checkbox" ${done ? 'checked' : ''} />
+            <span>${escapeHtml(cp.label)}</span>
+          </label>`;
+      }).join('') + `</div>
+        <p class="form-note" style="margin-top:8px">Tick every checkpoint, then submit. Photo is optional.</p>`;
+
+      listEl.querySelectorAll('.cp-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          e.target.closest('label').classList.toggle('cp-done', cb.checked);
+        });
+      });
+    }
+
+    submitBtn.disabled = false;
+    submitBtn.textContent = checkpoints.length ? 'Submit' : 'Mark done';
+
+    function close() {
+      modal.hidden = true;
+      submitBtn.removeEventListener('click', onSubmit);
+      document.getElementById('cancelCheckpointModal')?.removeEventListener('click', close);
+      document.getElementById('closeCheckpointModal')?.removeEventListener('click', close);
+    }
+
+    async function onSubmit() {
+      msgEl.hidden = true;
+      const checkedIds = checkpoints.length
+        ? [...listEl.querySelectorAll('.cp-checkbox:checked')].map(cb => cb.closest('label').dataset.cp)
+        : [];
+
+      if (checkpoints.length && checkedIds.length !== checkpoints.length) {
+        msgEl.textContent = 'Tick every checkpoint to mark this done.';
+        msgEl.hidden = false;
+        return;
+      }
+
+      const photoFile = photoInput?.files?.[0] || null;
+      const formData = new FormData();
+      if (photoFile) formData.append('photo', photoFile);
+
+      submitBtn.disabled = true;
+      try {
+        let updated;
+        if (checkpoints.length === 0) {
+          updated = await api(`/recurring-tasks/instances/${inst.id}/complete`, {
+            method: 'POST',
+            body: formData,
+            isForm: true,
+          });
+        } else {
+          formData.append('checkpoint_ids', JSON.stringify(checkedIds));
+          updated = await api(`/recurring-tasks/instances/${inst.id}/submit`, {
+            method: 'POST',
+            body: formData,
+            isForm: true,
+          });
+        }
+        close();
+        await refresh();
+        if (updated.status === 'Completed') {
+          showToast(
+            photoFile ? 'Done — photo saved ✅' : 'Task marked as done ✅',
+            'success'
+          );
+        } else {
+          showToast('Checkpoints saved', 'success');
+        }
+        refreshNavBadges();
+      } catch (err) {
+        msgEl.textContent = err.message;
+        msgEl.hidden = false;
+        submitBtn.disabled = false;
+      }
+    }
+
+    submitBtn.addEventListener('click', onSubmit);
+    document.getElementById('cancelCheckpointModal')?.addEventListener('click', close);
+    document.getElementById('closeCheckpointModal')?.addEventListener('click', close);
+    modal.hidden = false;
+  }
+
+  function renderEmployeeRecurringList(tasks, wrap = recEls.empList(), refreshFn = refreshMainRecurringView) {
+    if (!tasks.length) {
+      wrap.innerHTML = `<div class="empty-state">No recurring tasks assigned to you</div>`;
+      return;
+    }
+    wrap.innerHTML = '';
+
+    // Backend already sends one row per pending due date, oldest first — a
+    // missed day (e.g. the 6th) keeps its own row instead of vanishing once
+    // the 7th's instance exists. Split just for a friendlier "Today" vs
+    // "Overdue" heading; nothing gets filtered out here.
+    const todays = tasks.filter(t => t.is_today);
+    const overdue = tasks.filter(t => !t.is_today);
+
+    if (overdue.length) {
+      const hdr = document.createElement('div');
+      hdr.className = 'nav-section-label'; hdr.textContent = 'Overdue';
+      wrap.appendChild(hdr);
+      overdue.forEach(t => wrap.appendChild(buildEmployeeRecurringCard(t, refreshFn)));
+    }
+
+    const hdr = document.createElement('div');
+    hdr.className = 'nav-section-label'; hdr.style.marginTop = overdue.length ? '24px' : '0';
+    hdr.textContent = "Today's tasks";
+    wrap.appendChild(hdr);
+    if (todays.length) {
+      todays.forEach(t => wrap.appendChild(buildEmployeeRecurringCard(t, refreshFn)));
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.textContent = 'Nothing due today 🎉';
+      wrap.appendChild(empty);
+    }
+  }
+
+  function buildEmployeeRecurringCard(task, refreshFn = refreshMainRecurringView) {
+    const card = document.createElement('div');
+    card.className = 'task-card';
+    const inst = task.instance;
+    const checkpoints = (task.checkpoints || []).sort((a, b) => a.sort_order - b.sort_order);
+    const completedIds = inst
+      ? (inst.recurring_task_checkpoint_completions || []).map(c => c.checkpoint_id)
+      : [];
+    const allDone = checkpoints.length > 0 && completedIds.length === checkpoints.length;
+    const isCompleted = inst?.status === 'Completed' || inst?.status === 'NotApplicable';
+    const isNa = inst?.status === 'NotApplicable';
+    const isOverdue = !task.is_today && !isCompleted;
+    const canAct = !isCompleted;
+    const status = isNa ? 'Not Applicable'
+      : isCompleted ? 'Completed'
+        : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+          : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+
+    const pillClass = isNa ? 'pill-InProgress'
+      : isCompleted ? 'pill-Completed'
+        : isOverdue ? 'pill-Rejected'
+          : 'pill-In-Progress';
+
+    card.innerHTML = `
+      <div class="task-card-header">
+        <span class="pill ${pillClass}">${escapeHtml(status)}</span>
+        <span style="font-size:12px;color:#888">${escapeHtml(freqLabel(task))}</span>
+      </div>
+      <div class="task-card-body">
+        <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+        ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
+        ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
+        <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDateOnly(task.due_date))}</div>
+      </div>
+      ${canAct ? `<div class="task-card-actions" style="display:flex;gap:8px;flex-wrap:wrap"></div>` : ''}
+    `;
+
+    if (canAct) {
+      const actions = card.querySelector('.task-card-actions');
+      appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
+    }
+
+    return card;
+  }
+
+  // ─── Boot recurring modal once DOM is ready ───────────────────────────────────
+  __tfReadyFns.push(() => {
+    initRecurringModal();
+  });
+
+  // Fills the Department/Employee/Task Type/Project selects inside the
+  // recurring-task modal from state.master. Called directly from
+  // loadMasterData() once master data has loaded (not via monkey-patching —
+  // that previously broke silently if this file loaded after the dropdowns
+  // were first read).
+  function fillRecurringDropdowns() {
+    if (!state.master) return;
+    fillSelect(recEls.department(), state.master.departments, { placeholder: 'Select Department' });
+    fillSelect(recEls.taskType(), state.master.taskTypes, {
+      placeholder: 'Select Task Type',
+      extraOption: { value: '__add_new__', label: '+ Add new task type…' }
+    });
+    fillSelect(recEls.project(), state.master.projects, { placeholder: 'Select Project' });
+    syncRecurringEmployeeDropdown();
+    const deptSel = recEls.department();
+    if (deptSel && !deptSel.dataset.deptFilterBound) {
+      deptSel.dataset.deptFilterBound = '1';
+      deptSel.addEventListener('change', syncRecurringEmployeeDropdown);
+    }
+  }
+  // ═══════════════════════════════════════════════════════════════════
+  // ─── DRAWINGS MODULE ───────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════
+
+  const DRAWING_CATEGORIES = ['Architectural', 'Layout', 'MEP', 'Others', 'Presentation', 'Structural'];
+
+  // ─── Add Drawing View ────────────────────────────────────────────────
+  function renderDrawingAddView() {
+    const view = document.getElementById('view-drawings-add');
+    if (!view) return;
+
+    // Load projects for dropdown
+    api('/master/projects').then(projects => {
+      const projSel = view.querySelector('#drw-project');
+      if (projSel) fillSelect(projSel, projects || [], { placeholder: '-- Select Project --' });
+    }).catch(() => { });
+
+    // Load verifiers/heads for dropdown
+    api('/master/verifiers').then(users => {
+      const headSel = view.querySelector('#drw-head');
+      if (headSel) fillSelect(headSel, users || [], { placeholder: '-- Select Head --', labelKey: 'full_name' });
+    }).catch(() => { });
+
+    // Category change → update subcategory
+    const catSel = view.querySelector('#drw-category');
+    const sub1Sel = view.querySelector('#drw-sub1');
+    if (catSel && sub1Sel) {
+      catSel.addEventListener('change', () => {
+        sub1Sel.innerHTML = '<option value="">-- Select Sub Category --</option>';
+      });
+    }
+
+    const form = view.querySelector('#drawingForm');
+    const msgEl = view.querySelector('#drawingFormMsg');
+    if (!form) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msgEl.hidden = true;
+
+      const project_id = view.querySelector('#drw-project').value;
+      const category = view.querySelector('#drw-category').value;
+      const sub_cat_1 = view.querySelector('#drw-sub1').value;
+      const sub_cat_2 = view.querySelector('#drw-sub2').value;
+      const sub_cat_3 = view.querySelector('#drw-sub3').value;
+      const drawing_date = view.querySelector('#drw-date').value;
+      const head_id = view.querySelector('#drw-head').value;
+      const revision = view.querySelector('#drw-revision').value || 'R0';
+      const remarks = view.querySelector('#drw-remarks').value;
+      const fileInput = view.querySelector('#drw-files');
+
+      if (!project_id || !category || !drawing_date || !head_id) {
+        msgEl.textContent = 'Please fill in all required fields';
+        msgEl.hidden = false;
+        return;
+      }
+
+      try {
+        const fd = new FormData();
+        fd.append('project_id', project_id);
+        fd.append('category', category);
+        fd.append('sub_cat_1', sub_cat_1);
+        fd.append('sub_cat_2', sub_cat_2);
+        fd.append('sub_cat_3', sub_cat_3);
+        fd.append('drawing_date', drawing_date);
+        fd.append('head_id', head_id);
+        fd.append('revision', revision);
+        fd.append('remarks', remarks);
+        if (fileInput.files.length > 0) {
+          Array.from(fileInput.files).forEach(f => fd.append('files', f));
+        }
+
+        await api('/drawings', { method: 'POST', body: fd, isForm: true });
+        showToast('Drawing saved ✅', 'success');
+        form.reset();
+      } catch (err) {
+        msgEl.textContent = err.message || 'Failed to save drawing';
+        msgEl.hidden = false;
+      }
+    });
+
+    // Reset button
+    const resetBtn = view.querySelector('#drawingResetBtn');
+    if (resetBtn) resetBtn.addEventListener('click', () => { form.reset(); msgEl.hidden = true; });
+  }
+
+  // ─── All Drawings View ───────────────────────────────────────────────
+  let allDrawingsCache = [];
+
+  async function loadAllDrawings() {
+    const view = document.getElementById('view-drawings-all');
+    if (!view) return;
+    const tbody = view.querySelector('#drawingsTableBody');
+    tbody.innerHTML = `<tr><td colspan="11" class="empty-state">Loading drawings…</td></tr>`;
+
+    try {
+      allDrawingsCache = await api('/drawings');
+      // Populate project filter
+      const filterSel = view.querySelector('#drwFilterProject');
+      if (filterSel) {
+        const projects = [...new Map(allDrawingsCache.map(d => [d.project?.id, d.project?.name])).entries()]
+          .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]));
+        filterSel.innerHTML = '<option value="">All Projects</option>';
+        projects.forEach(([id, name]) => {
+          const opt = document.createElement('option');
+          opt.value = id; opt.textContent = name;
+          filterSel.appendChild(opt);
+        });
+      }
+      renderDrawingsTable(allDrawingsCache);
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="11" class="empty-state">Failed to load drawings</td></tr>`;
+      showToast(err.message, 'error');
+    }
+  }
+
+  function renderDrawingsTable(drawings) {
+    const view = document.getElementById('view-drawings-all');
+    const tbody = view.querySelector('#drawingsTableBody');
+    const countEl = view.querySelector('#drawingsCount');
+    if (countEl) countEl.textContent = `${drawings.length} total`;
+
+    if (!drawings.length) {
+      tbody.innerHTML = `<tr><td colspan="11" class="empty-state"><span class="emoji">📐</span>No drawings found</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = '';
+    drawings.forEach((d, i) => {
+      const tr = document.createElement('tr');
+      const fileUrls = Array.isArray(d.file_urls) ? d.file_urls : (d.file_url ? [d.file_url] : []);
+      const previewHtml = fileUrls.length
+        ? fileUrls.map(u => `<a href="${escapeHtml(u)}" target="_blank" class="media-link drw-view-btn">View</a>`).join(' ')
+        : `<span class="media-none">—</span>`;
+
+      tr.innerHTML = `
+        <td><span class="sr-number">${i + 1}</span></td>
+        <td><strong style="font-weight:600">${escapeHtml(d.project?.name ?? '—')}</strong></td>
+        <td><span class="ticket-category-chip">${escapeHtml(d.category ?? '—')}</span></td>
+        <td>${escapeHtml(d.sub_cat_1 || '—')}</td>
+        <td>${escapeHtml(d.sub_cat_2 || '—')}</td>
+        <td>${escapeHtml(d.sub_cat_3 || '—')}</td>
+        <td style="white-space:nowrap">${d.drawing_date ? fmtDate(d.drawing_date) : '—'}</td>
+        <td>${escapeHtml(d.head_user?.full_name ?? '—')}</td>
+        <td><span class="pill pill-Pending" style="font-size:0.72rem;padding:2px 8px">${escapeHtml(d.revision ?? 'R0')}</span></td>
+        <td style="font-size:0.8rem">${escapeHtml(d.remarks || '—')}</td>
+        <td style="text-align:center">${previewHtml}</td>
+        <td>${escapeHtml(d.added_by_user?.full_name ?? '—')}</td>
+        <td class="row-actions"><button class="action-btn action-delete drw-delete-btn" data-id="${d.id}">🗑 Delete</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // Delete listeners
+    tbody.querySelectorAll('.drw-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Delete this drawing?')) return;
+        try {
+          await api(`/drawings/${btn.dataset.id}`, { method: 'DELETE' });
+          showToast('Drawing deleted', 'success');
+          loadAllDrawings();
+        } catch (err) { showToast(err.message, 'error'); }
+      });
+    });
+  }
+
+  // Filter by project
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'drwFilterProject') {
+      const val = e.target.value;
+      const filtered = val
+        ? allDrawingsCache.filter(d => String(d.project?.id) === val)
+        : allDrawingsCache;
+      renderDrawingsTable(filtered);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ─── DAILY REPORT MODULE ──────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════
+
+  let _drptMode = 'single'; // 'single' | 'range'
+
+  function loadDailyReport() {
+    const dateInput = document.getElementById('drptDate');
+    const fromInput = document.getElementById('drptFromDate');
+    const toInput = document.getElementById('drptToDate');
+    const genBtn = document.getElementById('drptGenBtn');
+    const dlBtn = document.getElementById('drptDownloadBtn');
+    const modeSingle = document.getElementById('drptModeSingle');
+    const modeRange = document.getElementById('drptModeRange');
+    const singleWrap = document.getElementById('drptSingleWrap');
+    const rangeWrap = document.getElementById('drptRangeWrap');
+
+    // Default: yesterday
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = yesterday.toISOString().slice(0, 10);
+    if (dateInput && !dateInput._drptInit) {
+      dateInput.value = yStr;
+      dateInput._drptInit = true;
+    }
+    if (fromInput && !fromInput._drptInit) {
+      fromInput.value = yStr;
+      toInput.value = new Date().toISOString().slice(0, 10);
+      fromInput._drptInit = true;
+    }
+
+    // Mode toggle
+    if (modeSingle && !modeSingle._drptBound) {
+      modeSingle._drptBound = true;
+      modeSingle.addEventListener('click', () => {
+        _drptMode = 'single';
+        modeSingle.classList.add('active');
+        modeRange.classList.remove('active');
+        singleWrap.style.display = 'flex';
+        rangeWrap.style.display = 'none';
+      });
+      modeRange.addEventListener('click', () => {
+        _drptMode = 'range';
+        modeRange.classList.add('active');
+        modeSingle.classList.remove('active');
+        singleWrap.style.display = 'none';
+        rangeWrap.style.display = 'flex';
+      });
+    }
+
+    // Generate on button click
+    if (genBtn && !genBtn._drptBound) {
+      genBtn._drptBound = true;
+      genBtn.addEventListener('click', () => generateDailyReport());
+      if (dateInput) dateInput.addEventListener('change', () => generateDailyReport());
+      // Auto-generate on first load
+      generateDailyReport();
+    }
+
+    if (dlBtn && !dlBtn._drptBound) {
+      dlBtn._drptBound = true;
+      dlBtn.addEventListener('click', () => downloadDailyReportPdf());
+    }
+  }
+
+  async function generateDailyReport() {
+    const dateInput = document.getElementById('drptDate');
+    const fromInput = document.getElementById('drptFromDate');
+    const toInput = document.getElementById('drptToDate');
+    const body = document.getElementById('drptBody');
+    const subtitle = document.getElementById('drptSubtitle');
+    const dlBtn = document.getElementById('drptDownloadBtn');
+
+    let reportDateStr, rangeLabel;
+
+    if (_drptMode === 'range') {
+      const fromStr = fromInput?.value;
+      const toStr = toInput?.value;
+      if (!fromStr || !toStr) return;
+      const fmtD = (s) => new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      rangeLabel = `${fmtD(fromStr)} – ${fmtD(toStr)}`;
+      if (subtitle) subtitle.textContent = `Report: ${rangeLabel}`;
+      reportDateStr = null; // signal range mode
+      body.innerHTML = `<div class="empty-state">Generating report…</div>`;
+      await _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel);
+      return;
+    }
+
+    reportDateStr = dateInput?.value;
+    if (!reportDateStr) return;
+
+    const d = new Date(reportDateStr);
+    const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'long' });
+    if (subtitle) subtitle.textContent = `Report for ${label}`;
+
+    body.innerHTML = `<div class="empty-state">Generating report…</div>`;
+
+    try {
+      const allTasks = await api('/tasks/all');
+      const rDate = new Date(reportDateStr); rDate.setHours(0, 0, 0, 0);
+      const prevDate = new Date(rDate); prevDate.setDate(prevDate.getDate() - 1);
+
+      const allForDay = classifyDailyReportTasks(allTasks, rDate);
+
+      body.innerHTML = '';
+
+      // ── PMS-style header (matching image format) ──
+      const periodLabel = `${d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+      const pmsHtml = `
+        <div class="drpt-pms-header">
+          <div class="drpt-pms-smile">☺</div>
+          <div class="drpt-pms-title">PMS (${periodLabel})</div>
+        </div>`;
+      body.insertAdjacentHTML('beforeend', pmsHtml);
+
+      if (allForDay.length) {
+        body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:20px">📋 Task Status Summary</div>`);
+        const tbl = buildDrptPmsTable(allForDay, prevDate);
+        body.appendChild(tbl);
+      } else {
+        body.insertAdjacentHTML('beforeend', `<div class="empty-state">No overdue, pending, or done-today tasks for this date</div>`);
+      }
+
+      if (dlBtn) dlBtn.style.display = '';
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">Failed to generate report: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function startOfLocalDay(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+
+  function taskVerifiedDay(t) {
+    const iso = t.verified_at || t.first_verified_at;
+    if (!iso) return null;
+    const d = parseLocalDate(iso);
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return startOfLocalDay(d);
+  }
+
+  function isReportVerified(t) {
+    return t.verification_status === 'Verified' || (!!taskVerifiedDay(t) && t.status === 'Completed');
+  }
+
+  // Daily report rows: overdue + pending (incl. under-verification) + verified today.
+  // Yesterday-or-earlier verified tasks are omitted. Future-due and Rejected omitted.
+  function classifyDailyReportTasks(allTasks, reportDate) {
+    const rDate = startOfLocalDay(reportDate);
+    const overdue = [];
+    const pending = [];
+    const doneToday = [];
+
+    (allTasks || []).forEach((t) => {
+      if (t.status === 'Rejected') return;
+      if (t.verification_status === 'Verification Rejected') return;
+
+      const verified = isReportVerified(t);
+      const doneDay = taskVerifiedDay(t);
+
+      if (verified) {
+        if (doneDay && doneDay.getTime() === rDate.getTime()) {
+          doneToday.push({ ...t, _section: 'done', _daysLate: 0 });
+        }
+        return;
+      }
+
+      const targetD = t.target_date ? parseLocalDate(t.target_date) : null;
+      if (!targetD || Number.isNaN(targetD.getTime())) return;
+      targetD.setHours(0, 0, 0, 0);
+      if (targetD > rDate) return;
+
+      const daysLate = Math.floor((rDate - targetD) / 86400000);
+      const row = { ...t, _daysLate: Math.max(0, daysLate), _section: daysLate > 0 ? 'overdue' : 'pending' };
+      if (daysLate > 0) overdue.push(row);
+      else pending.push(row);
+    });
+
+    overdue.sort((a, b) => b._daysLate - a._daysLate);
+    return [...overdue, ...pending, ...doneToday];
+  }
+
+  // Builds the PMS-style main table (Sr, Prev. date, Target date, Task, Assignee, Delay, Remarks)
+  function buildDrptPmsTable(tasks, prevDate) {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap drpt-pms-wrap';
+    const tbl = document.createElement('table');
+    tbl.className = 'data-table drpt-table drpt-pms-table';
+    const prevLabel = prevDate ? fmtDateOnly(prevDate) : '—';
+
+    tbl.innerHTML = `<thead><tr>
+      <th class="col-sr">Sr.no</th>
+      <th>Prev. date</th>
+      <th>Target date</th>
+      <th>Task</th>
+      <th>Assigne</th>
+      <th>Delay</th>
+      <th>Remarks</th>
+    </tr></thead>`;
+
+    const tbody = document.createElement('tbody');
+    tasks.forEach((t, i) => {
+      const tr = document.createElement('tr');
+      const isDone = t._section === 'done';
+      const daysLate = t._daysLate ?? 0;
+
+      let delayHtml;
+      if (isDone) delayHtml = `<span class="drpt-done-badge">DONE</span>`;
+      else if (daysLate > 0) delayHtml = `<span class="drpt-overdue-badge">${daysLate} Days</span>`;
+      else delayHtml = `<span class="drpt-pending-badge">Today</span>`;
+
+      tr.innerHTML = `
+        <td><span class="sr-number">${i + 1}</span></td>
+        <td style="white-space:nowrap;font-size:0.82rem">${escapeHtml(prevLabel)}</td>
+        <td style="white-space:nowrap;font-size:0.82rem">${t.target_date ? fmtDateOnly(t.target_date) : '—'}</td>
+        <td class="drpt-task-cell">
+          <div style="font-size:0.8rem;font-weight:700;color:var(--indigo,#4f46e5);text-transform:uppercase">${escapeHtml(t.project?.name ?? '')}</div>
+          <div style="font-size:0.82rem">${escapeHtml(t.description)}</div>
+        </td>
+        <td style="font-weight:600;font-size:0.82rem">${escapeHtml(t.assigned_to_user?.full_name ?? '—')}</td>
+        <td>${delayHtml}</td>
+        <td></td>
+      `;
+      const remarksCell = tr.children[6];
+      remarksCell.innerHTML = `<input type="text" value="" placeholder="Add remark…" class="drpt-remark-input" />`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    wrap.appendChild(tbl);
+    return wrap;
+  }
+
+  // Date-range report: one table per calendar day using the same overdue / pending / done-today rules
+  async function _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel) {
+    try {
+      const allTasks = await api('/tasks/all');
+      const from = startOfLocalDay(parseLocalDate(fromStr));
+      const to = startOfLocalDay(parseLocalDate(toStr));
+
+      body.innerHTML = '';
+      body.insertAdjacentHTML('beforeend', `
+        <div class="drpt-pms-header">
+          <div class="drpt-pms-smile">☺</div>
+          <div class="drpt-pms-title">PMS (${rangeLabel})</div>
+        </div>`);
+
+      let anyRows = false;
+      for (let cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
+        const day = startOfLocalDay(cursor);
+        const rows = classifyDailyReportTasks(allTasks, day);
+        if (!rows.length) continue;
+        anyRows = true;
+        const dayLabel = day.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'long' });
+        const prevDate = new Date(day); prevDate.setDate(prevDate.getDate() - 1);
+        body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">📅 ${dayLabel}</div>`);
+        body.appendChild(buildDrptPmsTable(rows, prevDate));
+      }
+
+      if (!anyRows) {
+        body.insertAdjacentHTML('beforeend', `<div class="empty-state">No overdue, pending, or done-today tasks for this date range</div>`);
+        if (dlBtn) dlBtn.style.display = 'none';
+        return;
+      }
+
+      if (dlBtn) dlBtn.style.display = '';
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function buildDrptTable(headers, rows, editableRemarks) {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-wrap';
+
+    const colCount = headers.length;
+    const tbl = document.createElement('table');
+    tbl.className = 'data-table drpt-table';
+
+    // Head
+    const thead = document.createElement('thead');
+    thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+    tbl.appendChild(thead);
+
+    // Body
+    const tbody = document.createElement('tbody');
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-state">No tasks</td></tr>`;
+    } else {
+      rows.forEach(row => {
+        const tr = document.createElement('tr');
+        const vals = Object.values(row);
+        vals.forEach((val, idx) => {
+          const td = document.createElement('td');
+          // Last column + editableRemarks → make it an input
+          if (editableRemarks && idx === vals.length - 1) {
+            const inp = document.createElement('input');
+            inp.type = 'text';
+            inp.value = val || '';
+            inp.placeholder = 'Add remark…';
+            inp.className = 'drpt-remark-input';
+            td.appendChild(inp);
+          } else {
+            td.innerHTML = String(val ?? '—');
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+    tbl.appendChild(tbody);
+    wrap.appendChild(tbl);
+    return wrap;
+  }
+
+  function downloadDailyReportPdf() {
+    const dateInput = document.getElementById('drptDate');
+    const reportDate = dateInput?.value || 'report';
+    const body = document.getElementById('drptBody');
+    const subtitle = document.getElementById('drptSubtitle');
+
+    const win = window.open('', '_blank');
+    win.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Daily Report – ${reportDate}</title>
+        <style>
+          body { font-family: Arial, sans-serif; font-size: 12px; color: #111; margin: 20px; }
+          h1 { font-size: 18px; text-align: center; margin-bottom: 4px; }
+          .sub { text-align:center; color:#555; margin-bottom: 20px; font-size:12px; }
+          .drpt-summary-row { display:flex; gap:16px; margin-bottom:20px; }
+          .drpt-stat-card { border:1px solid #ddd; border-radius:8px; padding:12px 20px; text-align:center; flex:1; }
+          .drpt-stat-num { font-size:28px; font-weight:700; }
+          .drpt-stat-done { border-color:#10b981; color:#10b981; }
+          .drpt-stat-pending { border-color:#f59e0b; color:#f59e0b; }
+          .drpt-stat-overdue { border-color:#ef4444; color:#ef4444; }
+          .drpt-stat-verify { border-color:#6d28d9; color:#6d28d9; }
+          .drpt-stat-label { font-size:11px; color:#555; margin-top:4px; }
+          .drpt-section-title { font-weight:700; font-size:13px; text-transform:uppercase;
+            letter-spacing:.05em; margin:20px 0 8px; padding-bottom:4px;
+            border-bottom:2px solid #6d28d9; color:#6d28d9; }
+          table { width:100%; border-collapse:collapse; margin-bottom:16px; }
+          th { background:#1e1b4b; color:#fff; padding:7px 10px; text-align:left; font-size:11px; }
+          td { padding:6px 10px; border-bottom:1px solid #e5e7eb; font-size:11px; vertical-align:top; }
+          tr:nth-child(even) td { background:#f9fafb; }
+          .drpt-overdue-badge { background:#fef2f2; color:#dc2626; font-weight:700;
+            padding:2px 8px; border-radius:6px; font-size:10px; }
+          input.drpt-remark-input { border:none; background:transparent; width:100%; font-size:11px; }
+          @media print { body { margin:10px; } }
+        </style>
+      </head>
+      <body>
+        <h1>📋 DIP Projects — Daily Report</h1>
+        <p class="sub">${subtitle?.textContent || reportDate}</p>
+        ${body.innerHTML.replace(/class="drpt-remark-input"/g, 'style="border:none;width:100%;font-size:11px"')}
+        <script>window.onload = () => { window.print(); }<\/script>
+      </body>
+      </html>
+    `);
+    win.document.close();
+  }
+
+  // ─── MIS Report (admin, week-wise) ────────────────────────────────────────────
+  let _misLastData = null;
+  let _misReq = 0;
+
+  function misPill(n, kind, icon = '') {
+    return `<span class="mis-pill ${kind}">${icon ? `${icon} ` : ''}${n}</span>`;
+  }
+
+  function misPctCell(pct) {
+    // 0 = all done (good). Higher = more still open.
+    const color = pct <= 0 ? '#16a34a' : pct <= 33.33 ? '#d97706' : '#dc2626';
+    const w = Math.max(0, Math.min(100, pct));
+    const text = formatMisPct(pct);
+    return `
+      <div class="mis-pct-wrap">
+        <strong style="color:${color}">${text}%</strong>
+        <div class="mis-pct-bar"><div class="mis-pct-fill" style="width:${w}%;background:${color}"></div></div>
+      </div>`;
+  }
+
+  function formatMisPct(pct) {
+    const n = Number(pct) || 0;
+    if (n === 0) return '0';
+    // Up to 2 decimals (33.33, 44.7)
+    const rounded = Math.round(n * 100) / 100;
+    return String(rounded);
+  }
+
+  function misEmployeeRow(e, isTotal = false, taskType = 'all') {
+    let splitHtml = '';
+    if (!isTotal) {
+      if (taskType === 'normal') {
+        splitHtml = `<div class="mis-split">Delegated ${e.regular_total || 0}</div>`;
+      } else if (taskType === 'recurring') {
+        splitHtml = `<div class="mis-split">Recurring ${e.recurring_total || 0}</div>`;
+      } else {
+        splitHtml = `<div class="mis-split">Delegated ${e.regular_total || 0} · Recurring ${e.recurring_total || 0}</div>`;
+      }
+    }
+    const nameHtml = isTotal
+      ? `<strong>Grand Total (${e.employee_count || 0} employees)</strong>`
+      : `<div class="mis-emp-name">${escapeHtml(e.name)}</div>
+         <div class="mis-emp-meta">${escapeHtml(e.username || '')}${e.department ? ` · ${escapeHtml(e.department)}` : ''}</div>
+         ${splitHtml}`;
+    return `
+      <tr class="${isTotal ? 'mis-total-row' : ''}">
+        <td>${nameHtml}</td>
+        <td>${misPill(e.total || 0, 'total')}</td>
+        <td>${misPill(e.done || 0, 'done', '✓')}</td>
+        <td>${misPill(e.on_time || 0, 'ontime')}<div class="mis-emp-meta">${e.on_time_pct || 0}%</div></td>
+        <td>${misPill(e.delayed_done || 0, 'delayed-done')}</td>
+        <td>${misPill(e.delayed || e.delayed_not_done || 0, 'delayed')}</td>
+        <td>${misPill(e.pending || 0, 'pending', '⏳')}</td>
+        <td>${misPill(e.na || 0, 'na')}</td>
+        <td>${misPctCell(e.completion_pct || 0)}</td>
+      </tr>`;
+  }
+
+  function renderMisWeekCard(w, taskType = 'all') {
+    const hint = w.spans_prev_month
+      ? ' · includes previous month'
+      : w.spans_next_month
+        ? ' · includes next month'
+        : '';
+    let rowsHtml = '';
+    if (!w.employees?.length) {
+      rowsHtml = `<tr><td colspan="9" class="empty-state">No tasks due this week</td></tr>`;
+    } else {
+      rowsHtml = w.employees.map((e) => misEmployeeRow(e, false, taskType)).join('');
+      rowsHtml += misEmployeeRow({ ...w.totals, employee_count: w.employee_count }, true, taskType);
+    }
+    return `
+      <div class="mis-week-card" data-week="${w.week}">
+        <div class="mis-week-head">
+          <h3>${escapeHtml(w.label)}${hint ? `<span class="mis-week-meta">${hint}</span>` : ''}</h3>
+          <div class="mis-week-meta">${w.employee_count} employees · ${w.totals?.total || 0} tasks · Open ${formatMisPct(w.totals?.completion_pct || 0)}%</div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table mis-table" style="min-width:960px">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Total</th>
+                <th>Done</th>
+                <th>On-time</th>
+                <th>Delayed done</th>
+                <th>Delayed</th>
+                <th>Pending</th>
+                <th>N/A</th>
+                <th>Open % (0=all done)</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function downloadMisCsv(data) {
+    if (!data?.weeks?.length) {
+      showToast('Nothing to export', 'error');
+      return;
+    }
+    const headers = [
+      'Week', 'From', 'To', 'Employee', 'Username', 'Department',
+      'Total', 'Done', 'OnTime', 'DelayedDone', 'Delayed', 'Pending', 'NA',
+      'CompletionPct', 'Regular', 'Recurring',
+    ];
+    const lines = [headers.join(',')];
+    data.weeks.forEach((w) => {
+      (w.employees || []).forEach((e) => {
+        const cells = [
+          w.week, w.from, w.to,
+          `"${(e.name || '').replace(/"/g, '""')}"`,
+          e.username || '',
+          `"${(e.department || '').replace(/"/g, '""')}"`,
+          e.total, e.done, e.on_time, e.delayed_done || 0,
+          e.delayed || e.delayed_not_done || 0, e.pending, e.na,
+          e.completion_pct, e.regular_total || 0, e.recurring_total || 0,
+        ];
+        lines.push(cells.join(','));
+      });
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MIS-${data.year}-${String(data.month).padStart(2, '0')}-${data.filters?.task_type || 'all'}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV downloaded ✅', 'success');
+  }
+
+  async function loadMisReport() {
+    const body = document.getElementById('misReportBody');
+    const monthEl = document.getElementById('misMonth');
+    const weekEl = document.getElementById('misWeek');
+    const deptEl = document.getElementById('misDept');
+    const sortEl = document.getElementById('misSort');
+    const typeEl = document.getElementById('misTaskType');
+    const genBtn = document.getElementById('misGenBtn');
+    const csvBtn = document.getElementById('misCsvBtn');
+    if (!body || !monthEl) return;
+
+    const now = new Date();
+    if (!monthEl.value) {
+      monthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    async function run() {
+      const reqId = ++_misReq;
+      body.innerHTML = '<div class="empty-state">Building MIS report…</div>';
+      try {
+        const [y, m] = monthEl.value.split('-').map(Number);
+        const taskType = typeEl?.value || 'all';
+        const week = weekEl?.value || '';
+        const dept = deptEl?.value || '';
+        const sort = sortEl?.value || 'name';
+        const qs = new URLSearchParams({ year: String(y), month: String(m), task_type: taskType });
+        if (week) qs.set('week', week);
+        if (dept) qs.set('department', dept);
+        if (sort) qs.set('sort', sort);
+
+        const data = await api(`/mis-report?${qs}`);
+        if (reqId !== _misReq) return;
+        _misLastData = data;
+        const activeType = data.filters?.task_type || taskType;
+
+        // Week options. Keep the week the user picked for this request.
+        if (weekEl) {
+          weekEl.innerHTML = '<option value="">All weeks</option>';
+          (data.week_options || data.weeks || []).forEach((w) => {
+            const opt = document.createElement('option');
+            opt.value = String(w.week);
+            opt.textContent = w.label + (w.spans_prev_month ? ' *' : '');
+            weekEl.appendChild(opt);
+          });
+          if ([...weekEl.options].some((o) => o.value === week)) weekEl.value = week;
+        }
+
+        // Department options. Keep the department picked for this request.
+        if (deptEl) {
+          deptEl.innerHTML = '<option value="">All departments</option>';
+          (data.departments || []).forEach((d) => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            deptEl.appendChild(opt);
+          });
+          if ([...deptEl.options].some((o) => o.value === dept)) deptEl.value = dept;
+        }
+
+        if (!data.weeks?.length) {
+          body.innerHTML = `<div class="empty-state">No weeks / tasks for this selection</div>`;
+          return;
+        }
+
+        const typeLabel =
+          activeType === 'normal'
+            ? 'Normal / Delegated only'
+            : activeType === 'recurring'
+              ? 'Recurring only'
+              : 'All tasks';
+
+        const tabs = `
+          <div class="mis-week-tabs" id="misWeekTabs">
+            <button type="button" class="mis-week-tab" data-week="">All weeks</button>
+            ${(data.week_options || data.weeks).map((w) => `
+              <button type="button" class="mis-week-tab ${String(weekEl?.value) === String(w.week) ? 'active' : ''}" data-week="${w.week}">
+                W${w.week}${w.spans_prev_month ? '<span class="mis-week-hint">+prev</span>' : ''}
+              </button>`).join('')}
+          </div>`;
+
+        body.innerHTML =
+          `<div class="mis-filter-chip">Showing: <strong>${escapeHtml(typeLabel)}</strong></div>` +
+          tabs +
+          data.weeks.map((w) => renderMisWeekCard(w, activeType)).join('');
+
+        body.querySelectorAll('#misWeekTabs .mis-week-tab').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            if (weekEl) weekEl.value = btn.dataset.week || '';
+            run();
+          });
+        });
+        // Sync active tab with current week filter
+        body.querySelectorAll('#misWeekTabs .mis-week-tab').forEach((btn) => {
+          btn.classList.toggle('active', (btn.dataset.week || '') === (weekEl?.value || ''));
+        });
+      } catch (err) {
+        body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+        showToast(err.message, 'error');
+      }
+    }
+
+    if (!monthEl._misBound) {
+      monthEl._misBound = true;
+      genBtn?.addEventListener('click', run);
+      csvBtn?.addEventListener('click', () => downloadMisCsv(_misLastData));
+      monthEl.addEventListener('change', () => {
+        if (weekEl) weekEl.value = '';
+        run();
+      });
+      weekEl?.addEventListener('change', run);
+      deptEl?.addEventListener('change', run);
+      sortEl?.addEventListener('change', run);
+      typeEl?.addEventListener('change', run);
+    }
+    run();
+  }
+
+  function fmtHrs(h) {
+    if (h == null || h === '') return '—';
+    const n = Number(h);
+    if (Number.isNaN(n)) return '—';
+    const sign = n < 0 ? '-' : '';
+    const abs = Math.abs(n);
+    // Office-hours display: 8h work day (not 24h clock)
+    if (abs > 0 && abs < 1 / 60) return `${sign}<1m`;
+    if (abs < 1) {
+      const mins = Math.max(1, Math.round(abs * 60));
+      return `${sign}${mins}m`;
+    }
+    const workDay = 8;
+    const d = Math.floor(abs / workDay);
+    const rem = Math.round((abs - d * workDay) * 10) / 10;
+    if (d >= 1) return rem ? `${sign}${d}d ${rem}h` : `${sign}${d}d`;
+    return `${sign}${Math.round(abs * 10) / 10}h`;
+  }
+
+  function fmtDays(d) {
+    if (d == null || d === '') return '—';
+    const n = Number(d);
+    if (Number.isNaN(n)) return '—';
+    if (n === 0) return 'same day';
+    if (n === 1) return '1 day';
+    return `${n} days`;
+  }
+
+  function fmtWvdDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const mon = d.toLocaleString('en-GB', { month: 'short' });
+    const day = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${day} ${mon} ${yyyy}, ${hh}:${mm}`;
+  }
+
+  function fmtWvdDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    const mon = d.toLocaleString('en-GB', { month: 'short' });
+    const day = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${day} ${mon} ${yyyy}`;
+  }
+
+  let _tdLastData = null;
+  let _tdDash = null;
+  let _tdMeta = null;
+
+  function downloadTimeCsv(data) {
+    const dash = data?.dashboard;
+    if (!dash?.completion_time?.rows?.length && !dash?.by_employee?.length) {
+      return showToast('Nothing to export yet', 'error');
+    }
+    const head = ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours', 'Verifier', 'Start verification', 'Verified', 'Verify office hours'];
+    const lines = [head.join(',')];
+    const bySr = {};
+    (dash.completion_time?.rows || []).forEach((r) => { bySr[r.sr] = { ...r }; });
+    (dash.verify_turnaround?.rows || []).forEach((r) => {
+      bySr[r.sr] = {
+        ...(bySr[r.sr] || {}),
+        verifier: r.verifier,
+        started_at: r.started_at || r.accepted_at,
+        verified_at: r.verified_at,
+        verify_hours: r.hours,
+        days: r.days,
+        description: r.description || bySr[r.sr]?.description,
+      };
+    });
+    Object.values(bySr).forEach((r) => {
+      lines.push([
+        r.sr ?? '', r.employee || '', r.project || '', r.description || '', r.task_type || '',
+        r.assigned_at || '', r.submitted_at || '', r.hours ?? '',
+        r.verifier || '', r.started_at || '', r.verified_at || '', r.verify_hours ?? r.days ?? '',
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `work-verification-${(data.from || '').slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function pdfCell(v) {
+    const s = String(v ?? '').replace(/\s+/g, ' ').trim();
+    return s || '—';
+  }
+
+  function downloadReportPdf({ title, subtitle, sections }) {
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Allow pop-ups so the print box can open', 'error');
+    const tables = (sections || []).filter((sec) => sec.head?.length).map((sec) => {
+      const head = sec.head.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+      const rows = sec.body?.length ? sec.body : [sec.head.map(() => '')];
+      const body = rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
+      return `<h2>${escapeHtml(sec.heading || '')}</h2><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }).join('');
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+      <style>
+        @page { size: A3 landscape; margin: 8mm; }
+        html, body { margin: 0; padding: 0; background: #fff; color: #111; font-family: Arial, Helvetica, sans-serif; }
+        h1 { text-align: center; font-size: 18pt; margin: 0 0 4px; }
+        .sub { text-align: center; font-size: 11pt; color: #444; margin: 0 0 12px; }
+        h2 { font-size: 12pt; margin: 12px 0 6px; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; }
+        th { background: #1f2937; color: #fff; font-weight: 700; }
+        tr:nth-child(even) td { background: #f7f3ec; }
+        thead { display: table-header-group; }
+        tr { break-inside: avoid; page-break-inside: avoid; }
+      </style></head><body>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="sub">${escapeHtml(subtitle || '')}</p>
+      ${tables}
+      <script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script>
+      </body></html>`);
+    win.document.close();
+  }
+
+  function printWorkDashboardPdf() {
+    const dash = _tdDash;
+    if (!dash) return showToast('Generate the dashboard first', 'error');
+    const s = dash.summary || {};
+    const fromTo = `${String(_tdMeta?.from || '').slice(0, 10)} → ${String(_tdMeta?.to || '').slice(0, 10)}`;
+    const pem = dash.project_employee_matrix || { employees: [], projects: [] };
+    const pvm = dash.project_verifier_matrix || { verifiers: [], projects: [] };
+    const ct = dash.completion_time || {};
+    const vt = dash.verify_turnaround || {};
+    const pemHead = ['Project', ...(pem.employees || []), 'Total'];
+    const pvmHead = ['Project', ...(pvm.verifiers || []), 'Total'];
+    downloadReportPdf({
+      title: 'Work & Verification Dashboard',
+      subtitle: `${fromTo} · ${s.total_tasks || 0} tasks · ${s.employees || 0} employees · ${s.verified || 0} verified · ${s.pending_verify || 0} pending · ${s.corrections_sent || 0} corrections`,
+      filename: `work-verification-${String(_tdMeta?.from || '').slice(0, 10)}.pdf`,
+      sections: [
+        {
+          heading: '1. Work by employee',
+          head: ['Employee', 'Total', 'Verified', 'Pending', 'Projects'],
+          body: (dash.by_employee || []).map((e) => [
+            pdfCell(e.name),
+            pdfCell(e.total),
+            pdfCell(e.verified),
+            pdfCell(e.pending),
+            pdfCell((e.projects || []).map((p) => `${p.name}: ${p.count}`).join(', ')),
+          ]),
+        },
+        {
+          heading: '2. Project x employee',
+          head: pemHead,
+          body: (pem.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pem.employees || []).map((e) => pdfCell(p.counts?.[e] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3. Project x verifier',
+          head: pvmHead,
+          body: (pvm.projects || []).map((p) => [
+            pdfCell(p.name),
+            ...(pvm.verifiers || []).map((v) => pdfCell(p.counts?.[v] || 0)),
+            pdfCell(p.total),
+          ]),
+        },
+        {
+          heading: '3b. Verifier summary',
+          head: ['Verifier', 'Total', 'Verified', 'Correction sent', 'Correction ack', 'Pending'],
+          body: (dash.verifier_summary || []).map((v) => [
+            pdfCell(v.name), pdfCell(v.total), pdfCell(v.verified),
+            pdfCell(v.correction_sent), pdfCell(v.correction_ack), pdfCell(v.pending),
+          ]),
+        },
+        {
+          heading: '4. Correction log',
+          head: ['Employee', 'Project', 'SR', 'Status'],
+          body: (dash.correction_log?.items || []).map((i) => [
+            pdfCell(i.employee), pdfCell(i.project), pdfCell(i.sr), pdfCell(i.status),
+          ]),
+        },
+        {
+          heading: '5a. Task completion time',
+          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours'],
+          body: (ct.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
+            pdfCell(r.task_type), pdfCell(fmtWvdDateTime(r.assigned_at)),
+            pdfCell(fmtWvdDateTime(r.submitted_at)), pdfCell(fmtHrs(r.hours)),
+          ]),
+        },
+        {
+          heading: '5b. Verification turnaround',
+          head: ['SR', 'Submitted by', 'Verifier', 'Project', 'Task description', 'Start verification', 'Verified', 'Office hours'],
+          body: (vt.rows || []).map((r) => [
+            pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.verifier), pdfCell(r.project),
+            pdfCell(r.description), pdfCell(fmtWvdDateTime(r.started_at || r.accepted_at)),
+            pdfCell(fmtWvdDateTime(r.verified_at)), pdfCell(fmtHrs(r.hours != null ? r.hours : r.days)),
+          ]),
+        },
+      ],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
+  }
+
+  function filterDashboardData(dash, allEmps) {
+    const personId = document.getElementById('tdPerson')?.value || '';
+    const dept = document.getElementById('tdDept')?.value || '';
+    if (!personId && !dept) return dash;
+
+    let allowNames = null;
+    if (personId || dept) {
+      allowNames = new Set(
+        (allEmps || [])
+          .filter((e) => {
+            if (personId && String(e.id) !== String(personId)) return false;
+            if (dept && String(e.department || e.portfolio?.department || '') !== dept) return false;
+            return true;
+          })
+          .map((e) => e.name)
+      );
+    }
+    if (!allowNames || !allowNames.size) {
+      return {
+        ...dash,
+        summary: { ...dash.summary, total_tasks: 0, employees: 0, verified: 0, pending_verify: 0, corrections_sent: 0 },
+        by_employee: [],
+        project_employee_matrix: { employees: [], projects: [], employee_totals: {}, grand_total: 0 },
+        correction_log: { by_employee: [], items: [] },
+        completion_time: { matched: 0, avg_hrs: null, fastest_hrs: null, slowest_hrs: null, by_employee: [], rows: [] },
+      };
+    }
+
+    const by_employee = (dash.by_employee || []).filter((e) => allowNames.has(e.name));
+    const employees = by_employee.map((e) => e.name);
+    const pem = dash.project_employee_matrix || { projects: [] };
+    const projects = (pem.projects || [])
+      .map((p) => {
+        const counts = {};
+        let total = 0;
+        employees.forEach((e) => {
+          counts[e] = p.counts?.[e] || 0;
+          total += counts[e];
+        });
+        return { name: p.name, counts, total };
+      })
+      .filter((p) => p.total > 0);
+    const employee_totals = Object.fromEntries(employees.map((e) => [e, by_employee.find((x) => x.name === e)?.total || 0]));
+    const grand_total = by_employee.reduce((s, e) => s + e.total, 0);
+    const correction_log = {
+      by_employee: (dash.correction_log?.by_employee || []).filter((e) => allowNames.has(e.name)),
+      items: (dash.correction_log?.items || []).filter((i) => allowNames.has(i.employee)),
+    };
+    const completion_time = {
+      ...dash.completion_time,
+      rows: (dash.completion_time?.rows || []).filter((r) => allowNames.has(r.employee)),
+      by_employee: (dash.completion_time?.by_employee || []).filter((e) => allowNames.has(e.name)),
+    };
+    completion_time.matched = completion_time.rows.length;
+    const hrs = completion_time.rows.map((r) => r.hours).filter((h) => h != null);
+    completion_time.avg_hrs = hrs.length ? Math.round((hrs.reduce((a, b) => a + b, 0) / hrs.length) * 10) / 10 : null;
+    completion_time.fastest_hrs = hrs.length ? Math.min(...hrs) : null;
+    completion_time.slowest_hrs = hrs.length ? Math.max(...hrs) : null;
+
+    return {
+      ...dash,
+      summary: {
+        ...dash.summary,
+        total_tasks: grand_total,
+        employees: employees.length,
+        verified: by_employee.reduce((s, e) => s + (e.verified || 0), 0),
+        pending_verify: by_employee.reduce((s, e) => s + (e.pending || 0), 0),
+        corrections_sent: correction_log.items.length,
+      },
+      by_employee,
+      project_employee_matrix: { employees, projects, employee_totals, grand_total },
+      correction_log,
+      completion_time,
+    };
+  }
+
+  function wvdPill(text, kind) {
+    return `<span class="wvd-pill wvd-pill-${kind}">${escapeHtml(text)}</span>`;
+  }
+
+  function wvdMatrix(headers, rows, foot) {
+    return `<div class="wvd-table-wrap"><table class="wvd-matrix">
+      <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody>
+      ${foot || ''}
+    </table></div>`;
+  }
+
+  function renderWorkVerificationDashboard(dash, meta = {}) {
+    const s = dash.summary || {};
+    const srLabel = s.sr_from != null
+      ? `Task SR No. ${s.sr_from}–${s.sr_to} · ${s.total_tasks} tasks · ${s.employees} employees · ${s.verification_submissions || 0} verification submissions`
+      : `${s.total_tasks || 0} tasks · ${s.employees || 0} employees · ${s.verification_submissions || 0} verification submissions`;
+
+    const fromTo = meta.from && meta.to
+      ? `${escapeHtml(String(meta.from).slice(0, 10))} → ${escapeHtml(String(meta.to).slice(0, 10))}`
+      : '';
+
+    // 1 · Work by employee
+    const empCols = (dash.by_employee || []).map((e) => {
+      const pills = [
+        e.verified ? wvdPill(`Verified: ${e.verified}`, 'ok') : '',
+        e.pending ? wvdPill(`Pending Verification: ${e.pending}`, 'warn') : '',
+      ].filter(Boolean).join('');
+      const projects = (e.projects || []).map((p) => `
+        <div class="wvd-proj-row"><span>${escapeHtml(p.name)}</span><strong>${p.count}</strong></div>`).join('');
+      return `<div class="wvd-emp-col">
+        <div class="wvd-emp-head"><span>${escapeHtml((e.name || '').toUpperCase())}</span><em>${e.total} tasks</em></div>
+        <div class="wvd-pills">${pills || wvdPill('No status', 'muted')}</div>
+        <div class="wvd-proj-list">${projects || '<div class="wvd-muted">No projects</div>'}</div>
+      </div>`;
+    }).join('') || '<div class="empty-state">No employees in this range</div>';
+
+    // 2 · Project × Employee
+    const pem = dash.project_employee_matrix || { employees: [], projects: [] };
+    const pemHeads = ['PROJECT', ...(pem.employees || []).map((n) => n.toUpperCase()), 'TOTAL'];
+    const pemRows = (pem.projects || []).map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      ${(pem.employees || []).map((e) => `<td>${p.counts?.[e] ? p.counts[e] : '–'}</td>`).join('')}
+      <td><strong>${p.total || 0}</strong></td>
+    </tr>`).join('');
+    const pemFoot = `<tfoot><tr>
+      <td>Employee Total</td>
+      ${(pem.employees || []).map((e) => `<td>${pem.employee_totals?.[e] || 0}</td>`).join('')}
+      <td><span class="wvd-grand">${pem.grand_total || 0}</span></td>
+    </tr></tfoot>`;
+
+    // 3 · Project × Verifier
+    const pvm = dash.project_verifier_matrix || { verifiers: [], projects: [] };
+    const pvmHeads = ['PROJECT', ...(pvm.verifiers || []).map((n) => n.toUpperCase()), 'TOTAL'];
+    const pvmRows = (pvm.projects || []).map((p) => `<tr>
+      <td>${escapeHtml(p.name)}</td>
+      ${(pvm.verifiers || []).map((v) => `<td>${p.counts?.[v] ? p.counts[v] : '–'}</td>`).join('')}
+      <td><strong>${p.total || 0}</strong></td>
+    </tr>`).join('');
+    const pvmFoot = `<tfoot><tr>
+      <td>Verifier Total</td>
+      ${(pvm.verifiers || []).map((v) => `<td>${pvm.verifier_totals?.[v] || 0}</td>`).join('')}
+      <td><span class="wvd-grand">${pvm.grand_total || 0}</span></td>
+    </tr></tfoot>`;
+
+    // 3b · Verifier summary
+    const verSum = (dash.verifier_summary || []).map((v) => {
+      const pills = [
+        v.verified ? wvdPill(`Verified: ${v.verified}`, 'ok') : '',
+        v.correction_sent ? wvdPill(`Correction Sent: ${v.correction_sent}`, 'bad') : '',
+        v.correction_ack ? wvdPill(`Correction Acknowledged: ${v.correction_ack}`, 'ack') : '',
+        v.pending ? wvdPill(`Pending Verification: ${v.pending}`, 'warn') : '',
+      ].filter(Boolean).join('');
+      const notes = (v.corrections || []).map((c) => `
+        <div class="wvd-corr-note">
+          <div><strong>${escapeHtml(c.status)} (${escapeHtml(c.employee)}):</strong> ${escapeHtml(c.project)}</div>
+          <div class="wvd-muted">Task SR :- ${c.sr ?? '—'} &nbsp;|&nbsp; ${escapeHtml(c.task_type || '—')}</div>
+          ${c.note ? `<div class="wvd-muted">Note :- ${escapeHtml(c.note)}</div>` : ''}
+        </div>`).join('');
+      return `<div class="wvd-ver-col">
+        <div class="wvd-emp-head"><span>${escapeHtml((v.name || '').toUpperCase())}</span><em>${v.total} verified</em></div>
+        <div class="wvd-pills">${pills}</div>
+        ${notes}
+      </div>`;
+    }).join('') || '<div class="wvd-muted">No verifier activity</div>';
+
+    // 4 · Correction log
+    const corrPills = (dash.correction_log?.by_employee || [])
+      .map((e) => `<span class="wvd-corr-count">${escapeHtml(e.name)}: ${e.count}</span>`)
+      .join('');
+    const corrItems = (dash.correction_log?.items || []).map((i) => `
+      <div class="wvd-corr-row">
+        <span>${escapeHtml(i.employee)} — ${escapeHtml(i.project)} (SR ${i.sr ?? '—'})</span>
+        <em>${escapeHtml(i.status)}</em>
+      </div>`).join('') || '<div class="wvd-muted">No corrections in this range</div>';
+
+    // 5a · Completion time
+    const ct = dash.completion_time || {};
+    const maxAvg = Math.max(1, ...(ct.by_employee || []).map((e) => e.avg_hrs || 0));
+    const bars = (ct.by_employee || []).map((e) => {
+      const w = Math.round(((e.avg_hrs || 0) / maxAvg) * 100);
+      return `<div class="wvd-bar-row">
+        <span class="wvd-bar-name">${escapeHtml((e.name || '').toUpperCase())}</span>
+        <div class="wvd-bar-track"><i style="width:${w}%"></i></div>
+        <span class="wvd-bar-val">${fmtHrs(e.avg_hrs)} <small>(n=${e.n})</small></span>
+      </div>`;
+    }).join('');
+    const ctRows = (ct.rows || []).map((r) => `<tr>
+      <td>${r.sr ?? '—'}</td>
+      <td>${escapeHtml(r.employee)}</td>
+      <td>${escapeHtml(r.project)}</td>
+      <td class="wvd-desc">${escapeHtml(r.description || '—')}</td>
+      <td>${escapeHtml(r.task_type)}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.assigned_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.submitted_at))}</td>
+      <td>${fmtHrs(r.hours)}</td>
+    </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No matched assignment → submission pairs</td></tr>`;
+
+    // 5b · Verify turnaround
+    const vt = dash.verify_turnaround || {};
+    const vtSumRows = (vt.by_verifier || []).map((v) => `<tr>
+      <td>${escapeHtml((v.name || '').toUpperCase())}</td>
+      <td>${v.tasks}</td>
+      <td>${v.same_day}/${v.tasks}</td>
+      <td>${fmtHrs(v.avg_hrs != null ? v.avg_hrs : v.avg_days)}</td>
+      <td>${fmtHrs(v.slowest_hrs != null ? v.slowest_hrs : v.slowest_days)}</td>
+    </tr>`).join('');
+    const vtRows = (vt.rows || []).map((r) => `<tr>
+      <td>${r.sr ?? '—'}</td>
+      <td>${escapeHtml(r.employee)}</td>
+      <td>${escapeHtml(r.verifier)}</td>
+      <td>${escapeHtml(r.project)}</td>
+      <td class="wvd-desc">${escapeHtml(r.description || '—')}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.started_at || r.accepted_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.verified_at))}</td>
+      <td>${fmtHrs(r.hours != null ? r.hours : r.days)}</td>
+    </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No verification turnaround data</td></tr>`;
+
+    return `<article class="wvd" id="wvdReport">
+      <header class="wvd-header">
+        <div class="wvd-kicker">ENGINEERING OFFICE · TASK REGISTER</div>
+        <h1>Work &amp; Verification Dashboard</h1>
+        <p class="wvd-sub">${escapeHtml(srLabel)}${fromTo ? ` · ${fromTo}` : ''}</p>
+      </header>
+
+      <div class="wvd-stats">
+        <div class="wvd-stat"><strong>${s.total_tasks || 0}</strong><span>TOTAL TASKS</span></div>
+        <div class="wvd-stat"><strong>${s.employees || 0}</strong><span>EMPLOYEES</span></div>
+        <div class="wvd-stat wvd-stat-ok"><strong>${s.verified || 0}</strong><span>VERIFIED</span></div>
+        <div class="wvd-stat wvd-stat-warn"><strong>${s.pending_verify || 0}</strong><span>PENDING VERIFY</span></div>
+        <div class="wvd-stat wvd-stat-bad"><strong>${s.corrections_sent || 0}</strong><span>CORRECTIONS SENT</span></div>
+      </div>
+
+      <section class="wvd-sec">
+        <h2>1 · Work By Employee <small>total + status + project breakdown</small></h2>
+        <div class="wvd-emp-grid">${empCols}</div>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>2 · Project × Employee Matrix <small>how much work each person did per project</small></h2>
+        ${wvdMatrix(pemHeads, pemRows || `<tr><td colspan="${pemHeads.length}" class="empty-state">No data</td></tr>`, pem.employees?.length ? pemFoot : '')}
+      </section>
+
+      <section class="wvd-sec">
+        <h2>3 · Project × Verifier Matrix <small>who verified tasks on which project</small></h2>
+        ${wvdMatrix(pvmHeads, pvmRows || `<tr><td colspan="${Math.max(2, pvmHeads.length)}" class="empty-state">No data</td></tr>`, pvm.verifiers?.length ? pvmFoot : '')}
+      </section>
+
+      <section class="wvd-sec">
+        <h2>3b · Verifier Summary <small>total verifications + status</small></h2>
+        <div class="wvd-ver-grid">${verSum}</div>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>4 · Correction Log <small>who was asked for corrections, how many times</small></h2>
+        <div class="wvd-corr-pills">${corrPills || '<span class="wvd-muted">None</span>'}</div>
+        <div class="wvd-corr-list">${corrItems}</div>
+        <p class="wvd-footnote">* “Correction Acknowledged” and “Correction Sent” statuses are counted as corrections.</p>
+      </section>
+
+      <section class="wvd-sec">
+        <h2>5 · Time Analysis <small>how long employees take to finish work, and how long verification takes</small></h2>
+
+        <h3>5a · Task Completion Time <em>task assigned → submitted for verification</em></h3>
+        <p class="wvd-help">How this is measured: assigned time stamp → sent for verification. <strong>Time Taken uses office hours</strong> (9:30–18:30, lunch 1–2, Sunday off) — not full clock hours.</p>
+        <div class="wvd-stats wvd-stats-4">
+          <div class="wvd-stat wvd-stat-bad"><strong>${ct.matched || 0}</strong><span>TASKS MATCHED</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(ct.avg_hrs)}</strong><span>AVERAGE (OFFICE HRS)</span></div>
+          <div class="wvd-stat wvd-stat-ok"><strong>${fmtHrs(ct.fastest_hrs)}</strong><span>FASTEST</span></div>
+          <div class="wvd-stat wvd-stat-bad"><strong>${fmtHrs(ct.slowest_hrs)}</strong><span>SLOWEST</span></div>
+        </div>
+        <div class="wvd-bars">${bars}</div>
+        <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
+          <thead><tr>
+            <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK DESCRIPTION</th><th>TASK TYPE</th>
+            <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
+          </tr></thead>
+          <tbody>${ctRows}</tbody>
+        </table></div>
+
+        <h3>5b · Verification Turnaround Time <em>Start Verification → marked Verified</em></h3>
+        <p class="wvd-help">How this is measured: when the verifier clicked <strong>Start Verification</strong> → when they marked <strong>Verified</strong>. Duration uses <strong>office hours</strong> (not whole calendar days).</p>
+        <div class="wvd-stats wvd-stats-4">
+          <div class="wvd-stat wvd-stat-bad"><strong>${vt.measured || 0}</strong><span>TASKS MEASURED</span></div>
+          <div class="wvd-stat wvd-stat-ok"><strong>${vt.same_day || 0}/${vt.measured || 0}</strong><span>VERIFIED SAME DAY</span></div>
+          <div class="wvd-stat wvd-stat-info"><strong>${fmtHrs(vt.avg_hrs != null ? vt.avg_hrs : vt.avg_days)}</strong><span>AVERAGE TURNAROUND</span></div>
+          <div class="wvd-stat wvd-stat-bad"><strong>${fmtHrs(vt.slowest_hrs != null ? vt.slowest_hrs : vt.slowest_days)}</strong><span>SLOWEST</span></div>
+        </div>
+        ${vtSumRows ? `<div class="wvd-table-wrap"><table class="wvd-matrix">
+          <thead><tr><th>VERIFIER</th><th>TASKS</th><th>SAME-DAY</th><th>AVG TURNAROUND</th><th>SLOWEST</th></tr></thead>
+          <tbody>${vtSumRows}</tbody>
+        </table></div>` : ''}
+        <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
+          <thead><tr>
+            <th>SR</th><th>SUBMITTED BY</th><th>VERIFIER</th><th>PROJECT</th><th>TASK DESCRIPTION</th>
+            <th>START VERIFICATION</th><th>VERIFIED</th><th>TIME TAKEN (OFFICE HRS)</th>
+          </tr></thead>
+          <tbody>${vtRows}</tbody>
+        </table></div>
+      </section>
+
+      <footer class="wvd-footer">Generated from TaskFlow · Work &amp; Verification Dashboard</footer>
+    </article>`;
+  }
+
+  function fillTdFilters(emps) {
+    const personSel = document.getElementById('tdPerson');
+    const deptSel = document.getElementById('tdDept');
+    const personId = personSel?.value || '';
+    const dept = deptSel?.value || '';
+    if (personSel) {
+      const sortedEmps = sortByLabel(emps, 'name');
+      personSel.innerHTML = ['<option value="">All employees</option>']
+        .concat(sortedEmps.map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.name)}</option>`)).join('');
+      personSel.value = personId;
+    }
+    if (deptSel && !deptSel.dataset.filled) {
+      const depts = [...new Set(emps.map((e) => e.department || e.portfolio?.department).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      deptSel.innerHTML = ['<option value="">All departments</option>']
+        .concat(depts.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)).join('');
+      deptSel.dataset.filled = '1';
+      deptSel.value = dept;
+    }
+  }
+
+  async function loadTimeDashboard(opts = {}) {
+    const body = document.getElementById('tdBody');
+    const rangeEl = document.getElementById('tdRange');
+    if (!body) return;
+    const range = rangeEl?.value || 'month';
+    try {
+      let data = opts.fromCache ? _tdLastData : null;
+      if (!data) {
+        if (!opts.quiet) body.innerHTML = '<div class="empty-state">Building Work &amp; Verification Dashboard…</div>';
+        data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+      }
+      _tdLastData = data;
+      const allEmps = data.report || [];
+      fillTdFilters(allEmps);
+      let dash = data.dashboard;
+      if (!dash) {
+        body.innerHTML = '<div class="empty-state">Dashboard data unavailable — refresh after deploy</div>';
+        return;
+      }
+      dash = filterDashboardData(dash, allEmps);
+      _tdDash = dash;
+      _tdMeta = { from: data.from, to: data.to };
+      if (!(dash.summary?.total_tasks) && !(dash.by_employee || []).length) {
+        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
+        return;
+      }
+      body.innerHTML = renderWorkVerificationDashboard(dash, { from: data.from, to: data.to });
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
+  document.getElementById('tdRange')?.addEventListener('change', () => {
+    const deptSel = document.getElementById('tdDept');
+    if (deptSel) delete deptSel.dataset.filled;
+    loadTimeDashboard();
+  });
+  document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
+  document.getElementById('tdDept')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
+  document.getElementById('tdCsvBtn')?.addEventListener('click', () => downloadTimeCsv(_tdLastData));
+  document.getElementById('tdPdfBtn')?.addEventListener('click', () => printWorkDashboardPdf());
+
+  // ─── Emp Delay Report (Task Delay Report sheet format) ─────────────────────
+  let _drLast = null;
+  let _drEmpFilled = false;
+
+  /** Show a task-detail popup from any of the three report tables.
+   *  `fields` is an array of {label, value, cls?} objects. */
+  function showDrPopup(description, fields) {
+    const existing = document.getElementById('drTaskPopup');
+    if (existing) existing.remove();
+
+    const fieldsHtml = fields.map((f) =>
+      `<div class="dr-popup-field">
+        <span class="dr-popup-label">${escapeHtml(f.label)}</span>
+        <span class="dr-popup-value${f.cls ? ' ' + escapeHtml(f.cls) : ''}">${escapeHtml(String(f.value || '—'))}</span>
+      </div>`
+    ).join('');
+
+    const el = document.createElement('div');
+    el.id = 'drTaskPopup';
+    el.className = 'dr-popup-backdrop';
+    el.innerHTML = `
+      <div class="dr-popup" role="dialog" aria-modal="true" aria-label="Task details">
+        <div class="dr-popup-header">
+          <h3>Task Details</h3>
+          <button class="dr-popup-close" aria-label="Close">✕</button>
+        </div>
+        <div class="dr-popup-body">
+          <div class="dr-popup-desc">${escapeHtml(description || '—')}</div>
+          <div class="dr-popup-grid">${fieldsHtml}</div>
+        </div>
+      </div>`;
+
+    // close on backdrop click
+    el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+    el.querySelector('.dr-popup-close').addEventListener('click', () => el.remove());
+    // close on Escape
+    const onKey = (e) => { if (e.key === 'Escape') { el.remove(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+  }
+
+  function renderDelayReportTable(data) {
+    const rows = data.rows || [];
+    const showEmp = !document.getElementById('drEmployee')?.value;
+    const s = data.summary || {};
+    const headEmp = showEmp ? '<th>Employee</th>' : '';
+    const colSpan = showEmp ? 17 : 16;
+    const body = rows.map((r, i) => {
+      const statusClass =
+        r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
+      const vStatusClass =
+        r.verify_status === 'Delayed' || r.verify_status === 'Overdue'
+          ? 'dr-delayed'
+          : r.verify_status === 'On Time'
+            ? 'dr-ontime'
+            : 'dr-na';
+      const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
+      const planNote = r.reschedule_count > 0
+        ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
+        : '';
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}" data-idx="${i}">
+        <td class="dr-c">${r.sr ?? '—'}</td>
+        ${empTd}
+        <td>${escapeHtml(r.project)}${planNote}</td>
+        <td class="dr-desc"><div class="dr-desc-clamp">${escapeHtml(r.description || '—')}</div></td>
+        <td>${escapeHtml(r.assigned_label)}</td>
+        <td>${escapeHtml(r.accepted_label)}</td>
+        <td class="dr-c">${escapeHtml(r.hours_label)}</td>
+        <td class="dr-hold">${escapeHtml(r.hold_resume_label || '—')}</td>
+        <td class="dr-c">${escapeHtml(r.total_hold_label || '—')}</td>
+        <td>${escapeHtml(r.deadline_label)}</td>
+        <td>${escapeHtml(r.submitted_label)}</td>
+        <td class="${statusClass}">${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.delay_label)}</td>
+        <td>${escapeHtml(r.verify_started_label || '—')}</td>
+        <td>${escapeHtml(r.verified_label || '—')}</td>
+        <td class="${vStatusClass}">${escapeHtml(r.verify_status || '—')}</td>
+        <td>${escapeHtml(r.verify_delay_label || '—')}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
+
+    const html = `<div class="dr-report" id="drReport">
+      <h1 class="dr-title">Task Delay Report</h1>
+      <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+        · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+        · <span class="dr-ontime">${s.on_time || 0} on time</span>
+        · ${s.na || 0} N/A
+        · Verify delayed: <span class="dr-delayed">${rows.filter((r) => r.verify_status === 'Delayed' || r.verify_status === 'Overdue').length}</span></p>
+      <div class="dr-table-wrap">
+        <table class="dr-table">
+          <thead><tr>
+            <th>SR</th>${headEmp}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
+            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+            <th>Total Hold</th><th>Due</th>
+            <th>Sent for verification</th><th>Work status</th><th>Work delay</th>
+            <th>Start Verification</th><th>Verified</th><th>Verify status</th><th>Verify delay</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+    // Wire row click after injecting into DOM (caller sets innerHTML first)
+    setTimeout(() => {
+      document.getElementById('drReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        const fields = [];
+        if (showEmp) fields.push({ label: 'Employee', value: r.employee });
+        fields.push(
+          { label: 'Project', value: r.project },
+          { label: 'Timestamp (Assigned)', value: r.assigned_label },
+          { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Hrs to Complete', value: r.hours_label },
+          { label: 'Hold / Resume', value: r.hold_resume_label },
+          { label: 'Total Hold', value: r.total_hold_label },
+          { label: 'Due', value: r.deadline_label },
+          { label: 'Sent for Verification', value: r.submitted_label },
+          { label: 'Work Status', value: r.status, cls: r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Work Delay', value: r.delay_label },
+          { label: 'Start Verification', value: r.verify_started_label },
+          { label: 'Verified', value: r.verified_label },
+          { label: 'Verify Status', value: r.verify_status, cls: (r.verify_status === 'Delayed' || r.verify_status === 'Overdue') ? 'dr-delayed' : r.verify_status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Verify Delay', value: r.verify_delay_label },
+        );
+        showDrPopup(r.description, fields);
+      });
+    }, 0);
+
+    return html;
+  }
+
+  async function fillDelayEmployees() {
+    const sel = document.getElementById('drEmployee');
+    if (!sel || _drEmpFilled) return;
+    try {
+      const list = await api('/delay-report/employees');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All employees</option>' +
+        (list || []).map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.full_name)}</option>`).join('');
+      if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+      _drEmpFilled = true;
+    } catch (_) { /* ignore */ }
+  }
+
+  async function loadDelayReport() {
+    const body = document.getElementById('drBody');
+    if (!body) return;
+    await fillDelayEmployees();
+    const range = document.getElementById('drRange')?.value || 'month';
+    const emp = document.getElementById('drEmployee')?.value || '';
+    body.innerHTML = '<div class="empty-state">Loading Task Delay Report…</div>';
+    try {
+      const qs = new URLSearchParams({ range });
+      if (emp) qs.set('employee_id', emp);
+      const data = await api(`/delay-report?${qs}`);
+      _drLast = data;
+      body.innerHTML = renderDelayReportTable(data);
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // ─── Emp Report (custom date range + status + early/delay d h m) ───────────
+  let _erLast = null;
+  let _erEmpFilled = false;
+
+  function erDefaultDates() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const from = `${y}-${pad(m + 1)}-01`;
+    const to = `${y}-${pad(m + 1)}-${pad(now.getDate())}`;
+    const fromEl = document.getElementById('erFrom');
+    const toEl = document.getElementById('erTo');
+    if (fromEl && !fromEl.value) fromEl.value = from;
+    if (toEl && !toEl.value) toEl.value = to;
+  }
+
+  async function fillEmpReportEmployees() {
+    const sel = document.getElementById('erEmployee');
+    if (!sel || _erEmpFilled) return;
+    try {
+      const list = await api('/delay-report/employees');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All employees</option>' +
+        (list || []).map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.full_name)}</option>`).join('');
+      if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+      _erEmpFilled = true;
+    } catch (_) { /* ignore */ }
+  }
+
+  function renderEmpReportTable(data) {
+    const rows = data.rows || [];
+    const showEmp = !document.getElementById('erEmployee')?.value;
+    const s = data.summary || {};
+    const headEmp = showEmp ? '<th>Employee</th>' : '';
+    const colSpan = showEmp ? 13 : 12;
+    const body = rows.map((r, i) => {
+      const statusClass =
+        r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : 'dr-na';
+      const empTd = showEmp ? `<td>${escapeHtml(r.employee)}</td>` : '';
+      const planNote = r.reschedule_count > 0
+        ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
+        : '';
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}" data-idx="${i}">
+        <td class="dr-c">${r.sr ?? '—'}</td>
+        ${empTd}
+        <td>${escapeHtml(r.project)}${planNote}</td>
+        <td class="dr-desc"><div class="dr-desc-clamp">${escapeHtml(r.description || '—')}</div></td>
+        <td>${escapeHtml(r.assigned_label)}</td>
+        <td>${escapeHtml(r.accepted_label)}</td>
+        <td class="dr-c">${escapeHtml(r.hours_label)}</td>
+        <td class="dr-hold">${escapeHtml(r.hold_resume_label || '—')}</td>
+        <td class="dr-c">${escapeHtml(r.total_hold_label || '—')}</td>
+        <td>${escapeHtml(r.deadline_label)}</td>
+        <td>${escapeHtml(r.submitted_label || '—')}</td>
+        <td class="${statusClass}">${escapeHtml(r.status)}</td>
+        <td>${escapeHtml(r.timing_label || '—')}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
+
+    const html = `<div class="dr-report" id="erReport">
+      <h1 class="dr-title">Emp Report</h1>
+      <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+        · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+        · <span class="dr-ontime">${s.on_time || 0} on time</span>
+        · ${s.na || 0} N/A</p>
+      <div class="dr-table-wrap">
+        <table class="dr-table">
+          <thead><tr>
+            <th>SR</th>${headEmp}<th>Project</th><th>Task description</th><th>Timestamp (Assigned)</th>
+            <th>Emp Acceptance Time</th><th>Hrs to Complete</th><th>Hold / Resume</th>
+            <th>Total Hold</th><th>Due</th><th>Submitted</th><th>Status</th>
+            <th>Early / Delay (d h m)</th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+    setTimeout(() => {
+      document.getElementById('erReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        const fields = [];
+        if (showEmp) fields.push({ label: 'Employee', value: r.employee });
+        fields.push(
+          { label: 'Project', value: r.project },
+          { label: 'Timestamp (Assigned)', value: r.assigned_label },
+          { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Hrs to Complete', value: r.hours_label },
+          { label: 'Hold / Resume', value: r.hold_resume_label },
+          { label: 'Total Hold', value: r.total_hold_label },
+          { label: 'Due', value: r.deadline_label },
+          { label: 'Submitted', value: r.submitted_label },
+          { label: 'Status', value: r.status, cls: r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Early / Delay', value: r.timing_label },
+        );
+        showDrPopup(r.description, fields);
+      });
+    }, 0);
+
+    return html;
+  }
+
+  async function loadEmpReport() {
+    const body = document.getElementById('erBody');
+    if (!body) return;
+    erDefaultDates();
+    await fillEmpReportEmployees();
+    const from = document.getElementById('erFrom')?.value || '';
+    const to = document.getElementById('erTo')?.value || '';
+    const emp = document.getElementById('erEmployee')?.value || '';
+    if (!from || !to) {
+      body.innerHTML = '<div class="empty-state">Select From and To dates</div>';
+      return;
+    }
+    body.innerHTML = '<div class="empty-state">Loading Emp Report…</div>';
+    try {
+      const qs = new URLSearchParams({ from, to });
+      if (emp) qs.set('employee_id', emp);
+      const data = await api(`/delay-report/emp?${qs}`);
+      _erLast = data;
+      body.innerHTML = renderEmpReportTable(data);
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function printEmpReportPdf() {
+    const data = _erLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('erEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Submitted', 'Status', 'Early / Delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.timing_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
+  }
+
+  async function loadMdoDelayReport() {
+    const body = document.getElementById('mdoDrBody');
+    if (!body) return;
+    const range = document.getElementById('mdoDrRange')?.value || 'month';
+    body.innerHTML = '<div class="empty-state">Loading MDO Task Delay Report…</div>';
+    try {
+      const data = await api(`/mdo/task-report?range=${encodeURIComponent(range)}`);
+      const rows = data.rows || [];
+      const s = data.summary || {};
+      const tableRows = rows.map((r, i) => `
+        <tr class="${i % 2 === 0 ? 'dr-alt' : ''} ${r.delay ? 'dr-delayed-row' : ''}" data-idx="${i}">
+          <td class="dr-c">${r.sr ?? '—'}</td>
+          <td>${escapeHtml(r.employee)}</td>
+          <td><div class="dr-desc-clamp">${escapeHtml(r.description)}</div></td>
+          <td>${escapeHtml(r.task_type)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.accepted_label)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.done_label)}</td>
+          <td style="white-space:nowrap">${escapeHtml(r.due_label)}</td>
+          <td class="${r.delay ? 'dr-delayed' : 'dr-ontime'}">${escapeHtml(r.delay ? `Yes — ${r.delay_label}` : r.delay_label)}</td>
+          <td>${escapeHtml(r.status)}</td>
+        </tr>`).join('')
+        || `<tr><td colspan="9" class="empty-state">No MDO Office Work tasks in this range</td></tr>`;
+      body.innerHTML = `<div class="dr-report" id="mdoDrReport">
+        <h1 class="dr-title">MDO Task Delay Report</h1>
+        <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
+          · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
+          · <span class="dr-ontime">${s.on_time || 0} on time</span>
+          · ${s.pending || 0} not done</p>
+        <div class="dr-table-wrap"><table class="dr-table">
+          <thead><tr>
+            <th>SR</th><th>Employee</th><th>Task description</th><th>Task type</th>
+            <th>Accepted</th><th>Marked done</th><th>Due</th><th>Delay?</th><th>Status</th>
+          </tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table></div>
+      </div>`;
+
+      // Wire row click
+      document.getElementById('mdoDrReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        showDrPopup(r.description, [
+          { label: 'Employee', value: r.employee },
+          { label: 'Task Type', value: r.task_type },
+          { label: 'Accepted', value: r.accepted_label },
+          { label: 'Marked Done', value: r.done_label },
+          { label: 'Due', value: r.due_label },
+          { label: 'Delay?', value: r.delay ? `Yes — ${r.delay_label}` : r.delay_label, cls: r.delay ? 'dr-delayed' : 'dr-ontime' },
+          { label: 'Status', value: r.status },
+        ]);
+      });
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('mdoDrGenBtn')?.addEventListener('click', () => loadMdoDelayReport());
+  document.getElementById('mdoDrRange')?.addEventListener('change', () => loadMdoDelayReport());
+
+  function printDelayReportPdf() {
+    const data = _drLast;
+    if (!data?.rows) return showToast('Generate the report first', 'error');
+    const showEmp = !document.getElementById('drEmployee')?.value;
+    const head = ['SR'];
+    if (showEmp) head.push('Employee');
+    head.push(
+      'Project', 'Task description', 'Timestamp (Assigned)', 'Emp Acceptance Time',
+      'Hrs to Complete', 'Hold / Resume', 'Total Hold', 'Due', 'Sent for verification',
+      'Work status', 'Work delay', 'Start Verification', 'Verified', 'Verify status', 'Verify delay'
+    );
+    const body = data.rows.map((r) => {
+      const row = [pdfCell(r.sr)];
+      if (showEmp) row.push(pdfCell(r.employee));
+      const project = r.reschedule_count > 0
+        ? `${pdfCell(r.project)} (rescheduled ${r.reschedule_count}x)`
+        : pdfCell(r.project);
+      row.push(
+        project, pdfCell(r.description), pdfCell(r.assigned_label), pdfCell(r.accepted_label),
+        pdfCell(r.hours_label), pdfCell(r.hold_resume_label), pdfCell(r.total_hold_label),
+        pdfCell(r.deadline_label), pdfCell(r.submitted_label), pdfCell(r.status), pdfCell(r.delay_label),
+        pdfCell(r.verify_started_label), pdfCell(r.verified_label), pdfCell(r.verify_status), pdfCell(r.verify_delay_label)
+      );
+      return row;
+    });
+    const s = data.summary || {};
+    downloadReportPdf({
+      title: 'Emp Delay Report',
+      subtitle: `${String(data.from || '').slice(0, 10)} → ${String(data.to || '').slice(0, 10)} · ${s.total || 0} tasks · ${s.delayed || 0} delayed · ${s.on_time || 0} on time · ${s.na || 0} N/A`,
+      filename: `emp-delay-report-${String(data.from || '').slice(0, 10)}.pdf`,
+      sections: [{ heading: 'Tasks', head, body }],
+    });
+    showToast('Print box opened. All columns are on the page.', 'success');
+  }
+
+  document.getElementById('drGenBtn')?.addEventListener('click', () => loadDelayReport());
+  document.getElementById('drRange')?.addEventListener('change', () => loadDelayReport());
+  document.getElementById('drEmployee')?.addEventListener('change', () => loadDelayReport());
+  document.getElementById('drPdfBtn')?.addEventListener('click', () => printDelayReportPdf());
+  document.getElementById('erGenBtn')?.addEventListener('click', () => loadEmpReport());
+  document.getElementById('erEmployee')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erFrom')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erTo')?.addEventListener('change', () => loadEmpReport());
+  document.getElementById('erPdfBtn')?.addEventListener('click', () => printEmpReportPdf());
+  document.getElementById('drWaBtn')?.addEventListener('click', async () => {
+    if (!confirm('Send last-week Task Delay Report on WhatsApp to each employee + their head now?')) return;
+    try {
+      showToast('Sending WhatsApp reports…', 'success');
+      const result = await api('/delay-report/send-monday-now', { method: 'POST' });
+      showToast(
+        `WA done · emp ${result.employees_messaged || 0} · heads ${result.heads_messaged || 0}`,
+        'success'
+      );
+    } catch (err) {
+      showToast(err.message || 'WhatsApp send failed', 'error');
+    }
+  });
+
+  // ─── Task History (employee's own completed / verified tasks) ───────────────
+  let _thAllRows = [];   // full unfiltered dataset for client-side filtering
+
+  function _thPopulateDropdowns(rows) {
+    const projSel = document.getElementById('th-filter-project');
+    const typeSel = document.getElementById('th-filter-type');
+    const empWrap = document.getElementById('th-filter-emp-wrap');
+    const empSel = document.getElementById('th-filter-employee');
+
+    const isAdmin = state?.user?.role === 'admin';
+    if (empWrap && empSel) {
+      if (isAdmin) {
+        empWrap.hidden = false;
+        const prevE = empSel.value;
+        const empList = state.master?.employees || [];
+        fillSelect(empSel, empList, {
+          placeholder: 'All employees',
+          labelKey: 'full_name',
+        });
+        if (prevE && empList.some((e) => e.id === prevE)) empSel.value = prevE;
+      } else {
+        empWrap.hidden = true;
+      }
+    }
+
+    if (!projSel || !typeSel) return;
+
+    // Only populate once per data load (preserve user's current selection)
+    const uniq = (arr, key) => [...new Map(arr.filter((x) => x[key]?.id).map((x) => [x[key].id, x[key]])).values()];
+    const sortedProj = sortByLabel(uniq(rows, 'project'));
+    const sortedType = sortByLabel(uniq(rows, 'task_type'));
+
+    const prevP = projSel.value;
+    projSel.innerHTML = '<option value="">All projects</option>' +
+      sortedProj.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`).join('');
+    if ([...projSel.options].some((o) => o.value === prevP)) projSel.value = prevP;
+
+    const prevT = typeSel.value;
+    typeSel.innerHTML = '<option value="">All types</option>' +
+      sortedType.map((t) => `<option value="${escapeHtml(String(t.id))}">${escapeHtml(t.name)}</option>`).join('');
+    if ([...typeSel.options].some((o) => o.value === prevT)) typeSel.value = prevT;
+  }
+
+  function _thApplyFilters() {
+    const q = (document.getElementById('th-filter-q')?.value || '').toLowerCase().trim();
+    const emp = document.getElementById('th-filter-employee')?.value || '';
+    const project = document.getElementById('th-filter-project')?.value || '';
+    const type = document.getElementById('th-filter-type')?.value || '';
+    const status = document.getElementById('th-filter-status')?.value || '';
+    const from = document.getElementById('th-filter-from')?.value || '';
+    const to = document.getElementById('th-filter-to')?.value || '';
+
+    let rows = _thAllRows;
+    if (q) rows = rows.filter((r) =>
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.project?.name || '').toLowerCase().includes(q) ||
+      (r.task_type?.name || '').toLowerCase().includes(q) ||
+      (r.assigned_to_user?.full_name || '').toLowerCase().includes(q));
+    if (emp) rows = rows.filter((r) => String(r.assigned_to || r.assigned_to_user?.id || '') === emp);
+    if (project) rows = rows.filter((r) => String(r.project?.id || '') === project);
+    if (type) rows = rows.filter((r) => String(r.task_type?.id || '') === type);
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (from) rows = rows.filter((r) => r.target_date >= from);
+    if (to) rows = rows.filter((r) => r.target_date <= to);
+
+    _thRender(rows);
+
+    const countEl = document.getElementById('thFilterCount');
+    if (countEl) {
+      const isFiltered = q || emp || project || type || status || from || to;
+      countEl.hidden = !isFiltered;
+      countEl.textContent = isFiltered ? `Showing ${rows.length} of ${_thAllRows.length} tasks` : '';
+    }
+  }
+
+  function _thRender(rows) {
+    const tbody = document.getElementById('thTableBody');
+    const cardList = document.getElementById('thCardList');
+    if (!tbody) return;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state"><span class="emoji">📭</span>No completed tasks found</td></tr>`;
+      if (cardList) cardList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No completed tasks found</div>`;
+      return;
+    }
+
+    const isAdmin = state?.user?.role === 'admin';
+
+    // ── Desktop table ────────────────────────────────────────────────────────
+    tbody.innerHTML = '';
+    rows.forEach((task, i) => {
+      const tr = document.createElement('tr');
+
+      // Sr No
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${i + 1}</span>`;
+
+      // Task details
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: isAdmin });
+
+      // Accepted date (after Task details)
+      const tdAccepted = document.createElement('td');
+      tdAccepted.className = 'th-date-cell';
+      tdAccepted.textContent = fmtDateOnly(task.accepted_at || task.first_accepted_at);
+
+      // Target date
+      const tdTarget = document.createElement('td');
+      tdTarget.className = 'th-date-cell';
+      tdTarget.textContent = fmtDateOnly(task.target_date);
+
+      // Completed on — use verified_at > sent_for_verification_at > updated_at as proxy
+      const completedAt = task.verified_at || task.sent_for_verification_at || task.updated_at;
+      const tdDone = document.createElement('td');
+      tdDone.className = 'th-date-cell';
+      tdDone.textContent = fmtDateOnly(completedAt);
+
+      // Priority
+      const tdPriority = document.createElement('td');
+      tdPriority.className = 'th-center';
+      tdPriority.innerHTML = `<span class="pill pill-${escapeHtml(task.priority || 'Low')}">${escapeHtml(task.priority || '—')}</span>`;
+
+      // Status
+      const tdStatus = document.createElement('td');
+      const statusCls = task.status === 'Verified' ? 'pill-Completed' : 'pill-InProgress';
+      const statusIcon = task.status === 'Verified' ? '✅' : '✔️';
+      tdStatus.innerHTML = `<span class="pill ${statusCls}">${statusIcon} ${escapeHtml(task.status)}</span>`;
+
+      // Verified by
+      const tdVerifier = document.createElement('td');
+      const verifierName = task.verifier?.full_name || task.verifier_user?.full_name || '';
+      tdVerifier.innerHTML = verifierName
+        ? `<span class="th-verifier">${escapeHtml(verifierName)}</span>`
+        : `<span class="media-none">—</span>`;
+
+      tr.append(tdSr, tdDetails, tdAccepted, tdTarget, tdDone, tdPriority, tdStatus, tdVerifier);
+
+      tbody.appendChild(tr);
+    });
+
+    // ── Mobile cards ─────────────────────────────────────────────────────────
+    if (!cardList) return;
+    cardList.innerHTML = '';
+    rows.forEach((task) => {
+      const completedAt = task.verified_at || task.sent_for_verification_at || task.updated_at;
+      const statusCls = task.status === 'Verified' ? 'pill-Completed' : 'pill-InProgress';
+      const statusIcon = task.status === 'Verified' ? '✅' : '✔️';
+      const verifierName = task.verifier?.full_name || task.verifier_user?.full_name || '';
+
+      const card = document.createElement('div');
+      card.className = 'task-card th-card';
+      card.innerHTML = `
+        <div class="task-card-header">
+          <span class="pill ${statusCls}" style="font-size:0.7rem">${statusIcon} ${escapeHtml(task.status)}</span>
+          <span class="pill pill-${escapeHtml(task.priority || 'Low')}" style="font-size:0.7rem">${escapeHtml(task.priority || '—')}</span>
+        </div>
+        <div class="task-card-body">
+          ${isAdmin && task.assigned_to_user?.full_name ? `<div class="task-detail-line"><span class="task-detail-label">Assignee:</span> ${escapeHtml(task.assigned_to_user.full_name)}</div>` : ''}
+          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project?.name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type?.name ?? '—')}</div>
+          <div class="task-detail-line th-card-desc">${escapeHtml(task.description || '—')}</div>
+          <div class="task-card-meta">
+            <span>🤝 Accepted: ${escapeHtml(fmtDateOnly(task.accepted_at || task.first_accepted_at))}</span>
+            <span>🗓 Target: ${escapeHtml(fmtDateOnly(task.target_date))}</span>
+            <span>✔ Done: ${escapeHtml(fmtDateOnly(completedAt))}</span>
+            ${verifierName ? `<span>👤 ${escapeHtml(verifierName)}</span>` : ''}
+          </div>
+        </div>`;
+      cardList.appendChild(card);
+    });
+  }
+
+  async function loadTaskHistory() {
+    const tbody = document.getElementById('thTableBody');
+    const cardList = document.getElementById('thCardList');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading task history…</td></tr>`;
+    if (cardList) cardList.innerHTML = `<div class="empty-state">Loading task history…</div>`;
+
+    try {
+      // Existing tasks table in Supabase via /tasks/my-history
+      // (No separate task-history table needed or created)
+      const role = String(state?.user?.role || '').toLowerCase();
+      const isAdmin = role === 'admin';
+      const empSel = document.getElementById('th-filter-employee');
+      const selectedEmp = empSel?.value || '';
+
+      let url = '/tasks/my-history';
+      const params = new URLSearchParams();
+      if (isAdmin) {
+        params.set('all', 'true');
+        if (selectedEmp) params.set('employee_id', selectedEmp);
+      }
+      const qs = params.toString();
+      if (qs) url += '?' + qs;
+
+      let all = await api(url).catch((err) => {
+        console.warn('my-history fetch error, trying fallback:', err);
+        return null;
+      });
+
+      if (!all) {
+        all = await api('/tasks/my?status=Completed').catch(() => []);
+      }
+
+      const isDone = (t) => {
+        const s = String(t.status || '').toLowerCase().trim();
+        const vs = String(t.verification_status || '').toLowerCase().trim();
+        return s.includes('completed') || s.includes('verified') || vs.includes('verified');
+      };
+
+      const doneAt = (t) =>
+        t.verified_at || t.first_verified_at || t.completed_at ||
+        t.sent_for_verification_at || t.updated_at || '';
+
+      _thAllRows = (Array.isArray(all) ? all : [])
+        .filter((t) => String(t.status || '').toLowerCase().trim() !== 'rejected' && isDone(t))
+        .map((t) => {
+          const vs = String(t.verification_status || '').toLowerCase().trim();
+          const s = String(t.status || '').toLowerCase().trim();
+          const isVerified = vs.includes('verified') || s === 'verified';
+          return {
+            ...t,
+            status: isVerified ? 'Verified' : 'Completed',
+          };
+        })
+        .sort((a, b) => String(doneAt(b)).localeCompare(String(doneAt(a))));
+
+      _thPopulateDropdowns(_thAllRows);
+      _thApplyFilters();
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+      if (cardList) cardList.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // wire filter controls once DOM is ready
+  __tfReadyFns.push(() => {
+    const applyBtn = document.getElementById('th-filter-apply');
+    const clearBtn = document.getElementById('th-filter-clear');
+    const qInput = document.getElementById('th-filter-q');
+
+    applyBtn?.addEventListener('click', () => _thApplyFilters());
+    clearBtn?.addEventListener('click', () => {
+      ['th-filter-q', 'th-filter-employee', 'th-filter-project', 'th-filter-type', 'th-filter-status', 'th-filter-from', 'th-filter-to']
+        .forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+      _thApplyFilters();
+    });
+
+    // Live search on Enter / after debounce
+    let _thDebounce;
+    qInput?.addEventListener('input', () => {
+      clearTimeout(_thDebounce);
+      _thDebounce = setTimeout(() => _thApplyFilters(), 320);
+    });
+
+    // Dropdowns + date pickers apply immediately
+    ['th-filter-employee', 'th-filter-project', 'th-filter-type', 'th-filter-status', 'th-filter-from', 'th-filter-to']
+      .forEach((id) => document.getElementById(id)?.addEventListener('change', () => _thApplyFilters()));
+  });
+
+  // ─── FMS step tracker (Planned vs Actual per workflow step) ─────────────────
+  let _fmsLastData = null;
+
+  function fmsCell(step) {
+    if (!step || step.status === 'NA') {
+      return `<td class="fms-na">—</td><td class="fms-na">—</td><td><span class="fms-pill fms-pill-NA">n/a</span></td><td class="fms-na">—</td>`;
+    }
+    const delay = step.delayHrs;
+    let delayText = '—';
+    if (delay != null) {
+      const abs = Math.abs(delay);
+      const label = abs >= 24 ? `${Math.round((abs / 24) * 10) / 10}d` : `${abs}h`;
+      delayText = delay > 0
+        ? `<span class="fms-delay-late">+${label}</span>`
+        : `<span class="fms-delay-early">${abs ? `-${label}` : 'on time'}</span>`;
+    }
+    return `<td>${escapeHtml(fmtSheetDateTime(step.planned))}</td>
+      <td>${escapeHtml(step.actual ? fmtSheetDateTime(step.actual) : '—')}</td>
+      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span>${step.actor ? `<div class="fms-actor">${escapeHtml(step.actor)}</div>` : ''
+      }</td>
+      <td>${delayText}</td>`;
+  }
+
+  function renderFmsSummary(data) {
+    const el = document.getElementById('fmsSummary');
+    if (!el) return;
+    const steps = data.steps || [];
+    const sum = data.summary || {};
+    el.innerHTML = steps.map((s) => {
+      const v = sum[s.key] || {};
+      return `<div class="fms-step-card">
+        <h4>${escapeHtml(s.label)}</h4>
+        <div class="fms-step-nums">
+          <span>On time <b>${v.done || 0}</b></span>
+          <span>Delayed <b>${v.delayed || 0}</b></span>
+          <span>Overdue <b>${v.overdue || 0}</b></span>
+          <span>Waiting <b>${v.pending || 0}</b></span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function fillFmsFilters(rows) {
+    const projSel = document.getElementById('fmsProject');
+    const perSel = document.getElementById('fmsPerson');
+    const uniq = (list) => [...new Map(list.filter((x) => x.id).map((x) => [String(x.id), x])).values()];
+    if (projSel && !projSel.dataset.filled) {
+      const projects = sortByLabel(uniq(rows.map((r) => ({ id: r.project_id, name: r.project }))));
+      projSel.innerHTML = ['<option value="">All projects</option>']
+        .concat(projects.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
+      projSel.dataset.filled = '1';
+    }
+    if (perSel && !perSel.dataset.filled) {
+      const people = sortByLabel(uniq(rows.map((r) => ({ id: r.person_id, name: r.person }))));
+      perSel.innerHTML = ['<option value="">All people</option>']
+        .concat(people.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`)).join('');
+      perSel.dataset.filled = '1';
+    }
+  }
+
+  async function loadFms() {
+    const body = document.getElementById('fmsBody');
+    if (!body) return;
+    const range = document.getElementById('fmsRange')?.value || 'month';
+    const project = document.getElementById('fmsProject')?.value || '';
+    const person = document.getElementById('fmsPerson')?.value || '';
+    body.innerHTML = '<div class="empty-state">Building FMS sheet…</div>';
+    try {
+      const qs = new URLSearchParams({ range });
+      if (project) qs.set('project', project);
+      if (person) qs.set('person', person);
+      const data = await api(`/tasks/fms?${qs.toString()}`);
+      _fmsLastData = data;
+      const rows = data.rows || [];
+      const steps = data.steps || [];
+      fillFmsFilters(rows);
+      renderFmsSummary(data);
+      if (!rows.length) {
+        body.innerHTML = '<div class="empty-state">No tasks in this range</div>';
+        return;
+      }
+      const metaRow = (key, cls) =>
+        `<th class="fms-meta-label fms-sticky">${key}</th>` +
+        '<th></th><th></th><th></th><th></th><th></th>' +
+        steps.map((s, i) =>
+          `<th class="fms-meta-cell${i % 2 ? ' fms-meta-cell--alt' : ''} ${cls}" colspan="4">${escapeHtml(s[key.toLowerCase()] || s.label)}</th>`
+        ).join('');
+      const stepHead = steps.map((s, i) =>
+        `<th class="fms-step-head${i % 2 ? ' fms-step-head--alt' : ''}" colspan="4">${escapeHtml(s.label)}</th>`).join('');
+      const subHead = steps.map(() => '<th class="fms-sub-head">Planned</th><th class="fms-sub-head">Actual</th><th class="fms-sub-head">Status</th><th class="fms-sub-head">Time Delay</th>').join('');
+      const tbody = rows.map((r) => `<tr>
+        <td class="fms-sticky" title="${escapeHtml(r.description || '')}">${escapeHtml(fmtSheetDateTime(r.timestamp))}</td>
+        <td>${escapeHtml(r.job_no)}</td>
+        <td>${escapeHtml(r.project)}</td>
+        <td title="${escapeHtml(r.description || '')}">${escapeHtml(r.work_type)}</td>
+        <td>${escapeHtml(r.person)}</td>
+        <td>${r.lead_time_hrs || 0}${r.extra_hours ? ` +${r.extra_hours}h` : ''}${r.extra_days ? ` +${r.extra_days}d` : ''}</td>
+        ${steps.map((s) => fmsCell(r.steps?.[s.key])).join('')}
+      </tr>`).join('');
+
+      body.innerHTML = `<div class="fms-wrap"><div class="fms-scroll">
+        <table class="fms-table">
+          <thead>
+            <tr class="fms-meta-row">${metaRow('What', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('Who', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('How', '')}</tr>
+            <tr class="fms-meta-row">${metaRow('Why', '')}</tr>
+            <tr>
+              <th class="fms-sticky fms-id-head" rowspan="2">Timestamp</th>
+              <th class="fms-id-head" rowspan="2">JOB NO.</th>
+              <th class="fms-id-head" rowspan="2">PROJECT NAME</th>
+              <th class="fms-id-head" rowspan="2">WORK TYPE</th>
+              <th class="fms-id-head" rowspan="2">PERSON</th>
+              <th class="fms-id-head" rowspan="2">LEAD TIME</th>
+              ${stepHead}
+            </tr>
+            <tr class="fms-sub-row">${subHead}</tr>
+          </thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div></div>
+      <p class="td-muted" style="margin-top:10px">${escapeHtml((data.from || '').slice(0, 10))} → ${escapeHtml((data.to || '').slice(0, 10))} · ${rows.length} tasks</p>`;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function downloadFmsCsv(data) {
+    if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
+    const steps = data.steps || [];
+    const head = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
+    steps.forEach((s) => head.push(`${s.label} Planned`, `${s.label} Actual`, `${s.label} Status`, `${s.label} Time Delay`));
+    const lines = [head.join(',')];
+    data.rows.forEach((r) => {
+      const cells = [
+        r.timestamp || '', r.job_no, r.project, r.work_type,
+        r.person, r.lead_time_hrs || 0,
+      ];
+      steps.forEach((s) => {
+        const st = r.steps?.[s.key] || {};
+        cells.push(st.planned || '', st.actual || '', st.actor ? `${st.status || ''} (${st.actor})` : (st.status || ''), st.delayHrs ?? '');
+      });
+      lines.push(cells.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fms-tracker-${(data.from || '').slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // ─── FMS Excel export ────────────────────────────────────────────────────────
+  async function downloadFmsExcel(data) {
+    if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
+    const ExcelJS = (await import('exceljs')).default;
+    const { saveAs } = await import('file-saver');
+
+    const steps = data.steps || [];
+    const rows = data.rows || [];
+
+    // ── colour palette (mirrors taskflow.css exactly) ─────────────────────────
+    // Headers
+    const C_META_BG = 'FFD9E8EE'; // fms-meta-row th
+    const C_META_FG = 'FF134E4A';
+    const C_META_LBL = 'FFC5DDE6'; // fms-meta-label (sticky)
+    const C_META_LFGR = 'FF115E59';
+    const C_META_ALT = 'FFDCEBE1'; // fms-meta-cell--alt
+    const C_META_AFG = 'FF14532D';
+    const C_ID_BG = 'FFFDE9D9'; // fms-id-head
+    const C_ID_FG = 'FF7C2D12';
+    const C_STEP_ALT = 'FFDCEBE1'; // fms-step-head--alt
+    const C_STEP_AFG = 'FF14532D';
+    const C_SUB_BG = 'FFE8EEF4'; // fms-sub-head
+    const C_SUB_FG = 'FF334155';
+    // Status pills
+    const C_DONE_BG = 'FFDCFCE7'; const C_DONE_FG = 'FF15803D';
+    const C_DELAY_BG = 'FFFEE2E2'; const C_DELAY_FG = 'FFB91C1C';
+    const C_OVER_BG = 'FFFEF3C7'; const C_OVER_FG = 'FFB45309';
+    const C_PEND_BG = 'FFE5E7EB'; const C_PEND_FG = 'FF4B5563';
+    const C_NA_FG = 'FF9CA3AF';
+    // Delay text
+    const C_LATE_FG = 'FFB91C1C';
+    const C_EARLY_FG = 'FF15803D';
+    // Sticky / data cell defaults
+    const C_STICKY_BG = 'FFFAFBFF';
+    const C_WHITE = 'FFFFFFFF';
+    const C_ACTOR_FG = 'FF1D4ED8';
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'DIP TaskFlow';
+    const ws = wb.addWorksheet('FMS Tracker', { views: [{ state: 'frozen', xSplit: 1, ySplit: 6 }] });
+
+    // ── column widths ─────────────────────────────────────────────────────────
+    // Col 1 = Timestamp (sticky), cols 2-6 = identity, then 4 per step
+    ws.getColumn(1).width = 20;
+    ws.getColumn(2).width = 10; // JOB NO.
+    ws.getColumn(3).width = 22; // PROJECT NAME
+    ws.getColumn(4).width = 18; // WORK TYPE
+    ws.getColumn(5).width = 18; // PERSON
+    ws.getColumn(6).width = 12; // LEAD TIME
+    steps.forEach((_, i) => {
+      const base = 7 + i * 4;
+      ws.getColumn(base).width = 18; // Planned
+      ws.getColumn(base + 1).width = 18; // Actual
+      ws.getColumn(base + 2).width = 14; // Status
+      ws.getColumn(base + 3).width = 12; // Time Delay
+    });
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+    const totalCols = 6 + steps.length * 4;
+
+    /** Return an ExcelJS cell-style object. */
+    function style(bg, fg, { bold = false, wrap = false, hAlign = 'center', vAlign = 'middle', border = true } = {}) {
+      const base = {
+        font: { name: 'Calibri', size: 10, bold, color: { argb: fg || 'FF111827' } },
+        alignment: { horizontal: hAlign, vertical: vAlign, wrapText: wrap },
+        fill: bg ? { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } } : undefined,
+      };
+      if (border) {
+        base.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+        };
+      }
+      return base;
+    }
+
+    function applyStyle(cell, bg, fg, opts) {
+      Object.assign(cell, style(bg, fg, opts));
+    }
+
+    function setCell(row, col, value, bg, fg, opts) {
+      const cell = row.getCell(col);
+      cell.value = value ?? '';
+      applyStyle(cell, bg, fg, opts);
+    }
+
+    function mergeCols(rowObj, startCol, endCol, value, bg, fg, opts) {
+      ws.mergeCells(rowObj.number, startCol, rowObj.number, endCol);
+      setCell(rowObj, startCol, value, bg, fg, opts);
+      // fill merged cells with same style so borders look right
+      for (let c = startCol + 1; c <= endCol; c++) {
+        applyStyle(rowObj.getCell(c), bg, fg, opts);
+      }
+    }
+
+    // ── Row 1-4: What / Who / How / Why meta rows ─────────────────────────────
+    const metaKeys = ['What', 'Who', 'How', 'Why'];
+    metaKeys.forEach((key) => {
+      const r = ws.addRow([]);
+      r.height = 28;
+      // Sticky label cell (col 1)
+      setCell(r, 1, key, C_META_LBL, C_META_LFGR, { bold: true, hAlign: 'left', wrap: true });
+      // Identity cols 2-6 blank but styled
+      for (let c = 2; c <= 6; c++) setCell(r, c, '', C_META_BG, C_META_FG);
+      // Step meta cells
+      steps.forEach((s, i) => {
+        const base = 7 + i * 4;
+        const isAlt = i % 2 === 1;
+        const bg = isAlt ? C_META_ALT : C_META_BG;
+        const fg = isAlt ? C_META_AFG : C_META_FG;
+        const val = s[key.toLowerCase()] || s.label;
+        mergeCols(r, base, base + 3, val, bg, fg, { bold: false, wrap: true });
+      });
+    });
+
+    // ── Row 5: identity column headers + step group headers ──────────────────
+    const r5 = ws.addRow([]);
+    r5.height = 22;
+    const idLabels = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
+    idLabels.forEach((lbl, i) => {
+      setCell(r5, i + 1, lbl, C_ID_BG, C_ID_FG, { bold: true });
+    });
+    steps.forEach((s, i) => {
+      const base = 7 + i * 4;
+      const isAlt = i % 2 === 1;
+      const bg = isAlt ? C_STEP_ALT : C_ID_BG;
+      const fg = isAlt ? C_STEP_AFG : C_ID_FG;
+      mergeCols(r5, base, base + 3, s.label, bg, fg, { bold: true });
+    });
+    // Merge identity headers vertically with row 6
+    for (let c = 1; c <= 6; c++) {
+      ws.mergeCells(5, c, 6, c);
+    }
+
+    // ── Row 6: sub-column headers (Planned / Actual / Status / Time Delay) ────
+    const r6 = ws.addRow([]);
+    r6.height = 22;
+    // Identity cells 1-6 are merged into row 5 — just style them
+    for (let c = 1; c <= 6; c++) {
+      applyStyle(r6.getCell(c), C_ID_BG, C_ID_FG, { bold: true });
+    }
+    steps.forEach((_, i) => {
+      const base = 7 + i * 4;
+      ['Planned', 'Actual', 'Status', 'Time Delay'].forEach((lbl, j) => {
+        setCell(r6, base + j, lbl, C_SUB_BG, C_SUB_FG, { bold: true });
+      });
+    });
+
+    // ── Row height for first 6 rows ───────────────────────────────────────────
+    ws.getRow(1).height = 40;
+    ws.getRow(2).height = 30;
+    ws.getRow(3).height = 22;
+    ws.getRow(4).height = 40;
+
+    // ── helper: format an ISO date-time string to readable form ───────────────
+    function fmtDt(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d)) return iso;
+      return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    // ── helper: format delay hours into "+Xh" / "-Xd" style ──────────────────
+    function fmtDelay(delayHrs) {
+      if (delayHrs == null) return '';
+      const abs = Math.abs(delayHrs);
+      const label = abs >= 24 ? `${Math.round((abs / 24) * 10) / 10}d` : `${abs}h`;
+      return delayHrs > 0 ? `+${label}` : abs ? `-${label}` : 'on time';
+    }
+
+    // ── status → colours map ──────────────────────────────────────────────────
+    const STATUS_STYLE = {
+      Done: { bg: C_DONE_BG, fg: C_DONE_FG },
+      Delayed: { bg: C_DELAY_BG, fg: C_DELAY_FG },
+      Overdue: { bg: C_OVER_BG, fg: C_OVER_FG },
+      Pending: { bg: C_PEND_BG, fg: C_PEND_FG },
+      NA: { bg: C_WHITE, fg: C_NA_FG },
+    };
+
+    // ── data rows ─────────────────────────────────────────────────────────────
+    rows.forEach((r) => {
+      const dr = ws.addRow([]);
+      dr.height = 18;
+
+      // col 1 – Timestamp (sticky col)
+      setCell(dr, 1, fmtDt(r.timestamp), C_STICKY_BG, 'FF111827', { hAlign: 'left' });
+
+      // cols 2-6 – identity
+      setCell(dr, 2, r.job_no || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 3, r.project || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 4, r.work_type || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 5, r.person || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      // Lead time: e.g. "8 +2h +1d"
+      const lt = [String(r.lead_time_hrs || 0), r.extra_hours ? `+${r.extra_hours}h` : '', r.extra_days ? `+${r.extra_days}d` : ''].filter(Boolean).join(' ');
+      setCell(dr, 6, lt, C_WHITE, 'FF111827', { hAlign: 'center' });
+
+      // step cells
+      steps.forEach((s) => {
+        const st = r.steps?.[s.key] || {};
+        const base = 7 + steps.indexOf(s) * 4;
+        const isNA = !st || st.status === 'NA';
+
+        // Planned
+        setCell(dr, base, isNA ? '—' : fmtDt(st.planned), C_WHITE, 'FF374151');
+        // Actual
+        setCell(dr, base + 1, isNA ? '—' : (st.actual ? fmtDt(st.actual) : '—'), C_WHITE, 'FF374151');
+
+        // Status pill
+        const sc = STATUS_STYLE[st.status] || STATUS_STYLE.Pending;
+        const statusVal = isNA ? 'n/a' : (st.actor ? `${st.status}\n${st.actor}` : st.status || '');
+        setCell(dr, base + 2, statusVal, sc.bg, sc.fg, { bold: !isNA, wrap: !!st.actor, hAlign: 'center' });
+        // Actor gets a secondary blue annotation — ExcelJS doesn't support mixed rich text per cell,
+        // so we use newline (wrap is true when actor is set) and set the whole cell to a neutral fg,
+        // then override the status colour only on the bg.
+        if (st.actor && !isNA) {
+          const stCell = dr.getCell(base + 2);
+          stCell.value = {
+            richText: [
+              { text: st.status || '', font: { bold: true, color: { argb: sc.fg.replace('FF', '') !== sc.fg ? sc.fg : sc.fg }, name: 'Calibri', size: 10 } },
+              { text: `\n${st.actor}`, font: { color: { argb: C_ACTOR_FG }, name: 'Calibri', size: 9 } },
+            ]
+          };
+        }
+
+        // Time Delay
+        const delayVal = isNA ? '' : fmtDelay(st.delayHrs);
+        const delayFg = isNA ? C_NA_FG : (st.delayHrs > 0 ? C_LATE_FG : (st.delayHrs < 0 ? C_EARLY_FG : 'FF15803D'));
+        setCell(dr, base + 3, delayVal, C_WHITE, delayFg, { bold: !isNA && delayVal !== '', hAlign: 'center' });
+      });
+    });
+
+    // ── auto-filter on row 6 (the sub-header row) ─────────────────────────────
+    ws.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: totalCols } };
+
+    // ── download ──────────────────────────────────────────────────────────────
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `fms-tracker-${(data.from || '').slice(0, 10)}.xlsx`);
+  }
+
+  document.getElementById('fmsGenBtn')?.addEventListener('click', () => loadFms());
+  document.getElementById('fmsRange')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsProject')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsPerson')?.addEventListener('change', () => loadFms());
+  document.getElementById('fmsCsvBtn')?.addEventListener('click', () => downloadFmsCsv(_fmsLastData));
+  document.getElementById('fmsXlsBtn')?.addEventListener('click', () => downloadFmsExcel(_fmsLastData));
+
+  // ─── DIP AI Bot ─────────────────────────────────────────────────────────────
+  // Bot answers arrive as plain text with SECTION HEADINGS, "• bullet" lines and
+  // "  Label: value" detail lines. Turn that into readable blocks instead of a
+  // wall of <br>s.
+  function stripBotMd(s) {
+    return String(s || '')
+      .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, ''))
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  }
+  function isBotHeading(trimmed) {
+    if (/^[•*\u2022-]/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed)) return false;
+    if (/^#{1,3}\s+/.test(trimmed)) return true;
+    if (/^\*\*.+\*\*$/.test(trimmed)) return true;
+    // OVERDUE — Charmy Desai (5)  /  TASK COUNTS  /  DELEGATED OVERDUE (12)
+    if (
+      /^[A-Z][A-Z0-9 /&()]{1,48}( — | —|- |:|\s*\(|$)/.test(trimmed) &&
+      trimmed.length < 90
+    ) {
+      return true;
+    }
+    return false;
+  }
+  function renderBotAnswer(text) {
+    const raw = stripBotMd(String(text || '').replace(/\r/g, ''));
+    const out = [];
+    let list = [];
+    const flushList = () => {
+      if (list.length) {
+        out.push(`<ul class="bot-list">${list.join('')}</ul>`);
+        list = [];
+      }
+    };
+    const attachKv = (label, value) => {
+      if (list.length) {
+        list[list.length - 1] = list[list.length - 1].replace(
+          /<\/li>$/,
+          `<span class="bot-kv"><em>${escapeHtml(label)}</em> ${escapeHtml(value)}</span></li>`
+        );
+        return true;
+      }
+      return false;
+    };
+    raw.split('\n').forEach((lineRaw) => {
+      const line = lineRaw.replace(/\s+$/, '');
+      const trimmed = line.trim();
+      if (!trimmed) {
+        flushList();
+        return;
+      }
+      const headingText = trimmed.replace(/^#{1,3}\s+/, '').replace(/^\*\*(.+)\*\*$/, '$1');
+      if (isBotHeading(trimmed)) {
+        flushList();
+        out.push(`<div class="bot-heading">${escapeHtml(headingText)}</div>`);
+        return;
+      }
+      if (/^[•*\u2022-]\s+/.test(trimmed) || /^\d+[.)]\s+/.test(trimmed)) {
+        const body = trimmed.replace(/^[•*\u2022-]\s+/, '').replace(/^\d+[.)]\s+/, '');
+        const parts = body.split('|').map((p) => p.trim()).filter(Boolean);
+        const inner = parts.length > 1
+          ? `<strong>${escapeHtml(parts[0])}</strong>` +
+          parts.slice(1).map((p) => `<span class="bot-chip">${escapeHtml(p)}</span>`).join('')
+          : escapeHtml(body);
+        list.push(`<li>${inner}</li>`);
+        return;
+      }
+      const kv = /^([A-Za-z][A-Za-z0-9 \/]{1,28}):\s*(.+)$/.exec(trimmed);
+      if (kv) {
+        if (!attachKv(kv[1], kv[2])) {
+          flushList();
+          out.push(`<p class="bot-line bot-kv-line"><em>${escapeHtml(kv[1])}</em> ${escapeHtml(kv[2])}</p>`);
+        }
+        return;
+      }
+      if (/^\([^)]+\)$/.test(trimmed) || /^none\.?$/i.test(trimmed)) {
+        if (list.length) {
+          list.push(`<li class="bot-empty">${escapeHtml(trimmed)}</li>`);
+        } else {
+          out.push(`<p class="bot-line bot-empty">${escapeHtml(trimmed)}</p>`);
+        }
+        return;
+      }
+      flushList();
+      out.push(`<p class="bot-line">${escapeHtml(trimmed)}</p>`);
+    });
+    flushList();
+    return out.join('') || `<p class="bot-line">${escapeHtml(raw)}</p>`;
+  }
+
+  function appendBotBubble(who, text, downloads) {
+    const log = document.getElementById('botChatLog');
+    if (!log) return;
+    const div = document.createElement('div');
+    div.className = `bot-bubble ${who === 'you' ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
+    const body = who === 'you'
+      ? `<div class="bot-bubble-body">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`
+      : `<div class="bot-bubble-body bot-rich">${renderBotAnswer(text)}</div>`;
+    div.innerHTML = `<div class="bot-bubble-who">${who === 'you' ? 'You' : '<img src="/logo192.png" alt="" class="bot-bubble-who__dp" width="16" height="16" /> DIP Bot'}</div>${body}`;
+    if (who !== 'you' && Array.isArray(downloads) && downloads.length) {
+      const bar = document.createElement('div');
+      bar.className = 'bot-downloads';
+      downloads.forEach((d) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'primary-btn primary-btn-inline';
+        btn.textContent = `Download ${d.label || d.filename || 'report'}`;
+        btn.addEventListener('click', () => {
+          const blob = new Blob([d.html || ''], { type: 'text/html;charset=utf-8' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = d.filename || 'report.html';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        });
+        bar.appendChild(btn);
+      });
+      div.appendChild(bar);
+    }
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function loadAiBot() {
+    bindBotAskForm();
+    const log = document.getElementById('botChatLog');
+    if (log && !log.dataset.ready) {
+      log.dataset.ready = '1';
+      try {
+        const hist = await api('/bot/qa').catch(() => []);
+        if (Array.isArray(hist) && hist.length) {
+          hist.forEach((row) => {
+            if (row.question) appendBotBubble('you', row.question);
+            if (row.answer) appendBotBubble('bot', row.answer);
+          });
+        } else {
+          appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, attendance, or tickets. Offer letter and Experience letter are the buttons above.');
+        }
+      } catch (_) {
+        appendBotBubble('bot', 'DIP Bot. Ask one thing — overdue, a name, leave, or tickets. Offer letter and Experience letter are the buttons above.');
+      }
+    }
+  }
+
+  function openBotLetter(tabKey) {
+    const kind = tabKey === 'letter-exp' ? 'exp' : 'offer';
+    window.dispatchEvent(new CustomEvent('dip-bot-letter', { detail: kind }));
+  }
+
+  function letterTabFromQuestion(q) {
+    const s = String(q || '').toLowerCase();
+    if (/\b(offer)\b/.test(s) && /\bletter\b/.test(s)) return 'letter-offer';
+    if (/\b(exp|experience)\b/.test(s) && /\b(letter|cert|certificate)\b/.test(s)) return 'letter-exp';
+    return '';
+  }
+
+  function bindBotAskForm() {
+    const form = document.getElementById('botAskForm');
+    if (!form) return;
+    // Re-bind when React remounts the DOM (old window._botAskBound left the new form dead).
+    if (form.dataset.botAskBound === '1') return;
+    form.dataset.botAskBound = '1';
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('botAskInput');
+      const q = (input?.value || '').trim();
+      if (!q) return;
+      const letterTab = letterTabFromQuestion(q);
+      if (letterTab) {
+        appendBotBubble('you', q);
+        if (input) input.value = '';
+        appendBotBubble('bot', letterTab === 'letter-exp'
+          ? 'Experience letter form is open above.'
+          : 'Offer letter form is open above.');
+        openBotLetter(letterTab);
+        return;
+      }
+      appendBotBubble('you', q);
+      if (input) input.value = '';
+      const askBtn = form.querySelector('button[type="submit"]');
+      if (askBtn) askBtn.disabled = true;
+      appendBotBubble('bot', 'Thinking…');
+      const log = document.getElementById('botChatLog');
+      const thinking = log?.lastElementChild;
+      try {
+        const res = await api('/bot/ask', { method: 'POST', body: { question: q } });
+        if (thinking) thinking.remove();
+        appendBotBubble('bot', res.answer || 'No answer', res.downloads);
+      } catch (err) {
+        if (thinking) thinking.remove();
+        appendBotBubble('bot', err.message || 'Error');
+      } finally {
+        if (askBtn) askBtn.disabled = false;
+      }
+    });
+  }
+  bindBotAskForm();
+
+  // ─── Team chat (WhatsApp-style store + unread + video) ─────────────────────
+  let _activeChatRoom = null;
+  let _activeChatTitle = '';
+  let _chatPollTimer = null;
+
+  function formatChatTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function previewText(msg) {
+    if (!msg) return 'No messages yet';
+    if (msg.msg_type === 'mom') return '📝 MoM';
+    if (msg.msg_type === 'meeting' || msg.meeting_url) return '📹 Video meeting';
+    return String(msg.body || '').replace(/\s+/g, ' ').slice(0, 48);
+  }
+
+  function renderChatMessage(m) {
+    const mine = String(m.sender_id) === String(state.user.id);
+    const div = document.createElement('div');
+    div.className = `bot-bubble ${mine ? 'bot-bubble-you' : 'bot-bubble-bot'}`;
+    const who = m.is_bot ? 'Bot' : m.sender?.full_name || (mine ? 'You' : 'User');
+    const meetUrl = m.meeting_url || (String(m.body || '').match(/https:\/\/meet\.jit\.si\/[^\s]+/) || [])[0];
+    let bodyHtml;
+    if (m.msg_type === 'mom') {
+      const lines = String(m.body || 'Minutes of Meeting').split('\n');
+      const head = lines.slice(0, 2).join('\n');
+      const rest = lines.slice(2).join('\n').trim();
+      bodyHtml = `<div class="chat-meeting-card chat-mom-card">
+        <div class="chat-mom-head">${escapeHtml(head).replace(/\n/g, '<br>')}</div>
+        ${rest ? `<div class="bot-bubble-body chat-mom-body">${escapeHtml(rest).replace(/\n/g, '<br>')}</div>` : ''}
+        <button type="button" class="primary-btn primary-btn-inline js-open-mom" data-meet-url="${escapeHtml(meetUrl || '')}" data-mom-title="${escapeHtml(lines[1] || lines[0] || '')}">Open MoM</button>
+      </div>`;
+    } else if (m.msg_type === 'meeting' || meetUrl) {
+      bodyHtml = `<div class="chat-meeting-card">
+        <div>${escapeHtml((m.body || 'Video meeting').split('\n')[0])}</div>
+        <div class="chat-meeting-actions">
+          <button type="button" class="primary-btn primary-btn-inline js-join-meet" data-meet-url="${escapeHtml(meetUrl || '')}">Join video</button>
+          <button type="button" class="action-btn action-start js-open-mom" data-meet-url="${escapeHtml(meetUrl || '')}">View MoM</button>
+        </div>
+      </div>`;
+    } else {
+      bodyHtml = `<div class="bot-bubble-body">${escapeHtml(m.body).replace(/\n/g, '<br>')}</div>`;
+    }
+    div.innerHTML = `<div class="bot-bubble-who">${escapeHtml(who)}</div>${bodyHtml}<div class="chat-msg-meta">${escapeHtml(formatChatTime(m.created_at))}</div>`;
+    return div;
+  }
+
+  async function openMomFromChat(meetUrl, titleHint) {
+    try {
+      const rows = await api('/bot/meetings');
+      let hit = null;
+      if (meetUrl) hit = (rows || []).find((m) => String(m.meeting_url || '') === String(meetUrl));
+      if (!hit && titleHint) {
+        const t = String(titleHint).trim().toLowerCase();
+        hit = (rows || []).find((m) => String(m.title || '').trim().toLowerCase() === t);
+      }
+      if (!hit) {
+        showToast('MoM not found yet — start video from Team chat first', 'error');
+        return;
+      }
+      switchView('meetings');
+      await loadMeetings();
+      openMomEditor(hit);
+    } catch (err) {
+      showToast(err.message || 'Could not open MoM', 'error');
+    }
+  }
+
+  let _jitsiWin = null;
+  let _meetUrl = null;
+  let _meetRecog = null;
+  let _meetMomId = null;
+  let _meetKeepListening = false;
+  let _meetFlushTimer = null;
+  let _meetPending = '';
+  let _meetRecorder = null;
+  let _meetStream = null;
+
+  async function resolveMomIdForUrl(meetUrl) {
+    if (!meetUrl) return null;
+    try {
+      const rows = await api('/bot/meetings');
+      const hit = (rows || []).find((m) => String(m.meeting_url || '') === String(meetUrl));
+      return hit?.id || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setMeetCaptionStatus(text) {
+    const el = document.getElementById('meetCaptionStatus');
+    if (el) el.textContent = text;
+  }
+
+  function appendLiveCaptionLine(line) {
+    const pre = document.getElementById('meetLiveCaption');
+    if (!pre) return;
+    pre.textContent = `${pre.textContent}${pre.textContent ? '\n' : ''}${line}`.split('\n').slice(-12).join('\n');
+    pre.scrollTop = pre.scrollHeight;
+  }
+
+  async function flushMeetCaptions() {
+    const chunk = _meetPending.trim();
+    _meetPending = '';
+    if (!chunk || !_meetMomId) return;
+    try {
+      await api(`/bot/meetings/${_meetMomId}/transcript`, { method: 'POST', body: { chunk } });
+    } catch (err) {
+      console.warn('MoM caption:', err.message);
+    }
+  }
+
+  function stopCallAudioBackup() {
+    try { _meetRecorder?.stop(); } catch (_) { }
+    _meetRecorder = null;
+    try { _meetStream?.getTracks().forEach((t) => t.stop()); } catch (_) { }
+    _meetStream = null;
+  }
+
+  async function startCallAudioBackup(momId) {
+    stopCallAudioBackup();
+    if (!momId || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      _meetStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      setMeetCaptionStatus('Allow microphone so spoken words can be written to MoM');
+      return;
+    }
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    let rec;
+    try {
+      rec = new MediaRecorder(_meetStream, { mimeType: mime });
+    } catch (_) {
+      rec = new MediaRecorder(_meetStream);
+    }
+    rec.ondataavailable = async (ev) => {
+      if (!ev.data || ev.data.size < 2500 || !_meetMomId) return;
+      const fd = new FormData();
+      fd.append('audio', ev.data, 'chunk.webm');
+      try {
+        const res = await api(`/bot/meetings/${_meetMomId}/transcribe-audio`, { method: 'POST', body: fd, isForm: true });
+        if (res?.text) appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${res.text}`);
+      } catch (_) { }
+    };
+    rec.start(12000);
+    _meetRecorder = rec;
+  }
+
+  function stopCallCaptions() {
+    _meetKeepListening = false;
+    if (_meetFlushTimer) {
+      clearInterval(_meetFlushTimer);
+      _meetFlushTimer = null;
+    }
+    try { _meetRecog?.stop(); } catch (_) { }
+    _meetRecog = null;
+    flushMeetCaptions();
+    stopCallAudioBackup();
+  }
+
+  async function startCallCaptions(momId) {
+    stopCallCaptions();
+    _meetMomId = momId;
+    if (!momId) {
+      setMeetCaptionStatus('MoM not linked — spoken words will not be saved');
+      return;
+    }
+    await startCallAudioBackup(momId);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setMeetCaptionStatus('Keep this tab open — microphone audio is being saved to MoM');
+      return;
+    }
+    _meetKeepListening = true;
+    _meetPending = '';
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-IN';
+    rec.onresult = (ev) => {
+      let finals = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
+        const t = ev.results[i][0]?.transcript || '';
+        if (ev.results[i].isFinal) finals += ` ${t}`;
+      }
+      const piece = finals.replace(/\s+/g, ' ').trim();
+      if (piece) {
+        _meetPending = `${_meetPending} ${piece}`.trim();
+        appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${piece}`);
+      }
+    };
+    rec.onerror = () => { };
+    rec.onend = () => {
+      if (_meetKeepListening) {
+        try { rec.start(); } catch (_) { }
+      }
+    };
+    _meetRecog = rec;
+    try {
+      rec.start();
+      setMeetCaptionStatus('Listening here — keep this tab open. Speech goes into MoM.');
+    } catch (_) {
+      setMeetCaptionStatus('Allow microphone so spoken words can be written to MoM');
+    }
+    _meetFlushTimer = setInterval(flushMeetCaptions, 4000);
+  }
+
+  async function closeInAppMeeting(goToMom) {
+    const momId = _meetMomId;
+    stopCallCaptions();
+    _meetUrl = null;
+    const overlay = document.getElementById('meetOverlay');
+    if (overlay) overlay.hidden = true;
+    if (goToMom && momId) {
+      switchView('meetings');
+      try {
+        const rows = await api('/bot/meetings');
+        const m = (rows || []).find((r) => String(r.id) === String(momId));
+        if (m) openMomEditor(m);
+      } catch (_) { }
+    }
+  }
+
+  function launchJitsiWindow(meetUrl) {
+    if (!meetUrl) return;
+    try {
+      _jitsiWin = window.open(meetUrl, 'dip-jitsi-call', 'noopener,noreferrer');
+    } catch (_) {
+      _jitsiWin = null;
+    }
+    if (!_jitsiWin) window.open(meetUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  async function openInAppMeeting(meetUrl, momId) {
+    const overlay = document.getElementById('meetOverlay');
+    if (!overlay) {
+      window.open(meetUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    _meetUrl = meetUrl;
+    overlay.hidden = false;
+    const cap = document.getElementById('meetLiveCaption');
+    if (cap) cap.textContent = '';
+    setMeetCaptionStatus('Opening Jitsi in a new window… keep this tab open for MoM');
+    const linkedMom = momId || (await resolveMomIdForUrl(meetUrl));
+    await startCallCaptions(linkedMom);
+    launchJitsiWindow(meetUrl);
+  }
+
+  if (!window._meetOverlayBound) {
+    window._meetOverlayBound = true;
+    document.getElementById('meetEndMomBtn')?.addEventListener('click', () => closeInAppMeeting(true));
+    document.getElementById('meetCloseBtn')?.addEventListener('click', () => closeInAppMeeting(false));
+    document.getElementById('meetOpenCallBtn')?.addEventListener('click', () => {
+      if (_meetUrl) launchJitsiWindow(_meetUrl);
+    });
+    document.getElementById('meetNoticeClose')?.addEventListener('click', () => {
+      const n = document.getElementById('meetJitsiNotice');
+      if (n) n.hidden = true;
+    });
+    document.getElementById('chatMsgLog')?.addEventListener('click', async (e) => {
+      const momBtn = e.target.closest?.('.js-open-mom');
+      if (momBtn) {
+        await openMomFromChat(momBtn.dataset.meetUrl || '', momBtn.dataset.momTitle || '');
+        return;
+      }
+      const btn = e.target.closest?.('.js-join-meet');
+      if (!btn) return;
+      const url = btn.dataset.meetUrl;
+      if (!url) return;
+      await openInAppMeeting(url, null);
+    });
+  }
+
+  function stopChatPoll() {
+    if (_chatPollTimer) {
+      clearInterval(_chatPollTimer);
+      _chatPollTimer = null;
+    }
+  }
+
+  function startChatPoll() {
+    stopChatPoll();
+    _chatPollTimer = setInterval(async () => {
+      if (state.activeView !== 'team-chat' || !_activeChatRoom) return;
+      try {
+        const msgs = await api(`/bot/chats/${_activeChatRoom}/messages`);
+        const log = document.getElementById('chatMsgLog');
+        if (!log) return;
+        const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+        log.innerHTML = '';
+        (msgs || []).forEach((m) => log.appendChild(renderChatMessage(m)));
+        if (atBottom) log.scrollTop = log.scrollHeight;
+        await loadTeamChatRoomsOnly();
+        const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+        setNavBadge('team-chat', chatUnread?.total || 0);
+      } catch (_) { }
+    }, 8000);
+  }
+
+  async function loadTeamChatRoomsOnly() {
+    const list = document.getElementById('chatRoomList');
+    if (!list) return;
+    try {
+      const rooms = await api('/bot/chats');
+      list.innerHTML = '';
+      if (!(rooms || []).length) {
+        list.innerHTML = '<div class="empty-state" style="padding:8px;font-size:0.82rem">No chats yet — pick a colleague and Start chat.</div>';
+        return;
+      }
+      (rooms || []).forEach((r) => {
+        const unread = Number(r.unread_count || 0);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.roomId = r.id;
+        btn.className =
+          'chat-room-btn' +
+          (_activeChatRoom === r.id ? ' active' : '') +
+          (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
+        btn.innerHTML = `
+          <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : (r.kind === 'team' || /team group/i.test(r.title || '') ? 'Team' : 'DM')}</span></span>
+          ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+          <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
+        `;
+        btn.addEventListener('click', () => openChatRoom(r));
+        list.appendChild(btn);
+      });
+    } catch (_) { }
+  }
+
+  async function loadTeamChat() {
+    const list = document.getElementById('chatRoomList');
+    startChatPoll();
+    try {
+      let rooms = [];
+      let directory = [];
+      try {
+        rooms = await api('/bot/chats');
+      } catch (err) {
+        const msg = err?.message || String(err);
+        if (list) {
+          list.innerHTML = `<div class="empty-state" style="padding:12px;font-size:0.85rem">No chats yet — pick a colleague and Start chat.</div>`;
+        }
+        if (msg && !/run backend\/sql/i.test(msg)) showToast(msg, 'error');
+        return;
+      }
+      try {
+        directory = await api('/bot/directory');
+      } catch (_) {
+        directory = [];
+      }
+      const peer = document.getElementById('chatPeerSelect');
+      if (peer) {
+        peer.innerHTML = '<option value="">Select colleague…</option>';
+        (directory || []).forEach((u) => {
+          const opt = document.createElement('option');
+          opt.value = u.id;
+          opt.textContent = `${u.full_name}${u.department ? ` · ${u.department}` : ''}`;
+          peer.appendChild(opt);
+        });
+      }
+      if (list) {
+        list.innerHTML = '';
+        if (!(rooms || []).length) {
+          list.innerHTML = '<div class="empty-state" style="padding:8px;font-size:0.82rem">No chats yet — pick a colleague and Start chat.</div>';
+        }
+        (rooms || []).forEach((r) => {
+          const unread = Number(r.unread_count || 0);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.dataset.roomId = r.id;
+          btn.className =
+            'chat-room-btn' +
+            (_activeChatRoom === r.id ? ' active' : '') +
+            (unread > 0 && _activeChatRoom !== r.id ? ' has-unread' : '');
+          btn.innerHTML = `
+            <span class="chat-room-btn-title">${escapeHtml(r.title || r.kind)} <span class="chat-kind-tag">${r.kind === 'project' ? 'Group' : (r.kind === 'team' || /team group/i.test(r.title || '') ? 'Team' : 'DM')}</span></span>
+            ${unread > 0 && _activeChatRoom !== r.id ? `<span class="chat-unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
+            <span class="chat-room-btn-preview">${escapeHtml(previewText(r.last_message))}</span>
+          `;
+          btn.addEventListener('click', () => openChatRoom(r));
+          list.appendChild(btn);
+        });
+      }
+      const params = new URLSearchParams(window.location.search);
+      const join = params.get('joinChat');
+      if (join) {
+        try {
+          const room = await api('/bot/chats/join', { method: 'POST', body: { invite_code: join } });
+          showToast('Joined discussion', 'success');
+          await openChatRoom(room);
+          params.delete('joinChat');
+          const url = `${window.location.pathname}${params.toString() ? `?${params}` : ''}`;
+          window.history.replaceState({}, '', url);
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function openChatRoom(room) {
+    _activeChatRoom = room.id;
+    _activeChatTitle = room.title || 'Chat';
+    const title = document.getElementById('chatRoomTitle');
+    if (title) title.textContent = _activeChatTitle;
+    const input = document.getElementById('chatMsgInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    const videoBtn = document.getElementById('chatVideoBtn');
+    if (input) input.disabled = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (videoBtn) videoBtn.disabled = false;
+
+    // Invite code for project groups (and any room that has one)
+    const inviteRow = document.getElementById('chatInviteRow');
+    const inviteShow = document.getElementById('chatInviteCodeShow');
+    try {
+      let full = room;
+      if (!room.invite_code && room.kind === 'project') {
+        full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: {} });
+      } else if (room.kind === 'project' && !room.invite_code) {
+        full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: { regenerate: true } });
+      }
+      if (inviteRow && inviteShow) {
+        if (full.kind === 'project' || full.invite_code) {
+          if (!full.invite_code) {
+            full = await api(`/bot/chats/${room.id}/invite`, { method: 'POST', body: { regenerate: true } });
+          }
+          inviteRow.hidden = false;
+          inviteShow.textContent = full.invite_code || '—';
+          _activeChatInvite = full.invite_code || '';
+        } else {
+          inviteRow.hidden = true;
+          _activeChatInvite = '';
+        }
+      }
+    } catch (_) {
+      if (inviteRow) inviteRow.hidden = true;
+    }
+
+    const msgs = await api(`/bot/chats/${room.id}/messages`);
+    const log = document.getElementById('chatMsgLog');
+    if (!log) return;
+    log.innerHTML = '';
+    (msgs || []).forEach((m) => log.appendChild(renderChatMessage(m)));
+    log.scrollTop = log.scrollHeight;
+    document.querySelectorAll('.chat-room-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.roomId === room.id);
+      if (b.dataset.roomId === room.id) b.classList.remove('has-unread');
+    });
+    await api(`/bot/chats/${room.id}/read`, { method: 'POST' }).catch(() => { });
+    const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
+    setNavBadge('team-chat', chatUnread?.total || 0);
+    await loadTeamChatRoomsOnly();
+  }
+
+  let _activeChatInvite = '';
+  let _calMonth = new Date();
+  let _editingMomId = null;
+
+  function fireSystemNotify(title, body) {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.ico' });
+      }
+    } catch (_) { }
+    showToast(`${title}: ${body}`, 'success');
+  }
+
+  if (!window._teamChatBound) {
+    window._teamChatBound = true;
+    document.getElementById('chatStartDmBtn')?.addEventListener('click', async () => {
+      const peerId = document.getElementById('chatPeerSelect')?.value;
+      if (!peerId) return showToast('Select a colleague', 'error');
+      try {
+        const room = await api('/bot/chats/dm', { method: 'POST', body: { user_id: peerId } });
+        fireSystemNotify('Chat started', 'Peer gets WhatsApp + can open Team chat. Further msgs = unread badge only.');
+        await loadTeamChat();
+        await openChatRoom(room);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('chatJoinBtn')?.addEventListener('click', async () => {
+      const code = document.getElementById('chatJoinCode')?.value?.trim();
+      if (!code) return;
+      try {
+        const room = await api('/bot/chats/join', { method: 'POST', body: { invite_code: code } });
+        showToast('Joined', 'success');
+        await loadTeamChat();
+        await openChatRoom(room);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('chatSendForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!_activeChatRoom) return;
+      const input = document.getElementById('chatMsgInput');
+      const body = (input?.value || '').trim();
+      if (!body) return;
+      try {
+        await api(`/bot/chats/${_activeChatRoom}/messages`, { method: 'POST', body: { body } });
+        if (input) input.value = '';
+        await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || document.getElementById('chatRoomTitle')?.textContent, kind: 'dm' });
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('chatVideoBtn')?.addEventListener('click', async () => {
+      if (!_activeChatRoom) return showToast('Open a chat first', 'error');
+      try {
+        const res = await api(`/bot/chats/${_activeChatRoom}/meeting`, { method: 'POST', body: {} });
+        const url = res.meeting_url;
+        if (res.mom_warning) showToast(res.mom_warning, 'error');
+        else fireSystemNotify('Meeting started', 'Jitsi opens in a new window. Keep this TaskFlow tab open so spoken words go into MoM. WhatsApp sent to members.');
+        await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle, kind: 'project' });
+        if (url) await openInAppMeeting(url, res.mom?.id || null);
+      } catch (err) {
+        showToast(err.message || 'Could not start meeting', 'error');
+      }
+    });
+    document.getElementById('chatCopyInviteBtn')?.addEventListener('click', async () => {
+      const code = document.getElementById('chatInviteCodeShow')?.textContent || _activeChatInvite;
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code);
+        showToast('Invite code copied', 'success');
+      } catch (_) {
+        showToast(code, 'success');
+      }
+    });
+    document.getElementById('chatNewInviteBtn')?.addEventListener('click', async () => {
+      if (!_activeChatRoom) return;
+      try {
+        const room = await api(`/bot/chats/${_activeChatRoom}/invite`, {
+          method: 'POST',
+          body: { regenerate: true },
+        });
+        const show = document.getElementById('chatInviteCodeShow');
+        if (show) show.textContent = room.invite_code;
+        _activeChatInvite = room.invite_code;
+        showToast('New invite code generated', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  // ─── Meetings / MoM ─────────────────────────────────────────────────────────
+  async function loadMeetings() {
+    const list = document.getElementById('momList');
+    const editor = document.getElementById('momEditor');
+    if (editor) editor.hidden = true;
+    if (!list) return;
+    try {
+      const rows = await api('/bot/meetings');
+      if (!rows.length) {
+        list.innerHTML = '<div class="empty-state">No meetings yet. Start a video call from Team chat — MoM draft is created automatically.</div>';
+        return;
+      }
+      const isAdmin = state.user.role === 'admin';
+      if (isAdmin) {
+        const byProj = {};
+        rows.forEach((m) => {
+          const key = m.project?.name || 'Other / DM meetings';
+          if (!byProj[key]) byProj[key] = [];
+          byProj[key].push(m);
+        });
+        list.innerHTML = Object.keys(byProj)
+          .sort()
+          .map((proj) => {
+            const items = byProj[proj]
+              .map(
+                (m) => `<button type="button" class="mom-card" data-mom-id="${m.id}">
+                <strong>${escapeHtml(m.title)}</strong>
+                <span class="mom-meta">${escapeHtml(m.starter?.full_name || '—')} · ${escapeHtml(formatChatTime(m.started_at))} · ${m.status}</span>
+                <pre class="mom-preview">${escapeHtml((m.mom_body || '').slice(0, 180))}</pre>
+              </button>`
+              )
+              .join('');
+            return `<div class="mom-project-block"><h3 class="mom-project-title">${escapeHtml(proj)}</h3>${items}</div>`;
+          })
+          .join('');
+      } else {
+        list.innerHTML = rows
+          .map(
+            (m) => `<button type="button" class="mom-card" data-mom-id="${m.id}">
+            <strong>${escapeHtml(m.title)}</strong>
+            <span class="mom-meta">${escapeHtml(m.project?.name || 'Chat')} · ${escapeHtml(formatChatTime(m.started_at))} · ${m.status}</span>
+            <pre class="mom-preview">${escapeHtml((m.mom_body || '').slice(0, 180))}</pre>
+          </button>`
+          )
+          .join('');
+      }
+      list.querySelectorAll('[data-mom-id]').forEach((btn) => {
+        btn.addEventListener('click', () => openMomEditor(rows.find((r) => r.id === btn.dataset.momId)));
+      });
+    } catch (err) {
+      list.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}<br/>Run <code>add_meeting_moms.sql</code> in Supabase.</div>`;
+    }
+  }
+
+  async function openMomEditor(m) {
+    if (!m) return;
+    _editingMomId = m.id;
+    const editor = document.getElementById('momEditor');
+    if (editor) editor.hidden = false;
+    const t = document.getElementById('momTitle');
+    const b = document.getElementById('momBody');
+    if (t) t.value = m.title || '';
+    if (b) b.value = m.mom_body || '';
+    editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (m.status !== 'final') {
+      try {
+        const row = await api(`/bot/meetings/${m.id}/from-chat`, { method: 'POST', body: {} });
+        if (b && row?.mom_body) b.value = row.mom_body;
+      } catch (_) {
+        /* keep saved body */
+      }
+    }
+  }
+
+  if (!window._momBound) {
+    window._momBound = true;
+    document.getElementById('momSaveBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        await api(`/bot/meetings/${_editingMomId}`, {
+          method: 'PATCH',
+          body: {
+            title: document.getElementById('momTitle')?.value,
+            mom_body: document.getElementById('momBody')?.value,
+          },
+        });
+        showToast('MoM saved — also posted to Team chat', 'success');
+        loadMeetings();
+        if (_activeChatRoom) {
+          try {
+            await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
+          } catch (_) { }
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('momFillChatBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        const row = await api(`/bot/meetings/${_editingMomId}/from-chat`, { method: 'POST', body: {} });
+        const b = document.getElementById('momBody');
+        if (b) b.value = row.mom_body || '';
+        showToast('Call captions loaded into MoM', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('momFinalBtn')?.addEventListener('click', async () => {
+      if (!_editingMomId) return;
+      try {
+        await api(`/bot/meetings/${_editingMomId}`, {
+          method: 'PATCH',
+          body: {
+            title: document.getElementById('momTitle')?.value,
+            mom_body: document.getElementById('momBody')?.value,
+            status: 'final',
+          },
+        });
+        showToast('MoM marked final — posted to Team chat', 'success');
+        loadMeetings();
+        if (_activeChatRoom) {
+          try {
+            await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
+          } catch (_) { }
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('momCloseBtn')?.addEventListener('click', () => {
+      const editor = document.getElementById('momEditor');
+      if (editor) editor.hidden = true;
+      _editingMomId = null;
+    });
+  }
+
+  // ─── Employee calendar ──────────────────────────────────────────────────────
+  async function loadCalendar() {
+    const grid = document.getElementById('calGrid');
+    const label = document.getElementById('calMonthLabel');
+    if (!grid) return;
+    const y = _calMonth.getFullYear();
+    const m = _calMonth.getMonth();
+    if (label) {
+      label.textContent = _calMonth.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    }
+    let tasks = [];
+    try {
+      tasks = (await api('/tasks/my')).filter((t) => !isRejectedTask(t));
+    } catch (err) {
+      grid.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      return;
+    }
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const heads = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+      .map((d) => `<div class="cal-head">${d}</div>`)
+      .join('');
+    let cells = '';
+    for (let i = 0; i < firstDow; i++) cells += '<div class="cal-cell cal-empty"></div>';
+    for (let day = 1; day <= daysInMonth; day++) {
+      const key = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayTasks = (tasks || []).filter((t) => String(t.target_date || '').slice(0, 10) === key);
+      const chips = dayTasks
+        .slice(0, 3)
+        .map((t) => {
+          const cls = calTaskClass(t, todayKey);
+          return `<div class="cal-chip ${cls}" title="${escapeHtml(t.description || '')}">${escapeHtml((t.description || 'Task').slice(0, 22))}</div>`;
+        })
+        .join('');
+      const more = dayTasks.length > 3 ? `<div class="cal-more">+${dayTasks.length - 3} more</div>` : '';
+      cells += `<button type="button" class="cal-cell${key === todayKey ? ' cal-is-today' : ''}" data-day="${key}">
+        <span class="cal-daynum">${day}</span>${chips}${more}
+      </button>`;
+    }
+    grid.innerHTML = heads + cells;
+    grid.querySelectorAll('[data-day]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.day;
+        const dayTasks = (tasks || []).filter((t) => String(t.target_date || '').slice(0, 10) === key);
+        const detail = document.getElementById('calDayDetail');
+        if (!detail) return;
+        detail.innerHTML = dayTasks.length
+          ? `<h3>${key}</h3>` +
+          dayTasks
+            .map((t) => {
+              const cls = calTaskClass(t, todayKey);
+              return `<div class="cal-detail-row ${cls}"><strong>${escapeHtml(t.description || 'Task')}</strong><span>${escapeHtml(t.status || '')} · ${escapeHtml(t.project?.name || '')}</span></div>`;
+            })
+            .join('')
+          : `<h3>${key}</h3><p class="empty-state">No tasks</p>`;
+      });
+    });
+  }
+
+  function calTaskClass(t, todayKey) {
+    const d = String(t.target_date || '').slice(0, 10);
+    const done =
+      t.status === 'Completed' ||
+      t.verification_status === 'Verified' ||
+      t.status === 'Verified';
+    if (done) return 'cal-done';
+    if (d && d < todayKey) return 'cal-overdue';
+    if (d === todayKey) return 'cal-today';
+    return 'cal-upcoming';
+  }
+
+  if (!window._calBound) {
+    window._calBound = true;
+    document.getElementById('calPrev')?.addEventListener('click', () => {
+      _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() - 1, 1);
+      loadCalendar();
+    });
+    document.getElementById('calNext')?.addEventListener('click', () => {
+      _calMonth = new Date(_calMonth.getFullYear(), _calMonth.getMonth() + 1, 1);
+      loadCalendar();
+    });
+  }
+
+  // ─── Project management ─────────────────────────────────────────────────────
+  async function loadProjectMgmt() {
+    try {
+      const data = await api('/bot/management/projects');
+      if (data.hint) showToast(data.hint, 'error');
+      const projects = data.projects || [];
+      const members = data.members || [];
+      const fill = (sel, items, ph, labelKey = 'name') => {
+        const el = document.getElementById(sel);
+        if (!el) return;
+        fillSelect(el, items, { placeholder: ph, labelKey });
+      };
+      fill('pmg-project', projects, 'Select project');
+      fill('pmg-from', projects, 'From project');
+      fill('pmg-to', projects, 'To project');
+      const emps = state.master.employees?.length
+        ? state.master.employees
+        : await api('/master/employees').catch(() => []);
+      fill('pmg-employee', emps, 'Select employee', 'full_name');
+      fill('pmg-shift-emp', emps, 'Select employee', 'full_name');
+
+      const box = document.getElementById('pmgMembers');
+      if (box) {
+        if (!members.length) {
+          box.innerHTML = '<div class="empty-state">No project assignments yet</div>';
+        } else {
+          const byProj = {};
+          members.forEach((m) => {
+            const key = m.project_id;
+            if (!byProj[key]) byProj[key] = [];
+            byProj[key].push(m);
+          });
+          box.innerHTML = projects
+            .map((p) => {
+              const list = byProj[p.id] || [];
+              if (!list.length) return '';
+              return `<div class="ticket-card"><strong>${escapeHtml(p.name)}</strong><ul style="margin:8px 0 0;padding-left:18px">${list
+                .map((m) => `<li>${escapeHtml(m.user?.full_name || '—')}${m.role_on_project ? ` · ${escapeHtml(m.role_on_project)}` : ''}</li>`)
+                .join('')}</ul></div>`;
+            })
+            .join('');
+        }
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  if (!window._pmgBound) {
+    window._pmgBound = true;
+    document.getElementById('pmgAssignBtn')?.addEventListener('click', async () => {
+      const project_id = document.getElementById('pmg-project')?.value;
+      const user_id = document.getElementById('pmg-employee')?.value;
+      if (!project_id || !user_id) return showToast('Pick project + employee', 'error');
+      try {
+        await api('/bot/management/assign', { method: 'POST', body: { project_id, user_id } });
+        showToast('Assigned', 'success');
+        loadProjectMgmt();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('pmgShiftBtn')?.addEventListener('click', async () => {
+      const user_id = document.getElementById('pmg-shift-emp')?.value;
+      const from_project_id = document.getElementById('pmg-from')?.value || null;
+      const to_project_id = document.getElementById('pmg-to')?.value;
+      if (!user_id || !to_project_id) return showToast('Pick employee + destination project', 'error');
+      try {
+        await api('/bot/management/shift', {
+          method: 'POST',
+          body: { user_id, from_project_id: from_project_id || undefined, to_project_id },
+        });
+        showToast('Shifted', 'success');
+        loadProjectMgmt();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+    document.getElementById('pmgDiscussBtn')?.addEventListener('click', async () => {
+      const project_id = document.getElementById('pmg-project')?.value;
+      if (!project_id) return showToast('Pick a project first', 'error');
+      try {
+        const room = await api(`/bot/projects/${project_id}/discussion`, { method: 'POST' });
+        const box = document.getElementById('pmgInviteBox');
+        if (box) {
+          box.hidden = false;
+          box.textContent = `Discussion ready. Invite code: ${room.invite_code} · Share path: ${room.invite_path || ''}`;
+        }
+        showToast('Discussion opened — members notified on WhatsApp', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    });
+  }
+
+  __tfReadyFns.forEach((fn) => {
+    try { fn(); } catch (e) { console.error(e); }
+  });
+
+  _enterApp = enterApp;
+  _listenersBound = true;
+
+  if (state.token && state.user) await enterApp();
+}
+
+/** Stop background polls when leaving /app (e.g. navigate to /hr). */
+export function unmountTaskflowApp() {
+  if (window._badgeInterval) {
+    clearInterval(window._badgeInterval);
+    window._badgeInterval = null;
+  }
+  if (window._timerInterval) {
+    clearInterval(window._timerInterval);
+    window._timerInterval = null;
+  }
+}

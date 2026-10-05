@@ -1,0 +1,2849 @@
+/* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
+import { useEffect, useLayoutEffect, useState } from 'react';
+import MonthlyReport from '../site/MonthlyReport';
+import SiteReport from '../site/Sitereport';
+import MyReports from '../site/MyReports';
+import BotLetterPanel from './BotLetterPanel';
+
+function readOfficeUser() {
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
+  return user;
+}
+
+function OfficeMonthlyReport() {
+  const user = readOfficeUser();
+  return <MonthlyReport user={user} />;
+}
+
+function OfficeSiteReport() {
+  return <SiteReport user={readOfficeUser()} />;
+}
+
+function OfficeMyReports() {
+  return <MyReports user={readOfficeUser()} />;
+}
+
+/** Re-apply sidebar open/overlay after React re-renders (MonthlyReport etc. wipe className). */
+function restoreSidebarDom() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  const open = document.body.classList.contains('sidebar-open');
+  if (sidebar) sidebar.classList.toggle('open', open);
+  if (overlay) {
+    if (open && window.matchMedia('(max-width: 768px)').matches) {
+      overlay.hidden = false;
+      overlay.removeAttribute('hidden');
+    } else {
+      overlay.hidden = true;
+      overlay.setAttribute('hidden', '');
+    }
+  }
+}
+
+export default function TaskflowDom() {
+  const [botLetter, setBotLetter] = useState('');
+
+  useEffect(() => {
+    const onLetter = (e) => {
+      const kind = e.detail === 'exp' ? 'exp' : 'offer';
+      setBotLetter(kind);
+    };
+    window.addEventListener('dip-bot-letter', onLetter);
+    return () => window.removeEventListener('dip-bot-letter', onLetter);
+  }, []);
+
+  useLayoutEffect(() => {
+    restoreSidebarDom();
+    const key = window.__tfActiveView;
+    if (!key) return;
+    const htmlKey = (key === 'tickets-open' || key === 'tickets-resolved') ? 'tickets' : key;
+    document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
+    const viewEl = document.getElementById(`view-${htmlKey}`);
+    if (viewEl) viewEl.hidden = false;
+  });
+
+  return (
+    <>
+      {/* APP SHELL */}
+      <section id="appScreen" className="screen app-screen">
+        <header className="topbar">
+          <button id="menuToggle" className="icon-btn" aria-label="Toggle menu">☰</button>
+          <div className="topbar-brand">
+            <img src="https://drive.google.com/thumbnail?id=10FeV3emPMe-VCvGni66b2DOzNIPM3mGp&sz=w40"
+              alt="Logo" className="topbar-logo"
+              onError={(e) => { e.currentTarget.style.display = 'none'; if (e.currentTarget.nextElementSibling) e.currentTarget.nextElementSibling.style.display = 'flex'; }} />
+            <span className="topbar-mark" style={{ display: 'none' }}>DP</span>
+            <span className="topbar-name">DIP Projects</span>
+          </div>
+          <div className="topbar-user">
+            <div className="topbar-user-info">
+              <div className="topbar-user-namerow">
+                <strong id="userName">—</strong>
+                <span id="userRoleTag" className="role-tag">—</span>
+              </div>
+              <span className="topbar-tagline">Quality + Quantity to be delivered on time every time</span>
+            </div>
+            <div className="topbar-quick" id="topbarQuick">
+              <button type="button" id="topCalBtn" className="topbar-chip" hidden title="My calendar">📅 Calendar</button>
+              <button type="button" id="topMomBtn" className="topbar-chip" title="Meeting minutes">📝 Meetings</button>
+              <button type="button" id="topChatBtn" className="topbar-chip" title="Team chat">
+                💬 Chat <span id="topChatBadge" className="topbar-chip-badge" hidden></span>
+              </button>
+              <button type="button" id="topDipBotBtn" className="topbar-chip topbar-chip--bot" hidden title="DIP Bot">
+                <img src="/logo192.png" alt="" className="topbar-bot-dp" width="18" height="18" />
+                DIP Bot
+              </button>
+            </div>
+            <button id="logoutBtn" className="logout-btn">↩ Log out</button>
+          </div>
+        </header>
+
+        <div className="app-body">
+          <aside
+            id="sidebar"
+            className="sidebar"
+            ref={(node) => {
+              if (!node) return;
+              node.classList.toggle('open', document.body.classList.contains('sidebar-open'));
+            }}
+          >
+            <nav id="navList" className="nav-list"></nav>
+          </aside>
+          <div
+            id="sidebarOverlay"
+            className="sidebar-overlay"
+            ref={(node) => {
+              if (!node) return;
+              const open =
+                document.body.classList.contains('sidebar-open') &&
+                window.matchMedia('(max-width: 768px)').matches;
+              node.hidden = !open;
+              if (open) node.removeAttribute('hidden');
+              else node.setAttribute('hidden', '');
+            }}
+          />
+
+          <main id="mainContent" className="main-content">
+
+            {/* ADD TASK */}
+            <section id="view-add" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Assign a new task</h2>
+                <p className="view-sub">Fill in the details below to delegate a task to a team member.</p>
+              </div>
+              <form id="addTaskForm" className="task-form add-task-form">
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="f-department">Department <span className="req">*</span></label>
+                    <div className="field-with-add">
+                      <select id="f-department" required><option value="">Select department</option></select>
+                      <button type="button" className="field-add-btn" id="f-add-dept" title="Add department">+ Add</button>
+                    </div>
+                    <div className="inline-add-row" id="f-add-dept-row" hidden>
+                      <input type="text" id="f-new-dept" placeholder="New department name…" />
+                      <button type="button" className="primary-btn primary-btn-inline" id="f-save-dept">Save</button>
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-employee">Assign to <span className="req">*</span></label>
+                    <select id="f-employee" required><option value="">Select employee</option></select>
+                  </div>
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="f-project">Project <span className="req" id="f-project-req">*</span></label>
+                    <div className="field-with-add">
+                      <select id="f-project"><option value="">Select project</option></select>
+                      <button type="button" className="field-add-btn" id="f-add-project" title="Add project">+ Add</button>
+                    </div>
+                    <div className="inline-add-row" id="f-add-project-row" hidden>
+                      <input type="text" id="f-new-project" placeholder="New project name…" />
+                      <button type="button" className="primary-btn primary-btn-inline" id="f-save-project">Save</button>
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-tasktype">Task type <span className="req">*</span></label>
+                    <div className="field-with-add">
+                      <select id="f-tasktype" required><option value="">Select task type</option></select>
+                      <button type="button" className="field-add-btn" id="f-add-tasktype" title="Add task type">+ Add</button>
+                    </div>
+                    <div className="inline-add-row" id="f-add-tasktype-row" hidden>
+                      <input type="text" id="f-new-tasktype" placeholder="New task type name…" />
+                      <button type="button" className="primary-btn primary-btn-inline" id="f-save-tasktype">Save</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="field">
+                  <label htmlFor="f-description">Task description <span className="req">*</span></label>
+                  <textarea id="f-description" rows={3} placeholder="Describe the task in detail..." required></textarea>
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="f-hours">Hours to complete</label>
+                    <input id="f-hours" type="number" min="0" step="0.5" defaultValue="8" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-targetdate">Target date <span className="req">*</span></label>
+                    <input id="f-targetdate" type="date" required />
+                  </div>
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="f-priority">Priority</label>
+                    <select id="f-priority" defaultValue="Medium">
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-reschedule">Rescheduling possible</label>
+                    <select id="f-reschedule" defaultValue="false">
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="field-grid">
+                  <div className="field">
+                    <label htmlFor="f-attachment">Attachment <span className="optional">(optional)</span></label>
+                    <input id="f-attachment" type="file" />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="f-voicenote">Voice note <span className="optional">(optional)</span></label>
+                    <input id="f-voicenote" type="file" accept="audio/*" />
+                  </div>
+                </div>
+                <p id="addTaskMsg" className="form-error" hidden={true}></p>
+                <div className="form-footer">
+                  <button type="submit" className="primary-btn">Assign task</button>
+                </div>
+              </form>
+            </section>
+
+            {/* ALL DELEGATED TASKS */}
+            <section id="view-all" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">All delegated tasks</h2>
+                <p className="view-sub">Overview of every task assigned across the team.</p>
+              </div>
+
+              <div className="filter-panel">
+                <div className="filter-row">
+                  <div className="filter-field">
+                    <label className="filter-label">Department</label>
+                    <select id="filter-department"><option value="">All departments</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label">Employee</label>
+                    <select id="filter-employee"><option value="">All employees</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label">Status</label>
+                    <select id="filter-status" defaultValue="open">
+                      <option value="open">Pending &amp; In Progress</option>
+                      <option value="">All statuses</option>
+                      <option value="Pending">Pending</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Ticket Raised">Ticket Raised</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label">From date</label>
+                    <input type="date" id="filter-created-from" />
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label">To date</label>
+                    <input type="date" id="filter-created-to" />
+                  </div>
+                  <button id="clearAllFilters" className="clear-btn">✕ Clear</button>
+                </div>
+                <p id="dateRangeCount" hidden={true} className="range-count"></p>
+              </div>
+
+              <div className="table-card view-desktop-only">
+                <div className="table-scroll">
+                  <table className="data-table" id="allTasksTable">
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr No</th>
+                        <th className="col-details">Task details</th>
+                        <th className="col-date">Planned date</th>
+                        <th className="col-hrs">Hrs to complete</th>
+                        <th className="col-assigned">Assigned to</th>
+                        <th className="col-voice">Voice note</th>
+                        <th className="col-attach">Attachment</th>
+                        <th className="col-priority">Priority</th>
+                        <th className="col-status">Status</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="allTasksList"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="allTasksCards" className="task-list view-mobile-only"></div>
+            </section>
+
+            {/* OVERDUE TASKS */}
+            <section id="view-overdue" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Overdue tasks</h2>
+                <p className="view-sub">Tasks whose target date has passed and are still not completed/verified — includes who's currently verifying, if anyone.</p>
+              </div>
+
+              <div className="filter-panel">
+                <div className="filter-row">
+                  <div className="filter-field">
+                    <label className="filter-label">Employee</label>
+                    <select id="overdue-filter-employee"><option value="">All employees</option></select>
+                  </div>
+                  <button type="button" id="clearOverdueFilters" className="clear-btn">✕ Clear</button>
+                </div>
+              </div>
+
+              <div className="my-tasks-tabs" id="overdueTabBar">
+                <button type="button" className="my-tasks-tab-btn active" data-overduetab="task">
+                  Task
+                  <span className="my-tasks-tab-badge" id="overdueTaskBadge" hidden={true}>0</span>
+                </button>
+                <button type="button" className="my-tasks-tab-btn" data-overduetab="recurring">
+                  Recurring Task
+                  <span className="my-tasks-tab-badge" id="overdueRecurringBadge" hidden={true}>0</span>
+                </button>
+              </div>
+
+              <div id="overdueTaskTabPanel">
+                <div className="table-card view-desktop-only">
+                  <div className="table-scroll">
+                    <table className="data-table" id="overdueTasksTable">
+                      <thead>
+                        <tr>
+                          <th className="col-sr">Sr No</th>
+                          <th className="col-details">Task details</th>
+                          <th className="col-status">Source</th>
+                          <th className="col-date">Planned date</th>
+                          <th className="col-assigned">Assigned to</th>
+                          <th className="col-assigned">Verifier</th>
+                          <th className="col-priority">Priority</th>
+                          <th className="col-status">Status</th>
+                          <th className="col-actions">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="overdueTasksList"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="overdueTasksCards" className="task-list view-mobile-only"></div>
+              </div>
+
+              {/* Recurring tasks that have fallen behind (a due date passed
+               without being marked done) — kept in their own tab since
+               they're a different kind of record (instances, not delegated
+               tasks) with different columns. */}
+              <div id="overdueRecurringTabPanel" hidden={true}>
+                <div className="table-card view-desktop-only">
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th><th>Project</th><th>Task</th><th>Frequency</th><th>Overdue since</th><th>Days overdue</th>
+                        </tr>
+                      </thead>
+                      <tbody id="overdueRecurringTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="overdueRecurringCards" className="task-list view-mobile-only"></div>
+              </div>
+            </section>
+
+
+            {/* MY TASKS */}
+            <section id="view-my" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">My tasks</h2>
+                <p className="view-sub">Your delegated work.</p>
+              </div>
+
+              <div className="smt-day-row" id="officeMyTasksDayRow" hidden style={{ display: 'none' }}></div>
+              <div className="my-tasks-tabs" id="myTasksOpenDoneBar" hidden style={{ display: 'none' }}></div>
+              <button type="button" id="officeMyOpenBtn" hidden></button>
+              <button type="button" id="officeMyDoneBtn" hidden></button>
+              <button type="button" id="officeSendWaListBtn" hidden></button>
+
+              <div className="my-tasks-tabs" id="myTasksTabBar" hidden={true}>
+                <button type="button" className="my-tasks-tab-btn active" data-mytab="mytask">My Task</button>
+                <button type="button" className="my-tasks-tab-btn" data-mytab="recurring" id="myRecurringTabBtn">
+                  My Recurring Task
+                  <span className="my-tasks-tab-badge" id="myRecurringBadge" hidden={true}>0</span>
+                </button>
+                <button type="button" className="my-tasks-tab-btn" data-mytab="other" id="otherPendingTabBtn">
+                  Other Pending Work
+                  <span className="my-tasks-tab-badge" id="otherPendingBadge" hidden={true}>0</span>
+                </button>
+              </div>
+
+              <div id="myTaskTabPanel">
+                <div className="table-card view-desktop-only">
+                  <div className="table-scroll">
+                    <table className="data-table" id="myTasksTable">
+                      <thead>
+                        <tr>
+                          <th className="col-sr">Sr No</th>
+                          <th className="col-details">Task details</th>
+                          <th className="col-date">Due date</th>
+                          <th className="col-voice">Voice note</th>
+                          <th className="col-attach">Attachment</th>
+                          <th className="col-priority">Priority</th>
+                          <th className="col-status">Status</th>
+                          <th className="col-actions">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="myTasksTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="myTasksList" className="task-list view-mobile-only"></div>
+              </div>
+
+              <div id="myRecurringTabPanel" hidden={true}>
+                <p className="view-sub" style={{ marginTop: 0, marginBottom: 12 }}>
+                  Your assigned recurring tasks — mark <strong>Done</strong> or <strong>Not Applicable</strong> for each due date.
+                </p>
+                <div className="table-card view-desktop-only">
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Task</th>
+                          <th>Frequency</th>
+                          <th>Due date</th>
+                          <th>Status / Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="myTasksRecurringTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="myTasksRecurringList" className="view-mobile-only" style={{ marginTop: 8 }}></div>
+              </div>
+
+              {/* Other Pending Work — read-only summary of things awaiting the
+               admin's attention elsewhere (leave approvals, verifications,
+               open tickets). No actions here on purpose — approve/verify/
+               resolve from their real pages; an item simply drops off this
+               list on its own once it's no longer pending. */}
+              <div id="otherPendingTabPanel" hidden={true}>
+                <div className="my-tasks-tabs" id="otherPendingSubTabBar" style={{ marginBottom: 16 }}>
+                  <button type="button" className="my-tasks-tab-btn active" data-subtab="leave">
+                    🌴 Leave
+                    <span className="my-tasks-tab-badge" id="otherPendingLeaveBadge" hidden={true}>0</span>
+                  </button>
+                  <button type="button" className="my-tasks-tab-btn" data-subtab="verification">
+                    🔎 Verification
+                    <span className="my-tasks-tab-badge" id="otherPendingVerificationBadge" hidden={true}>0</span>
+                  </button>
+                  <button type="button" className="my-tasks-tab-btn" data-subtab="tickets">
+                    🟠 Tickets
+                    <span className="my-tasks-tab-badge" id="otherPendingTicketsBadge" hidden={true}>0</span>
+                  </button>
+                </div>
+
+                <div id="otherPendingLeavesList" className="task-list"></div>
+
+                <div id="otherPendingVerificationsWrap" hidden={true}>
+                  <div className="table-card view-desktop-only">
+                    <div className="table-scroll">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th className="col-tasksr">Task Sr No</th>
+                            <th className="col-vproject">Project</th>
+                            <th className="col-vtasktype">Task Type</th>
+                            <th className="col-vdesc">Task / Description</th>
+                            <th className="col-vsubmitted">Submitted By</th>
+                            <th className="col-vpending">Pending with</th>
+                            <th className="col-vattach">Attachments</th>
+                            <th className="col-vdate">Sent for verification</th>
+                            <th className="col-vactions">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody id="otherPendingVerificationsTableBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div id="otherPendingVerificationsList" className="task-list view-mobile-only"></div>
+                </div>
+
+                <div id="otherPendingTicketsList" className="task-list" hidden={true}></div>
+              </div>
+            </section>
+
+            {/* MANAGE EMPLOYEES */}
+            <section id="view-employees" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Manage employees</h2>
+                  <p className="view-sub">Add, activate, or deactivate team members.</p>
+                </div>
+                <button id="openAddEmployee" className="primary-btn primary-btn-inline">+ Add employee</button>
+              </div>
+
+              <div className="filter-panel" style={{ marginTop: 16 }}>
+                <div className="filter-row">
+                  <div className="filter-field" style={{ flex: '1 1 200px' }}>
+                    <label className="filter-label" htmlFor="emp-filter-q">Search</label>
+                    <input type="search" id="emp-filter-q" placeholder="Name, username, designation…" autoComplete="off" />
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="emp-filter-department">Department</label>
+                    <select id="emp-filter-department"><option value="">All departments</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="emp-filter-status">Status</label>
+                    <select id="emp-filter-status">
+                      <option value="">All statuses</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <button type="button" id="clearEmpFilters" className="clear-btn">✕ Clear</button>
+                </div>
+                <p id="empFilterCount" className="range-count" hidden={true}></p>
+              </div>
+
+              <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th><th>Department</th><th>Designation</th><th>Reporting Head</th>
+                        <th>Role</th><th>Username</th><th>Status</th><th>Verifier</th><th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="employeesTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="employeesCards" className="employee-card-list view-mobile-only" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* ORG HIERARCHY */}
+            <section id="view-hierarchy" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Org Hierarchy</h2>
+                  <p className="view-sub">Reporting structure — inactive employees are hidden automatically.</p>
+                </div>
+              </div>
+              <div id="hierarchyTreeContainer" className="org-tree-container" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* PROJECT MANAGEMENT — who is on which project + shift */}
+            <section id="view-project-mgmt" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">🗂️ Project management</h2>
+                <p className="view-sub">See who is on which project, shift people, and open project discussion (in-app group + WhatsApp alert).</p>
+              </div>
+              <div className="field-grid" style={{ marginBottom: 16 }}>
+                <div className="field">
+                  <label>Project</label>
+                  <select id="pmg-project"></select>
+                </div>
+                <div className="field">
+                  <label>Assign employee</label>
+                  <select id="pmg-employee"></select>
+                </div>
+              </div>
+              <div className="row-actions" style={{ gap: 8, marginBottom: 16, display: 'flex', flexWrap: 'wrap' }}>
+                <button type="button" id="pmgAssignBtn" className="primary-btn primary-btn-inline">Assign to project</button>
+                <button type="button" id="pmgDiscussBtn" className="ghost-btn">Start / open discussion</button>
+              </div>
+              <div id="pmgInviteBox" className="form-note" hidden></div>
+              <div className="field-grid" style={{ marginBottom: 16 }}>
+                <div className="field">
+                  <label>Shift from project</label>
+                  <select id="pmg-from"></select>
+                </div>
+                <div className="field">
+                  <label>Shift to project</label>
+                  <select id="pmg-to"></select>
+                </div>
+              </div>
+              <div className="field" style={{ maxWidth: 360 }}>
+                <label>Employee to shift</label>
+                <select id="pmg-shift-emp"></select>
+              </div>
+              <button type="button" id="pmgShiftBtn" className="primary-btn primary-btn-inline" style={{ marginBottom: 20 }}>Shift employee</button>
+              <div id="pmgMembers" className="ticket-list"></div>
+            </section>
+
+            {/* DIP AI BOT */}
+            <section id="view-ai-bot" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title view-title--bot">
+                  <img src="/logo192.png" alt="" className="view-bot-dp" width="28" height="28" />
+                  DIP Bot
+                </h2>
+                <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. Offer letter and experience letter download here.</p>
+              </div>
+              <div className="bot-shell">
+                <div className="bot-quick" id="botQuickActions">
+                  <button
+                    type="button"
+                    className={`bot-quick-btn${botLetter === 'offer' ? ' is-on' : ''}`}
+                    data-hr-tab="letter-offer"
+                    onClick={() => setBotLetter((cur) => (cur === 'offer' ? '' : 'offer'))}
+                  >
+                    Offer letter
+                  </button>
+                  <button
+                    type="button"
+                    className={`bot-quick-btn${botLetter === 'exp' ? ' is-on' : ''}`}
+                    data-hr-tab="letter-exp"
+                    onClick={() => setBotLetter((cur) => (cur === 'exp' ? '' : 'exp'))}
+                  >
+                    Experience letter
+                  </button>
+                </div>
+                {botLetter && <BotLetterPanel key={botLetter} kind={botLetter} />}
+                <div id="botChatLog" className="bot-chat-log"></div>
+                <form id="botAskForm" className="bot-ask-form">
+                  <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
+                  <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
+                </form>
+              </div>
+            </section>
+
+            {/* TEAM CHAT */}
+            <section id="view-team-chat" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">💬 Team chat</h2>
+                <p className="view-sub">Project group chat + individual DM (office &amp; site). Chats are saved. Unread shows only on your chats. Video meeting from any chat.</p>
+              </div>
+              <div className="chat-layout">
+                <aside className="chat-sidebar">
+                  <div className="field">
+                    <label>Start DM</label>
+                    <select id="chatPeerSelect"><option value="">Select colleague…</option></select>
+                  </div>
+                  <button type="button" id="chatStartDmBtn" className="primary-btn primary-btn-inline" style={{ width: '100%', marginBottom: 12 }}>Start chat</button>
+                  <div className="field">
+                    <label>Join with invite code</label>
+                    <input id="chatJoinCode" type="text" placeholder="Invite code" />
+                  </div>
+                  <button type="button" id="chatJoinBtn" className="ghost-btn" style={{ width: '100%', marginBottom: 12 }}>Join discussion</button>
+                  <div id="chatRoomList" className="chat-room-list"></div>
+                </aside>
+                <div className="chat-main">
+                  <div className="chat-main-header">
+                    <div>
+                      <div id="chatRoomTitle" className="chat-room-title">Select a chat</div>
+                      <div id="chatInviteRow" className="chat-invite-row" hidden>
+                        Invite: <code id="chatInviteCodeShow"></code>
+                        <button type="button" id="chatCopyInviteBtn" className="ghost-btn" style={{ padding: '2px 8px', fontSize: '0.75rem' }}>Copy</button>
+                        <button type="button" id="chatNewInviteBtn" className="ghost-btn" style={{ padding: '2px 8px', fontSize: '0.75rem' }}>New code</button>
+                      </div>
+                    </div>
+                    <button type="button" id="chatVideoBtn" className="ghost-btn chat-video-btn" disabled title="Start video meeting">📹 Video</button>
+                  </div>
+                  <div id="chatMsgLog" className="chat-msg-log"></div>
+                  <form id="chatSendForm" className="bot-ask-form">
+                    <input id="chatMsgInput" type="text" placeholder="Type a message…" autoComplete="off" disabled />
+                    <button type="submit" className="primary-btn primary-btn-inline" disabled id="chatSendBtn">Send</button>
+                  </form>
+                </div>
+              </div>
+            </section>
+
+            {/* MEETINGS / MoM */}
+            <section id="view-meetings" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">📝 Meetings &amp; MoM</h2>
+                <p className="view-sub">Spoken discussion is captured here while video runs in a Jitsi window. Keep this TaskFlow tab open during the call.</p>
+              </div>
+              <div id="momList" className="mom-list"></div>
+              <div id="momEditor" className="mom-editor" hidden>
+                <h3 id="momEditorTitle" className="view-title" style={{ fontSize: '1rem' }}>Edit MoM</h3>
+                <div className="field">
+                  <label>Title</label>
+                  <input id="momTitle" type="text" />
+                </div>
+                <div className="field">
+                  <label>Minutes of Meeting (structured)</label>
+                  <textarea id="momBody" rows={12} placeholder={"Agenda:\n1. …\n\nDiscussion:\n- …\n\nDecisions:\n- …\n\nAction items:\n- Owner — task — due date"}></textarea>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" id="momSaveBtn" className="primary-btn primary-btn-inline">Save MoM</button>
+                  <button type="button" id="momFillChatBtn" className="ghost-btn">Refresh from call captions</button>
+                  <button type="button" id="momFinalBtn" className="ghost-btn">Mark final</button>
+                  <button type="button" id="momCloseBtn" className="ghost-btn">Close</button>
+                </div>
+              </div>
+            </section>
+
+            {/* EMPLOYEE CALENDAR */}
+            <section id="view-calendar" className="view" hidden={true}>
+              <div className="cal-wrap">
+                <div className="cal-nav">
+                  <button type="button" id="calPrev" className="cal-nav-btn" aria-label="Previous month">‹</button>
+                  <h2 id="calMonthLabel" className="cal-month-title">—</h2>
+                  <button type="button" id="calNext" className="cal-nav-btn" aria-label="Next month">›</button>
+                </div>
+                <div id="calGrid" className="cal-grid"></div>
+                <div id="calDayDetail" className="cal-day-detail"></div>
+              </div>
+            </section>
+
+            {/* MANAGE SITES */}
+            <section id="view-sites" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Manage sites</h2>
+                  <p className="view-sub">Track construction sites and assigned personnel.</p>
+                </div>
+                <button id="openAddSite" className="primary-btn primary-btn-inline">+ Add site</button>
+              </div>
+
+              <div className="filter-panel" style={{ marginTop: 16 }}>
+                <div className="filter-row">
+                  <div className="filter-field" style={{ flex: '1 1 200px' }}>
+                    <label className="filter-label" htmlFor="site-filter-q">Search</label>
+                    <input type="search" id="site-filter-q" placeholder="Site, client, location, team leader…" autoComplete="off" />
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="site-filter-type">Type</label>
+                    <select id="site-filter-type"><option value="">All types</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="site-filter-status">Status</label>
+                    <select id="site-filter-status"><option value="">All statuses</option></select>
+                  </div>
+                  <button type="button" id="clearSiteFilters" className="clear-btn">✕ Clear</button>
+                </div>
+                <p id="siteFilterCount" className="range-count" hidden={true}></p>
+              </div>
+
+              <div className="table-card table-card--stack" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table" id="sitesTable">
+                    <thead>
+                      <tr>
+                        <th>Site name</th><th>Client</th><th>Location</th>
+                        <th>Type</th><th>Status</th><th>Team leader</th><th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="sitesTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* MANAGE CLIENTS */}
+            <section id="view-clients" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Manage clients</h2>
+                  <p className="view-sub">Create client logins and set Head / Coordinator / PC shown on their portal.</p>
+                </div>
+                <button id="openAddClient" className="primary-btn primary-btn-inline">+ Add client</button>
+              </div>
+
+              <div className="filter-panel" style={{ marginTop: 16 }}>
+                <div className="filter-row">
+                  <div className="filter-field" style={{ flex: '1 1 200px' }}>
+                    <label className="filter-label" htmlFor="client-filter-q">Search</label>
+                    <input type="search" id="client-filter-q" placeholder="Client, username, project / site…" autoComplete="off" />
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="client-filter-site">Project / Site</label>
+                    <select id="client-filter-site"><option value="">All projects</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="client-filter-status">Status</label>
+                    <select id="client-filter-status">
+                      <option value="">All statuses</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <button type="button" id="clearClientFilters" className="clear-btn">✕ Clear</button>
+                </div>
+                <p id="clientFilterCount" className="range-count" hidden={true}></p>
+              </div>
+
+              <div className="table-card table-card--stack" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table" id="clientsTable">
+                    <thead>
+                      <tr>
+                        <th>Client name</th>
+                        <th>Username</th>
+                        <th>Project / Site</th>
+                        <th>Head</th>
+                        <th>Coordinator</th>
+                        <th>PC</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="clientsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* MASTER DATA */}
+            <section id="view-masterdata" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Departments &amp; task types</h2>
+                <p className="view-sub">Manage the master lists used across all task assignments.</p>
+              </div>
+              <div className="field-grid">
+                <div>
+                  <h3 className="subsection-title">Departments</h3>
+                  <form id="addDepartmentForm" className="task-form">
+                    <div className="field">
+                      <label htmlFor="new-department-name">Department name</label>
+                      <input id="new-department-name" type="text" placeholder="e.g., Engg. Division" required />
+                    </div>
+                    <p id="addDepartmentMsg" className="form-error" hidden={true}></p>
+                    <button type="submit" className="primary-btn">Add department</button>
+                  </form>
+                  <div className="table-card" style={{ marginTop: 16 }}>
+                    <table className="data-table">
+                      <thead><tr><th>Department</th></tr></thead>
+                      <tbody id="departmentsTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="subsection-title">Task types</h3>
+                  <form id="addTaskTypeForm" className="task-form">
+                    <div className="field">
+                      <label htmlFor="new-tasktype-name">Task type name</label>
+                      <input id="new-tasktype-name" type="text" placeholder="e.g., Site Visit" required />
+                    </div>
+                    <p id="addTaskTypeMsg" className="form-error" hidden={true}></p>
+                    <button type="submit" className="primary-btn">Add task type</button>
+                  </form>
+                  <div className="table-card" style={{ marginTop: 16 }}>
+                    <table className="data-table">
+                      <thead><tr><th>Task type</th></tr></thead>
+                      <tbody id="taskTypesTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* PERMISSIONS */}
+            <section id="view-permissions" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Permissions</h2>
+                <p className="view-sub">Decide what each employee is allowed to do — Add task (with + Add dept/project/type on the form), Add site, Office ↔ Site / MDO — without making them a full admin.</p>
+              </div>
+              <div className="table-card table-card--stack">
+                <div className="table-scroll">
+                  <table className="data-table" id="permissionsTable">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th className="perm-col">Add task</th>
+                        <th className="perm-col">Add site</th>
+                        <th className="perm-col">Add employee</th>
+                        <th className="perm-col">Resolve tickets</th>
+                        <th className="perm-col">Verify tasks</th>
+                        <th className="perm-col">MIS Executive</th>
+                        <th className="perm-col">Office ↔ Site</th>
+                        <th className="perm-col">Office ↔ MDO</th>
+                      </tr>
+                    </thead>
+                    <tbody id="permissionsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* WHO SEES WHAT (admin + MIS) */}
+            <section id="view-visibility" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Who sees what</h2>
+                <p className="view-sub">MIS Support only. Uncheck a box to hide that screen. Team chat (office + site groups) for Site engineer / Site head is how site people see team group and project group — tick those if they cannot see chat.</p>
+              </div>
+              <div className="table-card table-card--stack">
+                <div className="table-scroll">
+                  <table className="data-table" id="visibilityTable">
+                    <thead>
+                      <tr>
+                        <th>Screen</th>
+                        <th className="perm-col">Admin</th>
+                        <th className="perm-col">MIS</th>
+                        <th className="perm-col">Employee</th>
+                        <th className="perm-col">Site engineer</th>
+                        <th className="perm-col">Site head</th>
+                      </tr>
+                    </thead>
+                    <tbody id="visibilityTableBody"></tbody>
+                  </table>
+                </div>
+                <div style={{ padding: '12px 16px' }}>
+                  <button type="button" id="visibilitySaveBtn" className="primary-btn primary-btn-inline">Save visibility</button>
+                </div>
+              </div>
+
+              {/* Automated reminder switches — MIS decides what goes out on WhatsApp */}
+              <div className="view-heading" style={{ marginTop: 28 }}>
+                <h2 className="view-title">Automatic WhatsApp reminders</h2>
+                <p className="view-sub">MIS Support only. Overdue is worked out from the employee's own timer (accept time + hours, office hours only) — not from the planned date.</p>
+              </div>
+              <div className="table-card table-card--stack">
+                <div className="reminder-settings" id="reminderSettings">
+                  <label className="reminder-row">
+                    <input type="checkbox" id="rsDailyOverdue" />
+                    <span>
+                      <strong>Daily overdue WhatsApp</strong>
+                      <em>Every morning, each employee gets one message per overdue task saying how many days it has been overdue. Repeats daily until the task is completed.</em>
+                    </span>
+                  </label>
+                  <label className="reminder-row">
+                    <input type="checkbox" id="rsAcceptNudge" />
+                    <span>
+                      <strong>Accept reminder for short tasks</strong>
+                      <em>If a short same-day task is not accepted within the wait time below, the employee is asked to accept it or request a reschedule.</em>
+                    </span>
+                  </label>
+                  <div className="reminder-row reminder-row--inputs">
+                    <label>
+                      Wait before accept reminder
+                      <span className="reminder-input"><input type="number" id="rsAcceptMinutes" min="1" max="600" step="1" /> minutes</span>
+                    </label>
+                    <label>
+                      Counts as a same-day task up to
+                      <span className="reminder-input"><input type="number" id="rsAcceptMaxHours" min="0.5" max="24" step="0.5" /> hours</span>
+                    </label>
+                    <label>
+                      Ignore tasks overdue before
+                      <span className="reminder-input"><input type="date" id="rsOverdueSince" /></span>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ padding: '12px 16px' }}>
+                  <button type="button" id="reminderSettingsSaveBtn" className="primary-btn primary-btn-inline">Save reminder settings</button>
+                </div>
+              </div>
+            </section>
+            <section id="view-verifications" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Verification requests</h2>
+                <p className="view-sub">Review and approve tasks pending your sign-off.</p>
+              </div>
+              <div className="table-card view-desktop-only">
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="col-tasksr">Task Sr No</th>
+                        <th className="col-vproject">Project</th>
+                        <th className="col-vtasktype">Task Type</th>
+                        <th className="col-vdesc">Task / Description</th>
+                        <th className="col-vsubmitted">Submitted By</th>
+                        <th className="col-vpending">Pending with</th>
+                        <th className="col-vattach">Attachments</th>
+                        <th className="col-vdate">Sent for verification</th>
+                        <th className="col-vactions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="verificationsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="verificationsList" className="task-list view-mobile-only"></div>
+            </section>
+
+            {/* RESCHEDULE REQUESTS — admin inbox + history (Pending / Approved / Rejected);
+             employees do not use this screen for actions. */}
+            <section id="view-reschedule-requests" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">🗓️ Reschedule requests</h2>
+                <p className="view-sub" id="reschedViewSub">Tasks where a new date has been requested.</p>
+              </div>
+              <div className="filters-card" id="reschedFiltersCard">
+                <div className="filters-row">
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="resched-filter-status">Status</label>
+                    <select id="resched-filter-status" defaultValue="Pending">
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Rejected">Rejected</option>
+                      <option value="">All</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="table-card view-desktop-only">
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr No</th>
+                        <th className="col-resched-emp">Employee</th>
+                        <th className="col-resched-task">Task</th>
+                        <th className="col-resched-date">Current date</th>
+                        <th className="col-resched-date">Requested date</th>
+                        <th className="col-resched-date">Additional hours</th>
+                        <th className="col-resched-reason">Reason</th>
+                        <th className="col-resched-status">Status</th>
+                        <th className="col-resched-decided">Decided by</th>
+                        <th className="col-resched-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="reschedRequestsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="reschedRequestsList" className="task-list view-mobile-only"></div>
+            </section>
+
+            {/* HIRING REQUIREMENT (heads) — not a candidate form */}
+            <section id="view-new-recruitment" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Hiring requirement</h2>
+                <p className="view-sub">
+                  Employee chahiye? Designation, experience, openings batao — HR hiring chalayega.
+                  Candidate name / mobile yahan nahi (woh apply / interview pe aata hai).
+                </p>
+              </div>
+              <form id="hrRecruitForm" className="modal-body" style={{ maxWidth: 560, padding: 0 }}>
+                <div className="field">
+                  <label htmlFor="hr-rec-designation">Designation needed <span className="req">*</span></label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select id="hr-rec-designation" required defaultValue="Site Engineer" style={{ flex: 1 }}>
+                      <option value="Site Engineer">Site Engineer</option>
+                      <option value="Site Incharge">Site Incharge</option>
+                      <option value="Site Head">Site Head</option>
+                      <option value="Estimator">Estimator</option>
+                      <option value="Sr Estimator">Sr Estimator</option>
+                      <option value="Jr. Estimator">Jr. Estimator</option>
+                      <option value="Coordinator">Coordinator</option>
+                      <option value="Sales Executive">Sales Executive</option>
+                      <option value="MIS">MIS</option>
+                      <option value="EA">EA</option>
+                      <option value="Staff">Staff</option>
+                      <option value="__custom__">Other (type below)…</option>
+                    </select>
+                    <button type="button" className="ghost-btn" id="hr-rec-desig-plus" title="Custom designation" style={{ minWidth: 36 }}>+</button>
+                  </div>
+                  <input id="hr-rec-designation-custom" hidden placeholder="Type custom designation…" style={{ marginTop: 8 }} />
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-experience">Experience required <span className="req">*</span></label>
+                  <select id="hr-rec-experience" required defaultValue="">
+                    <option value="" disabled>Select experience</option>
+                    <option value="Fresher / 0–1 year">Fresher / 0–1 year</option>
+                    <option value="1–2 years">1–2 years</option>
+                    <option value="2–3 years">2–3 years</option>
+                    <option value="3–5 years">3–5 years</option>
+                    <option value="5–8 years">5–8 years</option>
+                    <option value="8+ years">8+ years</option>
+                    <option value="Any">Any</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-openings">No. of openings <span className="req">*</span></label>
+                  <input id="hr-rec-openings" type="number" min="1" max="50" defaultValue="1" required />
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-department">Department</label>
+                  <input id="hr-rec-department" placeholder="e.g. Engg. Division, MDO, Sales, PMC" />
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-location">Location / site</label>
+                  <input id="hr-rec-location" placeholder="Office / site name / city" />
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-skills">Key skills / job requirement</label>
+                  <textarea id="hr-rec-skills" rows={3} placeholder="e.g. AutoCAD, site supervision, Hindi+English, 2-wheeler…" />
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-urgency">Urgency</label>
+                  <select id="hr-rec-urgency" defaultValue="Normal">
+                    <option value="Normal">Normal</option>
+                    <option value="Soon (2–3 weeks)">Soon (2–3 weeks)</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="hr-rec-notes">Additional notes</label>
+                  <textarea id="hr-rec-notes" rows={2} placeholder="Budget range, reporting to, shift, why needed…" />
+                </div>
+                <p id="hrRecruitMsg" className="form-error" hidden={true}></p>
+                <button type="submit" className="primary-btn primary-btn-inline">Send requirement to HR</button>
+              </form>
+              <div className="table-card" style={{ marginTop: 24 }}>
+                <h3 style={{ marginTop: 0 }}>My requirements</h3>
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Designation</th><th>Experience</th><th>Openings</th><th>Status</th><th>Submitted</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hrRecruitMineBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* APPLY LEAVE (everyone) */}
+            <section id="view-applyleave" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">🌴 Apply Leave</h2>
+                  <p className="view-sub">1 leave / month (Apr–Mar). Unused months carry forward. Apply below and track status in history.</p>
+                </div>
+                <button id="openApplyLeave" className="primary-btn primary-btn-inline">+ Apply leave</button>
+              </div>
+
+              <div id="leaveBalanceCard" className="leave-panel">
+                <div className="leave-panel-head">
+                  <div>
+                    <h3 className="leave-panel-title" id="leaveBalFyLabel">Leave balance</h3>
+                    <p className="leave-panel-sub" id="leaveBalSub">Loading…</p>
+                  </div>
+                </div>
+                <div id="leaveBalSummary" className="leave-stat-row">
+                  <div className="leave-stat">
+                    <span className="leave-stat-lbl">Accrued</span>
+                    <strong id="leaveBalAccrued" className="leave-stat-val">—</strong>
+                  </div>
+                  <div className="leave-stat">
+                    <span className="leave-stat-lbl">Used</span>
+                    <strong id="leaveBalUsed" className="leave-stat-val">—</strong>
+                  </div>
+                  <div className="leave-stat">
+                    <span className="leave-stat-lbl">Pending</span>
+                    <strong id="leaveBalPending" className="leave-stat-val">—</strong>
+                  </div>
+                  <div className="leave-stat leave-stat-avail">
+                    <span className="leave-stat-lbl">Available</span>
+                    <strong id="leaveBalAvailable" className="leave-stat-val">—</strong>
+                  </div>
+                </div>
+                <div id="leaveApplyResultBanner" className="leave-apply-result" hidden={true}></div>
+                <div className="leave-month-wrap">
+                  <div className="leave-month-caption">Month-wise (Apr → Mar)</div>
+                  <div className="leave-month-table-scroll">
+                    <table className="leave-month-table" aria-label="Monthly leave balance">
+                      <thead>
+                        <tr>
+                          <th>Month</th>
+                          <th>Accrued</th>
+                          <th>Used</th>
+                          <th>Pending</th>
+                          <th>Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody id="leaveBalanceMonthList"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="leave-panel leave-hist-panel">
+                <div className="leave-panel-head">
+                  <h3 className="leave-panel-title">Leave history</h3>
+                  <p className="leave-panel-sub">Your requests, grouped by month</p>
+                </div>
+                <div id="myLeavesHistory" className="leave-hist-months">
+                  <div className="empty-state">Loading your leave requests…</div>
+                </div>
+                <div className="table-scroll view-desktop-only" style={{ display: 'none' }} aria-hidden="true">
+                  <table className="data-table"><tbody id="myLeavesTableBody"></tbody></table>
+                </div>
+                <div id="myLeavesList" className="ticket-list" style={{ display: 'none' }} aria-hidden="true"></div>
+              </div>
+            </section>
+
+            {/* BUDDY REQUESTS (sidebar) */}
+            <section id="view-buddyrequests" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">🤝 Buddy requests</h2>
+                <p className="view-sub">Accept or decline when a teammate asks you to cover their tasks during leave.</p>
+              </div>
+              <div className="table-card view-desktop-only" style={{ marginTop: 12 }}>
+                <div className="table-scroll">
+                  <table className="data-table" style={{ minWidth: 720 }}>
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr</th>
+                        <th>From</th>
+                        <th>Dates</th>
+                        <th>Reason</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="buddyRequestsTableBody">
+                      <tr><td colSpan={5} className="empty-state">Loading…</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="buddyRequestsList" className="ticket-list view-mobile-only" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* LEAVE APPROVALS (admin) */}
+            <section id="view-leaveapprovals" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">🗒️ Leave Approvals</h2>
+                <p className="view-sub">Review leave requests raised by the team and approve or reject them.</p>
+              </div>
+              <div className="filter-panel">
+                <div className="filter-row">
+                  <div className="filter-field">
+                    <label className="filter-label">Status</label>
+                    <select id="leaveApprovalsStatusFilter" defaultValue="Pending">
+                      <option value="">All</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table" style={{ minWidth: 820 }}>
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr</th>
+                        <th>Employee</th>
+                        <th>Dates</th>
+                        <th>Reason</th>
+                        <th>Buddy</th>
+                        <th className="col-status">Status</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="leaveApprovalsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="leaveApprovalsList" className="ticket-list view-mobile-only" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* TICKETS */}
+            <section id="view-tickets" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title" id="ticketsViewTitle">Tickets</h2>
+                  <p className="view-sub" id="ticketsViewSub">Raise and track support issues.</p>
+                </div>
+                <button id="openRaiseTicket" className="primary-btn primary-btn-inline">+ Raise ticket</button>
+              </div>
+              <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table" style={{ minWidth: 860 }}>
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr</th>
+                        <th>Details</th>
+                        <th>Category</th>
+                        <th>Raised by</th>
+                        <th className="col-status">Status</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="ticketsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="ticketsList" className="ticket-list view-mobile-only" style={{ marginTop: 20 }}></div>
+            </section>
+
+
+            {/* CORRECTIONS */}
+            <section id="view-corrections" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">↩ Corrections</h2>
+                <p className="view-sub">Tasks sent back to you — review the note and resubmit for verification.</p>
+              </div>
+              <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr No</th>
+                        <th className="col-details">Task details</th>
+                        <th>Correction note</th>
+                        <th className="col-priority">Priority</th>
+                        <th className="col-status">Status</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="correctionsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="correctionsList" className="task-list view-mobile-only" style={{ marginTop: 20 }}></div>
+            </section>
+            {/* UPDATIONS */}
+            <section id="view-updations" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">📝 Updations</h2>
+                <p className="view-sub">Tasks where admin/verifier has requested changes — review the note and make updates.</p>
+              </div>
+              <div id="updationsList" className="task-list" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* RECURRING TASKS */}
+            <section id="view-recurring" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">🔁 Recurring Tasks</h2>
+                  <p className="view-sub" id="recurringViewSub">Tasks that repeat on a schedule.</p>
+                </div>
+                <button id="openAddRecurring" className="primary-btn primary-btn-inline" hidden={true}>+ Add recurring task</button>
+              </div>
+              <div id="recurringFilterPanel" className="filter-panel" hidden={true}>
+                <div className="filter-row">
+                  <div className="filter-field">
+                    <label className="filter-label">Project</label>
+                    <select id="recurring-filter-project">
+                      <option value="">All projects</option>
+                    </select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label">Name</label>
+                    <input type="text" id="recurring-filter-name" placeholder="Search task name…" />
+                  </div>
+                  <button type="button" id="clearRecurringFilters" className="clear-btn">✕ Clear</button>
+                </div>
+              </div>
+              <div id="adminRecurringWrap" hidden={true}>
+                <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Employee</th>
+                          <th>Project</th>
+                          <th>Description</th>
+                          <th>Frequency</th>
+                          <th>Period</th>
+                          <th>Checkpoints</th>
+                          <th>Active</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody id="recurringTasksTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="adminRecurringCards" className="task-list view-mobile-only" style={{ marginTop: 20 }}></div>
+              </div>
+
+              <div id="employeeRecurringWrap" hidden={true} style={{ marginTop: 20 }}>
+                <div className="table-card view-desktop-only">
+                  <div className="table-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Task</th><th>Frequency</th><th>Planned Date</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody id="employeeRecurringTableBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div id="employeeRecurringList" className="view-mobile-only"></div>
+              </div>
+            </section>
+
+            {/* TASK HISTORY */}
+            <section id="view-task-history" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">📜 Task History</h2>
+                <p className="view-sub">All your completed and verified tasks till date.</p>
+              </div>
+
+              <div className="filter-panel" id="thFilterPanel">
+                <div className="filter-row">
+                  <div className="filter-field" style={{ flex: '1 1 180px' }}>
+                    <label className="filter-label" htmlFor="th-filter-q">Search</label>
+                    <input type="search" id="th-filter-q" placeholder="Description, project, type…" autoComplete="off" />
+                  </div>
+                  <div className="filter-field" id="th-filter-emp-wrap" hidden={true}>
+                    <label className="filter-label" htmlFor="th-filter-employee">Employee</label>
+                    <select id="th-filter-employee"><option value="">All employees</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="th-filter-project">Project</label>
+                    <select id="th-filter-project"><option value="">All projects</option></select>
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="th-filter-type">Task type</label>
+                    <select id="th-filter-type"><option value="">All types</option></select>
+                  </div>
+                  <div className="filter-field">
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="th-filter-from">From</label>
+                    <input type="date" id="th-filter-from" />
+                  </div>
+                  <div className="filter-field">
+                    <label className="filter-label" htmlFor="th-filter-to">To</label>
+                    <input type="date" id="th-filter-to" />
+                  </div>
+                  <button type="button" id="th-filter-apply" className="primary-btn primary-btn-inline">🔍 Apply</button>
+                  <button type="button" id="th-filter-clear" className="clear-btn">✕ Clear</button>
+                </div>
+                <p id="thFilterCount" className="range-count" hidden={true}></p>
+              </div>
+
+              <div className="table-card view-desktop-only" style={{ marginTop: 16 }}>
+                <div className="table-scroll">
+                  <table className="data-table" id="thTable">
+                    <thead>
+                      <tr>
+                        <th className="col-sr">Sr No</th>
+                        <th className="th-col-details">Task details</th>
+                        <th className="th-col-date">Accepted date</th>
+                        <th className="th-col-date">Target date</th>
+                        <th className="th-col-date">Completed on</th>
+                        <th className="th-col-priority">Priority</th>
+                        <th className="th-col-status">Status</th>
+                        <th className="th-col-verifier">Verified by</th>
+                      </tr>
+                    </thead>
+                    <tbody id="thTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="thCardList" className="task-list view-mobile-only" style={{ marginTop: 16 }}></div>
+            </section>
+
+            {/* DRAWINGS — ADD */}
+            <section id="view-drawings-add" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">🖊️ Add Drawing</h2>
+                <p className="view-sub">Fill in the drawing details below and submit.</p>
+              </div>
+              <div className="drawing-form-card">
+                <p id="drawingFormMsg" className="form-error" hidden={true}></p>
+                <form id="drawingForm" autoComplete="off">
+
+                  <div className="form-section-label">Drawing Details</div>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="drw-category">Drawing Category <span className="req">*</span></label>
+                      <select id="drw-category" required>
+                        <option value="">-- Select Category --</option>
+                        <option>Layout</option>
+                        <option>Presentation</option>
+                        <option>Architectural</option>
+                        <option>Structural</option>
+                        <option>MEP</option>
+                        <option>Others</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-sub1">Sub Category 1</label>
+                      <input id="drw-sub1" type="text" placeholder="e.g. Floor Plans" />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-sub2">Sub Category 2</label>
+                      <input id="drw-sub2" type="text" placeholder="e.g. Ground Floor" />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-sub3">Sub Category 3</label>
+                      <input id="drw-sub3" type="text" placeholder="e.g. Toilet Layout" />
+                    </div>
+                  </div>
+
+                  <div className="form-section-label">Project Info</div>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="drw-project">Project Name <span className="req">*</span></label>
+                      <select id="drw-project" required>
+                        <option value="">-- Select Project --</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-date">Drawing Date <span className="req">*</span></label>
+                      <input id="drw-date" type="date" required />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-head">Head / Reviewer <span className="req">*</span></label>
+                      <select id="drw-head" required>
+                        <option value="">-- Select Head --</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-section-label">Additional Info</div>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="drw-remarks">Remarks / Notes</label>
+                      <textarea id="drw-remarks" rows={2} placeholder="Any notes about this drawing set…"></textarea>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="drw-files">Upload Drawing File(s)</label>
+                      <input id="drw-files" type="file" multiple accept=".pdf,.dwg,.dxf,.png,.jpg,.jpeg,.zip" />
+                      <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: 4 }}>Supported: PDF, DWG, DXF, Images, ZIP | Multiple files allowed</div>
+                    </div>
+                    <div className="field" style={{ maxWidth: 160 }}>
+                      <label htmlFor="drw-revision">Revision No.</label>
+                      <input id="drw-revision" type="text" placeholder="R0" />
+                    </div>
+                  </div>
+
+                  <div className="modal-footer" style={{ marginTop: 20, padding: 0 }}>
+                    <button type="button" id="drawingResetBtn" className="ghost-btn-text">Reset</button>
+                    <button type="submit" className="primary-btn">💾 Save Drawing</button>
+                  </div>
+                </form>
+              </div>
+            </section>
+
+            {/* DRAWINGS — ALL */}
+            <section id="view-drawings-all" className="view" hidden={true}>
+              <div className="view-header-row">
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">📐 All Drawings <span id="drawingsCount" className="tab-count" style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}></span></h2>
+                  <p className="view-sub">Browse, filter and manage all drawing records.</p>
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <select id="drwFilterProject" style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem' }}>
+                    <option value="">All Projects</option>
+                  </select>
+                </div>
+              </div>
+              <div className="table-card table-card--stack" style={{ marginTop: 18 }}>
+                <div className="table-scroll">
+                  <table className="data-table" id="drawingsTable">
+                    <thead>
+                      <tr>
+                        <th className="col-sr">SR</th>
+                        <th>Project</th>
+                        <th>Category</th>
+                        <th>Sub Cat 1</th>
+                        <th>Sub Cat 2</th>
+                        <th>Sub Cat 3</th>
+                        <th className="col-date">Date</th>
+                        <th>Head</th>
+                        <th style={{ textAlign: 'center' }}>Rev</th>
+                        <th>Remarks</th>
+                        <th style={{ textAlign: 'center' }}>Preview</th>
+                        <th>Added By</th>
+                        <th className="col-actions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="drawingsTableBody">
+                      <tr><td colSpan={13} className="empty-state">Loading…</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            {/* DAILY REPORT */}
+            <section id="view-daily-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">📋 Daily Report</h2>
+                  <p className="view-sub" id="drptSubtitle">Task status report</p>
+                </div>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button className="drpt-mode-btn active" id="drptModeSingle">Single Day</button>
+                    <button className="drpt-mode-btn" id="drptModeRange">Date Range</button>
+                  </div>
+                  <div id="drptSingleWrap" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input type="date" id="drptDate" style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem' }} />
+                  </div>
+                  <div id="drptRangeWrap" style={{ display: 'none', gap: 8, alignItems: 'center' }}>
+                    <input type="date" id="drptFromDate" style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem' }} />
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
+                    <input type="date" id="drptToDate" style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.85rem' }} />
+                  </div>
+                  <button id="drptGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button id="drptDownloadBtn" className="ghost-btn" style={{ display: 'none' }}>⬇️ Download PDF</button>
+                </div>
+              </div>
+              <div id="drptBody" style={{ marginTop: 20 }}></div>
+            </section>
+
+            {/* MIS REPORT (admin) — week-wise employee completion */}
+            <section id="view-mis-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">📊 MIS Report</h2>
+                  <p className="view-sub">Week-wise performance. Filter by Normal (delegated) or Recurring tasks. Week 1 can include previous-month days.</p>
+                </div>
+                <div className="mis-toolbar">
+                  <label className="mis-field">
+                    <span>Month</span>
+                    <input type="month" id="misMonth" />
+                  </label>
+                  <label className="mis-field">
+                    <span>Week</span>
+                    <select id="misWeek">
+                      <option value="">All weeks</option>
+                    </select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Department</span>
+                    <select id="misDept">
+                      <option value="">All departments</option>
+                    </select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Task type</span>
+                    <select id="misTaskType">
+                      <option value="all">All tasks</option>
+                      <option value="normal">Normal / Delegated only</option>
+                      <option value="recurring">Recurring only</option>
+                    </select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Sort</span>
+                    <select id="misSort">
+                      <option value="name">Name A–Z</option>
+                      <option value="completion">Open % (high → low)</option>
+                      <option value="delayed">Most delayed</option>
+                    </select>
+                  </label>
+                  <button id="misGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button id="misCsvBtn" className="ghost-btn" type="button">⬇️ CSV</button>
+                </div>
+              </div>
+              <div id="misReportBody" className="mis-body" style={{ marginTop: 16 }}></div>
+            </section>
+
+            {/* TIME DASHBOARD — Work & Verification (PDF layout) */}
+            <section id="view-time-dashboard" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Work &amp; Verification Dashboard</h2>
+                  <p className="view-sub">Same layout as the engineering office PDF — work by employee, matrices, corrections, and time analysis.</p>
+                </div>
+                <div className="td-toolbar mis-toolbar">
+                  <label className="mis-field">
+                    <span>Range</span>
+                    <select id="tdRange">
+                      <option value="month">This month</option>
+                      <option value="last-month">Last month</option>
+                      <option value="week">This week</option>
+                      <option value="day">Today</option>
+                      <option value="all">All time</option>
+                    </select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Department</span>
+                    <select id="tdDept"><option value="">All departments</option></select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Employee</span>
+                    <select id="tdPerson"><option value="">All employees</option></select>
+                  </label>
+                  <button type="button" id="tdGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button type="button" id="tdPdfBtn" className="ghost-btn">⬇️ PDF</button>
+                  <button type="button" id="tdCsvBtn" className="ghost-btn">⬇️ CSV</button>
+                </div>
+              </div>
+              <div id="tdSummary" className="td-summary" hidden></div>
+              <div id="tdBody"></div>
+            </section>
+
+            {/* EMP DELAY REPORT */}
+            <section id="view-delay-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Task Report</h2>
+                  <p className="view-sub">Employee-wise assigned → accept → deadline → submit → Start Verification → verified. Work + verify delays use office hours (9:30–6:30, lunch 1–2, Mon–Sat; verify SLA = 2h).</p>
+                </div>
+                <div className="mis-toolbar">
+                  <label className="mis-field">
+                    <span>Range</span>
+                    <select id="drRange">
+                      <option value="month">This month</option>
+                      <option value="last-week">Last week</option>
+                      <option value="week">This week</option>
+                      <option value="last-month">Last month</option>
+                      <option value="all">All time</option>
+                    </select>
+                  </label>
+                  <label className="mis-field">
+                    <span>Employee</span>
+                    <select id="drEmployee">
+                      <option value="">All employees</option>
+                    </select>
+                  </label>
+                  <button type="button" id="drGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button type="button" id="drPdfBtn" className="ghost-btn">⬇️ PDF</button>
+                  <button type="button" id="drWaBtn" className="ghost-btn" title="Send last-week reports on WhatsApp now">📲 Send WA now</button>
+                </div>
+              </div>
+              <div id="drBody"></div>
+            </section>
+
+            {/* EMP REPORT — work timeline + status + early/delay (d h m), custom date range */}
+            <section id="view-emp-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Emp Report</h2>
+                  <p className="view-sub">Assigned → accept → due → submit. Status + early/delay in office days, hours, minutes. Filter by employee and date range.</p>
+                </div>
+                <div className="mis-toolbar">
+                  <label className="mis-field">
+                    <span>From</span>
+                    <input type="date" id="erFrom" />
+                  </label>
+                  <label className="mis-field">
+                    <span>To</span>
+                    <input type="date" id="erTo" />
+                  </label>
+                  <label className="mis-field">
+                    <span>Employee</span>
+                    <select id="erEmployee">
+                      <option value="">All employees</option>
+                    </select>
+                  </label>
+                  <button type="button" id="erGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button type="button" id="erPdfBtn" className="ghost-btn">⬇️ PDF</button>
+                </div>
+              </div>
+              <div id="erBody"></div>
+            </section>
+
+            {/* MDO TASK DELAY REPORT — Chirag Shah only */}
+            <section id="view-mdo-delay-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">MDO Task Delay Report</h2>
+                  <p className="view-sub">MDO Office Work tasks — description, accept time, mark-done time, and delay. Chirag Shah only.</p>
+                </div>
+                <div className="mis-toolbar">
+                  <label className="mis-field">
+                    <span>Range</span>
+                    <select id="mdoDrRange">
+                      <option value="month">This month</option>
+                      <option value="week">This week</option>
+                      <option value="day">Today</option>
+                      <option value="last-week">Last week</option>
+                      <option value="last-month">Last month</option>
+                      <option value="all">All time</option>
+                    </select>
+                  </label>
+                  <button type="button" id="mdoDrGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                </div>
+              </div>
+              <div id="mdoDrBody"></div>
+            </section>
+
+            {/* FMS STEP TRACKER */}
+            <section id="view-fms" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">📑 FMS tracker</h2>
+              </div>
+              <div className="mis-toolbar" style={{ marginBottom: 14 }}>
+                <label className="mis-field">
+                  <span>Range</span>
+                  <select id="fmsRange">
+                    <option value="month">This month</option>
+                    <option value="week">This week</option>
+                    <option value="day">Today</option>
+                    <option value="all">All time</option>
+                  </select>
+                </label>
+                <label className="mis-field">
+                  <span>Project</span>
+                  <select id="fmsProject"><option value="">All projects</option></select>
+                </label>
+                <label className="mis-field">
+                  <span>Person</span>
+                  <select id="fmsPerson"><option value="">All people</option></select>
+                </label>
+                <button type="button" id="fmsGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
+                <button type="button" id="fmsCsvBtn" className="ghost-btn">Export CSV</button>
+                <button type="button" id="fmsXlsBtn" className="ghost-btn">Download Excel</button>
+              </div>
+              <div id="fmsSummary" className="fms-summary"></div>
+              <div id="fmsBody"></div>
+            </section>
+
+            <section id="view-monthly-report" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">Monthly reports</h2>
+                <p className="view-sub">Submitted monthly packs. Add a folder when a new month is ready.</p>
+              </div>
+              <OfficeMonthlyReport />
+            </section>
+
+            <section id="view-site-report" className="view" hidden={true}>
+              <OfficeSiteReport />
+            </section>
+
+            <section id="view-my-reports" className="view" hidden={true}>
+              <OfficeMyReports />
+            </section>
+
+          </main>
+        </div>
+      </section>
+
+      {/* Add Employee Modal */}
+      <div id="employeeModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Add new employee</h3>
+            <button className="modal-close" id="closeEmployeeModal">&times;</button>
+          </div>
+          <form id="employeeForm" className="modal-body">
+            <div className="field">
+              <label htmlFor="emp-fullname">Full name <span className="req">*</span></label>
+              <input id="emp-fullname" type="text" placeholder="Enter full name" required />
+            </div>
+            <div className="field">
+              <label htmlFor="emp-department">Department <span className="req">*</span></label>
+              <input id="emp-department" type="text" placeholder="e.g., Site Execution" required />
+            </div>
+            <div className="field">
+              <label htmlFor="emp-designation">Designation <span className="req">*</span></label>
+              <input id="emp-designation" type="text" placeholder="e.g., Project Manager" required />
+            </div>
+            <div className="field">
+              <label htmlFor="emp-role">Role <span className="req">*</span></label>
+              <select id="emp-role" required>
+                <option value="">Select role</option>
+                <option value="employee">Employee</option>
+                <option value="head">Head</option>
+                <option value="hr">HR</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-reporting-head">Reporting Head <span className="optional">(optional)</span></label>
+              <select id="emp-reporting-head">
+                <option value="">— None (Top level) —</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+              <div id="emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+              <p className="form-note" style={{ marginTop: 6 }}>You can assign multiple projects. Required for Site Engineers and Clients. Client login only shows these projects’ reports and materials.</p>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+              <input id="emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
+              <p className="form-note" style={{ marginTop: 6 }}>Used for task / leave / verification WhatsApp alerts.</p>
+            </div>
+            <p className="form-note">Username and password will be auto-generated after submission.</p>
+            <p id="employeeFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelEmployeeModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Add employee</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Edit Employee Modal */}
+      <div id="editEmployeeModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Edit employee</h3>
+            <button className="modal-close" id="closeEditEmployeeModal">&times;</button>
+          </div>
+          <form id="editEmployeeForm" className="modal-body">
+            <input type="hidden" id="edit-emp-id" />
+            <div className="field">
+              <label htmlFor="edit-emp-fullname">Full name <span className="req">*</span></label>
+              <input id="edit-emp-fullname" type="text" required />
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-department">Department <span className="req">*</span></label>
+              <input id="edit-emp-department" type="text" required />
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-designation">Designation <span className="req">*</span></label>
+              <input id="edit-emp-designation" type="text" required />
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-role">Role <span className="req">*</span></label>
+              <select id="edit-emp-role" required>
+                <option value="employee">Employee</option>
+                <option value="head">Head</option>
+                <option value="hr">HR</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-reporting-head">Reporting Head <span className="optional">(optional)</span></label>
+              <select id="edit-emp-reporting-head">
+                <option value="">— None (Top level) —</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+              <div id="edit-emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+              <p className="form-note" style={{ marginTop: 6 }}>Select every site this person should access. Click again to add or remove sites.</p>
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+              <input id="edit-emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
+            </div>
+            <div className="field">
+              <label>Status</label>
+              <div>
+                <button type="button" id="edit-emp-status-toggle" className="status-toggle active" data-active="true">Active</button>
+              </div>
+              <p className="form-note" style={{ marginTop: 6 }}>Inactive employees are removed from the Org Hierarchy and from every "assign to / reporting head" dropdown.</p>
+            </div>
+            <div className="field">
+              <label htmlFor="edit-emp-password">New password <span className="optional">(leave blank to keep current)</span></label>
+              <div className="password-field">
+                <input id="edit-emp-password" type="password" placeholder="Set a new password" minLength="6" autoComplete="new-password" />
+                <button type="button" id="toggleEditPassword" className="ghost-btn" aria-label="Show password">👁</button>
+              </div>
+            </div>
+            <p id="editEmployeeFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelEditEmployeeModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Save changes</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Credentials Modal */}
+      <div id="credsModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3 id="credsModalTitle">Login created ✅</h3>
+            <button className="modal-close" id="closeCredsModal">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p id="credsModalNote">Share these login details — they won't be shown again.</p>
+            <div className="creds-box">
+              <div><span>Username</span><strong id="credsUsername"></strong></div>
+              <div><span>Password</span><strong id="credsPassword"></strong></div>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="primary-btn primary-btn-inline" id="closeCredsModalBtn">Done</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Add Site Modal */}
+      <div id="siteModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3 id="siteModalTitle">Add new construction site</h3>
+            <button className="modal-close" id="closeSiteModal">&times;</button>
+          </div>
+          <form id="siteForm" className="modal-body">
+            <input type="hidden" id="site-edit-id" value="" />
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="site-client">Client name <span className="req">*</span></label>
+                <input id="site-client" type="text" placeholder="Enter client name" required />
+              </div>
+              <div className="field">
+                <label htmlFor="site-name">Site name <span className="req">*</span></label>
+                <input id="site-name" type="text" placeholder="Enter site name" required />
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="site-type">Type of project <span className="req">*</span></label>
+                <div className="field-with-add">
+                  <select id="site-type" required>
+                    <option value="">Select project type</option>
+                    <option value="Residential">Residential</option>
+                    <option value="Commercial">Commercial</option>
+                    <option value="Industrial">Industrial</option>
+                    <option value="Institutional">Institutional</option>
+                  </select>
+                  <button type="button" className="field-add-btn" id="site-add-type" title="Add project type">+ Add</button>
+                </div>
+                <div className="inline-add-row" id="site-add-type-row" hidden>
+                  <input type="text" id="site-new-type" placeholder="New project type…" />
+                  <button type="button" className="primary-btn primary-btn-inline" id="site-save-type">Save</button>
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="site-location">Site location <span className="req">*</span></label>
+                <input id="site-location" type="text" placeholder="e.g., Pune, Mumbai, Delhi" required />
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="site-start">Start date <span className="req">*</span></label>
+                <input id="site-start" type="date" required />
+              </div>
+              <div className="field">
+                <label htmlFor="site-end">Expected end date</label>
+                <input id="site-end" type="date" />
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="site-teamleader">Team incharge <span className="req">*</span></label>
+                <select id="site-teamleader" required><option value="">Select team incharge</option></select>
+              </div>
+              <div className="field">
+                <label htmlFor="site-coordinator">Co-ordinator <span className="req">*</span></label>
+                <select id="site-coordinator" required><option value="">Select coordinator</option></select>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="site-incharge">Head name <span className="req">*</span></label>
+                <select id="site-incharge" required><option value="">Select head name</option></select>
+              </div>
+              <div className="field">
+                <label htmlFor="site-pc">PC <span className="req">*</span></label>
+                <select id="site-pc" required><option value="">Select PC</option></select>
+                <p className="form-note">Employees whose designation is PC (including MDO Office).</p>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="site-description">Project description</label>
+              <textarea id="site-description" rows={3} placeholder="Enter project description..."></textarea>
+            </div>
+            <p id="siteFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelSiteModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline" id="siteFormSubmit">Add site</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Add / Edit Client Modal */}
+      <div id="clientModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3 id="clientModalTitle">Add client</h3>
+            <button className="modal-close" id="closeClientModal">&times;</button>
+          </div>
+          <form id="clientForm" className="modal-body">
+            <input type="hidden" id="client-edit-id" value="" />
+            <div className="field">
+              <label htmlFor="client-fullname">Client name <span className="req">*</span></label>
+              <input id="client-fullname" type="text" placeholder="Enter client name" required />
+            </div>
+            <div className="field">
+              <label htmlFor="client-site">Project / Site <span className="req">*</span></label>
+              <select id="client-site" required>
+                <option value="">Select project</option>
+              </select>
+              <p className="form-note">Client login only shows this project’s reports and materials.</p>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="client-head">Head <span className="req">*</span></label>
+                <select id="client-head" required><option value="">Select head</option></select>
+              </div>
+              <div className="field">
+                <label htmlFor="client-coordinator">Coordinator <span className="req">*</span></label>
+                <select id="client-coordinator" required><option value="">Select coordinator</option></select>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="client-pc">PC <span className="req">*</span></label>
+              <select id="client-pc" required><option value="">Select PC</option></select>
+              <p className="form-note">These names (and WhatsApp if saved on employee) show on client My Profile.</p>
+            </div>
+            <p className="form-note" id="clientCredsNote">Username and password will be auto-generated after save.</p>
+            <p id="clientFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelClientModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline" id="clientFormSubmit">Add client</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Toast */}
+      <div id="toast" className="toast" hidden={true}></div>
+
+      {/* Verify Modal */}
+      <div id="verifyModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Send for verification</h3>
+            <button className="modal-close" id="closeVerifyModal">&times;</button>
+          </div>
+          <form id="verifyForm" className="modal-body">
+            <div className="field">
+              <label htmlFor="verify-person">Send to <span className="req">*</span></label>
+              <select id="verify-person" required><option value="">Select a verifier</option></select>
+            </div>
+            <div className="field">
+              <label htmlFor="verify-files">Attach files <span className="optional">(max 3, optional)</span></label>
+              <input id="verify-files" type="file" multiple accept="*/*" />
+              <span className="form-note">Hold Ctrl / Cmd to select multiple files</span>
+            </div>
+            <p id="verifyFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelVerifyModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Verifier forwards a request already in their queue */}
+      <div id="forwardVerifyModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Send to another verifier</h3>
+            <button className="modal-close" id="closeForwardVerifyModal" type="button">&times;</button>
+          </div>
+          <form id="forwardVerifyForm" className="modal-body">
+            <p className="form-note" id="forwardVerifyHint">This task will leave the current verifier and show up for the person you pick.</p>
+            <div className="field">
+              <label htmlFor="forward-verify-person">Send to <span className="req">*</span></label>
+              <select id="forward-verify-person" required><option value="">Select a verifier</option></select>
+            </div>
+            <p id="forwardVerifyFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelForwardVerifyModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Ticket Modal */}
+      <div id="ticketModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Raise a ticket</h3>
+            <button className="modal-close" id="closeTicketModal">&times;</button>
+          </div>
+          <form id="ticketForm" className="modal-body">
+            {/* Shown only when raised from a task */}
+            <div id="ticketTaskBanner" className="ticket-task-banner" hidden={true}>
+              <span className="ticket-task-banner-icon">🔗</span>
+              <span>Linked to task: <strong id="ticketTaskBannerText"></strong></span>
+            </div>
+            <div className="field">
+              <label htmlFor="ticket-category">Category <span className="req">*</span></label>
+              <select id="ticket-category" required>
+                <option value="">Select category</option>
+                <option value="Technical">🔧 Technical issue</option>
+                <option value="Task">📋 Task related</option>
+                <option value="Access">🔑 Access / Login issue</option>
+                <option value="Other">📌 Other</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="ticket-description">Describe the issue <span className="req">*</span></label>
+              <textarea id="ticket-description" rows={4} placeholder="Explain your issue in detail..." required></textarea>
+            </div>
+            {/* Screenshot / screen recording — shown only for Technical or Access */}
+            <div id="ticketMediaFields" className="field" hidden={true}>
+              <label>Screenshot or screen recording <span className="optional">(optional)</span></label>
+              <p className="form-note">Attach a screenshot (PNG/JPG) or a short screen recording (MP4/WebM) to help us understand the issue.</p>
+              <input id="ticket-media" type="file" accept="image/png,image/jpeg,image/jpg,video/mp4,video/webm" />
+            </div>
+            <p id="ticketFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelTicketModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Submit ticket</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Updation Modal (verifier/admin → send updation note to employee) */}
+      <div id="updationModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>📝 Request Updation</h3>
+            <button className="modal-close" id="closeUpdationModal">&times;</button>
+          </div>
+          <form id="updationForm" className="modal-body">
+            <p className="form-note" style={{ marginBottom: 12 }}>Describe what needs to be updated. The employee will see this note in their Updations section.</p>
+            <div className="field">
+              <label htmlFor="updation-note">Updation note <span className="req">*</span></label>
+              <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
+            </div>
+            <div className="field">
+              <p id="updationCurrentDue" className="form-note" style={{ marginBottom: 8 }}>This was your target date.</p>
+              <label htmlFor="updation-due-action">Now what would you like to do?</label>
+              <select id="updation-due-action">
+                <option value="keep">Keep the same date</option>
+                <option value="hours">Give extra hours</option>
+                <option value="days">Give extra days</option>
+                <option value="new">Set a new date &amp; time</option>
+              </select>
+            </div>
+            <div className="field" id="updationExtraWrap" hidden={true}>
+              <label htmlFor="updation-extra-amount">How much extra?</label>
+              <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+              <input type="hidden" id="updation-extra-unit" value="" />
+            </div>
+            <div className="field" id="updationNewDueWrap" hidden={true}>
+              <label htmlFor="updation-new-due">New due date &amp; time</label>
+              <input id="updation-new-due" type="datetime-local" />
+              <p className="form-note">This exact date and time will become the new target date for this task.</p>
+            </div>
+            <p id="updationFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">📤 Send Updation</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Solution Modal (admin/resolver → write solution) */}
+      <div id="solutionModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>💡 Provide solution</h3>
+            <button className="modal-close" id="closeSolutionModal">&times;</button>
+          </div>
+          <div className="modal-body">
+            <div id="solutionTicketInfo" className="solution-ticket-info"></div>
+            <div className="field" style={{ marginTop: 14 }}>
+              <label htmlFor="solution-text">Solution / response <span className="req">*</span></label>
+              <textarea id="solution-text" rows={5} placeholder="Write the solution or action taken..."></textarea>
+            </div>
+            <p id="solutionFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelSolutionModal">Cancel</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="submitSolutionBtn">Submit &amp; Resolve</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Apply Leave Modal */}
+      <div id="leaveModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Apply for leave</h3>
+            <button className="modal-close" id="closeLeaveModal">&times;</button>
+          </div>
+          <form id="leaveForm" className="modal-body">
+            <div id="leaveFormBalancePreview" className="leave-form-bal-preview">
+              <div><strong>Available:</strong> <span id="leaveFormBalAvail">—</span></div>
+              <div><strong>This request:</strong> <span id="leaveFormBalReq">—</span></div>
+              <div><strong>After apply:</strong> <span id="leaveFormBalAfter">—</span></div>
+              <p id="leaveFormBalWarn" className="leave-form-bal-warn" hidden={true}></p>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="leave-from">From date <span className="req">*</span></label>
+                <input id="leave-from" type="date" required />
+              </div>
+              <div className="field">
+                <label htmlFor="leave-to">To date <span className="req">*</span></label>
+                <input id="leave-to" type="date" required />
+              </div>
+            </div>
+            <div className="field">
+              <label className="checkbox-label">
+                <input id="leave-halfday" type="checkbox" />
+                Half day leave
+              </label>
+            </div>
+            <div className="field">
+              <label htmlFor="leave-reason">Reason <span className="req">*</span></label>
+              <textarea id="leave-reason" rows={3} placeholder="Why are you taking leave..." required></textarea>
+            </div>
+            <div className="field">
+              <label htmlFor="leave-buddy">Buddy (task cover) <span className="req">*</span></label>
+              <select id="leave-buddy" required>
+                <option value="">Select buddy…</option>
+              </select>
+              <p className="form-note" style={{ marginTop: 6 }}>
+                After you submit, choose per task: plan for buddy (moves only after buddy Accepts), keep on hold, or request a reschedule.
+                Head/admin can approve leave anytime. Tasks go to buddy only when they Accept — leave approve alone does not move tasks.
+              </p>
+            </div>
+            <p id="leaveFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelLeaveModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Submit request</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Leave balance short / minus — Yes or No */}
+      <div id="leaveDeficitModal" className="modal-backdrop leave-deficit-modal" aria-hidden="true">
+        <div className="modal" style={{ maxWidth: 440 }}>
+          <div className="modal-header">
+            <h3>Leave balance check</h3>
+            <button type="button" className="modal-close" id="closeLeaveDeficitModal">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p id="leaveDeficitMsg" style={{ margin: '0 0 12px', fontSize: 14, lineHeight: 1.5 }}></p>
+            <div id="leaveDeficitStats" className="leave-deficit-stats"></div>
+            <p style={{ margin: '12px 0 0', fontSize: 13, color: '#4B5563' }}>Apply anyway? Balance can go in minus.</p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="leaveDeficitNoBtn">No</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="leaveDeficitYesBtn">Yes, apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* After leave apply — plan open tasks (office employees only) */}
+      <div id="leaveTaskActionsModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3>Plan your tasks while on leave</h3>
+            <button className="modal-close" id="closeLeaveTaskActionsModal" type="button">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p id="leaveTaskActionsIntro" className="cell-muted" style={{ marginTop: 0 }}>
+              Choose what should happen to each open task. Site engineers are not included in this flow.
+            </p>
+            <div id="leaveTaskActionsList" className="leave-task-actions-list"></div>
+            <p id="leaveTaskActionsMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="skipLeaveTaskActions">Skip for now</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="submitLeaveTaskActions">Save choices</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Reject Leave Modal (admin — reason optional) */}
+      <div id="rejectLeaveModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Reject leave request</h3>
+            <button className="modal-close" id="closeRejectLeaveModal">&times;</button>
+          </div>
+          <form id="rejectLeaveForm" className="modal-body">
+            <div className="field">
+              <label htmlFor="reject-leave-reason">Reason <span className="optional">(optional)</span></label>
+              <textarea id="reject-leave-reason" rows={3} placeholder="Let them know why (optional)..."></textarea>
+            </div>
+            <p id="rejectLeaveFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelRejectLeaveModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Reject request</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Leave cover unresolved — buddy declined after / with approval */}
+      <div id="leaveCoverModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3>Buddy declined — cover these tasks</h3>
+            <button className="modal-close" id="closeLeaveCoverModal" type="button">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p id="leaveCoverIntro" className="cell-muted" style={{ marginTop: 0 }}>
+              Buddy said No. Reassign the tasks to someone else, or change their target date.
+            </p>
+            <div id="leaveCoverList"></div>
+            <p id="leaveCoverFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="laterLeaveCoverModal">Remind me later</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="typeCpEditModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3 id="typeCpEditTitle">Add checkpoints</h3>
+            <button className="modal-close" id="closeTypeCpEditModal" type="button">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p className="form-note">Add as many checkpoints as you need for this task type.</p>
+            <div id="typeCpEditList"></div>
+            <button type="button" id="typeCpEditAdd" className="ghost-btn-text" style={{ marginTop: 8 }}>+ Add checkpoint</button>
+            <p id="typeCpEditMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelTypeCpEditModal">Skip</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="saveTypeCpEditModal">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="taskCpModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3 id="taskCpModalTitle">Task type checkpoints</h3>
+            <button className="modal-close" id="closeTaskCpModal" type="button">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p className="form-note" id="taskCpModalSub">Tick every checkpoint. The task is assigned only after all are ticked.</p>
+            <div id="taskCpModalList"></div>
+            <p id="taskCpModalMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelTaskCpModal">Cancel</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="submitTaskCpModal" disabled>Assign task</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recurring Task Done Modal (checkpoints if any + optional photo) */}
+      <div id="checkpointModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3 id="checkpointModalTitle">Mark done</h3>
+            <button className="modal-close" id="closeCheckpointModal">&times;</button>
+          </div>
+          <div className="modal-body">
+            <div id="checkpointModalList"></div>
+            <div className="field" style={{ marginTop: 12 }}>
+              <label htmlFor="checkpointModalPhoto">Photo <span className="optional">(optional)</span></label>
+              <input id="checkpointModalPhoto" type="file" accept="image/*" capture="environment" />
+              <p className="form-note">You can finish without a photo.</p>
+            </div>
+            <p id="checkpointModalMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelCheckpointModal">Cancel</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="submitCheckpointModal">Submit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Reschedule Modal */}
+      <div id="rescheduleModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Reschedule task</h3>
+            <button className="modal-close" id="closeRescheduleModal">&times;</button>
+          </div>
+          <form id="rescheduleForm" className="modal-body">
+
+            <div className="field">
+              <label htmlFor="reschedule-date">New target date <span className="req">*</span></label>
+              <input id="reschedule-date" type="datetime-local" required />
+            </div>
+            <div className="field">
+              <label htmlFor="reschedule-reason">Reason</label>
+              <textarea id="reschedule-reason" rows={2} placeholder="Why is this task being rescheduled?"></textarea>
+            </div>
+            <p id="rescheduleFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelRescheduleModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Request Reschedule Modal (employee — goes to admin for approval, doesn't change the date directly) */}
+      <div id="reschedRequestModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Request a reschedule</h3>
+            <button className="modal-close" id="closeReschedRequestModal">&times;</button>
+          </div>
+          <form id="reschedRequestForm" className="modal-body">
+            <p className="form-note" style={{ margin: '0 0 14px' }}>This sends a request to the admin — the task's date won't change until it's approved.</p>
+            <div className="field">
+              <label htmlFor="reschedreq-date">Requested new date <span className="req">*</span></label>
+              <input id="reschedreq-date" type="date" required />
+            </div>
+            <div className="field">
+              <label htmlFor="reschedreq-additional-hours">Additional Hours</label>
+              <input id="reschedreq-additional-hours" type="number" min="0" step="0.25" placeholder="e.g. 2" required />
+              <small className="form-note">Extra time needed to complete this task, in hours.</small>
+            </div>
+            <div className="field">
+              <label htmlFor="reschedreq-reason">Reason <span className="optional">(optional)</span></label>
+              <textarea id="reschedreq-reason" rows={3} placeholder="Why do you need this task moved?"></textarea>
+            </div>
+            <p id="reschedRequestFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelReschedRequestModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Send request</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Admin approve reschedule — hours summary + employee date vs own date/time.
+      Use class is-open (not React hidden) so mountTaskflowApp can show it reliably. */}
+      <div id="reschedApproveModal" className="modal-backdrop resched-approve-modal" aria-hidden="true">
+        <div className="modal" style={{ maxWidth: 520 }}>
+          <div className="modal-header">
+            <h3>Approve reschedule</h3>
+            <button type="button" className="modal-close" id="closeReschedApproveModal">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p className="form-note" style={{ margin: '0 0 12px' }} id="reschedApproveTaskLabel"></p>
+            <div id="reschedApproveHoursBox" style={{ background: '#F7F3EC', borderRadius: 8, padding: '12px 14px', marginBottom: 14, fontSize: 13, lineHeight: 1.55 }}>
+              <div><strong>Assigned hours:</strong> <span id="reschedApproveAssigned">—</span></div>
+              <div><strong>Hours done:</strong> <span id="reschedApproveDone">—</span></div>
+              <div><strong>Hours remaining:</strong> <span id="reschedApproveRemaining">—</span></div>
+              <div><strong>Additional hours requested:</strong> <span id="reschedApproveAdditionalHours">—</span></div>
+              <div style={{ marginTop: 6 }}><strong>Employee requested date:</strong> <span id="reschedApproveRequested">—</span></div>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: 13 }}>
+              Approve the employee&apos;s requested date, or set your own date &amp; time (consider remaining hours)?
+            </p>
+            <div className="field">
+              <label>
+                <input type="radio" name="reschedApproveChoice" id="reschedApproveUseEmp" value="emp" defaultChecked />
+                {' '}Yes — use employee requested date
+              </label>
+            </div>
+            <div className="field">
+              <label>
+                <input type="radio" name="reschedApproveChoice" id="reschedApproveUseAdmin" value="admin" />
+                {' '}No — I will set date &amp; time
+              </label>
+            </div>
+            <div className="field" id="reschedApproveCustomWrap" style={{ display: 'none' }}>
+              <label htmlFor="reschedApproveDatetime">Your deadline (date &amp; time) <span className="req">*</span></label>
+              <input id="reschedApproveDatetime" type="datetime-local" />
+            </div>
+            <p id="reschedApproveFormMsg" className="form-error" style={{ display: 'none' }}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelReschedApproveModal">Cancel</button>
+              <button type="button" className="primary-btn primary-btn-inline" id="confirmReschedApproveBtn">Confirm approve</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* SET EXTENDED TIME (Overdue view only — does not change target_date) */}
+      <div id="overdueExtendModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>⏱ Set extended time</h3>
+            <button className="modal-close" id="closeOverdueExtendModal">&times;</button>
+          </div>
+          <form id="overdueExtendForm" className="modal-body">
+            <p className="view-sub" style={{ margin: '0 0 14px' }}>This only affects the Overdue Tasks view — the employee and other views still show the original planned date.</p>
+            <div className="field">
+              <label htmlFor="overdue-extend-date">New time the employee asked for <span className="req">*</span></label>
+              <input id="overdue-extend-date" type="datetime-local" required />
+            </div>
+            <div className="field">
+              <label htmlFor="overdue-extend-reason">Reason (optional)</label>
+              <textarea id="overdue-extend-reason" rows={3} placeholder="e.g. waiting on material delivery"></textarea>
+            </div>
+            <p id="overdueExtendFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelOverdueExtendModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* OVERDUE TASK DETAIL PANEL (right-side drawer: Today / Pending tabs) */}
+      <div id="overdueDrawerBackdrop" className="drawer-backdrop" hidden={true}>
+        <div className="drawer-panel">
+          <div className="drawer-header">
+            <h3>Overdue tasks</h3>
+            <button className="modal-close" id="closeOverdueDrawer">&times;</button>
+          </div>
+          <div className="drawer-tabs">
+            <button type="button" className="drawer-tab active" id="overdueTabToday">Today <span className="tab-count" id="overdueTabTodayCount">0</span></button>
+            <button type="button" className="drawer-tab" id="overdueTabPending">Pending <span className="tab-count" id="overdueTabPendingCount">0</span></button>
+          </div>
+          <div className="drawer-body" id="overdueDrawerBody"></div>
+        </div>
+      </div>
+
+
+      {/* Reassign Modal */}
+      <div id="reassignModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Reassign task</h3>
+            <button className="modal-close" id="closeReassignModal">&times;</button>
+          </div>
+          <form id="reassignForm" className="modal-body">
+            <div className="field">
+              <label htmlFor="reassign-employee">New assignee <span className="req">*</span></label>
+              <select id="reassign-employee" required><option value="">Select employee</option></select>
+            </div>
+            <p className="form-note">The task will be reset to "Pending" for the new assignee.</p>
+            <p id="reassignFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelReassignModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Reassign</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Correction Modal (verifier → employee) */}
+      <div id="correctionModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>↩ Send for Correction</h3>
+            <button className="modal-close" id="closeCorrectionModal">&times;</button>
+          </div>
+          <form id="correctionForm" className="modal-body">
+            <div className="field">
+              <label htmlFor="correction-note">Correction note <span className="req">*</span></label>
+              <textarea id="correction-note" rows={4} placeholder="Describe what needs to be corrected…" required></textarea>
+            </div>
+            <div className="field">
+              <label>Voice note <span className="optional">(optional)</span></label>
+              <div className="voice-recorder-wrap" id="corrVoiceRecorderWrap">
+                <div className="voice-recorder-btns">
+                  <button type="button" id="corrStartRecord" className="ghost-btn-text">🎤 Start recording</button>
+                  <button type="button" id="corrStopRecord" className="ghost-btn-text" disabled style={{ color: '#e53e3e' }}>⏹ Stop</button>
+                </div>
+                <span id="corrRecordStatus" className="form-note"></span>
+                <audio id="corrVoicePlayback" controls hidden={true} style={{ marginTop: 8, width: '100%' }}></audio>
+              </div>
+            </div>
+            <div className="field">
+              <p id="correctionCurrentDue" className="form-note" style={{ marginBottom: 8 }}>This was your target date.</p>
+              <label htmlFor="correction-due-action">Now what would you like to do?</label>
+              <select id="correction-due-action">
+                <option value="keep">Keep the same date</option>
+                <option value="hours">Give extra hours</option>
+                <option value="days">Give extra days</option>
+                <option value="new">Set a new date &amp; time</option>
+              </select>
+            </div>
+            <div className="field" id="correctionExtraWrap" hidden={true}>
+              <label htmlFor="correction-extra-amount">How much extra?</label>
+              <input id="correction-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+              <input type="hidden" id="correction-extra-unit" value="" />
+            </div>
+            <div className="field" id="correctionNewDueWrap" hidden={true}>
+              <label htmlFor="correction-new-due">New due date &amp; time</label>
+              <input id="correction-new-due" type="datetime-local" />
+              <p className="form-note">This exact date and time will become the new target date for this task.</p>
+            </div>
+            <p id="correctionFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelCorrectionModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Send Correction</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Resend Verification Modal (employee after correction) */}
+      <div id="resendVerifyModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Resend for Verification</h3>
+            <button className="modal-close" id="closeResendVerifyModal">&times;</button>
+          </div>
+          <form id="resendVerifyForm" className="modal-body">
+            <p className="form-note" style={{ marginBottom: 12 }}>Sending back to: <strong id="resendVerifierName">—</strong></p>
+            <div className="field">
+              <label htmlFor="resend-files">Attach files <span className="optional">(max 3)</span></label>
+              <input id="resend-files" type="file" multiple accept="*/*" />
+              <span className="form-note">Hold Ctrl / Cmd to select multiple files</span>
+            </div>
+            <p id="resendVerifyFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelResendVerifyModal">Cancel</button>
+              <button type="submit" className="primary-btn primary-btn-inline">Resend for Verification</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+
+      {/* Add/Edit Recurring Task Modal */}
+      <div id="recurringModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3 id="recurringModalTitle">🔁 Create Recurring Task</h3>
+            <button className="modal-close" id="closeRecurringModal">&times;</button>
+          </div>
+          <div className="modal-body" id="recurringModalBody">
+            <input type="hidden" id="recurring-edit-id" />
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="rec-department">Department <span className="optional">(Optional)</span></label>
+                <select id="rec-department"><option value="">Select Department</option></select>
+              </div>
+              <div className="field">
+                <label htmlFor="rec-employee">Employee <span className="req">*</span></label>
+                <select id="rec-employee" required><option value="">Select Employee</option></select>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="rec-tasktype">Task Type <span className="optional">(Optional)</span></label>
+                <select id="rec-tasktype">
+                  <option value="">Select Task Type</option>
+                  <option value="__add_new__">+ Add new task type…</option>
+                </select>
+                <div id="recNewTaskTypeRow" className="inline-add-row" hidden={true}>
+                  <input type="text" id="recNewTaskTypeInput" placeholder="New task type name…" />
+                  <button type="button" id="recNewTaskTypeSave" className="primary-btn primary-btn-inline">Add</button>
+                  <button type="button" id="recNewTaskTypeCancel" className="ghost-btn-text">Cancel</button>
+                </div>
+                <p id="recTaskTypeMsg" className="form-error" hidden={true}></p>
+              </div>
+              <div className="field">
+                <label htmlFor="rec-project">Project <span className="optional">(Optional)</span></label>
+                <select id="rec-project"><option value="">Select Project</option></select>
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="rec-description">Task Description <span className="req">*</span></label>
+              <textarea id="rec-description" rows={3} placeholder="Describe the recurring task" required></textarea>
+            </div>
+            <div className="field" hidden={true}>
+              <label htmlFor="rec-priority">Priority</label>
+              <select id="rec-priority" defaultValue="Medium">
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+              </select>
+            </div>
+
+            {/* Frequency selector */}
+            <div className="field">
+              <label>Frequency <span className="req">*</span></label>
+              <div className="freq-grid">
+                <button type="button" className="freq-btn" data-freq="Daily"><strong>Daily</strong><small>Every day</small></button>
+                <button type="button" className="freq-btn" data-freq="Weekly"><strong>Weekly</strong><small>Every week</small></button>
+                <button type="button" className="freq-btn" data-freq="Monthly"><strong>Monthly</strong><small>Every month</small></button>
+                <button type="button" className="freq-btn" data-freq="Yearly"><strong>Yearly</strong><small>Every year</small></button>
+              </div>
+            </div>
+
+            {/* Weekly day selector */}
+            <div className="field" id="weeklyDaysField" hidden={true}>
+              <label>Select Days <span className="req">*</span></label>
+              <div className="days-grid">
+                <label className="day-check"><input type="checkbox" defaultValue="0" /> Sun</label>
+                <label className="day-check"><input type="checkbox" defaultValue="1" /> Mon</label>
+                <label className="day-check"><input type="checkbox" defaultValue="2" /> Tue</label>
+                <label className="day-check"><input type="checkbox" defaultValue="3" /> Wed</label>
+                <label className="day-check"><input type="checkbox" defaultValue="4" /> Thu</label>
+                <label className="day-check"><input type="checkbox" defaultValue="5" /> Fri</label>
+                <label className="day-check"><input type="checkbox" defaultValue="6" /> Sat</label>
+              </div>
+            </div>
+
+            {/* Monthly day-of-month range (from–to, e.g. 14–17) */}
+            <div className="field" id="monthlyDayField" hidden={true}>
+              <label>Days of month <span className="req">*</span></label>
+              <div className="field-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="field" style={{ margin: 0 }}>
+                  <label htmlFor="rec-monthly-day">From</label>
+                  <select id="rec-monthly-day" defaultValue="1">
+                    {Array.from({ length: 31 }, (_, i) => {
+                      const d = i + 1;
+                      const suf =
+                        d === 1 || d === 21 || d === 31 ? 'st'
+                          : d === 2 || d === 22 ? 'nd'
+                            : d === 3 || d === 23 ? 'rd'
+                              : 'th';
+                      return (
+                        <option key={d} value={d}>
+                          {d}{suf}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="field" style={{ margin: 0 }}>
+                  <label htmlFor="rec-monthly-day-to">To</label>
+                  <select id="rec-monthly-day-to" defaultValue="1">
+                    {Array.from({ length: 31 }, (_, i) => {
+                      const d = i + 1;
+                      const suf =
+                        d === 1 || d === 21 || d === 31 ? 'st'
+                          : d === 2 || d === 22 ? 'nd'
+                            : d === 3 || d === 23 ? 'rd'
+                              : 'th';
+                      return (
+                        <option key={`to-${d}`} value={d}>
+                          {d}{suf}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+              <p className="form-note">Same day = once per month. Range (e.g. 14–17) = one task each day in that window. Short months clamp to month-end.</p>
+            </div>
+
+            {/* Active period */}
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="rec-start">Start Date <span className="req">*</span></label>
+                <input id="rec-start" type="date" required />
+              </div>
+              <div className="field">
+                <label htmlFor="rec-end">End Date <span className="optional">(optional)</span></label>
+                <input id="rec-end" type="date" />
+              </div>
+            </div>
+
+            {/* Checkpoints */}
+            <div className="field">
+              <label>Checkpoints <span className="optional">(optional)</span></label>
+              <p className="form-note">Employee must tick all checkpoints before the task is marked done.</p>
+              <div id="checkpointsList"></div>
+              <button type="button" id="addCheckpointBtn" className="ghost-btn-text" style={{ marginTop: 8 }}>+ Add checkpoint</button>
+            </div>
+
+            <p id="recurringFormMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="cancelRecurringModal">Cancel</button>
+              <button type="button" id="saveRecurringBtn" className="primary-btn primary-btn-inline">Create Recurring Task</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="meetOverlay" className="meet-overlay" hidden>
+        <div id="meetJitsiNotice" className="meet-jitsi-notice">
+          <span className="meet-jitsi-notice-icon" aria-hidden="true">!</span>
+          <p>
+            Embedding meet.jitsi.si is only meant for demo purposes, so an embedded call disconnects in 5 minutes.
+            TaskFlow now opens the real Jitsi window. Keep this tab open so spoken words are written to MoM.
+            Please use <a href="https://jaas.8x8.vc/" target="_blank" rel="noopener noreferrer">Jitsi as a Service</a> for production.
+          </p>
+          <button type="button" id="meetNoticeClose" className="meet-jitsi-notice-x" aria-label="Dismiss">×</button>
+        </div>
+        <div className="meet-overlay-bar">
+          <div>
+            <strong>Minutes of meeting</strong>
+            <span id="meetCaptionStatus" className="meet-caption-status">Capturing spoken words for MoM…</span>
+          </div>
+          <div className="meet-overlay-actions">
+            <button type="button" id="meetOpenCallBtn" className="primary-btn primary-btn-inline">Open / rejoin Jitsi</button>
+            <button type="button" id="meetEndMomBtn" className="primary-btn primary-btn-inline">End call &amp; write MoM</button>
+            <button type="button" id="meetCloseBtn" className="ghost-btn">Close captions</button>
+          </div>
+        </div>
+        <div className="meet-caption-panel">
+          <p className="meet-caption-hint">Video is in the Jitsi window. Live captions for MoM appear below.</p>
+          <pre id="meetLiveCaption" className="meet-live-caption"></pre>
+        </div>
+      </div>
+
+
+    </>
+  );
+}

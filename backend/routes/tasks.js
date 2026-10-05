@@ -1,0 +1,2609 @@
+const express = require('express');
+const multer = require('multer');
+const supabase = require('../lib/supabaseClient');
+const { requireAuth, requireAdmin, requireAdminOrMis, requireCanAddTask } = require('../middleware/auth');
+const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours, endOfIstCalendarDay } = require('../lib/workingHours');
+const {
+  workTimerAnchor,
+  workTimerBudgetHours,
+  assignedWorkDeadline,
+  holdSecondsBetween,
+} = require('../lib/taskOverdue');
+const {
+  sendWhatsAppTemplate,
+  sendVerificationAlertTemplate,
+} = require('../lib/whatsapp');
+const { notifyAssigneeOpenTasksList } = require('../lib/taskListDigest');
+const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
+const router = express.Router();
+router.use(requireAuth);
+
+async function notifyWa(toNumber, templateName, bodyParams) {
+  try {
+    return await sendWhatsAppTemplate(toNumber, templateName, bodyParams);
+  } catch (err) {
+    console.warn('WhatsApp skip:', templateName, err.message);
+    return { ok: false, reason: err.message };
+  }
+}
+
+async function userWaByUsername(username) {
+  if (!username) return null;
+  const { data } = await supabase
+    .from('users')
+    .select('whatsapp_number, full_name, username')
+    .eq('username', username)
+    .maybeSingle();
+  if (!data?.whatsapp_number) return null;
+  return data;
+}
+
+/** Deduped WhatsApp sends by normalized number. */
+async function notifyWaMany(recipients, templateName, bodyParams) {
+  const seen = new Set();
+  const results = [];
+  for (const r of recipients || []) {
+    const raw = r?.whatsapp_number || r?.number || r;
+    const label = r?.full_name || r?.label || '';
+    const key = String(raw || '').replace(/\D/g, '');
+    if (!key || seen.has(key.slice(-10))) continue;
+    seen.add(key.slice(-10));
+    const sent = await notifyWa(raw, templateName, bodyParams);
+    results.push({ ok: !!sent?.ok, to: sent?.to || raw, label, reason: sent?.reason || null });
+  }
+  return results;
+}
+
+function applyDeadlineChange(existing, body, note) {
+  let target_date = existing.target_date;
+  let hours_to_complete = existing.hours_to_complete != null ? Number(existing.hours_to_complete) : null;
+  let extra_hours = Number(existing.extra_hours || 0);
+  let extra_days = Number(existing.extra_days || 0);
+  const extensions = Array.isArray(existing.correction_extensions) ? [...existing.correction_extensions] : [];
+  const extraUnit = String(body.extra_unit || '').toLowerCase();
+  const extraAmount = Number(body.extra_amount || 0);
+  const newDueRaw = String(body.new_target_date || '').trim();
+  let usedExplicitDue = false;
+  if (newDueRaw) {
+    const d = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(newDueRaw) && !/[zZ]|[+-]\d{2}:\d{2}$/.test(newDueRaw)
+      ? (() => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(newDueRaw);
+        return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : new Date(newDueRaw);
+      })()
+      : new Date(newDueRaw);
+    if (!Number.isNaN(d.getTime())) {
+      target_date = d.toISOString();
+      usedExplicitDue = true;
+      extensions.push({
+        at: new Date().toISOString(),
+        by: body._by || null,
+        unit: 'new_due',
+        amount: 0,
+        note: String(note || '').slice(0, 200),
+        new_target_date: target_date,
+      });
+    }
+  }
+  if (extraAmount > 0 && (extraUnit === 'hours' || extraUnit === 'days')) {
+    if (extraUnit === 'hours') {
+      extra_hours += extraAmount;
+      hours_to_complete = (hours_to_complete || 0) + extraAmount;
+      if (!usedExplicitDue && target_date) {
+        target_date = addWorkingHours(target_date, extraAmount).toISOString();
+      }
+    } else {
+      extra_days += extraAmount;
+      if (!usedExplicitDue && target_date) {
+        target_date = addCalendarDays(target_date, extraAmount).toISOString();
+      }
+    }
+    extensions.push({
+      at: new Date().toISOString(),
+      by: body._by || null,
+      unit: extraUnit,
+      amount: extraAmount,
+      note: String(note || '').slice(0, 200),
+    });
+  }
+  return { target_date, hours_to_complete, extra_hours, extra_days, extensions };
+}
+
+// Older deployments may not have run every SQL migration yet. Retry the update
+// after dropping whichever column Postgres says it doesn't know about, so a
+// missing migration degrades one field instead of breaking the whole action.
+async function updateTaskTolerant(id, updates, select) {
+  await resolveTaskSelect();
+  const sel = select || TASK_SELECT;
+  const attempt = { ...updates };
+  for (let i = 0; i < 6; i += 1) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(attempt)
+      .eq('id', id)
+      .select(sel)
+      .single();
+    if (!error) return data;
+    const msg = String(error.message || '');
+    const hit = /'([a-z_]+)' column/i.exec(msg) || /column "?([a-z_]+)"?/i.exec(msg);
+    const col = hit && hit[1];
+    if (col && Object.prototype.hasOwnProperty.call(attempt, col)) {
+      delete attempt[col];
+      continue;
+    }
+    // Select string references a missing column — step down one tier and retry.
+    if (/column|schema cache/i.test(msg) && sel === TASK_SELECT_PLAN) {
+      TASK_SELECT = TASK_SELECT_FULL;
+      return updateTaskTolerant(id, attempt, TASK_SELECT_FULL);
+    }
+    if (/original_hours|first_accepted|column|schema cache/i.test(msg) && sel === TASK_SELECT_FULL) {
+      TASK_SELECT = TASK_SELECT_LEGACY;
+      return updateTaskTolerant(id, attempt, TASK_SELECT_LEGACY);
+    }
+    throw error;
+  }
+  throw new Error('Could not update task');
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function taskEventsOf(existing) {
+  return Array.isArray(existing?.task_events) ? [...existing.task_events] : [];
+}
+
+function withTaskEvent(existing, action, by, extra = {}) {
+  const events = taskEventsOf(existing);
+  events.push({ at: nowIso(), action, by: by || null, ...extra });
+  return events.slice(-80);
+}
+
+function firstStamp(existing, field, value) {
+  return existing?.[field] || value;
+}
+
+const TASK_TIME_SELECT =
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, original_target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_approved_target_date, reschedule_approved_at, reschedule_count, assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason, accept_reminder_sent_at, is_on_hold, hold_remaining_hours, held_at, resumed_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at';
+
+// Newer plan/timer columns may not be migrated yet — fall back progressively so
+// a missing migration degrades a field instead of breaking the whole action.
+async function loadTaskForStamp(id) {
+  let { data, error } = await supabase.from('tasks').select(TASK_TIME_SELECT).eq('id', id).maybeSingle();
+  if (error && /column|schema cache/i.test(error.message || '')) {
+    const retry = await supabase
+      .from('tasks')
+      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, is_on_hold, hold_remaining_hours, held_at, resumed_at')
+      .eq('id', id)
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error && /column|schema cache/i.test(error.message || '')) {
+    const retry2 = await supabase
+      .from('tasks')
+      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours')
+      .eq('id', id)
+      .maybeSingle();
+    data = retry2.data;
+    error = retry2.error;
+  }
+  if (error) throw error;
+  return data;
+}
+
+// Both "toast says success but the date shown afterwards is still the old
+// one" reports (direct admin reschedule AND reschedule-request approval)
+// share one thing in common: they both PATCH successfully, then immediately
+// re-fetch via a GET to redraw the list. If that GET gets served from a
+// cache (browser heuristic cache, or an intermediary/mobile-network proxy)
+// instead of hitting this server, the redraw shows the pre-update snapshot
+// even though the database was updated correctly. None of the GET routes
+// below were sending explicit cache headers, so this was left to browser/
+// proxy defaults. Forcing no-store removes that possibility entirely.
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
+// 5 MB per file by default — change MAX_FILE_SIZE_MB below if you actually need a larger limit.
+const MAX_FILE_SIZE_MB = 5;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024 }
+});
+
+const BUCKET = 'task-files';
+
+// Nested select used everywhere we return a task, so every task always
+// looks the same on the wire (matches what frontend/app.js expects).
+//
+// Three tiers, newest first. Each tier drops the columns added by the migration
+// above it, so an un-migrated database still serves tasks instead of erroring.
+const TASK_SELECT_PLAN = `
+  id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
+  original_target_date, reschedule_approved_target_date, reschedule_approved_at, reschedule_count,
+  assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason,
+  accept_reminder_sent_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at,
+  rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
+  accepted_at, rejected_at, sent_for_verification_at, verified_at,
+  verification_status, verification_note, verification_attachment_urls,
+  verification_started_by, verification_started_at,
+  correction_voice_url, updation_note, task_events,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
+  reschedule_requested_at, reschedule_decided_at,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name ),
+  reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
+`;
+
+const TASK_SELECT_FULL = `
+  id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
+  rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
+  accepted_at, rejected_at, sent_for_verification_at, verified_at,
+  verification_status, verification_note, verification_attachment_urls,
+  verification_started_by, verification_started_at,
+  correction_voice_url, updation_note, task_events,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
+  reschedule_requested_at, reschedule_decided_at,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name ),
+  reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
+`;
+
+const TASK_SELECT_LEGACY = `
+  id, description, hours_to_complete, target_date, priority,
+  rescheduling_possible, status, status_note, attachment_url, voice_note_url, created_at,
+  assigned_at, extra_hours, extra_days, correction_extensions,
+  is_on_hold, hold_remaining_hours, held_at, resumed_at,
+  accepted_at, rejected_at, sent_for_verification_at, verified_at,
+  verification_status, verification_note, verification_attachment_urls,
+  verification_started_by, verification_started_at,
+  correction_voice_url, updation_note, task_events,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
+  reschedule_requested_at, reschedule_decided_at,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name ),
+  reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
+`;
+
+// Resolved once — picks the richest select the database actually supports.
+let TASK_SELECT = TASK_SELECT_PLAN;
+let _taskSelectReady = null;
+async function resolveTaskSelect() {
+  if (_taskSelectReady) return _taskSelectReady;
+  _taskSelectReady = (async () => {
+    const plan = await supabase
+      .from('tasks')
+      .select('id, original_target_date, work_due_at, reaccept_required, total_hold_seconds, reschedule_requested_additional_hours')
+      .limit(1);
+    if (!plan.error) {
+      TASK_SELECT = TASK_SELECT_PLAN;
+      return TASK_SELECT;
+    }
+    console.warn('tasks: plan columns missing (run backend/sql/add_task_plan_separation.sql)');
+
+    const { error } = await supabase
+      .from('tasks')
+      .select('id, original_hours_to_complete, first_accepted_at')
+      .limit(1);
+    if (error && /original_hours|first_accepted|column|schema cache/i.test(error.message || '')) {
+      TASK_SELECT = TASK_SELECT_LEGACY;
+      console.warn('tasks: using legacy TASK_SELECT (run backend/sql/add_original_hours.sql)');
+    } else {
+      TASK_SELECT = TASK_SELECT_FULL;
+    }
+    return TASK_SELECT;
+  })();
+  return _taskSelectReady;
+}
+resolveTaskSelect().catch((e) => console.warn('resolveTaskSelect', e.message));
+
+function parseCheckpointLabels(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((x) => String(typeof x === 'string' ? x : x?.label || '').trim()).filter(Boolean);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      return parseCheckpointLabels(JSON.parse(raw));
+    } catch {
+      return raw.split('\n').map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function normalizeCheckpointRows(rows) {
+  return (rows || []).map((r, i) => ({
+    id: r.id,
+    label: r.label || r.meta?.label || 'Checkpoint',
+    sort_order: r.sort_order ?? r.meta?.sort_order ?? i,
+    is_done: !!(r.is_done ?? r.completed ?? r.meta?.is_done),
+  }));
+}
+
+function isMissingRelation(err) {
+  const m = String(err?.message || err || '');
+  return /schema cache|could not find the table|does not exist|relation .* does not exist/i.test(m);
+}
+
+async function saveTaskCheckpoints(taskId, labels) {
+  const clean = (labels || []).map((l) => String(l || '').trim()).filter(Boolean);
+  if (!clean.length) return [];
+
+  const delPrimary = await supabase.from('task_checkpoints').delete().eq('task_id', taskId);
+  if (!delPrimary.error || !isMissingRelation(delPrimary.error)) {
+    const attempts = [
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i, is_done: false, completed: false })),
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i, is_done: false })),
+      clean.map((label, i) => ({ task_id: taskId, label, sort_order: i })),
+      clean.map((label) => ({ task_id: taskId, label })),
+    ];
+    for (const rows of attempts) {
+      const { data, error } = await supabase
+        .from('task_checkpoints')
+        .insert(rows)
+        .select('id, label');
+      if (!error) return normalizeCheckpointRows(data);
+      if (isMissingRelation(error)) break;
+    }
+  }
+
+  const delFallback = await supabase.from('checkpoints').delete().eq('task_id', taskId);
+  if (!delFallback.error || !isMissingRelation(delFallback.error)) {
+    const fallback = clean.map((label, i) => ({
+      task_id: taskId,
+      label,
+      meta: { sort_order: i, is_done: false },
+    }));
+    const { data, error } = await supabase.from('checkpoints').insert(fallback).select('id, label, meta');
+    if (!error) return normalizeCheckpointRows(data);
+    if (!isMissingRelation(error)) throw error;
+  }
+
+  return [];
+}
+
+async function loadTaskCheckpoints(taskId) {
+  const primary = await supabase
+    .from('task_checkpoints')
+    .select('id, label, sort_order, is_done, completed, meta')
+    .eq('task_id', taskId)
+    .order('sort_order', { ascending: true });
+  if (!primary.error && (primary.data || []).length) return normalizeCheckpointRows(primary.data);
+  if (primary.error && !isMissingRelation(primary.error)) {
+    console.warn('Load task_checkpoints:', primary.error.message);
+  }
+  const fallback = await supabase.from('checkpoints').select('id, label, meta').eq('task_id', taskId);
+  if (!fallback.error && (fallback.data || []).length) return normalizeCheckpointRows(fallback.data);
+  return [];
+}
+
+async function upsertTypeCheckpointTemplate(taskTypeId, labels) {
+  if (!taskTypeId) return;
+  await supabase.from('task_type_checkpoint_templates').delete().eq('task_type_id', taskTypeId);
+  const rows = (labels || [])
+    .map((label, i) => ({ task_type_id: taskTypeId, label: String(label || '').trim(), sort_order: i }))
+    .filter((r) => r.label);
+  if (rows.length) await supabase.from('task_type_checkpoint_templates').insert(rows);
+}
+
+async function uploadFile(file, folder) {
+  if (!file) return null;
+  const safeName = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const path = `${folder}/${Date.now()}_${safeName}`;
+
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
+    contentType: file.mimetype,
+    upsert: false
+  });
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// ----------------------------- create task (admin or can_add_task) -----------------------------
+router.post(
+  '/',
+  requireCanAddTask,
+  upload.fields([
+    { name: 'attachment', maxCount: 1 },
+    { name: 'voice_note', maxCount: 1 }
+  ]),
+  async (req, res) => {
+    try {
+      await resolveTaskSelect();
+      const {
+        department_id,
+        assigned_to,
+        project_id,
+        task_type_id,
+        description,
+        hours_to_complete,
+        target_date,
+        priority,
+        rescheduling_possible
+      } = req.body;
+
+      // if (!department_id || !assigned_to || !project_id || !task_type_id || !description || !target_date) {
+      //   return res.status(400).json({ error: 'Please fill in all required fields' });
+      // }
+      if (!department_id || !assigned_to || !task_type_id || !description || !target_date) {
+        return res.status(400).json({ error: 'Please fill in all required fields' });
+      }
+
+      // Project sirf non-MDO-OFFICE tasks ke liye compulsory hai
+      const { data: dept } = await supabase.from('departments').select('name').eq('id', department_id).maybeSingle();
+      const isMdoOffice = dept?.name === 'MDO OFFICE';
+      if (!isMdoOffice && !project_id) {
+        return res.status(400).json({ error: 'Please select a project' });
+      }
+      //above chg are 17th july
+
+      const attachmentFile = req.files?.attachment?.[0];
+      const voiceNoteFile = req.files?.voice_note?.[0];
+
+      const [attachment_url, voice_note_url] = await Promise.all([
+        uploadFile(attachmentFile, 'attachments'),
+        uploadFile(voiceNoteFile, 'voice-notes')
+      ]);
+
+      const hrsNum = hours_to_complete ? Number(hours_to_complete) : null;
+      const assignedAtIso = new Date().toISOString();
+      // Pre-accept deadline the employee sees in Due, frozen at assign time so a
+      // later hold/correction can never rewrite what the original promise was.
+      const assignedDeadline = assignedWorkDeadline({
+        assigned_at: assignedAtIso,
+        hours_to_complete: hrsNum,
+        original_hours_to_complete: hrsNum,
+      });
+      const payload = {
+        department_id,
+        assigned_to,
+        assigned_by: req.user.id,
+        project_id: project_id || null,
+        task_type_id,
+        description,
+        hours_to_complete: hrsNum,
+        original_hours_to_complete: hrsNum,
+        target_date,
+        original_target_date: target_date,
+        assigned_deadline_at: assignedDeadline ? assignedDeadline.toISOString() : null,
+        priority: priority || 'Medium',
+        rescheduling_possible: rescheduling_possible === 'true',
+        attachment_url,
+        voice_note_url,
+        status: 'Pending',
+        assigned_at: assignedAtIso,
+        task_events: [{ at: assignedAtIso, action: 'assigned', by: req.user.id }],
+      };
+      let { data, error } = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+      // Drop plan columns one at a time if that migration has not been run yet.
+      for (let i = 0; i < 4 && error && /column|schema cache/i.test(error.message || ''); i += 1) {
+        const hit = /'([a-z_]+)' column/i.exec(error.message) || /column "?([a-z_]+)"?/i.exec(error.message);
+        const col = hit && hit[1];
+        if (!col || !Object.prototype.hasOwnProperty.call(payload, col)) break;
+        delete payload[col];
+        const retryPlan = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retryPlan.data;
+        error = retryPlan.error;
+      }
+      if (error && /original_hours_to_complete/i.test(error.message || '')) {
+        delete payload.original_hours_to_complete;
+        const retry0 = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retry0.data;
+        error = retry0.error;
+      }
+      if (error && /task_events|assigned_at/i.test(error.message || '')) {
+        delete payload.task_events;
+        if (/assigned_at/i.test(error.message || '')) delete payload.assigned_at;
+        const retry = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
+        data = retry.data;
+        error = retry.error;
+      }
+
+      //   if (error) throw error;
+      //   res.status(201).json(data);
+      // } catch (err) {
+      //   console.error('Create task error:', err.message);
+      if (error) throw error;
+
+      let cpLabels = parseCheckpointLabels(req.body.checkpoints);
+      if (!cpLabels.length && task_type_id) {
+        const { data: tmpl } = await supabase
+          .from('task_type_checkpoint_templates')
+          .select('label')
+          .eq('task_type_id', task_type_id)
+          .order('sort_order', { ascending: true });
+        cpLabels = (tmpl || []).map((r) => r.label).filter(Boolean);
+      }
+      if (cpLabels.length) {
+        try {
+          data.checkpoints = await saveTaskCheckpoints(data.id, cpLabels);
+          await upsertTypeCheckpointTemplate(task_type_id, cpLabels).catch(() => { });
+        } catch (cpErr) {
+          console.warn('Task checkpoints skip:', cpErr.message);
+          data.checkpoints = [];
+          data.checkpoint_error = cpErr.message;
+        }
+      } else {
+        data.checkpoints = [];
+      }
+
+      // Reliable assign ping: template to assignee only
+      const { data: assigneeUser } = await supabase
+        .from('users')
+        .select('whatsapp_number, full_name')
+        .eq('id', assigned_to)
+        .maybeSingle();
+
+      const dueLabel = data.target_date
+        ? String(data.target_date).slice(0, 16)
+        : new Date().toISOString().slice(0, 10);
+      const projectName = data.project?.name || 'DIP Projects';
+      const desc = (data.description || 'New task').slice(0, 200);
+
+      let waAssign = null;
+      if (assigneeUser?.whatsapp_number) {
+        try {
+          waAssign = await sendWhatsAppTemplate(
+            assigneeUser.whatsapp_number,
+            process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+            [
+              assigneeUser.full_name || 'Team member',
+              desc,
+              projectName,
+              dueLabel,
+              data.priority || priority || 'Medium',
+            ]
+          );
+          console.log(
+            'Task assign WA:',
+            assigneeUser.full_name,
+            assigneeUser.whatsapp_number,
+            waAssign?.ok ? 'ok' : waAssign?.reason || 'fail'
+          );
+        } catch (waErr) {
+          console.warn('WhatsApp assign skip:', waErr.message);
+          waAssign = { ok: false, reason: waErr.message };
+        }
+      } else {
+        console.warn('Task created but assignee has no whatsapp_number:', assigned_to);
+        waAssign = { ok: false, reason: 'no_number' };
+      }
+
+      res.status(201).json({
+        ...data,
+        _whatsapp: { assignee: waAssign },
+      });
+    } catch (err) {
+      console.error('Create task error:', err.message);
+      res.status(500).json({ error: err.message || 'Could not create task' });
+    }
+  }
+);
+
+// ----------------------------- all delegated tasks (admin only, reference view) -----------------------------
+// router.get('/all', requireAdmin, async (req, res) => {
+//   try {
+//     let query = supabase.from('tasks').select(TASK_SELECT).order('target_date', { ascending: true });
+
+//     if (req.query.department_id) query = query.eq('department_id', req.query.department_id);
+//     if (req.query.employee_id) query = query.eq('assigned_to', req.query.employee_id);
+//     if (req.query.status) query = query.eq('status', req.query.status);
+// ----------------------------- all delegated tasks (admin only) -----------------------------
+router.get('/all', requireAdmin, async (req, res) => {
+  try {
+    await resolveTaskSelect();
+    // Sirf MDO OFFICE ke admin (top-level) ko sab departments ka data dikhta
+    // hai. Baaki har department ka admin (jaise Engg. Division ka head)
+    // sirf apne hi department ke tasks dekh sakta hai.
+    if (req.user.department !== 'MDO OFFICE' && !req.user.department_id) {
+      return res.json([]);
+    }
+
+    // Supabase caps a single select at 1000 rows. Rebuild the query each page
+    // — the builder is not reusable after .range().
+    const pageSize = 1000;
+    const rows = [];
+    for (let from = 0; ; from += pageSize) {
+      let pageQuery = supabase.from('tasks').select(TASK_SELECT).order('target_date', { ascending: true });
+      if (req.user.department !== 'MDO OFFICE') {
+        pageQuery = pageQuery.eq('department_id', req.user.department_id);
+      } else if (req.query.department_id) {
+        pageQuery = pageQuery.eq('department_id', req.query.department_id);
+      }
+      if (req.query.employee_id) pageQuery = pageQuery.eq('assigned_to', req.query.employee_id);
+      if (req.query.status) pageQuery = pageQuery.eq('status', req.query.status);
+      const { data, error } = await pageQuery.range(from, from + pageSize - 1);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+    res.json(rows);
+  } catch (err) {
+    console.error('List all tasks error:', err.message);
+    res.status(500).json({ error: 'Could not load tasks' });
+  }
+});
+// ----------------------------- my tasks (everyone — only their own) -----------------------------
+// Active tasks for My Tasks (Office or Site). When status=Completed is requested,
+// returns completed tasks from the existing tasks table.
+router.get('/my', async (req, res) => {
+  try {
+    await resolveTaskSelect();
+    let query = supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .eq('assigned_to', req.user.id)
+      .neq('status', 'Rejected');
+
+    if (req.query.status === 'Completed' || req.query.status === 'Verified') {
+      query = query.or('status.eq.Completed,status.eq.Verified,verification_status.eq.Verified');
+    } else if (req.query.status) {
+      query = query.eq('status', req.query.status);
+    } else {
+      query = query.neq('status', 'Completed');
+    }
+
+    query = query.order('target_date', { ascending: true });
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('List my tasks error:', err.message);
+    res.status(500).json({ error: 'Could not load your tasks' });
+  }
+});
+
+// ----------------------------- completed task history (fetched from existing tasks table) -------------
+router.get(['/my-history', '/history'], async (req, res) => {
+  try {
+    await resolveTaskSelect();
+    const { project, type, from, to, q, employee_id, all } = req.query;
+
+    let query = supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .or('status.ilike.%completed%,status.ilike.%verified%,verification_status.ilike.%verified%')
+      .neq('status', 'Rejected')
+      .order('target_date', { ascending: false });
+
+    const isAdmin = String(req.user.role || '').toLowerCase() === 'admin';
+    if (employee_id) {
+      query = query.eq('assigned_to', employee_id);
+    } else if (!isAdmin && all !== 'true') {
+      // Regular employee: fetch their own completed tasks
+      query = query.eq('assigned_to', req.user.id);
+    }
+    // If admin (or all=true): fetch completed tasks across the team
+
+    if (project) query = query.eq('project_id', project);
+    if (type)    query = query.eq('task_type_id', type);
+    if (from)    query = query.gte('target_date', from);
+    if (to)      query = query.lte('target_date', to + 'T23:59:59');
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    // Optional full-text search filter (done in JS to avoid ilike complexity)
+    let rows = data || [];
+    if (q) {
+      const lc = q.toLowerCase();
+      rows = rows.filter((t) =>
+        (t.description || '').toLowerCase().includes(lc) ||
+        (t.project?.name || '').toLowerCase().includes(lc) ||
+        (t.task_type?.name || '').toLowerCase().includes(lc) ||
+        (t.assigned_to_user?.full_name || '').toLowerCase().includes(lc)
+      );
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Task history error:', err.message);
+    res.status(500).json({ error: 'Could not load task history' });
+  }
+});
+
+// ----------------------------- verification queue (for verifiers/admin) -----------------------------
+// router.get('/verifications', async (req, res) => {
+//   try {
+//     let query = supabase
+//       .from('tasks')
+//       .select(TASK_SELECT)
+//       .eq('verification_status', 'Pending Verification')
+//       .order('target_date', { ascending: true });
+
+//     // Admins have global oversight — they can verify any task, so they see
+//     // every pending verification request, not just ones where they were
+//     // specifically picked as the verifier. Everyone else only sees the ones
+//     // routed to them.
+//     if (req.user.role !== 'admin') {
+//       query = query.eq('verifier_id', req.user.id);
+//     }
+router.get('/verifications', async (req, res) => {
+  try {
+    await resolveTaskSelect();
+
+    const dept = String(req.user.department || '').toLowerCase().trim();
+    const isMdo = dept === 'mdo office' || /\bmdo\b/.test(dept);
+    const isMdoOversight =
+      isMdo &&
+      (req.user.role === 'admin' ||
+        !!req.user.is_head ||
+        /\bhead\b/i.test(String(req.user.designation || '')));
+
+    const applyScope = (q) => {
+      if (isMdoOversight) return q;
+      if (req.user.role === 'admin') return q.eq('department_id', req.user.department_id);
+      return q.eq('verifier_id', req.user.id);
+    };
+
+    let query = applyScope(
+      supabase
+        .from('tasks')
+        .select(TASK_SELECT)
+        .eq('verification_status', 'Pending Verification')
+        .order('sent_for_verification_at', { ascending: false })
+    );
+    let { data, error } = await query;
+
+    // Older DBs may lack sent_for_verification_at — fall back to target_date sort
+    if (error && /sent_for_verification_at|column|schema cache/i.test(error.message || '')) {
+      ({ data, error } = await applyScope(
+        supabase
+          .from('tasks')
+          .select(TASK_SELECT)
+          .eq('verification_status', 'Pending Verification')
+          .order('target_date', { ascending: true })
+      ));
+    }
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('List verifications error:', err.message);
+    res.status(500).json({ error: 'Could not load verification requests' });
+  }
+});
+
+// ----------------------------- start verification (the chosen verifier, or admin) -----------------------------
+router.patch('/:id/start-verification', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // const { data: existing, error: fetchErr } = await supabase
+    //   .from('tasks')
+    //   .select('id, verifier_id, verification_status, verification_started_by, verification_started_at')
+    //   .eq('id', id)
+    //   .maybeSingle();
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not the verifier for this task' });
+    }
+    if (existing.verification_status !== 'Pending Verification') {
+      return res.status(400).json({ error: 'This task is not awaiting verification' });
+    }
+
+    // Already started this cycle — keep the original start time.
+    if (existing.verification_started_at || existing.verification_started_by) {
+      const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
+      if (error) throw error;
+      return res.json(data);
+    }
+
+    const at = nowIso();
+    // Stamp these two fields on their own so a missing task_events column
+    // cannot swallow the start time (that is what made the button return after refresh).
+    const { error: stampErr } = await supabase
+      .from('tasks')
+      .update({
+        verification_started_by: req.user.id,
+        verification_started_at: at,
+      })
+      .eq('id', id);
+    if (stampErr) throw stampErr;
+
+    try {
+      await updateTaskTolerant(id, {
+        first_verification_started_at: firstStamp(existing, 'first_verification_started_at', at),
+        task_events: withTaskEvent(existing, 'start_verification', req.user.id),
+      }, 'id');
+    } catch (extraErr) {
+      console.warn('Start verification extra fields skip:', extraErr.message);
+    }
+
+    const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
+    if (error) throw error;
+    if (!data?.verification_started_at) {
+      return res.status(503).json({
+        error: 'Start verification time did not save. Run backend/sql/RUN_DIP_BOT_CHAT.sql in Supabase, then try again.',
+      });
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('Start verification error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not start verification' });
+  }
+});
+
+// Current verifier (or admin) hands a pending verification to a different verifier.
+// The new person sees it in their queue and starts verification themselves.
+router.patch('/:id/forward-verification', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const verifier_id = String(req.body?.verifier_id || '').trim();
+    if (!verifier_id) {
+      return res.status(400).json({ error: 'Please choose who should verify this task' });
+    }
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only the current verifier can send this task to someone else' });
+    }
+    if (existing.verification_status !== 'Pending Verification') {
+      return res.status(400).json({ error: 'This task is not awaiting verification' });
+    }
+    if (verifier_id === existing.verifier_id) {
+      return res.status(400).json({ error: 'This task is already with that verifier' });
+    }
+
+    const { data: verifierUser, error: verifierErr } = await supabase
+      .from('users')
+      .select('id, full_name, whatsapp_number, username, can_verify, role, is_active')
+      .eq('id', verifier_id)
+      .maybeSingle();
+    if (verifierErr) throw verifierErr;
+    if (!verifierUser || verifierUser.is_active === false) {
+      return res.status(400).json({ error: 'That verifier was not found' });
+    }
+    if (!verifierUser.can_verify && verifierUser.role !== 'admin') {
+      return res.status(400).json({ error: 'That person is not set up as a verifier' });
+    }
+
+    const data = await updateTaskTolerant(id, {
+      verifier_id,
+      verification_started_by: null,
+      verification_started_at: null,
+      task_events: withTaskEvent(existing, 'forward_verification', req.user.id, {
+        from_verifier_id: existing.verifier_id || null,
+        to_verifier_id: verifier_id,
+      }),
+    }, TASK_SELECT);
+
+    const SHARED_PLACEHOLDER_WA = '8208026194';
+    const waDigits = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
+    let waVerify = null;
+    if (verifierUser.whatsapp_number && waDigits(verifierUser.whatsapp_number) !== SHARED_PLACEHOLDER_WA) {
+      waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
+        verifierName: verifierUser.full_name || 'Verifier',
+        taskDescription: data.description || 'Task',
+        projectName: data.project?.name || '—',
+      });
+    } else {
+      waVerify = {
+        ok: false,
+        reason: verifierUser.whatsapp_number ? 'shared_placeholder_number' : 'no_number',
+      };
+    }
+
+    try {
+      const bot = require('./bot');
+      if (typeof bot.notifyVerifierBot === 'function') {
+        await bot.notifyVerifierBot(
+          verifier_id,
+          data.description || 'Task',
+          data.project?.name || '—'
+        );
+      }
+    } catch (botErr) {
+      console.warn('Forward verification bot notify skip:', botErr.message);
+    }
+
+    res.json({
+      ...data,
+      _whatsapp: {
+        ok: !!waVerify?.ok,
+        to: verifierUser.full_name || 'Verifier',
+        reason: waVerify?.ok ? null : waVerify?.reason || waVerify?.error || null,
+      },
+    });
+  } catch (err) {
+    console.error('Forward verification error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send this task to another verifier' });
+  }
+});
+
+// ----------------------------- accept task -----------------------------
+router.patch('/:id/accept', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only accept your own tasks' });
+    }
+
+    const at = nowIso();
+    // An approved reschedule resets the timer, so that Accept is a fresh start:
+    // the countdown runs from this moment for the full assigned hours again.
+    const isReaccept = !!existing.reaccept_required;
+    const lockedHours =
+      existing.original_hours_to_complete != null
+        ? existing.original_hours_to_complete
+        : existing.hours_to_complete;
+    const budgetHours = isReaccept ? lockedHours : existing.hours_to_complete;
+    const workDue = addWorkingHours(at, Number(budgetHours) || 0);
+
+    const updates = {
+      status: 'In Progress',
+      // first_accepted_at is the audit stamp and is never overwritten;
+      // accepted_at is the anchor of the CURRENT timer cycle.
+      accepted_at: isReaccept ? at : firstStamp(existing, 'accepted_at', at),
+      first_accepted_at: firstStamp(existing, 'first_accepted_at', at),
+      original_hours_to_complete: lockedHours,
+      accept_count: (Number(existing.accept_count) || 0) + 1,
+      reaccept_required: false,
+      reaccept_reason: null,
+      task_events: withTaskEvent(existing, isReaccept ? 'reaccept_task' : 'start_task', req.user.id, {
+        hours: Number(budgetHours) || null,
+        work_due_at: Number(budgetHours) > 0 ? workDue.toISOString() : null,
+      }),
+    };
+    if (Number(budgetHours) > 0) {
+      updates.work_due_at = workDue.toISOString();
+      // Fresh cycle — any earlier overdue mark no longer applies.
+      updates.overdue_since_at = null;
+    }
+    if (isReaccept) {
+      updates.hours_to_complete = lockedHours;
+      updates.hold_remaining_hours = null;
+      updates.resumed_at = null;
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Accept task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not accept task' });
+  }
+});
+
+// ----------------------------- hold task (employee pauses remaining work hours) -----------------------------
+router.patch('/:id/hold', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only hold your own tasks' });
+    }
+    if (existing.status !== 'In Progress') {
+      return res.status(400).json({ error: 'Only in-progress tasks can be put on hold' });
+    }
+    if (existing.is_on_hold) {
+      return res.status(400).json({ error: 'This task is already on hold' });
+    }
+    if (existing.verification_status === 'Pending Verification') {
+      return res.status(400).json({ error: 'Cannot hold while awaiting verification' });
+    }
+    if (existing.status === 'Ticket Raised' || existing.reschedule_status === 'Pending') {
+      return res.status(400).json({ error: 'Cannot hold this task right now' });
+    }
+    if (!existing.accepted_at) {
+      return res.status(400).json({ error: 'Accept the task first before putting it on hold' });
+    }
+    const totalHours = Number(existing.hours_to_complete);
+    if (!totalHours || totalHours <= 0) {
+      return res.status(400).json({ error: 'This task has no work hours to pause' });
+    }
+
+    // Hold only when the assignee has 2+ accepted active tasks (switch between them)
+    const assigneeId = existing.assigned_to;
+    const { data: siblingRows, error: sibErr } = await supabase
+      .from('tasks')
+      .select('id, status, accepted_at, verification_status, is_on_hold')
+      .eq('assigned_to', assigneeId)
+      .neq('status', 'Completed')
+      .neq('status', 'Rejected');
+    if (sibErr) throw sibErr;
+    const activeAccepted = (siblingRows || []).filter((t) => {
+      if (!t.accepted_at) return false;
+      if (t.verification_status === 'Pending Verification') return false;
+      return t.status === 'In Progress' || t.status === 'Ticket Raised' || !!t.is_on_hold;
+    });
+    if (activeAccepted.length < 2) {
+      return res.status(400).json({
+        error: 'Hold is only available when you have 2 or more accepted tasks in progress',
+      });
+    }
+
+    const at = nowIso();
+    const anchor = workTimerAnchor(existing) || existing.accepted_at;
+    const budget = workTimerBudgetHours(existing);
+    const elapsed = elapsedWorkingHours(anchor, at);
+    const remaining = Math.max(0, Math.round((budget - elapsed) * 100) / 100);
+
+    const data = await updateTaskTolerant(id, {
+      is_on_hold: true,
+      held_at: at,
+      hold_remaining_hours: remaining,
+      hold_count: (Number(existing.hold_count) || 0) + 1,
+      original_hours_to_complete:
+        existing.original_hours_to_complete != null
+          ? existing.original_hours_to_complete
+          : existing.hours_to_complete,
+      task_events: withTaskEvent(existing, 'hold', req.user.id, {
+        remaining_hours: remaining,
+        original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+        timer: 'stopped',
+        elapsed_hours: Math.round(elapsed * 100) / 100,
+      }),
+    }, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Hold task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not hold task' });
+  }
+});
+
+// ----------------------------- resume task (restart countdown with remaining hours) -----------------------------
+router.patch('/:id/resume', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only resume your own tasks' });
+    }
+    if (!existing.is_on_hold) {
+      return res.status(400).json({ error: 'This task is not on hold' });
+    }
+
+    const remaining = Number(existing.hold_remaining_hours ?? existing.hours_to_complete) || 0;
+    const at = nowIso();
+    // How long the timer actually stayed paused, counted in office hours only.
+    const heldSeconds = holdSecondsBetween(existing.held_at, at);
+    const workDue = addWorkingHours(at, remaining);
+
+    // held_at is deliberately kept: it is the audit stamp of the last pause and
+    // every reader gates on is_on_hold, so nothing displays it as "still held".
+    const data = await updateTaskTolerant(id, {
+      is_on_hold: false,
+      resumed_at: at,
+      hold_remaining_hours: remaining,
+      last_hold_seconds: heldSeconds,
+      total_hold_seconds: (Number(existing.total_hold_seconds) || 0) + heldSeconds,
+      work_due_at: remaining > 0 ? workDue.toISOString() : null,
+      original_hours_to_complete:
+        existing.original_hours_to_complete != null
+          ? existing.original_hours_to_complete
+          : existing.hours_to_complete,
+      task_events: withTaskEvent(existing, 'resume', req.user.id, {
+        remaining_hours: remaining,
+        original_hours: existing.original_hours_to_complete ?? existing.hours_to_complete,
+        timer: 'restarted',
+        held_from: existing.held_at || null,
+        hold_seconds: heldSeconds,
+        work_due_at: remaining > 0 ? workDue.toISOString() : null,
+      }),
+    }, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Resume task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not resume task' });
+  }
+});
+
+// ----------------------------- reject task (assignee declines — reason required) -----------------------------
+router.patch('/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Please give a reason for rejecting this task' });
+    }
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('tasks').select('id, assigned_to').eq('id', id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only reject your own tasks' });
+    }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'Rejected',
+        rejected_at: new Date().toISOString(),
+        status_note: `Rejected by ${req.user.full_name}: ${reason.trim()}`
+      })
+      .eq('id', id)
+      .select(TASK_SELECT)
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Reject task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not reject task' });
+  }
+});
+
+// ----------------------------- update status (assignee or admin) -----------------------------
+router.patch('/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, status_note } = req.body || {};
+    const allowedStatuses = ['Pending', 'In Progress', 'Completed', 'Rejected'];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only update your own tasks' });
+    }
+
+    const at = nowIso();
+    const updates = { status };
+    if (status === 'Completed') {
+      updates.completed_at = at;
+      updates.status_note = status_note
+        ? String(status_note).slice(0, 500)
+        : `Completed by ${req.user.full_name}`;
+      updates.task_events = withTaskEvent(existing, 'completed', req.user.id);
+    } else if (status === 'Rejected') {
+      updates.status_note = `Rejected by ${req.user.full_name}${status_note ? `: ${status_note}` : ''}`;
+      updates.rejected_at = at;
+      updates.task_events = withTaskEvent(existing, 'rejected', req.user.id);
+    } else if (status === 'Pending') {
+      updates.status_note = null;
+    } else if (status === 'In Progress') {
+      // Explicitly starting work also satisfies a pending re-accept, so the
+      // timer anchors here rather than at the pre-reschedule accept.
+      const isReaccept = !!existing.reaccept_required;
+      updates.accepted_at = isReaccept ? at : firstStamp(existing, 'accepted_at', at);
+      updates.first_accepted_at = firstStamp(existing, 'first_accepted_at', at);
+      if (isReaccept) {
+        updates.reaccept_required = false;
+        updates.reaccept_reason = null;
+        updates.overdue_since_at = null;
+        const budget = Number(existing.original_hours_to_complete ?? existing.hours_to_complete) || 0;
+        if (budget > 0) updates.work_due_at = addWorkingHours(at, budget).toISOString();
+      }
+      updates.task_events = withTaskEvent(existing, isReaccept ? 'reaccept_task' : 'start_task', req.user.id);
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Update status error:', err.message);
+    res.status(500).json({ error: 'Could not update task' });
+  }
+});
+
+router.get('/:id/checkpoints', async (req, res) => {
+  try {
+    const rows = await loadTaskCheckpoints(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not load checkpoints' });
+  }
+});
+
+router.post('/:id/checkpoints', requireCanAddTask, async (req, res) => {
+  try {
+    const labels = parseCheckpointLabels(req.body?.labels || req.body?.checkpoints);
+    const rows = await saveTaskCheckpoints(req.params.id, labels);
+    if (req.body?.task_type_id) {
+      await upsertTypeCheckpointTemplate(req.body.task_type_id, labels).catch(() => { });
+    }
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save checkpoints' });
+  }
+});
+
+router.post('/:id/checkpoints/submit', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+    const isOwn = existing.assigned_to === req.user.id;
+    if (!isOwn && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only update checkpoints on your own tasks' });
+    }
+    const all = await loadTaskCheckpoints(id);
+    const submitted = new Set((req.body?.checkpoint_ids || []).map(String));
+    const at = nowIso();
+    for (const cp of all) {
+      const done = submitted.has(String(cp.id));
+      await supabase
+        .from('task_checkpoints')
+        .update({ is_done: done, done_at: done ? at : null, done_by: done ? req.user.id : null })
+        .eq('id', cp.id);
+    }
+    const rows = await loadTaskCheckpoints(id);
+    res.json({ checkpoints: rows, all_done: rows.length > 0 && rows.every((c) => c.is_done) });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not save checkpoints' });
+  }
+});
+
+// ----------------------------- send for verification -----------------------------
+// multipart/form-data: text field "verifier_id" + up to 3 files "verification_files"
+router.patch(
+  '/:id/send-for-verification',
+  upload.array('verification_files', 3),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { verifier_id } = req.body || {};
+      if (!verifier_id) {
+        return res.status(400).json({ error: 'Please choose who should verify this task' });
+      }
+
+      const existing = await loadTaskForStamp(id);
+      if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+      const isOwnTask = existing.assigned_to === req.user.id;
+      if (!isOwnTask && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'You can only send your own tasks for verification' });
+      }
+      if (existing.status === 'Ticket Raised') {
+        return res.status(400).json({ error: 'Cannot send for verification while a ticket is raised on this task' });
+      }
+      if (existing.reschedule_status === 'Pending') {
+        return res.status(400).json({ error: 'Cannot send for verification while a reschedule request is pending approval' });
+      }
+      if (existing.is_on_hold) {
+        return res.status(400).json({ error: 'Resume the task before sending for verification' });
+      }
+      if (existing.reaccept_required) {
+        return res.status(400).json({
+          error: 'This task was rescheduled — accept it again to start the hours before sending for verification',
+        });
+      }
+
+      const files = req.files || [];
+      const verification_attachment_urls = await Promise.all(
+        files.map((file) => uploadFile(file, 'verification-attachments'))
+      );
+
+      const at = nowIso();
+      const data = await updateTaskTolerant(id, {
+        verifier_id,
+        verification_status: 'Pending Verification',
+        verification_note: null,
+        correction_voice_url: null,
+        sent_for_verification_at: at,
+        first_sent_for_verification_at: firstStamp(existing, 'first_sent_for_verification_at', at),
+        accepted_at: firstStamp(existing, 'accepted_at', at),
+        verification_attachment_urls: verification_attachment_urls.length ? verification_attachment_urls : null,
+        // current cycle restarts; first start-verification time is kept
+        verification_started_by: null,
+        verification_started_at: null,
+        task_events: withTaskEvent(existing, 'send_for_verification', req.user.id),
+      }, TASK_SELECT);
+
+      const { data: verifierUser } = await supabase
+        .from('users')
+        .select('whatsapp_number, full_name, id, username')
+        .eq('id', verifier_id)
+        .maybeSingle();
+
+      // Most employees still have this seed/default number — not personal WhatsApp.
+      const SHARED_PLACEHOLDER_WA = '8208026194';
+      const waDigits = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
+      const isPlaceholderWa = (raw) => waDigits(raw) === SHARED_PLACEHOLDER_WA;
+
+      let waVerify = null;
+      const waVerifyAll = [];
+      if (verifierUser?.whatsapp_number) {
+        const shared = isPlaceholderWa(verifierUser.whatsapp_number);
+        if (shared) {
+          console.warn(
+            'Verification WA: verifier uses shared placeholder number',
+            verifierUser.full_name,
+            verifierUser.username
+          );
+        }
+        waVerify = await sendVerificationAlertTemplate(verifierUser.whatsapp_number, {
+          verifierName: verifierUser.full_name || 'Verifier',
+          taskDescription: data.description || 'Task',
+          projectName: data.project?.name || '—',
+        });
+        // Treat shared default as delivery-risk: Meta may accept, but not the verifier's phone.
+        const deliveredOk = !!waVerify?.ok && !shared;
+        waVerifyAll.push({
+          role: 'verifier',
+          label: verifierUser.full_name || 'Verifier',
+          ok: deliveredOk,
+          reason: shared
+            ? 'shared_placeholder_number'
+            : waVerify?.ok
+              ? null
+              : waVerify?.reason || waVerify?.error || 'fail',
+          to: waVerify?.to || null,
+          meta_ok: !!waVerify?.ok,
+        });
+        console.log(
+          'Verification WA:',
+          verifierUser.full_name,
+          shared ? 'shared_placeholder' : waVerify?.ok ? 'ok' : waVerify?.reason || 'fail'
+        );
+      } else {
+        console.warn('Verification sent but verifier has no whatsapp_number:', verifier_id);
+        waVerify = { ok: false, reason: 'no_number' };
+        waVerifyAll.push({
+          role: 'verifier',
+          label: verifierUser?.full_name || 'verifier',
+          ok: false,
+          reason: 'no_number',
+          to: null,
+        });
+      }
+
+      // Always CC Chirag (unless he is already the verifier / same number)
+      try {
+        const chirag = await userWaByUsername('chirag.s');
+        const same =
+          chirag?.whatsapp_number &&
+          verifierUser?.whatsapp_number &&
+          waDigits(chirag.whatsapp_number) === waDigits(verifierUser.whatsapp_number);
+        if (chirag?.whatsapp_number && !same) {
+          const waChirag = await sendVerificationAlertTemplate(chirag.whatsapp_number, {
+            verifierName: chirag.full_name || 'Chirag',
+            taskDescription: `Verify by ${verifierUser?.full_name || 'verifier'}: ${data.description || 'Task'}`,
+            projectName: data.project?.name || '—',
+          });
+          waVerifyAll.push({
+            role: 'chirag',
+            label: 'Chirag',
+            ok: !!waChirag?.ok,
+            reason: waChirag?.ok ? null : waChirag?.reason || waChirag?.error || 'fail',
+            to: waChirag?.to || null,
+          });
+        } else if (same) {
+          waVerifyAll.push({
+            role: 'chirag',
+            label: 'Chirag',
+            ok: !!waVerifyAll.find((r) => r.role === 'verifier')?.ok,
+            reason: 'same_as_verifier',
+            to: waVerify?.to || null,
+          });
+        }
+      } catch (ccErr) {
+        console.warn('Verification WA Chirag CC skip:', ccErr.message);
+      }
+
+      try {
+        const bot = require('./bot');
+        if (typeof bot.notifyVerifierBot === 'function') {
+          await bot.notifyVerifierBot(
+            verifier_id,
+            data.description || 'Task',
+            data.project?.name || '—'
+          );
+        }
+      } catch (botErr) {
+        console.warn('Verifier bot notify skip:', botErr.message);
+      }
+
+      const verifierOk = waVerifyAll.some((r) => r.role === 'verifier' && r.ok);
+      res.json({
+        ...data,
+        _whatsapp: {
+          ok: verifierOk,
+          recipients: waVerifyAll,
+          reason: verifierOk
+            ? null
+            : waVerifyAll.find((r) => r.role === 'verifier')?.reason || 'verifier_failed',
+        },
+      });
+    } catch (err) {
+      console.error('Send for verification error:', err.message);
+      res.status(500).json({ error: err.message || 'Could not send for verification' });
+    }
+  }
+);
+
+// ----------------------------- approve verification (the chosen verifier, or admin) -----------------------------
+router.patch('/:id/verify', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approved, note } = req.body || {};
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not the verifier for this task' });
+    }
+
+    const at = nowIso();
+    const updates = approved
+      ? {
+        verification_status: 'Verified',
+        verification_note: note || null,
+        status: 'Completed',
+        verified_at: at,
+        first_verified_at: firstStamp(existing, 'first_verified_at', at),
+        verification_decided_at: at,
+        task_events: withTaskEvent(existing, 'verified', req.user.id),
+      }
+      : {
+        verification_status: 'Verification Rejected',
+        verification_note: note || null,
+        status: 'In Progress',
+        verification_decided_at: at,
+        task_events: withTaskEvent(existing, 'verification_rejected', req.user.id),
+      };
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Verify task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not update verification' });
+  }
+});
+
+// ----------------------------- send correction (verifier/admin: reject with optional voice note) -----------------------------
+// multipart/form-data: "note" text field + optional "correction_voice" audio file
+router.patch(
+  '/:id/send-correction',
+  upload.single('correction_voice'),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { note } = req.body || {};
+
+      if (!note || !note.trim()) {
+        return res.status(400).json({ error: 'Please write a correction note before sending' });
+      }
+
+      const existing = await loadTaskForStamp(id);
+      if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+      const isChosenVerifier = existing.verifier_id === req.user.id;
+      if (!isChosenVerifier && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'You are not the verifier for this task' });
+      }
+
+      let correction_voice_url = null;
+      if (req.file) {
+        try {
+          correction_voice_url = await uploadFile(req.file, 'correction-voices');
+        } catch (upErr) {
+          console.warn('Correction voice upload skipped:', upErr.message);
+        }
+      }
+
+      const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
+      let target_date = extra.target_date;
+      let hours_to_complete = extra.hours_to_complete;
+      let extra_hours = extra.extra_hours;
+      let extra_days = extra.extra_days;
+      const extensions = extra.extensions;
+
+      const updates = {
+        verification_status: 'Verification Rejected',
+        verification_note: note.trim(),
+        status: 'In Progress',
+        correction_voice_url,
+        target_date,
+        hours_to_complete,
+        extra_hours,
+        extra_days,
+        correction_extensions: extensions,
+        verification_decided_at: nowIso(),
+        task_events: withTaskEvent(existing, 'correction', req.user.id),
+      };
+
+      const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+      res.json(data);
+    } catch (err) {
+      console.error('Send correction error:', err.message);
+      res.status(500).json({ error: err.message || 'Could not send correction' });
+    }
+  }
+);
+
+// ----------------------------- send updation (verifier/admin: request changes with a note) -----------------------------
+router.patch('/:id/send-updation', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note } = req.body || {};
+
+    if (!note || !note.trim()) {
+      return res.status(400).json({ error: 'Please write an updation note before sending' });
+    }
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not the verifier for this task' });
+    }
+
+    const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
+    const updates = {
+      verification_status: 'Updation Required',
+      updation_note: note.trim(),
+      status: 'In Progress',
+      target_date: extra.target_date,
+      hours_to_complete: extra.hours_to_complete,
+      extra_hours: extra.extra_hours,
+      extra_days: extra.extra_days,
+      correction_extensions: extra.extensions,
+      verification_decided_at: nowIso(),
+      task_events: withTaskEvent(existing, 'updation', req.user.id),
+    };
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Send updation error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send updation request' });
+  }
+});
+
+// ----------------------------- reschedule (admin only — instant, no approval needed) -----------------------------
+router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    // const { target_date } = req.body || {}; 17th july
+    const { target_date, reason } = req.body || {};
+    if (!target_date) {
+      return res.status(400).json({ error: 'Please pick a new target date' });
+    }
+    //17t july 
+    // const { data: existing, error: fetchErr } = await supabase
+    //   .from('tasks').select('id, reschedule_status').eq('id', id).maybeSingle();
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const at = nowIso();
+    const lockedHours =
+      existing.original_hours_to_complete != null
+        ? existing.original_hours_to_complete
+        : existing.hours_to_complete;
+
+    const updates = {
+      target_date,
+      // First plan the admin set is kept for the record; only the current plan moves.
+      original_target_date: existing.original_target_date || existing.target_date,
+      reschedule_approved_target_date: target_date,
+      reschedule_approved_at: at,
+      reschedule_count: (Number(existing.reschedule_count) || 0) + 1,
+      // Same rule as an approved request: timer stops, employee accepts again,
+      // and that Accept restarts the full assigned hours.
+      status: 'Pending',
+      reaccept_required: true,
+      reaccept_reason: 'Task rescheduled — accept again to start the hours',
+      accepted_at: null,
+      resumed_at: null,
+      is_on_hold: false,
+      hold_remaining_hours: null,
+      work_due_at: null,
+      overdue_since_at: null,
+      accept_reminder_sent_at: null,
+      hours_to_complete: lockedHours,
+      original_hours_to_complete: lockedHours,
+      task_events: withTaskEvent(existing, 'rescheduled_by_admin', req.user.id, {
+        from_target_date: existing.target_date || null,
+        to_target_date: target_date || null,
+        reason: reason && reason.trim() ? reason.trim() : null,
+        timer: 'reset_pending_accept',
+      }),
+    };
+    // If an employee's reschedule request was still pending, this direct
+    // admin reschedule supersedes it — clear it out so it can't later be
+    // approved and silently overwrite the date the admin just set here.
+    if (existing.reschedule_status === 'Pending') {
+      updates.reschedule_status = 'Rejected';
+      updates.reschedule_reason = 'Superseded — admin rescheduled this task directly';
+      updates.reschedule_decided_by = req.user.id;
+      updates.reschedule_decided_at = at;
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+
+    const { data: chirag } = await supabase
+      .from('users').select('whatsapp_number').eq('username', 'chirag.s').maybeSingle();
+
+    if (chirag?.whatsapp_number) {
+      // sendWhatsAppTemplate(chirag.whatsapp_number, 'task_reschedule', [
+      //   data.id,
+      //   data.project?.name || '—',
+      //   req.user.full_name,
+      //   reason && reason.trim() ? reason.trim() : 'No reason given',
+      //   existing.target_date || '—',
+      //   target_date
+      // ]).catch(() => {}); 17th july  chg
+      await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+        data.description,
+        data.project?.name || '—',
+        req.user.full_name,
+        reason && reason.trim() ? reason.trim() : 'No reason given',
+        existing.target_date || '—',
+        target_date
+      ]);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('Reschedule error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not reschedule task' });
+  }
+});
+
+// ----------------------------- reschedule requests (employee asks, admin approves/rejects) -----------------------------
+// An employee on a task with rescheduling_possible=true can no longer move
+// the date themselves — they file a request here, which shows up for the
+// admin to approve (applies the new date) or reject. The employee can see
+// their own request's status the same way (read-only, no action buttons).
+
+// Employee: request a new date for their own task
+router.post('/:id/reschedule-request', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { requested_date, reason } = req.body || {};
+    const additionalHours = req.body?.additional_hours == null || req.body.additional_hours === ''
+      ? 0
+      : Number(req.body.additional_hours);
+    if (!requested_date) {
+      return res.status(400).json({ error: 'Please pick the date you want to move this task to' });
+    }
+    if (!Number.isFinite(additionalHours) || additionalHours < 0) {
+      return res.status(400).json({ error: 'Additional hours must be a non-negative number' });
+    }
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('tasks')
+      .select('id, assigned_to, rescheduling_possible, reschedule_status, status, verification_status')
+      .eq('id', id).maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isOwnTask = existing.assigned_to === req.user.id;
+    if (!isOwnTask && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You can only request a reschedule on your own tasks' });
+    }
+    if (!existing.rescheduling_possible) {
+      return res.status(403).json({ error: 'Rescheduling was not allowed for this task' });
+    }
+    if (existing.status === 'Completed') {
+      return res.status(400).json({ error: 'This task is already completed' });
+    }
+    if (existing.status === 'Ticket Raised') {
+      return res.status(400).json({ error: 'Cannot request a reschedule while a ticket is raised on this task' });
+    }
+    if (existing.verification_status === 'Pending Verification') {
+      return res.status(400).json({ error: 'Cannot request a reschedule while this task is pending verification' });
+    }
+    if (existing.reschedule_status === 'Pending') {
+      return res.status(400).json({ error: 'A reschedule request is already pending for this task' });
+    }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        reschedule_status: 'Pending',
+        reschedule_requested_date: requested_date,
+        reschedule_requested_additional_hours: additionalHours,
+        reschedule_reason: reason && reason.trim() ? reason.trim() : null,
+        reschedule_requested_at: new Date().toISOString(),
+        reschedule_decided_by: null,
+        reschedule_decided_at: null
+      })
+      .eq('id', id)
+      .select(TASK_SELECT)
+      .single();
+
+    if (error) throw error;
+
+    // Reschedule REQUEST → Kishan + Chirag only
+    try {
+      const [kishan, chirag] = await Promise.all([
+        userWaByUsername('kishan.k'),
+        userWaByUsername('chirag.s'),
+      ]);
+      await notifyWaMany(
+        [kishan, chirag].filter(Boolean),
+        'task_reschedule',
+        [
+          data.description || 'Task',
+          data.project?.name || '—',
+          req.user.full_name || 'Employee',
+          reason && reason.trim()
+            ? `REQUEST: ${reason.trim()}`
+            : 'REQUEST: employee asked to move deadline',
+          data.target_date || '—',
+          requested_date,
+        ]
+      );
+    } catch (waErr) {
+      console.warn('Reschedule request WA skip:', waErr.message);
+    }
+
+    res.status(201).json(data);
+  } catch (err) {
+    console.error('Reschedule request error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not submit reschedule request' });
+  }
+});
+
+// List reschedule requests — admin sees Pending / Approved / Rejected history
+// (optional ?status= filter). Everyone else sees only their own, read-only.
+router.get('/reschedule-requests', async (req, res) => {
+  try {
+    let query = supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .neq('reschedule_status', 'None')
+      .order('reschedule_requested_at', { ascending: false });
+
+    if (req.user.role === 'admin') {
+      const st = String(req.query.status || '').trim();
+      if (st === 'Pending' || st === 'Approved' || st === 'Rejected') {
+        query = query.eq('reschedule_status', st);
+      }
+      // no status → all decided + pending (history stays in the inbox)
+    } else {
+      query = query.eq('assigned_to', req.user.id);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('List reschedule requests error:', err.message);
+    res.status(500).json({ error: 'Could not load reschedule requests' });
+  }
+});
+
+// Admin: approve — only moves the deadline (employee requested date or admin's
+// chosen date/time). Keeps the timer running with remaining hours — NO re-accept.
+router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { use_employee_date, target_date } = req.body || {};
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+    if (existing.reschedule_status !== 'Pending') {
+      return res.status(400).json({ error: 'This request has already been decided' });
+    }
+
+    const at = nowIso();
+    const useEmp =
+      use_employee_date === undefined || use_employee_date === null
+        ? true
+        : !!use_employee_date;
+
+    let approvedDate = useEmp
+      ? existing.reschedule_requested_date
+      : target_date || existing.reschedule_requested_date;
+
+    if (!approvedDate) {
+      return res.status(400).json({ error: 'Please pick a deadline date' });
+    }
+
+    // Date-only → end of office day (18:30 IST) so Due has a real time.
+    {
+      const s = String(approvedDate);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        approvedDate = `${s}T18:30:00+05:30`;
+      } else if (/^\d{4}-\d{2}-\d{2}T00:00(:00)?/.test(s) && !/18:30/.test(s)) {
+        approvedDate = `${s.slice(0, 10)}T18:30:00+05:30`;
+      }
+    }
+
+    const assignedHrs =
+      existing.original_hours_to_complete != null
+        ? Number(existing.original_hours_to_complete)
+        : Number(existing.hours_to_complete) || 0;
+    const additionalHours = Math.max(0, Number(existing.reschedule_requested_additional_hours) || 0);
+    let doneHrs = 0;
+    let remHrs = assignedHrs;
+    if (existing.is_on_hold) {
+      remHrs = Number(existing.hold_remaining_hours != null ? existing.hold_remaining_hours : assignedHrs) || 0;
+      doneHrs = Math.max(0, Math.round((assignedHrs - remHrs) * 100) / 100);
+    } else if (existing.accepted_at) {
+      // Office hours since accept, minus recorded hold pauses — vs original assigned
+      let worked = elapsedWorkingHours(new Date(existing.accepted_at), new Date());
+      const holdSec = Number(existing.total_hold_seconds) || 0;
+      if (holdSec > 0) worked = Math.max(0, worked - holdSec / 3600);
+      doneHrs = Math.max(0, Math.round(worked * 100) / 100);
+      if (doneHrs > assignedHrs) doneHrs = assignedHrs;
+      remHrs = Math.max(0, Math.round((assignedHrs - doneHrs) * 100) / 100);
+    }
+
+    const keepAccepted = !!existing.accepted_at;
+    const updatedAssignedHrs = assignedHrs + additionalHours;
+    const updatedRemainingHrs = remHrs + additionalHours;
+    const updates = {
+      target_date: approvedDate,
+      original_target_date: existing.original_target_date || existing.target_date,
+      reschedule_approved_target_date: approvedDate,
+      reschedule_approved_at: at,
+      reschedule_count: (Number(existing.reschedule_count) || 0) + 1,
+      reschedule_status: 'Approved',
+      reschedule_decided_by: req.user.id,
+      reschedule_decided_at: at,
+      // Deadline only — employee keeps working, no re-accept.
+      reaccept_required: false,
+      reaccept_reason: null,
+      overdue_since_at: null,
+      accept_reminder_sent_at: null,
+      work_due_at: null,
+      task_events: withTaskEvent(existing, 'reschedule_approved', req.user.id, {
+        from_target_date: existing.target_date || null,
+        to_target_date: approvedDate || null,
+        original_target_date: existing.original_target_date || existing.target_date || null,
+        use_employee_date: useEmp,
+        assigned_hours: updatedAssignedHrs,
+        hours_done: doneHrs,
+        hours_remaining: updatedRemainingHrs,
+        additional_hours_approved: additionalHours,
+        timer: 'deadline_only_no_reaccept',
+      }),
+    };
+
+    if (keepAccepted) {
+      // Preserve acceptance; keep remaining hours on a fresh timer segment from now
+      // so later elapsed is not double-counted against a reduced budget.
+      updates.status = existing.is_on_hold ? existing.status : (existing.status === 'Pending' ? 'In Progress' : existing.status);
+      if (existing.status === 'Pending' && existing.accepted_at) updates.status = 'In Progress';
+      updates.hours_to_complete = updatedRemainingHrs;
+      updates.original_hours_to_complete = updatedAssignedHrs;
+      updates.extra_hours = (Number(existing.extra_hours) || 0) + additionalHours;
+      if (existing.is_on_hold) {
+        updates.hold_remaining_hours = updatedRemainingHrs;
+      } else {
+        updates.resumed_at = at;
+        updates.hold_remaining_hours = updatedRemainingHrs;
+        updates.work_due_at = updatedRemainingHrs > 0
+          ? addWorkingHours(at, updatedRemainingHrs).toISOString()
+          : null;
+      }
+    } else {
+      // Not accepted yet — just move the plan date; still no re-accept flag.
+      updates.status = existing.status || 'Pending';
+      updates.hours_to_complete = updatedAssignedHrs;
+      updates.original_hours_to_complete = updatedAssignedHrs;
+      updates.extra_hours = (Number(existing.extra_hours) || 0) + additionalHours;
+    }
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+
+    // Approve detail → Chirag only (who asked, why, who approved, old→new date)
+    try {
+      const chirag = await userWaByUsername('chirag.s');
+      const assigneeName =
+        data.assigned_to_user?.full_name ||
+        existing.assigned_to_user?.full_name ||
+        'Employee';
+      if (chirag?.whatsapp_number) {
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          assigneeName,
+          `APPROVED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why: ${existing.reschedule_reason && String(existing.reschedule_reason).trim()
+              ? existing.reschedule_reason.trim()
+              : '—'
+            }`.slice(0, 500),
+          existing.target_date || '—',
+          approvedDate,
+        ]);
+      }
+    } catch (waErr) {
+      console.warn('Approve reschedule WA (Chirag) skip:', waErr.message);
+    }
+
+    res.json({
+      ...data,
+      _reschedule_summary: {
+        assigned_hours: updatedAssignedHrs,
+        hours_done: doneHrs,
+        hours_remaining: updatedRemainingHrs,
+        additional_hours_approved: additionalHours,
+        updated_assigned_hours: updatedAssignedHrs,
+        deadline: approvedDate,
+        use_employee_date: useEmp,
+      },
+    });
+  } catch (err) {
+    console.error('Approve reschedule error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not approve reschedule request' });
+  }
+});
+
+// Admin: reject — leaves the original target date untouched
+router.patch('/:id/reschedule-request/reject', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+    if (existing.reschedule_status !== 'Pending') {
+      return res.status(400).json({ error: 'This request has already been decided' });
+    }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        reschedule_status: 'Rejected',
+        reschedule_reason: reason && reason.trim() ? reason.trim() : null,
+        reschedule_decided_by: req.user.id,
+        reschedule_decided_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select(TASK_SELECT)
+      .single();
+
+    if (error) throw error;
+
+    // Reject detail → Chirag only
+    try {
+      const chirag = await userWaByUsername('chirag.s');
+      const assigneeName =
+        data.assigned_to_user?.full_name ||
+        existing.assigned_to_user?.full_name ||
+        'Employee';
+      if (chirag?.whatsapp_number) {
+        await notifyWa(chirag.whatsapp_number, 'task_reschedule', [
+          data.description || 'Task',
+          data.project?.name || '—',
+          assigneeName,
+          `REJECTED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why asked: ${existing.reschedule_reason && String(existing.reschedule_reason).trim()
+              ? existing.reschedule_reason.trim()
+              : '—'
+            }. Reject note: ${reason && reason.trim() ? reason.trim() : '—'}`.slice(0, 500),
+          existing.target_date || '—',
+          existing.reschedule_requested_date || '—',
+        ]);
+      }
+    } catch (waErr) {
+      console.warn('Reject reschedule WA (Chirag) skip:', waErr.message);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error('Reject reschedule error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not reject reschedule request' });
+  }
+});
+
+// ----------------------------- reassign (admin only) -----------------------------
+router.patch('/:id/reassign', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assigned_to } = req.body || {};
+    if (!assigned_to) {
+      return res.status(400).json({ error: 'Please choose who to reassign this task to' });
+    }
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({
+        assigned_to,
+        status: 'Pending',
+        assigned_at: new Date().toISOString(),
+        status_note: null,
+        verifier_id: null,
+        verification_status: null,
+        verification_note: null,
+        correction_voice_url: null
+      })
+      .eq('id', id)
+      .select(TASK_SELECT)
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Reassign task error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not reassign task' });
+  }
+});
+
+// ----------------------------- admin report -----------------------------
+// GET /tasks/report?range=day|week|month|custom&from=DATE&to=DATE
+const {
+  buildWorkVerificationDashboard,
+  buildSrMap,
+} = require('../lib/workVerificationDashboard');
+
+router.get('/report', requireAdminOrMis, async (req, res) => {
+  try {
+    const { range, from, to } = req.query;
+
+    let startDate, endDate;
+    const now = new Date();
+
+    if (range === 'day') {
+      startDate = new Date(now); startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(now); endDate.setHours(23, 59, 59, 999);
+    } else if (range === 'week') {
+      const day = now.getDay();
+      startDate = new Date(now); startDate.setDate(now.getDate() - day); startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6); endDate.setHours(23, 59, 59, 999);
+    } else if (range === 'month') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else if (range === 'last-month') {
+      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    } else if (range === 'all') {
+      startDate = new Date(2000, 0, 1);
+      endDate = new Date(now.getFullYear() + 1, 0, 1);
+    } else if (range === 'custom' && from && to) {
+      startDate = new Date(from); startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(to); endDate.setHours(23, 59, 59, 999);
+    } else {
+      // default: current month
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+
+    let taskQuery = supabase
+      .from('tasks')
+      .select(`
+        id, description, status, priority,
+        created_at, assigned_at, accepted_at, sent_for_verification_at,
+        verification_started_at, verified_at, rejected_at,
+        hours_to_complete, target_date, extra_hours, extra_days,
+        verification_status, verification_note, correction_extensions,
+        project:projects ( id, name ),
+        task_type:task_types ( id, name ),
+        department:departments ( id, name ),
+        assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+        assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+        verifier:users!tasks_verifier_id_fkey ( id, full_name )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(5000);
+
+    let { data: tasks, error } = await taskQuery;
+    // Optional columns (may be missing on older DBs)
+    if (!error) {
+      try {
+        const { data: extra } = await supabase
+          .from('tasks')
+          .select('id, first_sent_for_verification_at, task_events')
+          .in('id', (tasks || []).map((t) => t.id).slice(0, 1000));
+        const byId = Object.fromEntries((extra || []).map((t) => [t.id, t]));
+        tasks = (tasks || []).map((t) => ({ ...t, ...byId[t.id] }));
+      } catch (_) { /* ignore */ }
+    }
+
+    if (error) throw error;
+
+    const inRange = (iso) => {
+      if (!iso) return false;
+      const d = new Date(iso);
+      return d >= startDate && d <= endDate;
+    };
+    const ranged = (tasks || [])
+      .filter((t) => !isMdoOfficeWorkTask(t))
+      .filter(
+        (t) =>
+          inRange(t.created_at) ||
+          inRange(t.assigned_at) ||
+          inRange(t.accepted_at) ||
+          inRange(t.sent_for_verification_at) ||
+          inRange(t.verified_at) ||
+          inRange(t.rejected_at)
+      );
+
+    // Helper: diff in hours between two timestamps
+    function hrsBetween(a, b) {
+      if (!a || !b) return null;
+      return Math.round(((new Date(b) - new Date(a)) / 36e5) * 10) / 10;
+    }
+
+    // Enrich each task with computed time fields
+    const enriched = ranged.map(t => {
+      const assigned = t.assigned_at || t.created_at;
+      return {
+        ...t,
+        assigned_at: assigned,
+        time_to_accept_hrs: hrsBetween(assigned, t.accepted_at),
+        time_to_submit_hrs: hrsBetween(t.accepted_at, t.sent_for_verification_at),
+        time_to_start_verify_hrs: hrsBetween(t.sent_for_verification_at, t.verification_started_at),
+        time_to_verify_hrs: hrsBetween(t.verification_started_at || t.sent_for_verification_at, t.verified_at),
+        total_cycle_hrs: hrsBetween(assigned, t.verified_at || t.rejected_at),
+        extra_hours: Number(t.extra_hours || 0),
+        extra_days: Number(t.extra_days || 0),
+      };
+    });
+
+    // Group by employee → project
+    const byEmployee = {};
+    for (const t of enriched) {
+      const empId = t.assigned_to_user?.id || 'unknown';
+      const empName = t.assigned_to_user?.full_name || 'Unknown';
+      const projId = t.project?.id || 'no-project';
+      const projName = t.project?.name || 'No project';
+
+      if (!byEmployee[empId]) {
+        byEmployee[empId] = { id: empId, name: empName, projects: {}, totalTasks: 0 };
+      }
+      const emp = byEmployee[empId];
+      emp.totalTasks++;
+
+      if (!emp.projects[projId]) {
+        emp.projects[projId] = { id: projId, name: projName, tasks: [] };
+      }
+      emp.projects[projId].tasks.push(t);
+    }
+
+    // Convert to array form + compute project-level summaries
+    const report = Object.values(byEmployee).map(emp => {
+      const projects = Object.values(emp.projects).map(proj => {
+        const tasks = proj.tasks;
+        const completed = tasks.filter(t => t.status === 'Completed').length;
+        const pending = tasks.filter(t => t.status === 'Pending').length;
+        const inProgress = tasks.filter(t => t.status === 'In Progress').length;
+        const rejected = tasks.filter(t => t.status === 'Rejected').length;
+
+        const avgCycle = (() => {
+          const valid = tasks.map(t => t.total_cycle_hrs).filter(h => h !== null);
+          return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
+        })();
+
+        return { ...proj, tasks, summary: { total: tasks.length, completed, pending, inProgress, rejected, avgCycleHrs: avgCycle } };
+      });
+
+      const allTasks = projects.flatMap((p) => p.tasks);
+      const avg = (arr) => {
+        const valid = arr.filter((h) => h != null);
+        return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
+      };
+      const finished = allTasks.filter((t) => t.accepted_at && (t.sent_for_verification_at || t.verified_at));
+      const onTime = finished.filter((t) => {
+        const planned = Number(t.hours_to_complete || 0);
+        if (!planned || planned <= 0) return true;
+        const end = t.sent_for_verification_at || t.verified_at;
+        const worked = elapsedWorkingHours(t.accepted_at, end);
+        return worked <= planned;
+      }).length;
+      const late = Math.max(0, finished.length - onTime);
+      const deptName = allTasks.find((t) => t.department?.name)?.department?.name || '';
+      const portfolio = {
+        total: allTasks.length,
+        completed: allTasks.filter((t) => t.status === 'Completed' || t.verification_status === 'Verified').length,
+        pending: allTasks.filter((t) => t.status === 'Pending').length,
+        inProgress: allTasks.filter((t) => t.status === 'In Progress').length,
+        plannedHours: Math.round(allTasks.reduce((s, t) => s + Number(t.hours_to_complete || 0), 0) * 10) / 10,
+        extraHours: allTasks.reduce((s, t) => s + Number(t.extra_hours || 0), 0),
+        extraDays: allTasks.reduce((s, t) => s + Number(t.extra_days || 0), 0),
+        avgAcceptHrs: avg(allTasks.map((t) => t.time_to_accept_hrs)),
+        avgSubmitHrs: avg(allTasks.map((t) => t.time_to_submit_hrs)),
+        avgVerifyHrs: avg(allTasks.map((t) => t.time_to_verify_hrs)),
+        avgCycleHrs: avg(allTasks.map((t) => t.total_cycle_hrs)),
+        onTime,
+        late,
+        department: deptName,
+      };
+      return { ...emp, department: deptName, projects, portfolio };
+    });
+
+    const byVerifier = {};
+    for (const t of enriched) {
+      const vid = t.verifier?.id || 'none';
+      const vname = t.verifier?.full_name || 'No verifier';
+      if (!byVerifier[vid]) {
+        byVerifier[vid] = { id: vid, name: vname, projects: {}, total: 0, verifyHrs: [] };
+      }
+      const row = byVerifier[vid];
+      row.total += 1;
+      if (t.time_to_verify_hrs != null) row.verifyHrs.push(t.time_to_verify_hrs);
+      const pid = t.project?.id || 'no-project';
+      const pname = t.project?.name || 'No project';
+      if (!row.projects[pid]) row.projects[pid] = { id: pid, name: pname, count: 0, verifyHrs: [] };
+      row.projects[pid].count += 1;
+      if (t.time_to_verify_hrs != null) row.projects[pid].verifyHrs.push(t.time_to_verify_hrs);
+    }
+    const verifiers = Object.values(byVerifier).map((v) => ({
+      id: v.id,
+      name: v.name,
+      total: v.total,
+      avgVerifyHrs: v.verifyHrs.length
+        ? Math.round((v.verifyHrs.reduce((a, b) => a + b, 0) / v.verifyHrs.length) * 10) / 10
+        : null,
+      projects: Object.values(v.projects).map((p) => ({
+        ...p,
+        avgVerifyHrs: p.verifyHrs.length
+          ? Math.round((p.verifyHrs.reduce((a, b) => a + b, 0) / p.verifyHrs.length) * 10) / 10
+          : null,
+        verifyHrs: undefined,
+      })),
+    }));
+
+    const srMap = buildSrMap(tasks || []);
+    const dashboard = buildWorkVerificationDashboard(enriched, { srMap });
+
+    res.json({
+      range: range || 'month',
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+      report,
+      verifiers,
+      dashboard,
+    });
+  } catch (err) {
+    console.error('Report error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not generate report' });
+  }
+});
+
+// ----------------------------- FMS step tracker -----------------------------
+// One row per task, each workflow step showing Planned vs Actual + delay,
+// the same way the office FMS sheet is read.
+const FMS_STEPS = [
+  {
+    key: 'accept',
+    label: 'Start / Accept',
+    what: 'Accept the assigned task the same day',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Same-day accept = on time; accept after assign day = Delayed',
+    when: '1',
+  },
+  {
+    key: 'submit',
+    label: 'Send for verification',
+    what: 'Send completed work within lead time',
+    who: 'Assignee (PERSON)',
+    how: 'In TaskFlow',
+    why: 'Delay if not sent for verification inside lead time',
+    when: '2',
+  },
+  {
+    key: 'verify',
+    label: 'Verification',
+    what: 'Verify, send correction, or request update',
+    who: 'Verifier',
+    how: 'In TaskFlow',
+    why: 'Delay if not decided within 2 working hours of Start Verification',
+    when: '3',
+  },
+];
+
+function fmsRangeDates(range, from, to) {
+  const now = new Date();
+  if (range === 'day') {
+    const s = new Date(now); s.setHours(0, 0, 0, 0);
+    const e = new Date(now); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'week') {
+    const s = new Date(now); s.setDate(now.getDate() - now.getDay()); s.setHours(0, 0, 0, 0);
+    const e = new Date(s); e.setDate(s.getDate() + 6); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'custom' && from && to) {
+    const s = new Date(from); s.setHours(0, 0, 0, 0);
+    const e = new Date(to); e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
+  if (range === 'all') return [new Date('2000-01-01'), new Date('2999-12-31')];
+  return [
+    new Date(now.getFullYear(), now.getMonth(), 1),
+    new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+  ];
+}
+
+function fmsJobCode(name) {
+  const words = String(name || '')
+    .replace(/[^A-Za-z0-9\s]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return 'JB';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
+function fmsStep(planned, actual, isApplicable) {
+  if (!isApplicable) return { planned: null, actual: null, status: 'NA', delayHrs: null };
+  const p = planned ? new Date(planned) : null;
+  const a = actual ? new Date(actual) : null;
+  let status = 'Pending';
+  let delayHrs = null;
+  if (a && p) {
+    delayHrs = Math.round(((a - p) / 36e5) * 10) / 10;
+    status = delayHrs > 0 ? 'Delayed' : 'Done';
+  } else if (a) {
+    status = 'Done';
+  } else if (p && p < new Date()) {
+    status = 'Overdue';
+    delayHrs = Math.round(((new Date() - p) / 36e5) * 10) / 10;
+  }
+  return {
+    planned: p ? p.toISOString() : null,
+    actual: a ? a.toISOString() : null,
+    status,
+    delayHrs,
+  };
+}
+
+/**
+ * Accept SLA = same IST calendar day as assign.
+ * Same-day accept → Done / on time. Accept after that day → Delayed.
+ * Still not accepted → Pending only (no Overdue).
+ */
+function fmsAcceptStep(t) {
+  const assigned = t.assigned_at || t.created_at;
+  if (!assigned) return { planned: null, actual: null, status: 'Pending', delayHrs: null };
+  const deadline = endOfIstCalendarDay(assigned);
+  const accepted = t.accepted_at || null;
+  if (!accepted) {
+    return {
+      planned: deadline.toISOString(),
+      actual: null,
+      status: 'Pending',
+      delayHrs: null,
+    };
+  }
+  const step = fmsStep(deadline.toISOString(), accepted, true);
+  if (step.status === 'Done' && step.delayHrs != null && step.delayHrs <= 0) {
+    step.delayHrs = 0; // same-day accept → on time
+  }
+  return step;
+}
+
+/**
+ * Send-for-verification SLA = lead time from assign (working hours).
+ * Prefer assigned_deadline_at, else assigned + hours_to_complete, else target_date.
+ */
+function fmsSubmitStep(t) {
+  const assigned = t.assigned_at || t.created_at;
+  const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at || null;
+  let planned = null;
+  if (t.assigned_deadline_at) {
+    planned = new Date(t.assigned_deadline_at);
+  } else {
+    const lead = Number(t.hours_to_complete || t.original_hours_to_complete || 0);
+    if (assigned && lead > 0) planned = addWorkingHours(assigned, lead);
+    else if (t.target_date) planned = new Date(t.target_date);
+  }
+  if (!planned) return fmsStep(null, sentAt, true);
+
+  const step = fmsStep(planned.toISOString(), sentAt, true);
+  if (planned && sentAt) {
+    const late = elapsedWorkingHours(planned, sentAt);
+    const early = elapsedWorkingHours(sentAt, planned);
+    if (new Date(sentAt) > planned) {
+      step.delayHrs = Math.round(late * 10) / 10;
+      step.status = 'Delayed';
+    } else {
+      step.delayHrs = -Math.round(early * 10) / 10;
+      step.status = 'Done';
+    }
+  } else if (!sentAt && planned < new Date()) {
+    step.delayHrs = Math.round(elapsedWorkingHours(planned, new Date()) * 10) / 10;
+    step.status = 'Overdue';
+  }
+  return step;
+}
+
+const FMS_VERIFICATION_SLA_HOURS = 2;
+
+/** Verification FMS: planned = Start Verification + 2 working hours; actual = Verify/Correction/Updation only. */
+function fmsVerifyStep(t) {
+  const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
+  if (!sentAt) {
+    return { planned: null, actual: null, status: 'NA', delayHrs: null, actor: null };
+  }
+  const startVerifyAt = t.verification_started_at || t.first_verification_started_at;
+  const verifiedAt = t.verified_at || t.first_verified_at;
+  const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
+  const verifyActual = decidedAt || null;
+  const verifyPlanned = startVerifyAt
+    ? addWorkingHours(startVerifyAt, FMS_VERIFICATION_SLA_HOURS)
+    : null;
+  const step = fmsStep(
+    verifyPlanned ? verifyPlanned.toISOString() : null,
+    verifyActual,
+    true
+  );
+  // Prefer working-hours delay when both ends exist
+  if (verifyPlanned && verifyActual) {
+    const late = elapsedWorkingHours(verifyPlanned, verifyActual);
+    const early = elapsedWorkingHours(verifyActual, verifyPlanned);
+    if (new Date(verifyActual) > verifyPlanned) {
+      step.delayHrs = Math.round(late * 10) / 10;
+      step.status = 'Delayed';
+    } else {
+      step.delayHrs = -Math.round(early * 10) / 10;
+      step.status = 'Done';
+    }
+  } else if (verifyPlanned && !verifyActual && verifyPlanned < new Date()) {
+    step.delayHrs = Math.round(elapsedWorkingHours(verifyPlanned, new Date()) * 10) / 10;
+    step.status = 'Overdue';
+  }
+  return {
+    ...step,
+    actor: t.verifier?.full_name || null,
+  };
+}
+
+router.get('/fms', requireAdminOrMis, async (req, res) => {
+  try {
+    const { range, from, to, project, person } = req.query;
+    const [startDate, endDate] = fmsRangeDates(range, from, to);
+
+    const columns = `
+      id, description, status, priority, created_at, assigned_at, accepted_at,
+      sent_for_verification_at, verification_started_at, verified_at, rejected_at,
+      verification_status, verification_decided_at, first_verified_at,
+      first_sent_for_verification_at, first_verification_started_at,
+      hours_to_complete, original_hours_to_complete, target_date, assigned_deadline_at,
+      extra_hours, extra_days, correction_extensions,
+      project:projects ( id, name ),
+      task_type:task_types ( id, name ),
+      department:departments ( id, name ),
+      assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+      assigned_by_user:users!tasks_assigned_by_fkey ( id, full_name ),
+      verifier:users!tasks_verifier_id_fkey ( id, full_name )
+    `;
+
+    let selectCols = columns;
+    let tasks = null;
+    let error = null;
+    for (let i = 0; i < 8; i += 1) {
+      const result = await supabase
+        .from('tasks')
+        .select(selectCols)
+        .order('created_at', { ascending: false })
+        .limit(4000);
+      tasks = result.data;
+      error = result.error;
+      if (!error) break;
+      const hit = /column "?([a-z_]+)"?/i.exec(error.message || '') || /'([a-z_]+)' column/i.exec(error.message || '');
+      const col = hit && hit[1];
+      if (!col || !selectCols.includes(col)) break;
+      selectCols = selectCols.replace(new RegExp(`\\s*${col},?`, 'i'), ' ');
+    }
+    if (error) throw error;
+
+    const stamps = (t) => [
+      t.created_at, t.assigned_at, t.accepted_at, t.sent_for_verification_at,
+      t.verification_started_at, t.verified_at, t.rejected_at, t.verification_decided_at,
+    ];
+    const inRange = (iso) => {
+      if (!iso) return false;
+      const d = new Date(iso);
+      return d >= startDate && d <= endDate;
+    };
+
+    const seqByProject = {};
+    const rows = (tasks || [])
+      .filter((t) => !isMdoOfficeWorkTask(t))
+      .filter((t) => stamps(t).some(inRange))
+      .filter((t) => !project || String(t.project?.id) === String(project))
+      .filter((t) => !person || String(t.assigned_to_user?.id) === String(person))
+      .map((t) => {
+        const assigned = t.assigned_at || t.created_at;
+        const pid = t.project?.id || 'none';
+        seqByProject[pid] = (seqByProject[pid] || 0) + 1;
+
+        const steps = {
+          accept: fmsAcceptStep(t),
+          submit: fmsSubmitStep(t),
+          verify: fmsVerifyStep(t),
+        };
+
+        return {
+          id: t.id,
+          job_no: `${fmsJobCode(t.project?.name)}-${String(seqByProject[pid]).padStart(2, '0')}`,
+          timestamp: assigned,
+          project: t.project?.name || 'No project',
+          project_id: t.project?.id || null,
+          work_type: t.task_type?.name || '—',
+          department: t.department?.name || '—',
+          description: t.description || '',
+          person: t.assigned_to_user?.full_name || 'Unassigned',
+          person_id: t.assigned_to_user?.id || null,
+          assigned_by: t.assigned_by_user?.full_name || '—',
+          verifier: t.verifier?.full_name || '—',
+          lead_time_hrs: Number(t.hours_to_complete || 0),
+          extra_hours: Number(t.extra_hours || 0),
+          extra_days: Number(t.extra_days || 0),
+          target_date: t.target_date,
+          status: t.status,
+          verification_status: t.verification_status,
+          steps,
+        };
+      });
+
+    const stepSummary = {};
+    for (const step of FMS_STEPS) {
+      const all = rows.map((r) => r.steps[step.key]).filter((s) => s.status !== 'NA');
+      stepSummary[step.key] = {
+        label: step.label,
+        total: all.length,
+        done: all.filter((s) => s.status === 'Done').length,
+        delayed: all.filter((s) => s.status === 'Delayed').length,
+        overdue: all.filter((s) => s.status === 'Overdue').length,
+        pending: all.filter((s) => s.status === 'Pending').length,
+      };
+    }
+
+    res.json({
+      range: range || 'month',
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+      steps: FMS_STEPS,
+      rows,
+      summary: stepSummary,
+    });
+  } catch (err) {
+    console.error('FMS error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not build FMS tracker' });
+  }
+});
+
+// ----------------------------- mark as ticket raised (auto-called when ticket is raised) -----------------------------
+router.patch('/:id/ticket-raised', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ status: 'Ticket Raised' })
+      .eq('id', id)
+      .select(TASK_SELECT)
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    console.error('Ticket raised status error:', err.message);
+    res.status(500).json({ error: 'Could not update task status' });
+  }
+});
+
+module.exports = router;

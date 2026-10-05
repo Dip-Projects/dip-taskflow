@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+<title>DIP Projects — Task Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=4" />
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <section id="loginScreen" class="screen login-screen">
+    <div class="login-card">
+      <div class="brand">
+        <img src="https://drive.google.com/thumbnail?id=10FeV3emPMe-VCvGni66b2DOzNIPM3mGp&sz=w120" 
+             alt="Company Logo" class="brand-logo"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+        <span class="brand-mark" style="display:none">DP</span>
+        <div>
+          <h1>DIP Projects</h1>
+          <p class="brand-tag">Quality + Quantity · On Time Every Time</p>
+        </div>
+      </div>
+      <form id="loginForm" autocomplete="off">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" placeholder="Enter your username" required />
+        <label for="password">Password</label>
+        <div class="password-field">
+          <input id="password" name="password" type="password" placeholder="Enter your password" required />
+          <button type="button" id="togglePassword" class="ghost-btn" aria-label="Show password">👁</button>
+        </div>
+        <p id="loginError" class="form-error" hidden></p>
+        <button type="submit" class="primary-btn" id="loginBtn">Log in</button>
+      </form>
+      <p class="hint">First time here? Ask your admin for a username and password.</p>
+    </div>
+  </section>
+
+  <!-- APP SHELL -->
+  <section id="appScreen" class="screen app-screen" hidden>
+    <header class="topbar">
+      <button id="menuToggle" class="icon-btn" aria-label="Toggle menu">☰</button>
+      <div class="topbar-brand">
+        <img src="https://drive.google.com/thumbnail?id=10FeV3emPMe-VCvGni66b2DOzNIPM3mGp&sz=w40"
+             alt="Logo" class="topbar-logo"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+        <span class="topbar-mark" style="display:none">DP</span>
+        <span class="topbar-name">DIP Projects</span>
+      </div>
+      <div class="topbar-user">
+        <div class="topbar-user-info">
+          <div class="topbar-user-namerow">
+            <strong id="userName">—</strong>
+            <span id="userRoleTag" class="role-tag">—</span>
+          </div>
+          <span class="topbar-tagline">Quality + Quantity to be delivered on time every time</span>
+        </div>
+        <button id="logoutBtn" class="logout-btn">↩ Log out</button>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside id="sidebar" class="sidebar">
+        <nav id="navList" class="nav-list"></nav>
+      </aside>
+      <div id="sidebarOverlay" class="sidebar-overlay" hidden></div>
+
+      <main id="mainContent" class="main-content">
+
+        <!-- ADD TASK -->
+        <section id="view-add" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">Assign a new task</h2>
+            <p class="view-sub">Fill in the details below to delegate a task to a team member.</p>
+          </div>
+          <form id="addTaskForm" class="task-form">
+            <div class="field-grid">
+              <div class="field">
+                <label for="f-department">Department <span class="req">*</span></label>
+                <select id="f-department" required><option value="">Select department</option></select>
+              </div>
+              <div class="field">
+                <label for="f-employee">Assign to <span class="req">*</span></label>
+                <select id="f-employee" required><option value="">Select employee</option></select>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+              <!-- <label for="f-project">Project <span class="req">*</span></label>
+                <select id="f-project" required><option value="">Select project</option></select> -->
+                <label for="f-project">Project <span class="req" id="f-project-req">*</span></label>
+<select id="f-project"><option value="">Select project</option></select>
+              </div>
+              <div class="field">
+                <label for="f-tasktype">Task type <span class="req">*</span></label>
+                <select id="f-tasktype" required><option value="">Select task type</option></select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="f-description">Task description <span class="req">*</span></label>
+              <textarea id="f-description" rows="3" placeholder="Describe the task in detail..." required></textarea>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="f-hours">Hours to complete</label>
+                <input id="f-hours" type="number" min="0" step="0.5" value="8" />
+              </div>
+              <div class="field">
+                <label for="f-targetdate">Target date <span class="req">*</span></label>
+                <input id="f-targetdate" type="date" required />
+              </div>
+            </div>
+            <div class="field" id="f-deadline-preview-wrap" style="margin-top:-6px">
+              <div id="f-deadline-preview" class="form-hint">Enter hours to complete to see the employee's calculated deadline (office hours: 9:30 AM–6:30 PM, 1–2 PM lunch excluded).</div>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="f-priority">Priority</label>
+                <select id="f-priority">
+                  <option value="Low">Low</option>
+                  <option value="Medium" selected>Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="f-reschedule">Rescheduling possible</label>
+                <select id="f-reschedule">
+                  <option value="false" selected>No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="f-attachment">Attachment <span class="optional">(optional)</span></label>
+                <input id="f-attachment" type="file" />
+              </div>
+              <div class="field">
+                <label for="f-voicenote">Voice note <span class="optional">(optional)</span></label>
+                <input id="f-voicenote" type="file" accept="audio/*" />
+              </div>
+            </div>
+            <p id="addTaskMsg" class="form-error" hidden></p>
+            <div class="form-footer">
+              <button type="submit" class="primary-btn">Assign task</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- ALL DELEGATED TASKS -->
+        <section id="view-all" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">All delegated tasks</h2>
+            <p class="view-sub">Overview of every task assigned across the team.</p>
+          </div>
+
+          <div class="filter-panel">
+            <div class="filter-row">
+              <div class="filter-field">
+                <label class="filter-label">Department</label>
+                <select id="filter-department"><option value="">All departments</option></select>
+              </div>
+              <div class="filter-field">
+                <label class="filter-label">Employee</label>
+                <select id="filter-employee"><option value="">All employees</option></select>
+              </div>
+              <div class="filter-field">
+                <label class="filter-label">Status</label>
+                <select id="filter-status">
+                  <option value="">All statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Completed">Completed</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+              <div class="filter-field">
+                <label class="filter-label">From date</label>
+                <input type="date" id="filter-created-from" />
+              </div>
+              <div class="filter-field">
+                <label class="filter-label">To date</label>
+                <input type="date" id="filter-created-to" />
+              </div>
+              <button id="clearAllFilters" class="clear-btn">✕ Clear</button>
+            </div>
+            <p id="dateRangeCount" hidden class="range-count"></p>
+          </div>
+
+          <div class="table-card view-desktop-only">
+            <div class="table-scroll">
+              <table class="data-table" id="allTasksTable">
+                <thead>
+                  <tr>
+                    <th class="col-sr">Sr No</th>
+                    <th class="col-details">Task details</th>
+                    <th class="col-date">Planned date</th>
+                    <th class="col-assigned">Assigned to</th>
+                    <th class="col-voice">Voice note</th>
+                    <th class="col-attach">Attachment</th>
+                    <th class="col-priority">Priority</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="allTasksList"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="allTasksCards" class="task-list view-mobile-only"></div>
+        </section>
+
+        <!-- OVERDUE TASKS -->
+        <section id="view-overdue" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">Overdue tasks</h2>
+            <p class="view-sub">Tasks whose target date has passed and are still not completed/verified — includes who's currently verifying, if anyone.</p>
+          </div>
+
+          <div class="my-tasks-tabs" id="overdueTabBar">
+            <button type="button" class="my-tasks-tab-btn active" data-overduetab="task">
+              Task
+              <span class="my-tasks-tab-badge" id="overdueTaskBadge" hidden>0</span>
+            </button>
+            <button type="button" class="my-tasks-tab-btn" data-overduetab="recurring">
+              Recurring Task
+              <span class="my-tasks-tab-badge" id="overdueRecurringBadge" hidden>0</span>
+            </button>
+          </div>
+
+          <div id="overdueTaskTabPanel">
+            <div class="table-card view-desktop-only">
+              <div class="table-scroll">
+                <table class="data-table" id="overdueTasksTable">
+                  <thead>
+                    <tr>
+                      <th class="col-sr">Sr No</th>
+                      <th class="col-details">Task details</th>
+                      <th class="col-status">Source</th>
+                      <th class="col-date">Planned date</th>
+                      <th class="col-assigned">Assigned to</th>
+                      <th class="col-assigned">Verifier</th>
+                      <th class="col-priority">Priority</th>
+                      <th class="col-status">Status</th>
+                      <th class="col-actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overdueTasksList"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="overdueTasksCards" class="task-list view-mobile-only"></div>
+          </div>
+
+          <!-- Recurring tasks that have fallen behind (a due date passed
+               without being marked done) — kept in their own tab since
+               they're a different kind of record (instances, not delegated
+               tasks) with different columns. -->
+          <div id="overdueRecurringTabPanel" hidden>
+            <div class="table-card view-desktop-only">
+              <div class="table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th><th>Task</th><th>Frequency</th><th>Overdue since</th><th>Days overdue</th>
+                    </tr>
+                  </thead>
+                  <tbody id="overdueRecurringTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="overdueRecurringCards" class="task-list view-mobile-only"></div>
+          </div>
+        </section>
+
+
+        <!-- MY TASKS -->
+        <section id="view-my" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">My tasks</h2>
+            <p class="view-sub">Your active and pending tasks are listed here.</p>
+          </div>
+
+          <div class="my-tasks-tabs" id="myTasksTabBar" hidden>
+            <button type="button" class="my-tasks-tab-btn active" data-mytab="mytask">My Task</button>
+            <button type="button" class="my-tasks-tab-btn" data-mytab="other">
+              Other Pending Work
+              <span class="my-tasks-tab-badge" id="otherPendingBadge" hidden>0</span>
+            </button>
+          </div>
+
+          <div id="myTaskTabPanel">
+            <div class="table-card view-desktop-only">
+              <div class="table-scroll">
+                <table class="data-table" id="myTasksTable">
+                  <thead>
+                    <tr>
+                      <th class="col-sr">Sr No</th>
+                      <th class="col-details">Task details</th>
+                      <th class="col-date">Due date</th>
+                      <th class="col-voice">Voice note</th>
+                      <th class="col-attach">Attachment</th>
+                      <th class="col-priority">Priority</th>
+                      <th class="col-status">Status</th>
+                      <th class="col-actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="myTasksTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="myTasksList" class="task-list view-mobile-only"></div>
+          </div>
+
+          <!-- Other Pending Work — read-only summary of things awaiting the
+               admin's attention elsewhere (leave approvals, verifications,
+               open tickets). No actions here on purpose — approve/verify/
+               resolve from their real pages; an item simply drops off this
+               list on its own once it's no longer pending. -->
+          <div id="otherPendingTabPanel" hidden>
+            <div class="my-tasks-tabs" id="otherPendingSubTabBar" style="margin-bottom:16px">
+              <button type="button" class="my-tasks-tab-btn active" data-subtab="leave">
+                🌴 Leave
+                <span class="my-tasks-tab-badge" id="otherPendingLeaveBadge" hidden>0</span>
+              </button>
+              <button type="button" class="my-tasks-tab-btn" data-subtab="verification">
+                🔎 Verification
+                <span class="my-tasks-tab-badge" id="otherPendingVerificationBadge" hidden>0</span>
+              </button>
+              <button type="button" class="my-tasks-tab-btn" data-subtab="tickets">
+                🟠 Tickets
+                <span class="my-tasks-tab-badge" id="otherPendingTicketsBadge" hidden>0</span>
+              </button>
+            </div>
+
+            <div id="otherPendingLeavesList" class="task-list"></div>
+
+            <div id="otherPendingVerificationsWrap" hidden>
+              <div class="table-card view-desktop-only">
+                <div class="table-scroll">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th class="col-reqid">Request ID</th>
+                        <th class="col-tasksr">Task Sr No</th>
+                        <th class="col-vproject">Project</th>
+                        <th class="col-vtasktype">Task Type</th>
+                        <th class="col-vsubmitted">Submitted By</th>
+                        <th class="col-vattach">Attachments</th>
+                        <th class="col-vdate">Submission Date</th>
+                        <th class="col-vactions">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="otherPendingVerificationsTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div id="otherPendingVerificationsList" class="task-list view-mobile-only"></div>
+            </div>
+
+            <div id="otherPendingTicketsList" class="task-list" hidden></div>
+          </div>
+        </section>
+
+        <!-- MANAGE EMPLOYEES -->
+        <section id="view-employees" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">Manage employees</h2>
+              <p class="view-sub">Add, activate, or deactivate team members.</p>
+            </div>
+            <button id="openAddEmployee" class="primary-btn primary-btn-inline">+ Add employee</button>
+          </div>
+
+          <div class="table-card view-desktop-only" style="margin-top:20px">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Department</th><th>Designation</th><th>Reporting Head</th>
+                    <th>Role</th><th>Username</th><th>Status</th><th>Verifier</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="employeesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="employeesCards" class="employee-card-list view-mobile-only" style="margin-top:20px"></div>
+        </section>
+
+        <!-- ORG HIERARCHY -->
+        <section id="view-hierarchy" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">Org Hierarchy</h2>
+              <p class="view-sub">Reporting structure — inactive employees are hidden automatically.</p>
+            </div>
+          </div>
+          <div id="hierarchyTreeContainer" class="org-tree-container" style="margin-top:20px"></div>
+        </section>
+
+        <!-- MANAGE SITES -->
+        <section id="view-sites" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">Manage sites</h2>
+              <p class="view-sub">Track construction sites and assigned personnel.</p>
+            </div>
+            <button id="openAddSite" class="primary-btn primary-btn-inline">+ Add site</button>
+          </div>
+          <div class="table-card" style="margin-top:20px">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Site name</th><th>Client</th><th>Location</th>
+                    <th>Type</th><th>Status</th><th>Team leader</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="sitesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- MASTER DATA -->
+        <section id="view-masterdata" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">Departments &amp; task types</h2>
+            <p class="view-sub">Manage the master lists used across all task assignments.</p>
+          </div>
+          <div class="field-grid">
+            <div>
+              <h3 class="subsection-title">Departments</h3>
+              <form id="addDepartmentForm" class="task-form">
+                <div class="field">
+                  <label for="new-department-name">Department name</label>
+                  <input id="new-department-name" type="text" placeholder="e.g., Engg. Division" required />
+                </div>
+                <p id="addDepartmentMsg" class="form-error" hidden></p>
+                <button type="submit" class="primary-btn">Add department</button>
+              </form>
+              <div class="table-card" style="margin-top:16px">
+                <table class="data-table">
+                  <thead><tr><th>Department</th></tr></thead>
+                  <tbody id="departmentsTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <h3 class="subsection-title">Task types</h3>
+              <form id="addTaskTypeForm" class="task-form">
+                <div class="field">
+                  <label for="new-tasktype-name">Task type name</label>
+                  <input id="new-tasktype-name" type="text" placeholder="e.g., Site Visit" required />
+                </div>
+                <p id="addTaskTypeMsg" class="form-error" hidden></p>
+                <button type="submit" class="primary-btn">Add task type</button>
+              </form>
+              <div class="table-card" style="margin-top:16px">
+                <table class="data-table">
+                  <thead><tr><th>Task type</th></tr></thead>
+                  <tbody id="taskTypesTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- PERMISSIONS -->
+        <section id="view-permissions" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">Permissions</h2>
+            <p class="view-sub">Decide what each employee is allowed to do, without making them a full admin.</p>
+          </div>
+          <div class="table-card">
+            <div class="table-scroll">
+              <table class="data-table" id="permissionsTable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th class="perm-col">Add site</th>
+                    <th class="perm-col">Add employee</th>
+                    <th class="perm-col">Resolve tickets</th>
+                    <th class="perm-col">Verify tasks</th>
+                    <th class="perm-col">MIS Executive</th>
+                  </tr>
+                </thead>
+                <tbody id="permissionsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- VERIFICATIONS -->
+        <section id="view-verifications" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">Verification requests</h2>
+            <p class="view-sub">Review and approve tasks pending your sign-off.</p>
+          </div>
+          <div class="table-card view-desktop-only">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="col-reqid">Request ID</th>
+                    <th class="col-tasksr">Task Sr No</th>
+                    <th class="col-vproject">Project</th>
+                    <th class="col-vtasktype">Task Type</th>
+                    <th class="col-vsubmitted">Submitted By</th>
+                    <th class="col-vattach">Attachments</th>
+                    <th class="col-vdate">Submission Date</th>
+                    <th class="col-vactions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="verificationsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="verificationsList" class="task-list view-mobile-only"></div>
+        </section>
+
+        <!-- RESCHEDULE REQUESTS — admin sees every pending one (approve/reject);
+             everyone else sees only their own, read-only. -->
+        <section id="view-reschedule-requests" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">🗓️ Reschedule requests</h2>
+            <p class="view-sub" id="reschedViewSub">Tasks where a new date has been requested.</p>
+          </div>
+          <div class="table-card view-desktop-only">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="col-sr">Sr No</th>
+                    <th class="col-resched-emp">Employee</th>
+                    <th class="col-resched-task">Task</th>
+                    <th class="col-resched-date">Current date</th>
+                    <th class="col-resched-date">Requested date</th>
+                    <th class="col-resched-reason">Reason</th>
+                    <th class="col-resched-status">Status</th>
+                    <th class="col-resched-decided">Decided by</th>
+                    <th class="col-resched-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="reschedRequestsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="reschedRequestsList" class="task-list view-mobile-only"></div>
+        </section>
+
+        <!-- APPLY LEAVE (everyone) -->
+        <section id="view-applyleave" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">🌴 Apply Leave</h2>
+              <p class="view-sub">Submit a leave request and track its approval status.</p>
+            </div>
+            <button id="openApplyLeave" class="primary-btn primary-btn-inline">+ Apply leave</button>
+          </div>
+          <div id="myLeavesList" class="ticket-list" style="margin-top:20px"></div>
+        </section>
+
+        <!-- LEAVE APPROVALS (admin) -->
+        <section id="view-leaveapprovals" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">🗒️ Leave Approvals</h2>
+            <p class="view-sub">Review leave requests raised by the team and approve or reject them.</p>
+          </div>
+          <div class="filter-panel">
+            <div class="filter-row">
+              <div class="filter-field">
+                <label class="filter-label">Status</label>
+                <select id="leaveApprovalsStatusFilter">
+                  <option value="">All</option>
+                  <option value="Pending" selected>Pending</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div id="leaveApprovalsList" class="ticket-list" style="margin-top:20px"></div>
+        </section>
+
+        <!-- TICKETS -->
+        <section id="view-tickets" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title" id="ticketsViewTitle">Tickets</h2>
+              <p class="view-sub" id="ticketsViewSub">Raise and track support issues.</p>
+            </div>
+            <button id="openRaiseTicket" class="primary-btn primary-btn-inline">+ Raise ticket</button>
+          </div>
+          <div id="ticketsList" class="ticket-list" style="margin-top:20px"></div>
+        </section>
+
+        <!-- CORRECTIONS 
+        <section id="view-corrections" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">↩ Corrections</h2>
+            <p class="view-sub">Tasks sent back to you — review the note and resubmit for verification.</p>
+          </div>
+          <div id="correctionsList" class="task-list" style="margin-top:20px"></div>
+        </section>-->
+<!-- CORRECTIONS -->
+        <section id="view-corrections" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">↩ Corrections</h2>
+            <p class="view-sub">Tasks sent back to you — review the note and resubmit for verification.</p>
+          </div>
+          <div class="table-card view-desktop-only" style="margin-top:20px">
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th class="col-sr">Sr No</th>
+                    <th class="col-details">Task details</th>
+                    <th>Correction note</th>
+                    <th class="col-priority">Priority</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="correctionsTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="correctionsList" class="task-list view-mobile-only" style="margin-top:20px"></div>
+        </section>
+        <!-- UPDATIONS -->
+        <section id="view-updations" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">📝 Updations</h2>
+            <p class="view-sub">Tasks where admin/verifier has requested changes — review the note and make updates.</p>
+          </div>
+          <div id="updationsList" class="task-list" style="margin-top:20px"></div>
+        </section>
+
+        <!-- RECURRING TASKS -->
+        <section id="view-recurring" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">🔁 Recurring Tasks</h2>
+              <p class="view-sub" id="recurringViewSub">Tasks that repeat on a schedule.</p>
+            </div>
+            <button id="openAddRecurring" class="primary-btn primary-btn-inline" hidden>+ Add recurring task</button>
+          </div>
+          <div id="adminRecurringWrap" hidden>
+            <div class="table-card view-desktop-only" style="margin-top:20px">
+              <div class="table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Employee</th><th>Description</th><th>Frequency</th>
+                      <th>Period</th><th>Checkpoints</th><th>Active</th><th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="recurringTasksTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="adminRecurringCards" class="task-list view-mobile-only" style="margin-top:20px"></div>
+          </div>
+         <!-- <div id="employeeRecurringWrap" hidden style="margin-top:20px">
+            <div id="employeeRecurringList"></div>
+          </div> -->
+          <div id="employeeRecurringWrap" hidden style="margin-top:20px">
+            <div class="table-card view-desktop-only">
+              <div class="table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Task</th><th>Frequency</th><th>Planned Date</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="employeeRecurringTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="employeeRecurringList" class="view-mobile-only"></div>
+          </div>
+        </section>
+
+        <!-- DRAWINGS — ADD -->
+        <section id="view-drawings-add" class="view" hidden>
+          <div class="view-heading">
+            <h2 class="view-title">🖊️ Add Drawing</h2>
+            <p class="view-sub">Fill in the drawing details below and submit.</p>
+          </div>
+          <div class="drawing-form-card">
+            <p id="drawingFormMsg" class="form-error" hidden></p>
+            <form id="drawingForm" autocomplete="off">
+
+              <div class="form-section-label">Drawing Details</div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="drw-category">Drawing Category <span class="req">*</span></label>
+                  <select id="drw-category" required>
+                    <option value="">-- Select Category --</option>
+                    <option>Layout</option>
+                    <option>Presentation</option>
+                    <option>Architectural</option>
+                    <option>Structural</option>
+                    <option>MEP</option>
+                    <option>Others</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="drw-sub1">Sub Category 1</label>
+                  <input id="drw-sub1" type="text" placeholder="e.g. Floor Plans" />
+                </div>
+                <div class="field">
+                  <label for="drw-sub2">Sub Category 2</label>
+                  <input id="drw-sub2" type="text" placeholder="e.g. Ground Floor" />
+                </div>
+                <div class="field">
+                  <label for="drw-sub3">Sub Category 3</label>
+                  <input id="drw-sub3" type="text" placeholder="e.g. Toilet Layout" />
+                </div>
+              </div>
+
+              <div class="form-section-label">Project Info</div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="drw-project">Project Name <span class="req">*</span></label>
+                  <select id="drw-project" required>
+                    <option value="">-- Select Project --</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="drw-date">Drawing Date <span class="req">*</span></label>
+                  <input id="drw-date" type="date" required />
+                </div>
+                <div class="field">
+                  <label for="drw-head">Head / Reviewer <span class="req">*</span></label>
+                  <select id="drw-head" required>
+                    <option value="">-- Select Head --</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-section-label">Additional Info</div>
+              <div class="form-row">
+                <div class="field">
+                  <label for="drw-remarks">Remarks / Notes</label>
+                  <textarea id="drw-remarks" rows="2" placeholder="Any notes about this drawing set…"></textarea>
+                </div>
+                <div class="field">
+                  <label for="drw-files">Upload Drawing File(s)</label>
+                  <input id="drw-files" type="file" multiple accept=".pdf,.dwg,.dxf,.png,.jpg,.jpeg,.zip" />
+                  <div style="font-size:0.75rem;color:var(--muted);margin-top:4px">Supported: PDF, DWG, DXF, Images, ZIP | Multiple files allowed</div>
+                </div>
+                <div class="field" style="max-width:160px">
+                  <label for="drw-revision">Revision No.</label>
+                  <input id="drw-revision" type="text" placeholder="R0" />
+                </div>
+              </div>
+
+              <div class="modal-footer" style="margin-top:20px;padding:0">
+                <button type="button" id="drawingResetBtn" class="ghost-btn-text">Reset</button>
+                <button type="submit" class="primary-btn">💾 Save Drawing</button>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <!-- DRAWINGS — ALL -->
+        <section id="view-drawings-all" class="view" hidden>
+          <div class="view-header-row">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">📐 All Drawings <span id="drawingsCount" class="tab-count" style="font-size:0.8rem;vertical-align:middle"></span></h2>
+              <p class="view-sub">Browse, filter and manage all drawing records.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <select id="drwFilterProject" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem">
+                <option value="">All Projects</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-top:18px">
+            <table class="data-table" id="drawingsTable">
+              <thead>
+                <tr>
+                  <th class="col-sr">SR</th>
+                  <th>Project</th>
+                  <th>Category</th>
+                  <th>Sub Cat 1</th>
+                  <th>Sub Cat 2</th>
+                  <th>Sub Cat 3</th>
+                  <th class="col-date">Date</th>
+                  <th>Head</th>
+                  <th style="text-align:center">Rev</th>
+                  <th>Remarks</th>
+                  <th style="text-align:center">Preview</th>
+                  <th>Added By</th>
+                  <th class="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="drawingsTableBody">
+                <tr><td colspan="13" class="empty-state">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- DAILY REPORT -->
+        <section id="view-daily-report" class="view" hidden>
+          <div class="view-header-row" style="flex-wrap:wrap;gap:12px">
+            <div class="view-heading" style="margin-bottom:0">
+              <h2 class="view-title">📋 Daily Report</h2>
+              <p class="view-sub" id="drptSubtitle">Task status report</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <div style="display:flex;gap:6px;align-items:center">
+                <button class="drpt-mode-btn active" id="drptModeSingle">Single Day</button>
+                <button class="drpt-mode-btn" id="drptModeRange">Date Range</button>
+              </div>
+              <div id="drptSingleWrap" style="display:flex;gap:8px;align-items:center">
+                <input type="date" id="drptDate" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem" />
+              </div>
+              <div id="drptRangeWrap" style="display:none;gap:8px;align-items:center">
+                <input type="date" id="drptFromDate" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem" />
+                <span style="color:var(--text-muted);font-size:12px">to</span>
+                <input type="date" id="drptToDate" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:0.85rem" />
+              </div>
+              <button id="drptGenBtn" class="primary-btn primary-btn-inline">🔄 Generate</button>
+              <button id="drptDownloadBtn" class="ghost-btn" style="display:none">⬇️ Download PDF</button>
+            </div>
+          </div>
+          <div id="drptBody" style="margin-top:20px"></div>
+        </section>
+
+      </main>
+    </div>
+  </section>
+
+  <!-- Add Employee Modal -->
+  <div id="employeeModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Add new employee</h3>
+        <button class="modal-close" id="closeEmployeeModal">&times;</button>
+      </div>
+      <form id="employeeForm" class="modal-body">
+        <div class="field">
+          <label for="emp-fullname">Full name <span class="req">*</span></label>
+          <input id="emp-fullname" type="text" placeholder="Enter full name" required />
+        </div>
+        <div class="field">
+          <label for="emp-department">Department <span class="req">*</span></label>
+          <input id="emp-department" type="text" placeholder="e.g., Site Execution" required />
+        </div>
+        <div class="field">
+          <label for="emp-designation">Designation <span class="req">*</span></label>
+          <input id="emp-designation" type="text" placeholder="e.g., Project Manager" required />
+        </div>
+        <div class="field">
+          <label for="emp-role">Role <span class="req">*</span></label>
+          <select id="emp-role" required>
+            <option value="">Select role</option>
+            <option value="employee">Employee</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="emp-reporting-head">Reporting Head <span class="optional">(optional)</span></label>
+          <select id="emp-reporting-head">
+            <option value="">— None (Top level) —</option>
+          </select>
+        </div>
+        <p class="form-note">Username and password will be auto-generated after submission.</p>
+        <p id="employeeFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelEmployeeModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Add employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Edit Employee Modal -->
+  <div id="editEmployeeModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Edit employee</h3>
+        <button class="modal-close" id="closeEditEmployeeModal">&times;</button>
+      </div>
+      <form id="editEmployeeForm" class="modal-body">
+        <input type="hidden" id="edit-emp-id" />
+        <div class="field">
+          <label for="edit-emp-fullname">Full name <span class="req">*</span></label>
+          <input id="edit-emp-fullname" type="text" required />
+        </div>
+        <div class="field">
+          <label for="edit-emp-department">Department <span class="req">*</span></label>
+          <input id="edit-emp-department" type="text" required />
+        </div>
+        <div class="field">
+          <label for="edit-emp-designation">Designation <span class="req">*</span></label>
+          <input id="edit-emp-designation" type="text" required />
+        </div>
+        <div class="field">
+          <label for="edit-emp-role">Role <span class="req">*</span></label>
+          <select id="edit-emp-role" required>
+            <option value="employee">Employee</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="edit-emp-reporting-head">Reporting Head <span class="optional">(optional)</span></label>
+          <select id="edit-emp-reporting-head">
+            <option value="">— None (Top level) —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Status</label>
+          <div>
+            <button type="button" id="edit-emp-status-toggle" class="status-toggle active" data-active="true">Active</button>
+          </div>
+          <p class="form-note" style="margin-top:6px">Inactive employees are removed from the Org Hierarchy and from every "assign to / reporting head" dropdown.</p>
+        </div>
+        <div class="field">
+          <label for="edit-emp-password">New password <span class="optional">(leave blank to keep current)</span></label>
+          <div class="password-field">
+            <input id="edit-emp-password" type="password" placeholder="Set a new password" minlength="6" autocomplete="new-password" />
+            <button type="button" id="toggleEditPassword" class="ghost-btn" aria-label="Show password">👁</button>
+          </div>
+        </div>
+        <p id="editEmployeeFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelEditEmployeeModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Credentials Modal -->
+  <div id="credsModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Employee added ✅</h3>
+        <button class="modal-close" id="closeCredsModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Share these login details with the employee — they won't be shown again.</p>
+        <div class="creds-box">
+          <div><span>Username</span><strong id="credsUsername"></strong></div>
+          <div><span>Password</span><strong id="credsPassword"></strong></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="primary-btn primary-btn-inline" id="closeCredsModalBtn">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Site Modal -->
+  <div id="siteModal" class="modal-backdrop" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3>Add new construction site</h3>
+        <button class="modal-close" id="closeSiteModal">&times;</button>
+      </div>
+      <form id="siteForm" class="modal-body">
+        <div class="field-grid">
+          <div class="field">
+            <label for="site-client">Client name <span class="req">*</span></label>
+            <input id="site-client" type="text" placeholder="Enter client name" required />
+          </div>
+          <div class="field">
+            <label for="site-name">Site name <span class="req">*</span></label>
+            <input id="site-name" type="text" placeholder="Enter site name" required />
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="site-type">Type of project <span class="req">*</span></label>
+            <select id="site-type" required>
+              <option value="">Select project type</option>
+              <option value="Residential">Residential</option>
+              <option value="Commercial">Commercial</option>
+              <option value="Industrial">Industrial</option>
+              <option value="Institutional">Institutional</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="site-location">Site location <span class="req">*</span></label>
+            <input id="site-location" type="text" placeholder="e.g., Pune, Mumbai, Delhi" required />
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="site-start">Start date <span class="req">*</span></label>
+            <input id="site-start" type="date" required />
+          </div>
+          <div class="field">
+            <label for="site-end">Expected end date</label>
+            <input id="site-end" type="date" />
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="site-teamleader">Team leader <span class="req">*</span></label>
+            <select id="site-teamleader" required><option value="">Select team leader</option></select>
+          </div>
+          <div class="field">
+            <label for="site-coordinator">Co-ordinator <span class="req">*</span></label>
+            <select id="site-coordinator" required><option value="">Select coordinator</option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="site-incharge">Site incharge <span class="req">*</span></label>
+          <select id="site-incharge" required><option value="">Select site incharge</option></select>
+        </div>
+        <div class="field">
+          <label for="site-description">Project description</label>
+          <textarea id="site-description" rows="3" placeholder="Enter project description..."></textarea>
+        </div>
+        <p id="siteFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelSiteModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Add site</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Verify Modal -->
+  <div id="verifyModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Send for verification</h3>
+        <button class="modal-close" id="closeVerifyModal">&times;</button>
+      </div>
+      <form id="verifyForm" class="modal-body">
+        <div class="field">
+          <label for="verify-person">Send to <span class="req">*</span></label>
+          <select id="verify-person" required><option value="">Select a verifier</option></select>
+        </div>
+        <div class="field">
+          <label for="verify-files">Attach files <span class="optional">(max 3, optional)</span></label>
+          <input id="verify-files" type="file" multiple accept="*/*" />
+          <span class="form-note">Hold Ctrl / Cmd to select multiple files</span>
+        </div>
+        <p id="verifyFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelVerifyModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Ticket Modal -->
+  <div id="ticketModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Raise a ticket</h3>
+        <button class="modal-close" id="closeTicketModal">&times;</button>
+      </div>
+      <form id="ticketForm" class="modal-body">
+        <!-- Shown only when raised from a task -->
+        <div id="ticketTaskBanner" class="ticket-task-banner" hidden>
+          <span class="ticket-task-banner-icon">🔗</span>
+          <span>Linked to task: <strong id="ticketTaskBannerText"></strong></span>
+        </div>
+        <div class="field">
+          <label for="ticket-category">Category <span class="req">*</span></label>
+          <select id="ticket-category" required>
+            <option value="">Select category</option>
+            <option value="Technical">🔧 Technical issue</option>
+            <option value="Task">📋 Task related</option>
+            <option value="Access">🔑 Access / Login issue</option>
+            <option value="Other">📌 Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="ticket-description">Describe the issue <span class="req">*</span></label>
+          <textarea id="ticket-description" rows="4" placeholder="Explain your issue in detail..." required></textarea>
+        </div>
+        <!-- Screenshot / screen recording — shown only for Technical or Access -->
+        <div id="ticketMediaFields" class="field" hidden>
+          <label>Screenshot or screen recording <span class="optional">(optional)</span></label>
+          <p class="form-note">Attach a screenshot (PNG/JPG) or a short screen recording (MP4/WebM) to help us understand the issue.</p>
+          <input id="ticket-media" type="file" accept="image/png,image/jpeg,image/jpg,video/mp4,video/webm" />
+        </div>
+        <p id="ticketFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelTicketModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Submit ticket</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Updation Modal (verifier/admin → send updation note to employee) -->
+  <div id="updationModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>📝 Request Updation</h3>
+        <button class="modal-close" id="closeUpdationModal">&times;</button>
+      </div>
+      <form id="updationForm" class="modal-body">
+        <p class="form-note" style="margin-bottom:12px">Describe what needs to be updated. The employee will see this note in their Updations section.</p>
+        <div class="field">
+          <label for="updation-note">Updation note <span class="req">*</span></label>
+          <textarea id="updation-note" rows="4" placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
+        </div>
+        <p id="updationFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">📤 Send Updation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Solution Modal (admin/resolver → write solution) -->
+  <div id="solutionModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>💡 Provide solution</h3>
+        <button class="modal-close" id="closeSolutionModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="solutionTicketInfo" class="solution-ticket-info"></div>
+        <div class="field" style="margin-top:14px">
+          <label for="solution-text">Solution / response <span class="req">*</span></label>
+          <textarea id="solution-text" rows="5" placeholder="Write the solution or action taken..."></textarea>
+        </div>
+        <p id="solutionFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelSolutionModal">Cancel</button>
+          <button type="button" class="primary-btn primary-btn-inline" id="submitSolutionBtn">Submit &amp; Resolve</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Apply Leave Modal -->
+  <div id="leaveModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Apply for leave</h3>
+        <button class="modal-close" id="closeLeaveModal">&times;</button>
+      </div>
+      <form id="leaveForm" class="modal-body">
+        <div class="field-grid">
+          <div class="field">
+            <label for="leave-from">From date <span class="req">*</span></label>
+            <input id="leave-from" type="date" required />
+          </div>
+          <div class="field">
+            <label for="leave-to">To date <span class="req">*</span></label>
+            <input id="leave-to" type="date" required />
+          </div>
+        </div>
+        <div class="field">
+          <label class="checkbox-label">
+            <input id="leave-halfday" type="checkbox" />
+            Half day leave
+          </label>
+        </div>
+        <div class="field">
+          <label for="leave-reason">Reason <span class="req">*</span></label>
+          <textarea id="leave-reason" rows="3" placeholder="Why are you taking leave..." required></textarea>
+        </div>
+        <p id="leaveFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelLeaveModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Submit request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Reject Leave Modal (admin — reason optional) -->
+  <div id="rejectLeaveModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Reject leave request</h3>
+        <button class="modal-close" id="closeRejectLeaveModal">&times;</button>
+      </div>
+      <form id="rejectLeaveForm" class="modal-body">
+        <div class="field">
+          <label for="reject-leave-reason">Reason <span class="optional">(optional)</span></label>
+          <textarea id="reject-leave-reason" rows="3" placeholder="Let them know why (optional)..."></textarea>
+        </div>
+        <p id="rejectLeaveFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelRejectLeaveModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Reject request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Recurring Task Checkpoint Modal (employee: tick checkpoints, then Submit) -->
+  <div id="checkpointModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="checkpointModalTitle">Checkpoints</h3>
+        <button class="modal-close" id="closeCheckpointModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="checkpointModalList"></div>
+        <p id="checkpointModalMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelCheckpointModal">Cancel</button>
+          <button type="button" class="primary-btn primary-btn-inline" id="submitCheckpointModal">Submit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reschedule Modal -->
+  <div id="rescheduleModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Reschedule task</h3>
+        <button class="modal-close" id="closeRescheduleModal">&times;</button>
+      </div>
+      <form id="rescheduleForm" class="modal-body">
+        <!-- <div class="field">
+          <label for="reschedule-date">New target date <span class="req">*</span></label>
+          <input id="reschedule-date" type="datetime-local" required />
+        </div> -->
+        <div class="field">
+          <label for="reschedule-date">New target date <span class="req">*</span></label>
+          <input id="reschedule-date" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="reschedule-reason">Reason</label>
+          <textarea id="reschedule-reason" rows="2" placeholder="Why is this task being rescheduled?"></textarea>
+        </div>
+        <p id="rescheduleFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelRescheduleModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Request Reschedule Modal (employee — goes to admin for approval, doesn't change the date directly) -->
+  <div id="reschedRequestModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Request a reschedule</h3>
+        <button class="modal-close" id="closeReschedRequestModal">&times;</button>
+      </div>
+      <form id="reschedRequestForm" class="modal-body">
+        <p class="form-note" style="margin:0 0 14px">This sends a request to the admin — the task's date won't change until it's approved.</p>
+        <div class="field">
+          <label for="reschedreq-date">Requested new date <span class="req">*</span></label>
+          <input id="reschedreq-date" type="date" required />
+        </div>
+        <div class="field">
+          <label for="reschedreq-reason">Reason <span class="optional">(optional)</span></label>
+          <textarea id="reschedreq-reason" rows="3" placeholder="Why do you need this task moved?"></textarea>
+        </div>
+        <p id="reschedRequestFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelReschedRequestModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Send request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SET EXTENDED TIME (Overdue view only — does not change target_date) -->
+  <div id="overdueExtendModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>⏱ Set extended time</h3>
+        <button class="modal-close" id="closeOverdueExtendModal">&times;</button>
+      </div>
+      <form id="overdueExtendForm" class="modal-body">
+        <p class="view-sub" style="margin:0 0 14px">This only affects the Overdue Tasks view — the employee and other views still show the original planned date.</p>
+        <div class="field">
+          <label for="overdue-extend-date">New time the employee asked for <span class="req">*</span></label>
+          <input id="overdue-extend-date" type="datetime-local" required />
+        </div>
+        <div class="field">
+          <label for="overdue-extend-reason">Reason (optional)</label>
+          <textarea id="overdue-extend-reason" rows="3" placeholder="e.g. waiting on material delivery"></textarea>
+        </div>
+        <p id="overdueExtendFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelOverdueExtendModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- OVERDUE TASK DETAIL PANEL (right-side drawer: Today / Pending tabs) -->
+  <div id="overdueDrawerBackdrop" class="drawer-backdrop" hidden>
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <h3>Overdue tasks</h3>
+        <button class="modal-close" id="closeOverdueDrawer">&times;</button>
+      </div>
+      <div class="drawer-tabs">
+        <button type="button" class="drawer-tab active" id="overdueTabToday">Today <span class="tab-count" id="overdueTabTodayCount">0</span></button>
+        <button type="button" class="drawer-tab" id="overdueTabPending">Pending <span class="tab-count" id="overdueTabPendingCount">0</span></button>
+      </div>
+      <div class="drawer-body" id="overdueDrawerBody"></div>
+    </div>
+  </div>
+
+
+  <!-- Reassign Modal -->
+  <div id="reassignModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Reassign task</h3>
+        <button class="modal-close" id="closeReassignModal">&times;</button>
+      </div>
+      <form id="reassignForm" class="modal-body">
+        <div class="field">
+          <label for="reassign-employee">New assignee <span class="req">*</span></label>
+          <select id="reassign-employee" required><option value="">Select employee</option></select>
+        </div>
+        <p class="form-note">The task will be reset to "Pending" for the new assignee.</p>
+        <p id="reassignFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelReassignModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Reassign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Correction Modal (verifier → employee) -->
+  <div id="correctionModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>↩ Send for Correction</h3>
+        <button class="modal-close" id="closeCorrectionModal">&times;</button>
+      </div>
+      <form id="correctionForm" class="modal-body">
+        <div class="field">
+          <label for="correction-note">Correction note <span class="req">*</span></label>
+          <textarea id="correction-note" rows="4" placeholder="Describe what needs to be corrected…" required></textarea>
+        </div>
+        <div class="field">
+          <label>Voice note <span class="optional">(optional)</span></label>
+          <div class="voice-recorder-wrap" id="corrVoiceRecorderWrap">
+            <div class="voice-recorder-btns">
+              <button type="button" id="corrStartRecord" class="ghost-btn-text">🎤 Start recording</button>
+              <button type="button" id="corrStopRecord" class="ghost-btn-text" disabled style="color:#e53e3e">⏹ Stop</button>
+            </div>
+            <span id="corrRecordStatus" class="form-note"></span>
+            <audio id="corrVoicePlayback" controls hidden style="margin-top:8px;width:100%"></audio>
+          </div>
+        </div>
+        <p id="correctionFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelCorrectionModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Send Correction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Resend Verification Modal (employee after correction) -->
+  <div id="resendVerifyModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Resend for Verification</h3>
+        <button class="modal-close" id="closeResendVerifyModal">&times;</button>
+      </div>
+      <form id="resendVerifyForm" class="modal-body">
+        <p class="form-note" style="margin-bottom:12px">Sending back to: <strong id="resendVerifierName">—</strong></p>
+        <div class="field">
+          <label for="resend-files">Attach files <span class="optional">(max 3)</span></label>
+          <input id="resend-files" type="file" multiple accept="*/*" />
+          <span class="form-note">Hold Ctrl / Cmd to select multiple files</span>
+        </div>
+        <p id="resendVerifyFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelResendVerifyModal">Cancel</button>
+          <button type="submit" class="primary-btn primary-btn-inline">Resend for Verification</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+  <!-- Add/Edit Recurring Task Modal -->
+  <div id="recurringModal" class="modal-backdrop" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h3 id="recurringModalTitle">🔁 Create Recurring Task</h3>
+        <button class="modal-close" id="closeRecurringModal">&times;</button>
+      </div>
+      <div class="modal-body" id="recurringModalBody">
+        <input type="hidden" id="recurring-edit-id" />
+        <div class="field-grid">
+          <div class="field">
+            <label for="rec-department">Department <span class="optional">(Optional)</span></label>
+            <select id="rec-department"><option value="">Select Department</option></select>
+          </div>
+          <div class="field">
+            <label for="rec-employee">Employee <span class="req">*</span></label>
+            <select id="rec-employee" required><option value="">Select Employee</option></select>
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label for="rec-tasktype">Task Type <span class="optional">(Optional)</span></label>
+            <select id="rec-tasktype">
+              <option value="">Select Task Type</option>
+              <option value="__add_new__">+ Add new task type…</option>
+            </select>
+            <div id="recNewTaskTypeRow" class="inline-add-row" hidden>
+              <input type="text" id="recNewTaskTypeInput" placeholder="New task type name…" />
+              <button type="button" id="recNewTaskTypeSave" class="primary-btn primary-btn-inline">Add</button>
+              <button type="button" id="recNewTaskTypeCancel" class="ghost-btn-text">Cancel</button>
+            </div>
+            <p id="recTaskTypeMsg" class="form-error" hidden></p>
+          </div>
+          <div class="field">
+            <label for="rec-project">Project <span class="optional">(Optional)</span></label>
+            <select id="rec-project"><option value="">Select Project</option></select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="rec-description">Task Description <span class="req">*</span></label>
+          <textarea id="rec-description" rows="3" placeholder="Describe the recurring task" required></textarea>
+        </div>
+        <div class="field" hidden>
+          <label for="rec-priority">Priority</label>
+          <select id="rec-priority">
+            <option value="Low">Low</option>
+            <option value="Medium" selected>Medium</option>
+            <option value="High">High</option>
+          </select>
+        </div>
+
+        <!-- Frequency selector -->
+        <div class="field">
+          <label>Frequency <span class="req">*</span></label>
+          <div class="freq-grid">
+            <button type="button" class="freq-btn" data-freq="Daily"><strong>Daily</strong><small>Every day</small></button>
+            <button type="button" class="freq-btn" data-freq="Weekly"><strong>Weekly</strong><small>Every week</small></button>
+            <button type="button" class="freq-btn" data-freq="Monthly"><strong>Monthly</strong><small>Every month</small></button>
+            <button type="button" class="freq-btn" data-freq="Yearly"><strong>Yearly</strong><small>Every year</small></button>
+          </div>
+        </div>
+
+        <!-- Weekly day selector -->
+        <div class="field" id="weeklyDaysField" hidden>
+          <label>Select Days <span class="req">*</span></label>
+          <div class="days-grid">
+            <label class="day-check"><input type="checkbox" value="0" /> Sun</label>
+            <label class="day-check"><input type="checkbox" value="1" /> Mon</label>
+            <label class="day-check"><input type="checkbox" value="2" /> Tue</label>
+            <label class="day-check"><input type="checkbox" value="3" /> Wed</label>
+            <label class="day-check"><input type="checkbox" value="4" /> Thu</label>
+            <label class="day-check"><input type="checkbox" value="5" /> Fri</label>
+            <label class="day-check"><input type="checkbox" value="6" /> Sat</label>
+          </div>
+        </div>
+
+        <!-- Active period -->
+        <div class="field-grid">
+          <div class="field">
+            <label for="rec-start">Start Date <span class="req">*</span></label>
+            <input id="rec-start" type="date" required />
+          </div>
+          <div class="field">
+            <label for="rec-end">End Date <span class="optional">(optional)</span></label>
+            <input id="rec-end" type="date" />
+          </div>
+        </div>
+
+        <!-- Checkpoints -->
+        <div class="field">
+          <label>Checkpoints <span class="optional">(optional)</span></label>
+          <p class="form-note">Employee must tick all checkpoints before the task is marked done.</p>
+          <div id="checkpointsList"></div>
+          <button type="button" id="addCheckpointBtn" class="ghost-btn-text" style="margin-top:8px">+ Add checkpoint</button>
+        </div>
+
+        <p id="recurringFormMsg" class="form-error" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn-text" id="cancelRecurringModal">Cancel</button>
+          <button type="button" id="saveRecurringBtn" class="primary-btn primary-btn-inline">Create Recurring Task</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>
