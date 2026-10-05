@@ -67,9 +67,9 @@ function applyDeadlineChange(existing, body, note) {
   if (newDueRaw) {
     const d = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(newDueRaw) && !/[zZ]|[+-]\d{2}:\d{2}$/.test(newDueRaw)
       ? (() => {
-          const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(newDueRaw);
-          return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : new Date(newDueRaw);
-        })()
+        const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(newDueRaw);
+        return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : new Date(newDueRaw);
+      })()
       : new Date(newDueRaw);
     if (!Number.isNaN(d.getTime())) {
       target_date = d.toISOString();
@@ -163,7 +163,7 @@ function firstStamp(existing, field, value) {
 }
 
 const TASK_TIME_SELECT =
-  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, original_target_date, reschedule_status, reschedule_requested_date, reschedule_approved_target_date, reschedule_approved_at, reschedule_count, assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason, accept_reminder_sent_at, is_on_hold, hold_remaining_hours, held_at, resumed_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at';
+  'id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, verification_decided_at, first_verified_at, first_sent_for_verification_at, first_verification_started_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, original_target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_approved_target_date, reschedule_approved_at, reschedule_count, assigned_deadline_at, work_due_at, accept_count, reaccept_required, reaccept_reason, accept_reminder_sent_at, is_on_hold, hold_remaining_hours, held_at, resumed_at, total_hold_seconds, last_hold_seconds, hold_count, overdue_since_at';
 
 // Newer plan/timer columns may not be migrated yet — fall back progressively so
 // a missing migration degrades a field instead of breaking the whole action.
@@ -172,7 +172,7 @@ async function loadTaskForStamp(id) {
   if (error && /column|schema cache/i.test(error.message || '')) {
     const retry = await supabase
       .from('tasks')
-      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, is_on_hold, hold_remaining_hours, held_at, resumed_at')
+      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, is_on_hold, hold_remaining_hours, held_at, resumed_at')
       .eq('id', id)
       .maybeSingle();
     data = retry.data;
@@ -181,7 +181,7 @@ async function loadTaskForStamp(id) {
   if (error && /column|schema cache/i.test(error.message || '')) {
     const retry2 = await supabase
       .from('tasks')
-      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status')
+      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours')
       .eq('id', id)
       .maybeSingle();
     data = retry2.data;
@@ -231,7 +231,7 @@ const TASK_SELECT_PLAN = `
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
   correction_voice_url, updation_note, task_events,
-  reschedule_status, reschedule_requested_date, reschedule_reason,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
@@ -251,7 +251,7 @@ const TASK_SELECT_FULL = `
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
   correction_voice_url, updation_note, task_events,
-  reschedule_status, reschedule_requested_date, reschedule_reason,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
@@ -271,7 +271,7 @@ const TASK_SELECT_LEGACY = `
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at,
   correction_voice_url, updation_note, task_events,
-  reschedule_status, reschedule_requested_date, reschedule_reason,
+  reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
@@ -290,7 +290,7 @@ async function resolveTaskSelect() {
   _taskSelectReady = (async () => {
     const plan = await supabase
       .from('tasks')
-      .select('id, original_target_date, work_due_at, reaccept_required, total_hold_seconds')
+      .select('id, original_target_date, work_due_at, reaccept_required, total_hold_seconds, reschedule_requested_additional_hours')
       .limit(1);
     if (!plan.error) {
       TASK_SELECT = TASK_SELECT_PLAN;
@@ -444,18 +444,18 @@ router.post(
       // if (!department_id || !assigned_to || !project_id || !task_type_id || !description || !target_date) {
       //   return res.status(400).json({ error: 'Please fill in all required fields' });
       // }
-if (!department_id || !assigned_to || !task_type_id || !description || !target_date) {
-  return res.status(400).json({ error: 'Please fill in all required fields' });
-}
+      if (!department_id || !assigned_to || !task_type_id || !description || !target_date) {
+        return res.status(400).json({ error: 'Please fill in all required fields' });
+      }
 
-// Project sirf non-MDO-OFFICE tasks ke liye compulsory hai
-const { data: dept } = await supabase.from('departments').select('name').eq('id', department_id).maybeSingle();
-const isMdoOffice = dept?.name === 'MDO OFFICE';
-if (!isMdoOffice && !project_id) {
-  return res.status(400).json({ error: 'Please select a project' });
-}
+      // Project sirf non-MDO-OFFICE tasks ke liye compulsory hai
+      const { data: dept } = await supabase.from('departments').select('name').eq('id', department_id).maybeSingle();
+      const isMdoOffice = dept?.name === 'MDO OFFICE';
+      if (!isMdoOffice && !project_id) {
+        return res.status(400).json({ error: 'Please select a project' });
+      }
       //above chg are 17th july
-      
+
       const attachmentFile = req.files?.attachment?.[0];
       const voiceNoteFile = req.files?.voice_note?.[0];
 
@@ -474,24 +474,24 @@ if (!isMdoOffice && !project_id) {
         original_hours_to_complete: hrsNum,
       });
       const payload = {
-          department_id,
-          assigned_to,
-          assigned_by: req.user.id,
-          project_id: project_id || null,
-          task_type_id,
-          description,
-          hours_to_complete: hrsNum,
-          original_hours_to_complete: hrsNum,
-          target_date,
-          original_target_date: target_date,
-          assigned_deadline_at: assignedDeadline ? assignedDeadline.toISOString() : null,
-          priority: priority || 'Medium',
-          rescheduling_possible: rescheduling_possible === 'true',
-          attachment_url,
-          voice_note_url,
-          status: 'Pending',
-          assigned_at: assignedAtIso,
-          task_events: [{ at: assignedAtIso, action: 'assigned', by: req.user.id }],
+        department_id,
+        assigned_to,
+        assigned_by: req.user.id,
+        project_id: project_id || null,
+        task_type_id,
+        description,
+        hours_to_complete: hrsNum,
+        original_hours_to_complete: hrsNum,
+        target_date,
+        original_target_date: target_date,
+        assigned_deadline_at: assignedDeadline ? assignedDeadline.toISOString() : null,
+        priority: priority || 'Medium',
+        rescheduling_possible: rescheduling_possible === 'true',
+        attachment_url,
+        voice_note_url,
+        status: 'Pending',
+        assigned_at: assignedAtIso,
+        task_events: [{ at: assignedAtIso, action: 'assigned', by: req.user.id }],
       };
       let { data, error } = await supabase.from('tasks').insert(payload).select(TASK_SELECT).single();
       // Drop plan columns one at a time if that migration has not been run yet.
@@ -518,10 +518,10 @@ if (!isMdoOffice && !project_id) {
         error = retry.error;
       }
 
-    //   if (error) throw error;
-    //   res.status(201).json(data);
-    // } catch (err) {
-    //   console.error('Create task error:', err.message);
+      //   if (error) throw error;
+      //   res.status(201).json(data);
+      // } catch (err) {
+      //   console.error('Create task error:', err.message);
       if (error) throw error;
 
       let cpLabels = parseCheckpointLabels(req.body.checkpoints);
@@ -536,7 +536,7 @@ if (!isMdoOffice && !project_id) {
       if (cpLabels.length) {
         try {
           data.checkpoints = await saveTaskCheckpoints(data.id, cpLabels);
-          await upsertTypeCheckpointTemplate(task_type_id, cpLabels).catch(() => {});
+          await upsertTypeCheckpointTemplate(task_type_id, cpLabels).catch(() => { });
         } catch (cpErr) {
           console.warn('Task checkpoints skip:', cpErr.message);
           data.checkpoints = [];
@@ -643,8 +643,8 @@ router.get('/all', requireAdmin, async (req, res) => {
   }
 });
 // ----------------------------- my tasks (everyone — only their own) -----------------------------
-// Completed tasks stay on admin "All delegated" only — employees should not
-// keep seeing finished work in My Tasks (Office or Site).
+// Active tasks for My Tasks (Office or Site). When status=Completed is requested,
+// returns completed tasks from the existing tasks table.
 router.get('/my', async (req, res) => {
   try {
     await resolveTaskSelect();
@@ -652,11 +652,17 @@ router.get('/my', async (req, res) => {
       .from('tasks')
       .select(TASK_SELECT)
       .eq('assigned_to', req.user.id)
-      .neq('status', 'Rejected')
-      .neq('status', 'Completed')
-      .order('target_date', { ascending: true });
+      .neq('status', 'Rejected');
 
-    if (req.query.status) query = query.eq('status', req.query.status);
+    if (req.query.status === 'Completed' || req.query.status === 'Verified') {
+      query = query.or('status.eq.Completed,status.eq.Verified,verification_status.eq.Verified');
+    } else if (req.query.status) {
+      query = query.eq('status', req.query.status);
+    } else {
+      query = query.neq('status', 'Completed');
+    }
+
+    query = query.order('target_date', { ascending: true });
 
     const { data, error } = await query;
     if (error) throw error;
@@ -664,6 +670,55 @@ router.get('/my', async (req, res) => {
   } catch (err) {
     console.error('List my tasks error:', err.message);
     res.status(500).json({ error: 'Could not load your tasks' });
+  }
+});
+
+// ----------------------------- completed task history (fetched from existing tasks table) -------------
+router.get(['/my-history', '/history'], async (req, res) => {
+  try {
+    await resolveTaskSelect();
+    const { project, type, from, to, q, employee_id, all } = req.query;
+
+    let query = supabase
+      .from('tasks')
+      .select(TASK_SELECT)
+      .or('status.ilike.%completed%,status.ilike.%verified%,verification_status.ilike.%verified%')
+      .neq('status', 'Rejected')
+      .order('target_date', { ascending: false });
+
+    const isAdmin = String(req.user.role || '').toLowerCase() === 'admin';
+    if (employee_id) {
+      query = query.eq('assigned_to', employee_id);
+    } else if (!isAdmin && all !== 'true') {
+      // Regular employee: fetch their own completed tasks
+      query = query.eq('assigned_to', req.user.id);
+    }
+    // If admin (or all=true): fetch completed tasks across the team
+
+    if (project) query = query.eq('project_id', project);
+    if (type)    query = query.eq('task_type_id', type);
+    if (from)    query = query.gte('target_date', from);
+    if (to)      query = query.lte('target_date', to + 'T23:59:59');
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    // Optional full-text search filter (done in JS to avoid ilike complexity)
+    let rows = data || [];
+    if (q) {
+      const lc = q.toLowerCase();
+      rows = rows.filter((t) =>
+        (t.description || '').toLowerCase().includes(lc) ||
+        (t.project?.name || '').toLowerCase().includes(lc) ||
+        (t.task_type?.name || '').toLowerCase().includes(lc) ||
+        (t.assigned_to_user?.full_name || '').toLowerCase().includes(lc)
+      );
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Task history error:', err.message);
+    res.status(500).json({ error: 'Could not load task history' });
   }
 });
 
@@ -729,13 +784,6 @@ router.get('/verifications', async (req, res) => {
 });
 
 // ----------------------------- start verification (the chosen verifier, or admin) -----------------------------
-// Records who clicked "Start Verification" and when, directly on the task
-// row. This used to be tracked only in the browser's sessionStorage, which
-// meant the "started" state could vanish (tab closed, different device,
-// storage cleared) and the button would appear to reset even though nothing
-// had actually changed. Storing it server-side makes it permanent — once
-// started, it stays started for that task, everywhere, for everyone.
-// Idempotent: calling it again just returns the task as-is (first click wins).
 router.patch('/:id/start-verification', async (req, res) => {
   try {
     const { id } = req.params;
@@ -1186,7 +1234,7 @@ router.post('/:id/checkpoints', requireCanAddTask, async (req, res) => {
     const labels = parseCheckpointLabels(req.body?.labels || req.body?.checkpoints);
     const rows = await saveTaskCheckpoints(req.params.id, labels);
     if (req.body?.task_type_id) {
-      await upsertTypeCheckpointTemplate(req.body.task_type_id, labels).catch(() => {});
+      await upsertTypeCheckpointTemplate(req.body.task_type_id, labels).catch(() => { });
     }
     res.json(rows);
   } catch (err) {
@@ -1415,21 +1463,21 @@ router.patch('/:id/verify', async (req, res) => {
     const at = nowIso();
     const updates = approved
       ? {
-          verification_status: 'Verified',
-          verification_note: note || null,
-          status: 'Completed',
-          verified_at: at,
-          first_verified_at: firstStamp(existing, 'first_verified_at', at),
-          verification_decided_at: at,
-          task_events: withTaskEvent(existing, 'verified', req.user.id),
-        }
+        verification_status: 'Verified',
+        verification_note: note || null,
+        status: 'Completed',
+        verified_at: at,
+        first_verified_at: firstStamp(existing, 'first_verified_at', at),
+        verification_decided_at: at,
+        task_events: withTaskEvent(existing, 'verified', req.user.id),
+      }
       : {
-          verification_status: 'Verification Rejected',
-          verification_note: note || null,
-          status: 'In Progress',
-          verification_decided_at: at,
-          task_events: withTaskEvent(existing, 'verification_rejected', req.user.id),
-        };
+        verification_status: 'Verification Rejected',
+        verification_note: note || null,
+        status: 'In Progress',
+        verification_decided_at: at,
+        task_events: withTaskEvent(existing, 'verification_rejected', req.user.id),
+      };
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
     res.json(data);
@@ -1478,18 +1526,18 @@ router.patch(
       const extensions = extra.extensions;
 
       const updates = {
-          verification_status: 'Verification Rejected',
-          verification_note: note.trim(),
-          status: 'In Progress',
-          correction_voice_url,
-          target_date,
-          hours_to_complete,
-          extra_hours,
-          extra_days,
-          correction_extensions: extensions,
-          verification_decided_at: nowIso(),
-          task_events: withTaskEvent(existing, 'correction', req.user.id),
-        };
+        verification_status: 'Verification Rejected',
+        verification_note: note.trim(),
+        status: 'In Progress',
+        correction_voice_url,
+        target_date,
+        hours_to_complete,
+        extra_hours,
+        extra_days,
+        correction_extensions: extensions,
+        verification_decided_at: nowIso(),
+        task_events: withTaskEvent(existing, 'correction', req.user.id),
+      };
 
       const data = await updateTaskTolerant(id, updates, TASK_SELECT);
       res.json(data);
@@ -1544,12 +1592,12 @@ router.patch('/:id/send-updation', async (req, res) => {
 router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-   // const { target_date } = req.body || {}; 17th july
+    // const { target_date } = req.body || {}; 17th july
     const { target_date, reason } = req.body || {};
     if (!target_date) {
       return res.status(400).json({ error: 'Please pick a new target date' });
     }
-//17t july 
+    //17t july
     // const { data: existing, error: fetchErr } = await supabase
     //   .from('tasks').select('id, reschedule_status').eq('id', id).maybeSingle();
     const existing = await loadTaskForStamp(id);
@@ -1641,8 +1689,14 @@ router.post('/:id/reschedule-request', async (req, res) => {
   try {
     const { id } = req.params;
     const { requested_date, reason } = req.body || {};
+    const additionalHours = req.body?.additional_hours == null || req.body.additional_hours === ''
+      ? 0
+      : Number(req.body.additional_hours);
     if (!requested_date) {
       return res.status(400).json({ error: 'Please pick the date you want to move this task to' });
+    }
+    if (!Number.isFinite(additionalHours) || additionalHours < 0) {
+      return res.status(400).json({ error: 'Additional hours must be a non-negative number' });
     }
 
     const { data: existing, error: fetchErr } = await supabase
@@ -1677,6 +1731,7 @@ router.post('/:id/reschedule-request', async (req, res) => {
       .update({
         reschedule_status: 'Pending',
         reschedule_requested_date: requested_date,
+        reschedule_requested_additional_hours: additionalHours,
         reschedule_reason: reason && reason.trim() ? reason.trim() : null,
         reschedule_requested_at: new Date().toISOString(),
         reschedule_decided_by: null,
@@ -1788,6 +1843,7 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       existing.original_hours_to_complete != null
         ? Number(existing.original_hours_to_complete)
         : Number(existing.hours_to_complete) || 0;
+    const additionalHours = Math.max(0, Number(existing.reschedule_requested_additional_hours) || 0);
     let doneHrs = 0;
     let remHrs = assignedHrs;
     if (existing.is_on_hold) {
@@ -1804,6 +1860,8 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
     }
 
     const keepAccepted = !!existing.accepted_at;
+    const updatedAssignedHrs = assignedHrs + additionalHours;
+    const updatedRemainingHrs = remHrs + additionalHours;
     const updates = {
       target_date: approvedDate,
       original_target_date: existing.original_target_date || existing.target_date,
@@ -1818,15 +1876,16 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       reaccept_reason: null,
       overdue_since_at: null,
       accept_reminder_sent_at: null,
-      work_due_at: approvedDate,
+      work_due_at: null,
       task_events: withTaskEvent(existing, 'reschedule_approved', req.user.id, {
         from_target_date: existing.target_date || null,
         to_target_date: approvedDate || null,
         original_target_date: existing.original_target_date || existing.target_date || null,
         use_employee_date: useEmp,
-        assigned_hours: assignedHrs,
+        assigned_hours: updatedAssignedHrs,
         hours_done: doneHrs,
-        hours_remaining: remHrs,
+        hours_remaining: updatedRemainingHrs,
+        additional_hours_approved: additionalHours,
         timer: 'deadline_only_no_reaccept',
       }),
     };
@@ -1836,19 +1895,24 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
       // so later elapsed is not double-counted against a reduced budget.
       updates.status = existing.is_on_hold ? existing.status : (existing.status === 'Pending' ? 'In Progress' : existing.status);
       if (existing.status === 'Pending' && existing.accepted_at) updates.status = 'In Progress';
-      updates.hours_to_complete = remHrs > 0 ? remHrs : existing.hours_to_complete;
-      if (existing.original_hours_to_complete == null && assignedHrs > 0) {
-        updates.original_hours_to_complete = assignedHrs;
-      }
+      updates.hours_to_complete = updatedRemainingHrs;
+      updates.original_hours_to_complete = updatedAssignedHrs;
+      updates.extra_hours = (Number(existing.extra_hours) || 0) + additionalHours;
       if (existing.is_on_hold) {
-        updates.hold_remaining_hours = remHrs;
+        updates.hold_remaining_hours = updatedRemainingHrs;
       } else {
         updates.resumed_at = at;
-        updates.hold_remaining_hours = remHrs;
+        updates.hold_remaining_hours = updatedRemainingHrs;
+        updates.work_due_at = updatedRemainingHrs > 0
+          ? addWorkingHours(at, updatedRemainingHrs).toISOString()
+          : null;
       }
     } else {
       // Not accepted yet — just move the plan date; still no re-accept flag.
       updates.status = existing.status || 'Pending';
+      updates.hours_to_complete = updatedAssignedHrs;
+      updates.original_hours_to_complete = updatedAssignedHrs;
+      updates.extra_hours = (Number(existing.extra_hours) || 0) + additionalHours;
     }
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
@@ -1865,11 +1929,10 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
           data.description || 'Task',
           data.project?.name || '—',
           assigneeName,
-          `APPROVED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why: ${
-            existing.reschedule_reason && String(existing.reschedule_reason).trim()
+          `APPROVED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why: ${existing.reschedule_reason && String(existing.reschedule_reason).trim()
               ? existing.reschedule_reason.trim()
               : '—'
-          }`.slice(0, 500),
+            }`.slice(0, 500),
           existing.target_date || '—',
           approvedDate,
         ]);
@@ -1881,9 +1944,11 @@ router.patch('/:id/reschedule-request/approve', requireAdmin, async (req, res) =
     res.json({
       ...data,
       _reschedule_summary: {
-        assigned_hours: assignedHrs,
+        assigned_hours: updatedAssignedHrs,
         hours_done: doneHrs,
-        hours_remaining: remHrs,
+        hours_remaining: updatedRemainingHrs,
+        additional_hours_approved: additionalHours,
+        updated_assigned_hours: updatedAssignedHrs,
         deadline: approvedDate,
         use_employee_date: useEmp,
       },
@@ -1932,11 +1997,10 @@ router.patch('/:id/reschedule-request/reject', requireAdmin, async (req, res) =>
           data.description || 'Task',
           data.project?.name || '—',
           assigneeName,
-          `REJECTED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why asked: ${
-            existing.reschedule_reason && String(existing.reschedule_reason).trim()
+          `REJECTED by ${req.user.full_name || 'Admin'}. Requested by ${assigneeName}. Why asked: ${existing.reschedule_reason && String(existing.reschedule_reason).trim()
               ? existing.reschedule_reason.trim()
               : '—'
-          }. Reject note: ${reason && reason.trim() ? reason.trim() : '—'}`.slice(0, 500),
+            }. Reject note: ${reason && reason.trim() ? reason.trim() : '—'}`.slice(0, 500),
           existing.target_date || '—',
           existing.reschedule_requested_date || '—',
         ]);
@@ -2001,27 +2065,27 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
 
     if (range === 'day') {
       startDate = new Date(now); startDate.setHours(0, 0, 0, 0);
-      endDate   = new Date(now); endDate.setHours(23, 59, 59, 999);
+      endDate = new Date(now); endDate.setHours(23, 59, 59, 999);
     } else if (range === 'week') {
       const day = now.getDay();
       startDate = new Date(now); startDate.setDate(now.getDate() - day); startDate.setHours(0, 0, 0, 0);
-      endDate   = new Date(startDate); endDate.setDate(startDate.getDate() + 6); endDate.setHours(23, 59, 59, 999);
+      endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6); endDate.setHours(23, 59, 59, 999);
     } else if (range === 'month') {
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      endDate   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     } else if (range === 'last-month') {
       startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      endDate   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
     } else if (range === 'all') {
       startDate = new Date(2000, 0, 1);
-      endDate   = new Date(now.getFullYear() + 1, 0, 1);
+      endDate = new Date(now.getFullYear() + 1, 0, 1);
     } else if (range === 'custom' && from && to) {
       startDate = new Date(from); startDate.setHours(0, 0, 0, 0);
-      endDate   = new Date(to);   endDate.setHours(23, 59, 59, 999);
+      endDate = new Date(to); endDate.setHours(23, 59, 59, 999);
     } else {
       // default: current month
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      endDate   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     }
 
     let taskQuery = supabase
@@ -2099,9 +2163,9 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     // Group by employee → project
     const byEmployee = {};
     for (const t of enriched) {
-      const empId   = t.assigned_to_user?.id   || 'unknown';
+      const empId = t.assigned_to_user?.id || 'unknown';
       const empName = t.assigned_to_user?.full_name || 'Unknown';
-      const projId  = t.project?.id   || 'no-project';
+      const projId = t.project?.id || 'no-project';
       const projName = t.project?.name || 'No project';
 
       if (!byEmployee[empId]) {
@@ -2120,14 +2184,14 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     const report = Object.values(byEmployee).map(emp => {
       const projects = Object.values(emp.projects).map(proj => {
         const tasks = proj.tasks;
-        const completed  = tasks.filter(t => t.status === 'Completed').length;
-        const pending    = tasks.filter(t => t.status === 'Pending').length;
+        const completed = tasks.filter(t => t.status === 'Completed').length;
+        const pending = tasks.filter(t => t.status === 'Pending').length;
         const inProgress = tasks.filter(t => t.status === 'In Progress').length;
-        const rejected   = tasks.filter(t => t.status === 'Rejected').length;
+        const rejected = tasks.filter(t => t.status === 'Rejected').length;
 
         const avgCycle = (() => {
           const valid = tasks.map(t => t.total_cycle_hrs).filter(h => h !== null);
-          return valid.length ? Math.round((valid.reduce((a,b)=>a+b,0) / valid.length) * 10) / 10 : null;
+          return valid.length ? Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 10) / 10 : null;
         })();
 
         return { ...proj, tasks, summary: { total: tasks.length, completed, pending, inProgress, rejected, avgCycleHrs: avgCycle } };

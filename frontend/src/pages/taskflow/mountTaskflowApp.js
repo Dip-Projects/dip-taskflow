@@ -205,6 +205,7 @@ function collectEls() {
     reschedRequestForm: document.getElementById('reschedRequestForm'),
     reschedRequestFormMsg: document.getElementById('reschedRequestFormMsg'),
     reschedreqDate: document.getElementById('reschedreq-date'),
+    reschedreqAdditionalHours: document.getElementById('reschedreq-additional-hours'),
     reschedreqReason: document.getElementById('reschedreq-reason'),
     closeReschedRequestModal: document.getElementById('closeReschedRequestModal'),
     cancelReschedRequestModal: document.getElementById('cancelReschedRequestModal'),
@@ -296,11 +297,11 @@ export async function mountTaskflowApp(opts = {}) {
 
   const __tfReadyFns = [];
 
-  
+
   /* els via collectEls() */
-  
+
   /* state module-scoped */
-  
+
   // ─── helpers ────────────────────────────────────────────────────────────────
   function showToast(message, type = '') {
     if (!els.toast) {
@@ -335,7 +336,7 @@ export async function mountTaskflowApp(opts = {}) {
     el.textContent = text;
     el.hidden = false;
   }
-  
+
   async function api(path, { method = 'GET', body, isForm = false } = {}) {
     const headers = {};
     const tokenUsed = state.token || localStorage.getItem('tf_token') || '';
@@ -346,7 +347,7 @@ export async function mountTaskflowApp(opts = {}) {
       cache: 'no-store',
       body: isForm ? body : (body ? JSON.stringify(body) : undefined)
     });
-  
+
     // Sliding session: backend jab token expiry ke kareeb hota hai to naya
     // token bhej deta hai — usko silently swap kar do
     const newToken = res.headers.get('X-New-Token');
@@ -357,7 +358,7 @@ export async function mountTaskflowApp(opts = {}) {
         localStorage.setItem('tf_token', newToken);
       }
     }
-  
+
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
       // Login attempt ke liye backend ka asli message dikhao (e.g. "Invalid
@@ -559,7 +560,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (e.target.closest('.multi-select')) return;
     closeSiteMultiSelects();
   });
-  
+
   // JS parses a bare "YYYY-MM-DD" string (no time, no offset) as UTC midnight
   // per the ISO-8601 spec — but a full timestamp like "...T10:15:00" (no
   // timezone) is parsed as LOCAL time. target_date started life as a
@@ -811,7 +812,7 @@ export async function mountTaskflowApp(opts = {}) {
       <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
     `;
   }
-  
+
   function fmtDate(iso) {
     if (!iso) return '—';
     return parseLocalDate(iso).toLocaleString(undefined, {
@@ -839,7 +840,7 @@ export async function mountTaskflowApp(opts = {}) {
     const d = fmtDateOnly(iso);
     return hours != null ? `${d} · ${hours}h` : d;
   }
-  
+
   // ── Office-hours-aware due date calculator ─────────────────────────────────
   // Office hours: 9:30 AM – 6:30 PM, Monday–Saturday (Sunday off), with a
   // 1-hour lunch break from 1:00 PM – 2:00 PM that doesn't count as work time.
@@ -851,13 +852,13 @@ export async function mountTaskflowApp(opts = {}) {
     lunchStartH: 13, lunchStartM: 0,
     lunchEndH: 14, lunchEndM: 0
   };
-  
+
   function atTime(date, h, m) {
     const d = new Date(date);
     d.setHours(h, m, 0, 0);
     return d;
   }
-  
+
   // Moves a moment forward to the next valid working instant: not on a Sunday,
   // not before opening, not after closing, and not during lunch.
   function snapToWorkingMoment(date) {
@@ -872,7 +873,7 @@ export async function mountTaskflowApp(opts = {}) {
       const dayEnd = atTime(d, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
       const lunchStart = atTime(d, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
       const lunchEnd = atTime(d, OFFICE_HOURS.lunchEndH, OFFICE_HOURS.lunchEndM);
-  
+
       if (d < dayStart) { d = dayStart; continue; }
       if (d >= dayEnd) {
         d.setDate(d.getDate() + 1);
@@ -884,7 +885,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return d;
   }
-  
+
   // Adds `hours` of working time (office hours, minus lunch, Mon–Sat only) to
   // a starting datetime and returns the resulting Date.
   // function addWorkingHours(startDate, hours) {
@@ -894,29 +895,29 @@ export async function mountTaskflowApp(opts = {}) {
   function addWorkingHours(startDate, hours, { fromNowIfToday = true } = {}) {
     let remainingMs = (Number(hours) || 0) * 3600000;
     let current = snapToWorkingMoment(parseLocalDate(startDate));
-  
+
     // For a target date of today, start from "now" so the preview is not already
     // in the past. Employee due dates pass fromNowIfToday:false so they stay
     // anchored to the real assign/create time.
     if (fromNowIfToday) {
-    const now = snapToWorkingMoment(new Date());
-    const targetDay = parseLocalDate(startDate);
-    const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
-      && targetDay.getMonth() === new Date().getMonth()
-      && targetDay.getDate() === new Date().getDate();
-    if (isSameCalendarDay && now > current) {
-      current = now;
+      const now = snapToWorkingMoment(new Date());
+      const targetDay = parseLocalDate(startDate);
+      const isSameCalendarDay = targetDay.getFullYear() === new Date().getFullYear()
+        && targetDay.getMonth() === new Date().getMonth()
+        && targetDay.getDate() === new Date().getDate();
+      if (isSameCalendarDay && now > current) {
+        current = now;
       }
     }
-  
+
     if (remainingMs <= 0) return current;
-  
+
     for (let guard = 0; guard < 1000 && remainingMs > 0; guard++) {
       const dayEnd = atTime(current, OFFICE_HOURS.endH, OFFICE_HOURS.endM);
       const lunchStart = atTime(current, OFFICE_HOURS.lunchStartH, OFFICE_HOURS.lunchStartM);
       const segmentEnd = current < lunchStart ? lunchStart : dayEnd;
       const availableMs = segmentEnd - current;
-  
+
       if (remainingMs <= availableMs) {
         current = new Date(current.getTime() + remainingMs);
         remainingMs = 0;
@@ -1109,19 +1110,19 @@ export async function mountTaskflowApp(opts = {}) {
       if (task) el.innerHTML = fmtEmployeeTimerHtml(task, now);
     });
   }
-  
+
   function fmtCalculatedDeadline(targetDateIso, hours) {
     if (!targetDateIso) return '—';
     const due = addWorkingHours(targetDateIso, hours);
     const d = fmtDate(due.toISOString());
     return hours != null ? `${d} · ${hours}h` : d;
   }
-  
+
   function toDatetimeLocalValue(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   function datetimeLocalToIso(value) {
     if (!value) return '';
@@ -1160,7 +1161,7 @@ export async function mountTaskflowApp(opts = {}) {
     div.textContent = str ?? '';
     return div.innerHTML;
   }
-  
+
   // Builds the "Project: / Task Type: / Details: [/ Assigned to:]" block used
   // in the Task Details column of both the All Tasks and My Tasks tables.
   function buildTaskDetailsHtml(task, { showAssignee = false } = {}) {
@@ -1176,7 +1177,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return html;
   }
-  
+
   // ─── auth (login handled by React AuthContext) ────────────────────────────────
   function logout() {
     state.token = null; state.user = null;
@@ -1227,7 +1228,7 @@ export async function mountTaskflowApp(opts = {}) {
   window.addEventListener('resize', () => {
     if (els.sidebar?.classList.contains('open')) openSidebar();
   });
-  
+
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
     if (!state.user?.id) {
@@ -1252,9 +1253,9 @@ export async function mountTaskflowApp(opts = {}) {
     setupTopbarQuick();
     try {
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
+        Notification.requestPermission().catch(() => { });
       }
-    } catch (_) {}
+    } catch (_) { }
     // Desktop: sidebar open by default; mobile: closed
     if (isMobileNav()) closeSidebar();
     else openSidebar();
@@ -1278,7 +1279,7 @@ export async function mountTaskflowApp(opts = {}) {
       switchView('add');
     } else {
       // Employees with Add task need master dropdowns; always preload
-      await loadMasterData().catch(() => {});
+      await loadMasterData().catch(() => { });
       switchView('my');
     }
     // Refresh badge counts now and every 15s
@@ -1291,13 +1292,13 @@ export async function mountTaskflowApp(opts = {}) {
     }, 60000);
     try {
       if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
+        Notification.requestPermission().catch(() => { });
       }
-    } catch (_) {}
+    } catch (_) { }
     // Head/admin: unresolved leave covers (buddy declined) — popup until resolved
     checkLeaveCoverAlerts();
   }
-  
+
   function viewerNavRole() {
     const u = state.user || {};
     const role = String(u.role || '').toLowerCase().trim();
@@ -1336,7 +1337,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!row) return true;
     return row[who] !== false;
   }
-  
+
   function buildNav() {
     const isAdmin = state.user.role === 'admin';
     const isMis = !isAdmin && (!!state.user.is_mis_executive || /\bmis\b/i.test(`${state.user.department || ''} ${state.user.designation || ''}`));
@@ -1351,17 +1352,18 @@ export async function mountTaskflowApp(opts = {}) {
     const canAddEmployee = isAdmin || !!state.user.can_add_employee;
     const canAddTask = isAdmin || !!state.user.can_add_task;
     const canResolveTickets = isAdmin || !!state.user.can_resolve_tickets;
-  
+
     const taskItems = [];
     // Admin always; Permissions “Add task”; or Who sees what grants the role
     if (isAdmin || canAddTask || visOk('add')) {
       taskItems.push({ key: 'add', label: '➕ Add new task' });
     }
-    if (visOk('all') && isAdmin) taskItems.push({ key:'all', label:'📋 All delegated tasks' });
-    if (visOk('overdue') && isAdmin) taskItems.push({ key:'overdue', label:'⏰ Overdue tasks' });
-    if (visOk('my')) taskItems.push({ key:'my', label:'✅ My tasks' });
+    if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
+    if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
+    if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
     if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? '🔁 Recurring tasks' : '🔁 My recurring tasks' });
-  
+    if (visOk('my')) taskItems.push({ key: 'task-history', label: '📜 Task History' });
+
     els.navList.innerHTML = '';
     if (taskItems.length) {
       appendCollapsibleNav(
@@ -1370,7 +1372,7 @@ export async function mountTaskflowApp(opts = {}) {
         { collapsed: true, sectionId: 'tasks' }
       );
     }
-  
+
     const isMdoHead =
       isMdoOfficeUser() &&
       (!!state.user.is_head ||
@@ -1383,7 +1385,7 @@ export async function mountTaskflowApp(opts = {}) {
         { collapsed: true, sectionId: 'verification' }
       );
     }
-  
+
     if (visOk('tickets')) {
       appendCollapsibleNav(
         isMis ? 'MIS — Ticket Tracking' : 'Support',
@@ -1407,7 +1409,7 @@ export async function mountTaskflowApp(opts = {}) {
         { collapsed: true, sectionId: 'reschedule' }
       );
     }
-  
+
     const showAdminBlock = visOk('employees') && (isAdmin || canAddEmployee)
       || visOk('sites') && (isAdmin || canAddSite)
       || visOk('clients') && isAdmin
@@ -1498,9 +1500,9 @@ export async function mountTaskflowApp(opts = {}) {
       );
     }
   }
-  
+
   const NAV_SECTION_BY_VIEW = {
-    add: 'tasks', all: 'tasks', overdue: 'tasks', my: 'tasks', recurring: 'tasks',
+    add: 'tasks', all: 'tasks', overdue: 'tasks', my: 'tasks', recurring: 'tasks', 'task-history': 'tasks',
     verifications: 'verification',
     'reschedule-requests': 'reschedule',
     employees: 'administration', hierarchy: 'administration', 'project-mgmt': 'administration',
@@ -1562,7 +1564,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!group) return;
     setNavGroupOpen(group, true);
   }
-  
+
   function makeNavButton(key, label, badge) {
     const btn = document.createElement('button');
     btn.className = 'nav-btn'; btn.dataset.view = key;
@@ -1584,7 +1586,7 @@ export async function mountTaskflowApp(opts = {}) {
     });
     return btn;
   }
-  
+
   // Updates badge on an existing nav button (or creates one if missing)
   function setNavBadge(viewKey, count) {
     if (viewKey === 'team-chat') {
@@ -1637,7 +1639,7 @@ export async function mountTaskflowApp(opts = {}) {
       cal.onclick = () => switchView('calendar');
     }
   }
-  
+
   // Poll badge counts from the API and update nav
   async function refreshNavBadges() {
     try {
@@ -1654,17 +1656,17 @@ export async function mountTaskflowApp(opts = {}) {
         setNavBadge('my', pending);
         setNavBadge('corrections', corrections);
         setNavBadge('updations', updations);
-  
+
         // Verifications (if verifier)
         if (state.user?.can_verify) {
           const verifs = await api('/tasks/verifications');
           setNavBadge('verifications', verifs.length);
         }
-  
+
         // Reschedule requests are admin-only (approve/reject). Emp requests
         // from the task menu and does not get a requests inbox.
         setNavBadge('reschedule-requests', 0);
-  
+
         // My recurring tasks — count of instances still outstanding (today's
         // due instance plus any backlog that hasn't been marked Completed yet)
         const myRecurring = await api('/recurring-tasks/my').catch(() => []);
@@ -1673,7 +1675,7 @@ export async function mountTaskflowApp(opts = {}) {
           return st !== 'Completed' && st !== 'NotApplicable';
         }).length;
         setNavBadge('recurring', recurringPending);
-  
+
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
         const openTickets = tickets.filter(t => t.status === 'Open').length;
@@ -1697,13 +1699,13 @@ export async function mountTaskflowApp(opts = {}) {
           return true;
         }).length;
         const overdueCount = allTasks.filter((t) => isDelegatedOverdueTask(t, now)).length;
-  
+
         const recurringAll = await api('/recurring-tasks/all').catch(() => []);
         const overdueRecurringCount = recurringAll.filter(t => t.is_overdue).length;
-  
+
         setNavBadge('all', pendingCount);
         setNavBadge('overdue', overdueCount + overdueRecurringCount);
-  
+
         // Admin's own "My tasks" — delegated + own recurring pending
         const myTasks = await api('/tasks/my').catch(() => []);
         const myPending = myTasks.filter(t => t.status === 'Pending' || t.status === 'In Progress').length;
@@ -1713,23 +1715,23 @@ export async function mountTaskflowApp(opts = {}) {
           return st !== 'Completed' && st !== 'NotApplicable';
         }).length;
         setNavBadge('my', myPending + myRecurringPending);
-  
+
         // Verifications where THIS admin is the chosen verifier (admins can be
         // picked as a verifier too — see /master/verifiers). This was missing
         // before, so the badge never showed up for admins even when tasks were
         // sitting in their verification queue.
         const adminVerifs = await api('/tasks/verifications').catch(() => []);
         setNavBadge('verifications', adminVerifs.length);
-  
+
         // Reschedule requests awaiting admin decision (API already Pending-only)
         const reschedReqs = await api('/tasks/reschedule-requests?status=Pending').catch(() => []);
         setNavBadge('reschedule-requests', reschedReqs.length);
-  
+
         // Open tickets
         const tickets = await api('/tickets').catch(() => []);
         const openTickets = tickets.filter(t => t.status === 'Open').length;
         setNavBadge('tickets-open', openTickets);
-  
+
         // Pending leave requests awaiting approval
         const pendingLeaves = await api('/leaves/all?status=Pending').catch(() => []);
         const coverItems = await api('/leaves/unresolved-covers').catch(() => []);
@@ -1752,9 +1754,9 @@ export async function mountTaskflowApp(opts = {}) {
         const age = Date.now() - new Date(a.created_at || 0).getTime();
         if (Number.isFinite(age) && age < 3 * 60 * 1000) fireSystemNotify(a.title, a.body);
       });
-    } catch(e) { /* silently fail — badges are non-critical */ }
+    } catch (e) { /* silently fail — badges are non-critical */ }
   }
-  
+
   function switchView(viewKey) {
     // DIP Bot is admin-only
     if (viewKey === 'visibility') {
@@ -1770,54 +1772,55 @@ export async function mountTaskflowApp(opts = {}) {
     window.__tfActiveView = viewKey;
     ensureNavSectionOpen(viewKey);
     document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
-  
+
     // tickets-open and tickets-resolved share the same view-tickets section
     const htmlKey = (viewKey === 'tickets-open' || viewKey === 'tickets-resolved') ? 'tickets' : viewKey;
     const viewEl = document.getElementById(`view-${htmlKey}`);
     if (viewEl) viewEl.hidden = false;
-  
+
     document.querySelectorAll('.nav-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.view === viewKey);
     });
-    if (viewKey === 'add')            loadMasterData();
-    if (viewKey === 'all')           loadAllTasks();
-    if (viewKey === 'overdue')       loadOverdueTasks();
-    if (viewKey === 'my')            loadMyTasks();
-    if (viewKey === 'employees')     loadEmployees();
-    if (viewKey === 'hierarchy')     loadHierarchy();
-    if (viewKey === 'sites')         loadSites();
-    if (viewKey === 'clients')       loadClients();
-    if (viewKey === 'masterdata')    loadMasterDataView();
-    if (viewKey === 'permissions')   loadPermissions();
-    if (viewKey === 'visibility')    { loadVisibility(); loadReminderSettings(); }
+    if (viewKey === 'add') loadMasterData();
+    if (viewKey === 'all') loadAllTasks();
+    if (viewKey === 'overdue') loadOverdueTasks();
+    if (viewKey === 'my') loadMyTasks();
+    if (viewKey === 'employees') loadEmployees();
+    if (viewKey === 'hierarchy') loadHierarchy();
+    if (viewKey === 'sites') loadSites();
+    if (viewKey === 'clients') loadClients();
+    if (viewKey === 'masterdata') loadMasterDataView();
+    if (viewKey === 'permissions') loadPermissions();
+    if (viewKey === 'visibility') { loadVisibility(); loadReminderSettings(); }
     if (viewKey === 'verifications') loadVerifications();
     if (viewKey === 'reschedule-requests') loadRescheduleRequests();
-    if (viewKey === 'tickets')       loadTickets();
-    if (viewKey === 'tickets-open')     loadTicketsFiltered('Open');
+    if (viewKey === 'tickets') loadTickets();
+    if (viewKey === 'tickets-open') loadTicketsFiltered('Open');
     if (viewKey === 'tickets-resolved') loadTicketsFiltered('Resolved');
-    if (viewKey === 'corrections')   loadCorrections();
-    if (viewKey === 'updations')     loadUpdations();
-    if (viewKey === 'recurring')     loadRecurringView();
-    if (viewKey === 'applyleave')      loadMyLeaves();
-    if (viewKey === 'buddyrequests')  loadBuddyRequests();
-    if (viewKey === 'leaveapprovals')  { loadLeaveApprovals(); checkLeaveCoverAlerts(); }
+    if (viewKey === 'corrections') loadCorrections();
+    if (viewKey === 'updations') loadUpdations();
+    if (viewKey === 'recurring') loadRecurringView();
+    if (viewKey === 'task-history') loadTaskHistory();
+    if (viewKey === 'applyleave') loadMyLeaves();
+    if (viewKey === 'buddyrequests') loadBuddyRequests();
+    if (viewKey === 'leaveapprovals') { loadLeaveApprovals(); checkLeaveCoverAlerts(); }
     if (viewKey === 'new-recruitment') loadHrRecruitmentMine();
-    if (viewKey === 'drawings-add')  renderDrawingAddView();
-    if (viewKey === 'drawings-all')  loadAllDrawings();
-    if (viewKey === 'daily-report')  loadDailyReport();
-    if (viewKey === 'mis-report')    loadMisReport();
+    if (viewKey === 'drawings-add') renderDrawingAddView();
+    if (viewKey === 'drawings-all') loadAllDrawings();
+    if (viewKey === 'daily-report') loadDailyReport();
+    if (viewKey === 'mis-report') loadMisReport();
     if (viewKey === 'time-dashboard') loadTimeDashboard();
-    if (viewKey === 'delay-report')   loadDelayReport();
-    if (viewKey === 'emp-report')     loadEmpReport();
+    if (viewKey === 'delay-report') loadDelayReport();
+    if (viewKey === 'emp-report') loadEmpReport();
     if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
-    if (viewKey === 'fms')           loadFms();
-    if (viewKey === 'ai-bot')        loadAiBot();
-    if (viewKey === 'team-chat')     loadTeamChat();
-    if (viewKey === 'meetings')      loadMeetings();
-    if (viewKey === 'calendar')      loadCalendar();
-    if (viewKey === 'project-mgmt')  loadProjectMgmt();
+    if (viewKey === 'fms') loadFms();
+    if (viewKey === 'ai-bot') loadAiBot();
+    if (viewKey === 'team-chat') loadTeamChat();
+    if (viewKey === 'meetings') loadMeetings();
+    if (viewKey === 'calendar') loadCalendar();
+    if (viewKey === 'project-mgmt') loadProjectMgmt();
   }
-  
+
   // ─── master data (admin) ─────────────────────────────────────────────────────
   function normDeptName(s) {
     return String(s || '')
@@ -1906,7 +1909,7 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const [departments, projects, taskTypes, employees] = await Promise.all([
         api('/master/departments'), api('/master/projects'),
-        api('/master/task-types'),  api('/master/employees')
+        api('/master/task-types'), api('/master/employees')
       ]);
       state.master = {
         departments: sortByLabel(departments),
@@ -1938,8 +1941,8 @@ export async function mountTaskflowApp(opts = {}) {
   els.filterDepartment?.addEventListener('change', () => {
     syncFilterEmployeeDropdown();
   });
-  
-  
+
+
   async function refreshEmployeeDropdowns() {
     try {
       const employees = sortByLabel(
@@ -1960,9 +1963,9 @@ export async function mountTaskflowApp(opts = {}) {
       fillSelect(els.empReportingHead, employees, { placeholder: '— None (Top level) —', labelKey: 'full_name' });
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // ─── Add New Task ────────────────────────────────────────────────────────────
-  
+
   // Live preview of the actual completion deadline while assigning a task —
   // reuses the same office-hours-aware calculator (9:30 AM–6:30 PM, 1–2 PM
   // lunch excluded, Sundays skipped) that's already used to show deadlines
@@ -1972,8 +1975,8 @@ export async function mountTaskflowApp(opts = {}) {
     const previewEl = document.getElementById('f-deadline-preview');
     if (!previewEl) return;
     const hoursRaw = document.getElementById('f-hours').value;
-    const dateRaw  = document.getElementById('f-targetdate').value;
-  
+    const dateRaw = document.getElementById('f-targetdate').value;
+
     if (!dateRaw) {
       previewEl.innerHTML = '';
       return;
@@ -1989,7 +1992,7 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('f-hours')?.addEventListener('input', updateTaskDeadlinePreview);
   document.getElementById('f-targetdate')?.addEventListener('input', updateTaskDeadlinePreview);
   updateTaskDeadlinePreview();
-  
+
   els.addTaskForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     hideFormMsg(els.addTaskMsg);
@@ -2012,9 +2015,9 @@ export async function mountTaskflowApp(opts = {}) {
     formData.append('priority', document.getElementById('f-priority').value);
     formData.append('rescheduling_possible', document.getElementById('f-reschedule').value);
     const attachment = document.getElementById('f-attachment').files[0];
-    const voiceNote  = document.getElementById('f-voicenote').files[0];
+    const voiceNote = document.getElementById('f-voicenote').files[0];
     if (attachment) formData.append('attachment', attachment);
-    if (voiceNote)  formData.append('voice_note', voiceNote);
+    if (voiceNote) formData.append('voice_note', voiceNote);
     if (cpLabels.length) formData.append('checkpoints', JSON.stringify(cpLabels));
     const created = await api('/tasks', { method: 'POST', body: formData, isForm: true });
     if (cpLabels.length && created?.id && !(created.checkpoints || []).length && !created.checkpoint_error) {
@@ -2025,11 +2028,11 @@ export async function mountTaskflowApp(opts = {}) {
         });
       } catch (_) { /* table missing — task is still assigned */ }
     }
-      showToast('Task assigned ✅', 'success');
-      els.addTaskForm.reset();
-      document.getElementById('f-priority').value = 'Medium';
-      document.getElementById('f-reschedule').value = 'false';
-      updateTaskDeadlinePreview();
+    showToast('Task assigned ✅', 'success');
+    els.addTaskForm.reset();
+    document.getElementById('f-priority').value = 'Medium';
+    document.getElementById('f-reschedule').value = 'false';
+    updateTaskDeadlinePreview();
   }
 
   function toggleInlineAdd(rowId) {
@@ -2139,17 +2142,17 @@ export async function mountTaskflowApp(opts = {}) {
       if (msg) { msg.textContent = err.message || 'Could not save'; msg.hidden = false; }
     }
   });
-  
+
   // ─── All Delegated Tasks ──────────────────────────────────────────────────────
   function buildAllTasksQuery() {
     const params = new URLSearchParams();
     if (els.filterDepartment.value) params.set('department_id', els.filterDepartment.value);
-    if (els.filterEmployee.value)   params.set('employee_id',   els.filterEmployee.value);
+    if (els.filterEmployee.value) params.set('employee_id', els.filterEmployee.value);
     const st = els.filterStatus.value;
     if (st && st !== 'open') params.set('status', st);
     return params.toString();
   }
-  
+
   async function loadAllTasks() {
     const tbody = els.allTasksList;
     tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading tasks…</td></tr>`;
@@ -2157,19 +2160,19 @@ export async function mountTaskflowApp(opts = {}) {
     try {
       const query = buildAllTasksQuery();
       let tasks = await api(`/tasks/all${query ? `?${query}` : ''}`);
-  
+
       if (els.filterStatus.value === 'open') {
         tasks = tasks.filter((t) => t.status === 'Pending' || t.status === 'In Progress');
       }
-  
+
       const from = els.filterCreatedFrom.value ? new Date(els.filterCreatedFrom.value) : null;
-      const to   = els.filterCreatedTo.value   ? new Date(els.filterCreatedTo.value + 'T23:59:59') : null;
+      const to = els.filterCreatedTo.value ? new Date(els.filterCreatedTo.value + 'T23:59:59') : null;
       if (from || to) {
         const before = tasks.length;
         tasks = tasks.filter((t) => {
           const d = new Date(t.created_at);
           if (from && d < from) return false;
-          if (to   && d > to)   return false;
+          if (to && d > to) return false;
           return true;
         });
         const hidden = before - tasks.length;
@@ -2178,12 +2181,12 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         els.dateRangeCount.hidden = true;
       }
-  
+
       renderAllTasksTable(tbody, tasks);
       renderTaskList(els.allTasksCards, tasks, { showAssignee: true, allowActions: true });
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   [els.filterDepartment, els.filterEmployee, els.filterStatus].forEach((sel) =>
     sel.addEventListener('change', loadAllTasks)
   );
@@ -2196,7 +2199,7 @@ export async function mountTaskflowApp(opts = {}) {
     els.filterCreatedTo.value = ''; els.dateRangeCount.hidden = true;
     loadAllTasks();
   });
-  
+
   // renders the admin "All delegated tasks" as a table (desktop)
   function assignedHoursLabel(task) {
     const orig = task.original_hours_to_complete != null && task.original_hours_to_complete !== ''
@@ -2239,16 +2242,16 @@ export async function mountTaskflowApp(opts = {}) {
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
       const statusClass = task.status.replace(/\s/g, '');
-  
+
       // Sr No
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
-  
+
       // Task details
       const tdDetails = document.createElement('td');
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: true });
-  
+
       // Planned date — current plan, with the original kept visible after a move
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
@@ -2259,11 +2262,11 @@ export async function mountTaskflowApp(opts = {}) {
       tdHrs.style.textAlign = 'center';
       tdHrs.style.fontWeight = '600';
       tdHrs.textContent = assignedHoursLabel(task);
-  
+
       // Assigned to
       const tdAssigned = document.createElement('td');
       tdAssigned.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
-  
+
       // Voice note
       const tdVoice = document.createElement('td');
       tdVoice.style.textAlign = 'center';
@@ -2275,7 +2278,7 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdVoice.innerHTML = `<span class="media-none">—</span>`;
       }
-  
+
       // Attachment
       const tdAttach = document.createElement('td');
       tdAttach.style.textAlign = 'center';
@@ -2287,11 +2290,11 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdAttach.innerHTML = `<span class="media-none">—</span>`;
       }
-  
+
       // Priority
       const tdPriority = document.createElement('td');
       tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
-  
+
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
@@ -2307,18 +2310,18 @@ export async function mountTaskflowApp(opts = {}) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
-  
+
       // Actions
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       buildPrimaryStatusButtons(task, { showAssignee: true, allowActions: true }).forEach((btn) => tdActions.appendChild(btn));
       tdActions.appendChild(buildCardMenuElement(task, { showAssignee: true }));
-  
+
       tr.append(tdSr, tdDetails, tdDate, tdHrs, tdAssigned, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
       tbody.appendChild(tr);
     });
   }
-  
+
   // ─── Overdue Tasks (admin) ───────────────────────────────────────────────────
   // Reuses the same /tasks/all data as "All delegated tasks". A task counts as
   // overdue when its target_date has passed and it hasn't actually finished
@@ -2332,21 +2335,21 @@ export async function mountTaskflowApp(opts = {}) {
   //     time itself passes, it falls back into "Today" — needs attention again.
   let overdueTasksCache = [];
   let overdueDrawerTab = 'today';
-  
+
   function taskOverdueSource(task) {
     if (isVerificationOverdueTask(task)) return 'verification';
     if (isAssignmentOverdueTask(task)) return 'assignment';
     return 'assignment';
   }
-  
+
   function isOverdueExtensionActive(task) {
     return !!task.overdue_extended_until && new Date(task.overdue_extended_until) > new Date();
   }
-  
+
   function overdueAssigneeId(task) {
     return task.assigned_to || task.assigned_to_user?.id || '';
   }
-  
+
   async function loadOverdueTasks() {
     els.overdueTasksList.innerHTML = `<tr><td colspan="9" class="empty-state">Loading overdue tasks…</td></tr>`;
     els.overdueTasksCards.innerHTML = `<div class="empty-state">Loading overdue tasks…</div>`;
@@ -2367,12 +2370,12 @@ export async function mountTaskflowApp(opts = {}) {
         const bDue = employeeWorkDueDate(b) || parseLocalDate(b.target_date) || now;
         return aDue - bDue;
       });
-  
+
       overdueTasksCache = overdue;
       renderOverdueTasksTable(els.overdueTasksList, overdue);
       renderTaskList(els.overdueTasksCards, overdue, { showAssignee: true, allowActions: true });
       setBadge('overdueTaskBadge', overdue.length);
-  
+
       // Recurring tasks that have missed a due date also count as "overdue"
       // for the admin — kept in their own "Recurring Task" tab since they're
       // a different kind of record (instances, not delegated tasks).
@@ -2392,7 +2395,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.overdueFilterEmployee) els.overdueFilterEmployee.value = '';
     if (state.activeView === 'overdue') loadOverdueTasks();
   });
-  
+
   // ─── Overdue tab switching: Task ↔ Recurring Task ──────────────────────────
   __tfReadyFns.push(() => {
     document.querySelectorAll('#overdueTabBar .my-tasks-tab-btn').forEach((btn) => {
@@ -2407,18 +2410,18 @@ export async function mountTaskflowApp(opts = {}) {
       });
     });
   });
-  
+
   function renderOverdueRecurringSection(tasks) {
     const tbody = document.getElementById('overdueRecurringTableBody');
     const cards = document.getElementById('overdueRecurringCards');
     if (!tbody || !cards) return;
-  
+
     if (tasks.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</td></tr>`;
       cards.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</div>`;
       return;
     }
-  
+
     tbody.innerHTML = '';
     cards.innerHTML = '';
     tasks.forEach((task) => {
@@ -2433,7 +2436,7 @@ export async function mountTaskflowApp(opts = {}) {
         <td><span class="pill pill-Rejected">${task.overdue_days} day${task.overdue_days > 1 ? 's' : ''}</span></td>
       `;
       tbody.appendChild(tr);
-  
+
       const card = document.createElement('div');
       card.className = 'task-card';
       card.innerHTML = `
@@ -2451,7 +2454,7 @@ export async function mountTaskflowApp(opts = {}) {
       cards.appendChild(card);
     });
   }
-  
+
   // renders the admin "Overdue tasks" as a table (desktop) — adds a Verifier
   // column and a Source badge, and clicking a row opens the Today/Pending
   // detail drawer for that task.
@@ -2466,22 +2469,22 @@ export async function mountTaskflowApp(opts = {}) {
       tr.style.cursor = 'pointer';
       const statusClass = task.status.replace(/\s/g, '');
       const source = taskOverdueSource(task);
-  
+
       // Sr No
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
-  
+
       // Task details
       const tdDetails = document.createElement('td');
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: true });
-  
+
       // Source — why is this overdue: stuck before submission, or stuck in verification?
       const tdSource = document.createElement('td');
       tdSource.innerHTML = source === 'verification'
         ? `<span class="source-badge source-verification">⏳ Verification</span>`
         : `<span class="source-badge source-assignment">📋 Assignment</span>`;
-  
+
       // Overdue detail (assignment work hours or verification 2h SLA)
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
@@ -2489,11 +2492,11 @@ export async function mountTaskflowApp(opts = {}) {
       if (isOverdueExtensionActive(task)) {
         tdDate.innerHTML += `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>`;
       }
-  
+
       // Assigned to
       const tdAssigned = document.createElement('td');
       tdAssigned.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
-  
+
       // Verifier — who must verify (highlight when verification overdue)
       const tdVerifier = document.createElement('td');
       if (task.verifier?.full_name) {
@@ -2506,11 +2509,11 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdVerifier.innerHTML = `<span class="media-none">—</span>`;
       }
-  
+
       // Priority
       const tdPriority = document.createElement('td');
       tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
-  
+
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
@@ -2524,19 +2527,19 @@ export async function mountTaskflowApp(opts = {}) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
-  
+
       // Actions — overdue view only offers "Mark as done" + "Set extended time"
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       tdActions.addEventListener('click', (e) => e.stopPropagation()); // don't open drawer when using the menu
       tdActions.appendChild(buildOverdueMenuElement(task));
-  
+
       tr.append(tdSr, tdDetails, tdSource, tdDate, tdAssigned, tdVerifier, tdPriority, tdStatus, tdActions);
       tr.addEventListener('click', () => openOverdueDrawer(task.id));
       tbody.appendChild(tr);
     });
   }
-  
+
   // Dedicated 3-dot menu for the Overdue view — intentionally just these two
   // actions (not the full reschedule/reassign/reject menu used elsewhere),
   // since "deal with it from here" in this view means either finish it or
@@ -2548,20 +2551,20 @@ export async function mountTaskflowApp(opts = {}) {
     menuBtn.setAttribute('aria-label', 'More options'); menuBtn.textContent = '⋮';
     const menuList = document.createElement('div');
     menuList.className = 'card-menu-list'; menuList.hidden = true;
-  
+
     const items = [];
     if (task.status !== 'Completed') {
       items.push({ label: '✅ Mark as done', onClick: () => updateStatus(task.id, 'Completed') });
     }
     items.push({ label: '⏱ Set extended time', onClick: () => openOverdueExtendModal(task) });
-  
+
     items.forEach((item) => {
       const btn = document.createElement('button');
       btn.type = 'button'; btn.className = 'card-menu-item'; btn.textContent = item.label;
       btn.addEventListener('click', () => { menuList.hidden = true; item.onClick(); });
       menuList.appendChild(btn);
     });
-  
+
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       document.querySelectorAll('.card-menu-list').forEach((l) => { if (l !== menuList) l.hidden = true; });
@@ -2572,7 +2575,7 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(menuBtn); wrap.appendChild(menuList);
     return wrap;
   }
-  
+
   // ─── Set extended time modal ──────────────────────────────────────────────
   function openOverdueExtendModal(task) {
     state.pendingTaskId = task.id;
@@ -2595,7 +2598,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (state.activeView === 'overdue') loadOverdueTasks();
     } catch (err) { els.overdueExtendFormMsg.textContent = err.message; els.overdueExtendFormMsg.hidden = false; }
   });
-  
+
   // ─── Overdue detail drawer (Today / Pending tabs) ─────────────────────────
   // "Today" = needs attention right now (no active extension, or the
   // extension itself has already lapsed). "Pending" = an admin already gave
@@ -2613,24 +2616,24 @@ export async function mountTaskflowApp(opts = {}) {
   });
   els.overdueTabToday?.addEventListener('click', () => { overdueDrawerTab = 'today'; renderOverdueDrawer(); });
   els.overdueTabPending?.addEventListener('click', () => { overdueDrawerTab = 'pending'; renderOverdueDrawer(); });
-  
+
   function renderOverdueDrawer() {
     const today = overdueTasksCache.filter((t) => !isOverdueExtensionActive(t));
     const pending = overdueTasksCache.filter((t) => isOverdueExtensionActive(t));
-  
+
     els.overdueTabTodayCount.textContent = today.length;
     els.overdueTabPendingCount.textContent = pending.length;
     els.overdueTabToday.classList.toggle('active', overdueDrawerTab === 'today');
     els.overdueTabPending.classList.toggle('active', overdueDrawerTab === 'pending');
-  
+
     const list = overdueDrawerTab === 'today' ? today : pending;
     const body = els.overdueDrawerBody;
-  
+
     if (!list.length) {
       body.innerHTML = `<div class="empty-state">${overdueDrawerTab === 'today' ? 'Nothing needs attention right now 🎉' : 'No tasks on extended time'}</div>`;
       return;
     }
-  
+
     body.innerHTML = '';
     list.forEach((task) => {
       const source = taskOverdueSource(task);
@@ -2660,7 +2663,7 @@ export async function mountTaskflowApp(opts = {}) {
       body.appendChild(item);
     });
   }
-  
+
   // ─── My Tasks (day-wise Mon…Sun + Open/Done) ───────────────────────────────
   function istYmdLocal(d = new Date()) {
     return new Date(d).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -2889,7 +2892,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (tab === 'other') loadOtherPendingWork();
       });
     });
-  
+
     // Other Pending Work has its own 3 sub-tabs: Leave / Verification / Tickets
     document.querySelectorAll('#otherPendingSubTabBar .my-tasks-tab-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -2905,7 +2908,7 @@ export async function mountTaskflowApp(opts = {}) {
       });
     });
   });
-  
+
   // Read-only summary of things pending elsewhere that need the admin's
   // attention — leave requests, verifications, open tickets. Nothing can be
   // actioned from here on purpose; approve/verify/resolve from the real
@@ -2917,12 +2920,12 @@ export async function mountTaskflowApp(opts = {}) {
     const verifTableBody = document.getElementById('otherPendingVerificationsTableBody');
     const ticketsWrap = document.getElementById('otherPendingTicketsList');
     if (!leavesWrap || !verifWrap || !ticketsWrap) return;
-  
+
     leavesWrap.innerHTML = '<div class="empty-state">Loading…</div>';
     verifWrap.innerHTML = '<div class="empty-state">Loading…</div>';
     if (verifTableBody) verifTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
     ticketsWrap.innerHTML = '<div class="empty-state">Loading…</div>';
-  
+
     try {
       const [leaves, verifications, tickets] = await Promise.all([
         api('/leaves/all?status=Pending'),
@@ -2930,23 +2933,23 @@ export async function mountTaskflowApp(opts = {}) {
         api('/tickets')
       ]);
       const openTickets = tickets.filter((t) => t.status === 'Open');
-  
+
       renderOtherPendingLeaves(leaves, leavesWrap);
       renderOtherPendingVerifications(verifications, verifWrap);
       // Same renderer used by the main "Verification requests" page — so
       // Verify / Send for Correction / Updation all work identically from here.
       if (verifTableBody) renderVerificationsTable(verifTableBody, verifications);
       renderOtherPendingTickets(openTickets, ticketsWrap);
-  
+
       setBadge('otherPendingLeaveBadge', leaves.length);
       setBadge('otherPendingVerificationBadge', verifications.length);
       setBadge('otherPendingTicketsBadge', openTickets.length);
-  
+
       const total = leaves.length + verifications.length + openTickets.length;
       setBadge('otherPendingBadge', total);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // Small helper for the badge spans on tab buttons (not the sidebar nav
   // badges — those go through setNavBadge).
   function setBadge(elementId, count) {
@@ -2955,7 +2958,7 @@ export async function mountTaskflowApp(opts = {}) {
     badge.hidden = count <= 0;
     badge.textContent = count > 99 ? '99+' : count;
   }
-  
+
   function renderOtherPendingLeaves(leaves, wrap) {
     if (!leaves.length) {
       wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No pending leave requests</div>`;
@@ -2976,7 +2979,7 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.appendChild(card);
     });
   }
-  
+
   function renderOtherPendingVerifications(tasks, wrap) {
     if (!tasks.length) {
       wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No pending verifications</div>`;
@@ -2984,7 +2987,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     renderTaskList(wrap, tasks, { showAssignee: true, allowActions: false, verificationMode: true });
   }
-  
+
   function renderOtherPendingTickets(tickets, wrap) {
     if (!tickets.length) {
       wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No open tickets</div>`;
@@ -3008,7 +3011,7 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.appendChild(card);
     });
   }
-  
+
   // renders "My tasks" as a table (desktop). Same columns as All Tasks, minus
   // "Assigned to" (it's always you), since this is the employee's own task list.
   function renderMyTasksTable(tbody, tasks, recurringTasks = []) {
@@ -3020,23 +3023,23 @@ export async function mountTaskflowApp(opts = {}) {
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
       const statusClass = task.status.replace(/\s/g, '');
-  
+
       // Sr No
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
-  
+
       // Task details
       const tdDetails = document.createElement('td');
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: false });
-  
+
       // Due date + live timer (office-hours aware)
       const tdDate = document.createElement('td');
       tdDate.className = 'task-timer-cell';
       tdDate.style.wordBreak = 'break-word';
       tdDate.dataset.taskTimerId = task.id;
       tdDate.innerHTML = fmtEmployeeTimerHtml(task);
-  
+
       // Voice note
       const tdVoice = document.createElement('td');
       tdVoice.style.textAlign = 'center';
@@ -3048,7 +3051,7 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdVoice.innerHTML = `<span class="media-none">—</span>`;
       }
-  
+
       // Attachment
       const tdAttach = document.createElement('td');
       tdAttach.style.textAlign = 'center';
@@ -3060,11 +3063,11 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdAttach.innerHTML = `<span class="media-none">—</span>`;
       }
-  
+
       // Priority
       const tdPriority = document.createElement('td');
       tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
-  
+
       // Status (with verification badge if applicable)
       const tdStatus = document.createElement('td');
       let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
@@ -3080,17 +3083,17 @@ export async function mountTaskflowApp(opts = {}) {
         statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
       }
       tdStatus.innerHTML = statusHtml;
-  
+
       // Actions
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       buildPrimaryStatusButtons(task, { showAssignee: false, allowActions: true }).forEach((btn) => tdActions.appendChild(btn));
       tdActions.appendChild(buildCardMenuElement(task, { showAssignee: false }));
-  
+
       tr.append(tdSr, tdDetails, tdDate, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
       tbody.appendChild(tr);
     });
-  
+
     // Recurring tasks assigned to the admin personally — merged into this
     // same table (continuing the Sr No count) rather than a separate section,
     // with a 🔁 marker on the task details so they're still easy to spot.
@@ -3106,16 +3109,16 @@ export async function mountTaskflowApp(opts = {}) {
       const isOverdue = !task.is_today && !isCompleted;
       const statusText = isNa ? 'Not Applicable'
         : isCompleted ? 'Completed'
-        : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
-        : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+          : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+            : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
       const pillClass = isNa ? 'pill-InProgress'
         : isCompleted ? 'pill-Completed'
-        : isOverdue ? 'pill-Rejected'
-        : 'pill-InProgress';
-  
+          : isOverdue ? 'pill-Rejected'
+            : 'pill-InProgress';
+
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${tasks.length + i + 1}</span>`;
-  
+
       const tdDetails = document.createElement('td');
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = `
@@ -3124,36 +3127,36 @@ export async function mountTaskflowApp(opts = {}) {
         ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
         ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
       `;
-  
+
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
       tdDate.textContent = fmtDateOnly(task.due_date);
-  
+
       const tdVoice = document.createElement('td');
       tdVoice.style.textAlign = 'center';
       tdVoice.innerHTML = `<span class="media-none">—</span>`;
-  
+
       const tdAttach = document.createElement('td');
       tdAttach.style.textAlign = 'center';
       tdAttach.innerHTML = `<span class="media-none">—</span>`;
-  
+
       const tdPriority = document.createElement('td');
       tdPriority.innerHTML = `<span class="media-none">—</span>`;
-  
+
       const tdStatus = document.createElement('td');
       tdStatus.innerHTML = `<span class="pill ${pillClass}">${escapeHtml(statusText)}</span>`;
-  
+
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       if (!isCompleted) {
         appendRecurringActionButtons(tdActions, task, inst, checkpoints, loadMyTasks);
       }
-  
+
       tr.append(tdSr, tdDetails, tdDate, tdVoice, tdAttach, tdPriority, tdStatus, tdActions);
       tbody.appendChild(tr);
     });
   }
-  
+
   // ─── shared task card rendering (My Tasks / Verifications) ───────────────────
   function renderTaskList(container, tasks, { showAssignee, allowActions, verificationMode = false }) {
     if (!tasks || tasks.length === 0) {
@@ -3164,12 +3167,12 @@ export async function mountTaskflowApp(opts = {}) {
     container.innerHTML = '';
     tasks.forEach((task) => container.appendChild(renderTaskCard(task, { showAssignee, allowActions, verificationMode })));
   }
-  
+
   function getDeadlineHtml(task, showAssignee, useCreatedDate = false) {
     if (useCreatedDate) return fmtEmployeeTimerHtml(task);
     return plannedDateCellHtml(task);
   }
-  
+
   function verifyingStatusPillHtml(task) {
     const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
     const label = who
@@ -3196,7 +3199,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return '';
   }
-  
+
   function isMdoOfficeUser(user = state.user) {
     const dept = String(user?.department || '').toLowerCase().trim();
     return dept === 'mdo office' || /\bmdo\b/.test(dept);
@@ -3212,11 +3215,11 @@ export async function mountTaskflowApp(opts = {}) {
     const isTicketRaised = task.status === 'Ticket Raised';
     const isReschedulePending = task.reschedule_status === 'Pending';
     const items = [];
-  
+
     if (!isAdminManaging && !isMdoOffice && task.status === 'Pending') {
       return items;
     }
-  
+
     // Admin (all tasks) + MDO OFFICE emp (own tasks): mark complete like admin
     if (
       task.status !== 'Completed'
@@ -3229,10 +3232,12 @@ export async function mountTaskflowApp(opts = {}) {
       items.push({ label: '🗓️ Reschedule', onClick: () => openRescheduleModal(task.id, task.target_date) });
       items.push({ label: '🔁 Reassign', onClick: () => openReassignModal(task.id) });
       if (task.status !== 'Rejected') {
-        items.push({ label: '❌ Reject task', onClick: () => {
-          const reason = prompt('Reason for rejecting this task (optional):') || '';
-          updateStatus(task.id, 'Rejected', reason);
-        }});
+        items.push({
+          label: '❌ Reject task', onClick: () => {
+            const reason = prompt('Reason for rejecting this task (optional):') || '';
+            updateStatus(task.id, 'Rejected', reason);
+          }
+        });
       }
     } else if (isOnHold && isActuallyMine && canShowResumeForTask(task)) {
       items.push({ label: '▶️ Resume task', onClick: () => resumeTask(task.id) });
@@ -3268,7 +3273,7 @@ export async function mountTaskflowApp(opts = {}) {
         items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
       }
     }
-  
+
     if (task.status !== 'Completed' && !isPendingVerification && !isOnHold && canManageThisTask) {
       if (isTicketRaised) {
         items.push({ label: '🔎 Verification blocked — ticket raised', disabled: true });
@@ -3281,7 +3286,7 @@ export async function mountTaskflowApp(opts = {}) {
     items.push({ label: '🎫 Raise a ticket', onClick: () => openTicketModal(task.id, task.description, task.project?.name) });
     return items;
   }
-  
+
   function buildPrimaryStatusButtons(task, { showAssignee, allowActions }) {
     const isOwnTask = state.user.role !== 'admin' || (showAssignee === false);
     const isPendingVerification = task.verification_status === 'Pending Verification';
@@ -3311,7 +3316,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return buttons;
   }
-  
+
   function buildCardMenuElement(task, { showAssignee }) {
     const items = buildCardMenuItems(task, { showAssignee });
     const wrap = document.createElement('div'); wrap.className = 'card-menu';
@@ -3321,7 +3326,7 @@ export async function mountTaskflowApp(opts = {}) {
     menuBtn.setAttribute('aria-label', 'More options'); menuBtn.textContent = '⋮';
     const menuList = document.createElement('div');
     menuList.className = 'card-menu-list'; menuList.hidden = true;
-  
+
     items.forEach((item) => {
       const btn = document.createElement('button');
       btn.type = 'button'; btn.className = 'card-menu-item'; btn.textContent = item.label;
@@ -3332,7 +3337,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
       menuList.appendChild(btn);
     });
-  
+
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       document.querySelectorAll('.card-menu-list').forEach((l) => { if (l !== menuList) l.hidden = true; });
@@ -3343,7 +3348,7 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(menuBtn); wrap.appendChild(menuList);
     return wrap;
   }
-  
+
   function renderTaskCard(task, { showAssignee, allowActions, verificationMode = false, useCreatedDueDate = false }) {
     const card = document.createElement('div');
     card.className = `task-card priority-${task.priority}`;
@@ -3362,10 +3367,10 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-timer-wrap" data-task-timer-card-id="${task.id}">${useCreatedDueDate ? fmtEmployeeTimerHtml(task) : plannedDateCellHtml(task)}</div>
       </div>
       ${verificationMode ? `<div class="assigned-line">Sent for verification: <strong>${escapeHtml(
-        (task.sent_for_verification_at || task.first_sent_for_verification_at)
-          ? fmtSheetDateTime(task.sent_for_verification_at || task.first_sent_for_verification_at)
-          : '—'
-      )}</strong></div>` : ''}
+      (task.sent_for_verification_at || task.first_sent_for_verification_at)
+        ? fmtSheetDateTime(task.sent_for_verification_at || task.first_sent_for_verification_at)
+        : '—'
+    )}</strong></div>` : ''}
       ${verificationMode ? `<div class="assigned-line">Pending with: <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>` : ''}
       <div class="task-meta task-meta-files">
         ${task.attachment_url ? `<a class="attachment-link" href="${task.attachment_url}" target="_blank" rel="noopener">📎 Attachment</a>` : ''}
@@ -3395,7 +3400,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
       return card;
     }
-  
+
     buildPrimaryStatusButtons(task, { showAssignee, allowActions }).forEach((btn) => actionsEl.appendChild(btn));
     return card;
   }
@@ -3411,7 +3416,7 @@ export async function mountTaskflowApp(opts = {}) {
     let left = rect.right - menuWidth;
     left = Math.min(left, window.innerWidth - menuWidth - 8);
     left = Math.max(8, left);
-  
+
     let top = rect.bottom + 4;
     const menuHeight = menuList.offsetHeight || 160;
     if (top + menuHeight > window.innerHeight - 8) {
@@ -3421,7 +3426,7 @@ export async function mountTaskflowApp(opts = {}) {
     menuList.style.top = `${top}px`;
     menuList.style.left = `${left}px`;
   }
-  
+
   function makeActionBtn(cls, label, onClick) {
     const btn = document.createElement('button');
     btn.className = `action-btn ${cls}`; btn.textContent = label;
@@ -3445,7 +3450,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!btn) return;
     btn.innerHTML = `${VERIFY_ICON_START}<span>Start Verification</span>`;
   }
-  
+
   async function updateStatus(taskId, status, status_note) {
     try {
       await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
@@ -3470,19 +3475,19 @@ export async function mountTaskflowApp(opts = {}) {
       refreshNavBadges();
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   function reloadCurrentTaskView() {
-    if (state.activeView === 'all')           loadAllTasks();
-    else if (state.activeView === 'my')       loadMyTasks();
-    else if (state.activeView === 'overdue')  loadOverdueTasks();
+    if (state.activeView === 'all') loadAllTasks();
+    else if (state.activeView === 'my') loadMyTasks();
+    else if (state.activeView === 'overdue') loadOverdueTasks();
     else if (state.activeView === 'verifications') loadVerifications();
     else if (state.activeView === 'reschedule-requests') loadRescheduleRequests();
   }
-  
+
   document.addEventListener('click', () => {
     document.querySelectorAll('.card-menu-list').forEach((l) => { l.hidden = true; });
   });
-  
+
   async function openAssignCheckpointGate() {
     const typeId = els.fTaskType.value;
     const typeName = els.fTaskType.options[els.fTaskType.selectedIndex]?.text || 'this task type';
@@ -3574,7 +3579,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (assignBtn) assignBtn.disabled = false;
     }
   });
-  
+
   // ─── Send for verification ───────────────────────────────────────────────────
   async function openVerifyModal(taskId) {
     state.pendingTaskId = taskId;
@@ -3621,7 +3626,7 @@ export async function mountTaskflowApp(opts = {}) {
       reloadCurrentTaskView();
     } catch (err) { showFormMsg(els.verifyFormMsg, err.message); }
   });
-  
+
   // ─── Verifier two-step flow: Start → Verify OR Send for Correction ───────────
   // Called when verifier clicks "Start Verification" on a card/row.
   // We toggle the card's action area to show the two choice buttons.
@@ -3719,7 +3724,7 @@ export async function mountTaskflowApp(opts = {}) {
     actionsEl.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
     appendForwardVerificationBtn(actionsEl, task);
   }
-  
+
   async function verifyApprove(taskId) {
     try {
       await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: { approved: true } });
@@ -3727,19 +3732,19 @@ export async function mountTaskflowApp(opts = {}) {
       loadVerifications();
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // ─── Correction Modal (verifier sends correction note + optional voice) ────────
   let corrVoiceBlob = null;
   let corrMediaRecorder = null;
-  
+
   function openCorrectionModal(taskOrId) {
     const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
     state.pendingTaskId = task.id;
     if (els.correctionNote) els.correctionNote.value = '';
     if (els.correctionFormMsg) els.correctionFormMsg.hidden = true;
     if (els.corrVoicePlayback) {
-    els.corrVoicePlayback.hidden = true;
-    els.corrVoicePlayback.src = '';
+      els.corrVoicePlayback.hidden = true;
+      els.corrVoicePlayback.src = '';
     }
     if (els.corrRecordStatus) els.corrRecordStatus.textContent = '';
     if (els.corrStartRecord) els.corrStartRecord.disabled = false;
@@ -3748,7 +3753,7 @@ export async function mountTaskflowApp(opts = {}) {
     fillDuePrompt('correction', task);
     if (els.correctionModal) els.correctionModal.hidden = false;
   }
-  
+
   els.closeCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
   els.cancelCorrectionModal?.addEventListener('click', stopCorrectionRecordingAndClose);
   document.getElementById('correction-due-action')?.addEventListener('change', () => syncDueActionFields('correction'));
@@ -3758,7 +3763,7 @@ export async function mountTaskflowApp(opts = {}) {
     const modal = els.correctionModal || document.getElementById('correctionModal');
     if (modal) modal.hidden = true;
   }
-  
+
   // Voice recording for correction modal
   els.corrStartRecord?.addEventListener('click', async () => {
     try {
@@ -3771,8 +3776,8 @@ export async function mountTaskflowApp(opts = {}) {
         corrVoiceBlob = new Blob(chunks, { type: 'audio/webm' });
         const url = URL.createObjectURL(corrVoiceBlob);
         if (els.corrVoicePlayback) {
-        els.corrVoicePlayback.src = url;
-        els.corrVoicePlayback.hidden = false;
+          els.corrVoicePlayback.src = url;
+          els.corrVoicePlayback.hidden = false;
         }
         if (els.corrRecordStatus) els.corrRecordStatus.textContent = '✅ Recording saved';
         if (els.corrStartRecord) els.corrStartRecord.disabled = false;
@@ -3790,7 +3795,7 @@ export async function mountTaskflowApp(opts = {}) {
   els.corrStopRecord?.addEventListener('click', () => {
     if (corrMediaRecorder && corrMediaRecorder.state !== 'inactive') corrMediaRecorder.stop();
   });
-  
+
   els.correctionForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const msg = els.correctionFormMsg || document.getElementById('correctionFormMsg');
@@ -3851,7 +3856,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     }
   });
-  
+
   const _startVerifyBusy = new Set();
 
   function showBusyOverlay(msg) {
@@ -3880,7 +3885,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function startVerification(taskId) {
     return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
   }
-  
+
   async function clickStartVerification(task, actionsEl, btn) {
     const id = task?.id;
     if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
@@ -3923,7 +3928,7 @@ export async function mountTaskflowApp(opts = {}) {
         els.verificationsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
       }
       if (els.verificationsList) {
-    els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
+        els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
       }
     }
     try {
@@ -3932,7 +3937,7 @@ export async function mountTaskflowApp(opts = {}) {
       renderTaskList(els.verificationsList, tasks, { showAssignee: true, allowActions: false, verificationMode: true });
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // ─── Reschedule requests ────────────────────────────────────────────────────
   // Admin inbox + history: Pending / Approved / Rejected stay visible.
   // Admin direct Reschedule updates the date immediately (no request row).
@@ -3947,7 +3952,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (sub) sub.textContent = 'Only admins review reschedule requests.';
       if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
       const tbody = document.getElementById('reschedRequestsTableBody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
       return;
     }
     if (filtersCard) filtersCard.hidden = false;
@@ -3956,7 +3961,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading…</td></tr>`;
     try {
       const st = filterEl?.value ?? 'Pending';
       const qs = st ? `?status=${encodeURIComponent(st)}` : '';
@@ -3979,50 +3984,56 @@ export async function mountTaskflowApp(opts = {}) {
       if (state.activeView === 'reschedule-requests') loadRescheduleRequests();
     });
   });
-  
+
   // Desktop table view — was previously missing, so the desktop table stayed
   // empty forever even though the nav badge and the mobile card list both had
   // the right count/data.
   function renderRescheduleRequestsTable(tbody, tasks, isAdmin, emptyMsg) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
-  
+
       const tdSr = document.createElement('td');
       tdSr.textContent = index + 1;
-  
+
       const tdEmployee = document.createElement('td');
       tdEmployee.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong>`;
-  
+
       const tdTask = document.createElement('td');
       tdTask.textContent = task.description ?? '—';
-  
+
       const tdCurrentDate = document.createElement('td');
       tdCurrentDate.textContent = fmtDate(task.target_date);
-  
+
       const tdRequestedDate = document.createElement('td');
       tdRequestedDate.textContent = fmtDateOnly(task.reschedule_requested_date);
-  
+
+      const tdAdditionalHours = document.createElement('td');
+      const additionalHours = task.reschedule_requested_additional_hours;
+      tdAdditionalHours.textContent = additionalHours == null || additionalHours === ''
+        ? 'Not saved'
+        : fmtHrsLabel(additionalHours);
+
       const tdReason = document.createElement('td');
       tdReason.textContent = task.reschedule_reason || '—';
-  
+
       const tdStatus = document.createElement('td');
       const statusPill = task.reschedule_status === 'Pending' ? 'pill-Pending'
         : task.reschedule_status === 'Approved' ? 'pill-Completed'
-        : 'pill-Rejected';
+          : 'pill-Rejected';
       tdStatus.innerHTML = `<span class="pill ${statusPill}">${escapeHtml(task.reschedule_status)}</span>`;
-  
+
       const tdDecidedBy = document.createElement('td');
       if (task.reschedule_status !== 'Pending' && task.reschedule_decided_by_user) {
         tdDecidedBy.innerHTML = `${escapeHtml(task.reschedule_decided_by_user.full_name)} · ${escapeHtml(fmtDate(task.reschedule_decided_at))}`;
       } else {
         tdDecidedBy.textContent = '—';
       }
-  
+
       const tdActions = document.createElement('td');
       tdActions.className = 'row-actions';
       if (isAdmin && task.reschedule_status === 'Pending') {
@@ -4031,12 +4042,12 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         tdActions.textContent = '—';
       }
-  
-      tr.append(tdSr, tdEmployee, tdTask, tdCurrentDate, tdRequestedDate, tdReason, tdStatus, tdDecidedBy, tdActions);
+
+      tr.append(tdSr, tdEmployee, tdTask, tdCurrentDate, tdRequestedDate, tdAdditionalHours, tdReason, tdStatus, tdDecidedBy, tdActions);
       tbody.appendChild(tr);
     });
   }
-  
+
   function renderRescheduleRequests(wrap, tasks, isAdmin, emptyMsg) {
     if (!tasks.length) {
       wrap.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</div>`;
@@ -4048,7 +4059,7 @@ export async function mountTaskflowApp(opts = {}) {
       card.className = 'task-card';
       const statusPill = task.reschedule_status === 'Pending' ? 'pill-Pending'
         : task.reschedule_status === 'Approved' ? 'pill-Completed'
-        : 'pill-Rejected';
+          : 'pill-Rejected';
       card.innerHTML = `
         <div class="task-card-header">
           <span class="pill ${statusPill}">${escapeHtml(task.reschedule_status)}</span>
@@ -4059,6 +4070,7 @@ export async function mountTaskflowApp(opts = {}) {
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
           <div class="task-detail-line"><span class="task-detail-label">Current date:</span> ${escapeHtml(fmtDate(task.target_date))}</div>
           <div class="task-detail-line"><span class="task-detail-label">Requested date:</span> ${escapeHtml(fmtDateOnly(task.reschedule_requested_date))}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Additional hours:</span> ${task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === '' ? 'Not saved' : escapeHtml(fmtHrsLabel(task.reschedule_requested_additional_hours))}</div>
           ${task.reschedule_reason ? `<div class="task-detail-line"><span class="task-detail-label">Reason:</span> ${escapeHtml(task.reschedule_reason)}</div>` : ''}
           ${task.reschedule_status !== 'Pending' && task.reschedule_decided_by_user ? `<div class="task-detail-line"><span class="task-detail-label">Decided by:</span> ${escapeHtml(task.reschedule_decided_by_user.full_name)} · ${escapeHtml(fmtDate(task.reschedule_decided_at))}</div>` : ''}
         </div>
@@ -4075,7 +4087,7 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.appendChild(card);
     });
   }
-  
+
   async function decideRescheduleRequest(taskId, decision, taskHint) {
     if (decision === 'reject') {
       const reason = prompt('Reason for rejecting this reschedule request (optional):') || '';
@@ -4182,6 +4194,9 @@ export async function mountTaskflowApp(opts = {}) {
     set('reschedApproveAssigned', fmtHrsLabel(sum.assigned));
     set('reschedApproveDone', fmtHrsLabel(sum.done));
     set('reschedApproveRemaining', fmtHrsLabel(sum.remaining));
+    set('reschedApproveAdditionalHours', task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === ''
+      ? 'Not saved'
+      : fmtHrsLabel(task.reschedule_requested_additional_hours));
     let reqLabel = '—';
     try { reqLabel = fmtDateOnly(task.reschedule_requested_date) || '—'; } catch (_) { /* ignore */ }
     set('reschedApproveRequested', reqLabel);
@@ -4264,7 +4279,7 @@ export async function mountTaskflowApp(opts = {}) {
       renderCorrectionsList(corrections);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // Desktop table view — same data as the card view below, just laid out as rows.
   function renderCorrectionsTable(tasks) {
     const tbody = els.correctionsTableBody;
@@ -4276,14 +4291,14 @@ export async function mountTaskflowApp(opts = {}) {
     tbody.innerHTML = '';
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
-  
+
       const tdSr = document.createElement('td');
       tdSr.innerHTML = `<span class="sr-number">${index + 1}</span>`;
-  
+
       const tdDetails = document.createElement('td');
       tdDetails.className = 'task-name-cell';
       tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: false });
-  
+
       const tdNote = document.createElement('td');
       tdNote.innerHTML = `
         <div class="correction-note-box" style="margin:0">
@@ -4292,24 +4307,24 @@ export async function mountTaskflowApp(opts = {}) {
           ${task.correction_voice_url ? `<a href="${task.correction_voice_url}" target="_blank" rel="noopener" class="attachment-link" style="margin-top:6px;display:inline-block">🎤 Voice note</a>` : ''}
         </div>
       `;
-  
+
       const tdPriority = document.createElement('td');
       tdPriority.innerHTML = `<span class="pill pill-${task.priority}">${task.priority}</span>`;
-  
+
       const tdStatus = document.createElement('td');
       tdStatus.innerHTML = `<span class="pill pill-InProgress">${escapeHtml(task.status)}</span>`;
-  
+
       const tdActions = document.createElement('td');
       const actionsWrap = document.createElement('div');
       actionsWrap.className = 'task-actions';
       actionsWrap.appendChild(makeActionBtn('action-start', '🔄 Resend for Verification', () => openResendVerifyModal(task)));
       tdActions.appendChild(actionsWrap);
-  
+
       tr.append(tdSr, tdDetails, tdNote, tdPriority, tdStatus, tdActions);
       tbody.appendChild(tr);
     });
   }
-  
+
   function renderCorrectionsList(tasks) {
     if (!tasks.length) {
       els.correctionsList.innerHTML = `<div class="empty-state"><span class="emoji">✅</span>No corrections — you're all good!</div>`;
@@ -4344,7 +4359,7 @@ export async function mountTaskflowApp(opts = {}) {
       els.correctionsList.appendChild(card);
     });
   }
-  
+
   // Resend for verification (employee after correction — verifier is already known)
   function openResendVerifyModal(task) {
     state.pendingTaskId = task.id;
@@ -4387,7 +4402,7 @@ export async function mountTaskflowApp(opts = {}) {
       loadCorrections();
     } catch (err) { els.resendVerifyFormMsg.textContent = err.message; els.resendVerifyFormMsg.hidden = false; }
   });
-  
+
   function renderVerificationsTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
       tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
@@ -4396,17 +4411,17 @@ export async function mountTaskflowApp(opts = {}) {
     tbody.innerHTML = '';
     tasks.forEach((task, index) => {
       const tr = document.createElement('tr');
-  
+
       // Task Sr No
       const tdSr = document.createElement('td');
       tdSr.className = 'col-tasksr';
       tdSr.textContent = index + 1;
-  
+
       // Project
       const tdProject = document.createElement('td');
       tdProject.className = 'col-vproject';
       tdProject.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.project?.name ?? '—')}</strong>`;
-  
+
       // Task Type
       const tdTaskType = document.createElement('td');
       tdTaskType.className = 'col-vtasktype';
@@ -4417,7 +4432,7 @@ export async function mountTaskflowApp(opts = {}) {
       tdDesc.className = 'col-vdesc';
       tdDesc.textContent = task.description || '—';
       if (task.description) tdDesc.title = task.description;
-  
+
       // Submitted By (person who did the task and sent for verification)
       const tdSubmittedBy = document.createElement('td');
       tdSubmittedBy.className = 'col-vsubmitted';
@@ -4427,7 +4442,7 @@ export async function mountTaskflowApp(opts = {}) {
       const tdPendingWith = document.createElement('td');
       tdPendingWith.className = 'col-vpending';
       tdPendingWith.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier?.full_name ?? '—')}</strong>`;
-  
+
       // Attachments
       const tdAttach = document.createElement('td');
       tdAttach.className = 'col-vattach';
@@ -4439,7 +4454,7 @@ export async function mountTaskflowApp(opts = {}) {
         links.push(`<a href="${task.voice_note_url}" target="_blank" rel="noopener" class="media-link" title="Play voice note">🎤</a>`);
       }
       tdAttach.innerHTML = links.length ? links.join(' ') : `<span class="media-none">—</span>`;
-  
+
       // Sent for verification date/time (when employee clicked Send for verification)
       const tdDate = document.createElement('td');
       tdDate.className = 'col-vdate';
@@ -4448,11 +4463,11 @@ export async function mountTaskflowApp(opts = {}) {
         task.first_sent_for_verification_at ||
         null;
       tdDate.textContent = sentAt ? fmtSheetDateTime(sentAt) : '—';
-  
+
       // Actions — Verify / Correction / Updation, shown directly (no gate)
       const tdActions = document.createElement('td');
       tdActions.className = 'col-vactions row-actions';
-  
+
       function showVerifyActions() {
         tdActions.innerHTML = '';
         tdActions.appendChild(makeActionBtn('action-complete', '✅ Verify', () => {
@@ -4462,7 +4477,7 @@ export async function mountTaskflowApp(opts = {}) {
         tdActions.appendChild(makeActionBtn('action-updation', '📝 Updation', () => openUpdationModal(task)));
         appendForwardVerificationBtn(tdActions, task);
       }
-  
+
       // Actions — "Start Verification" → then Verify or Send for Correction
       if (verificationHasStarted(task)) {
         // Already started (recorded on the task itself) — show verify/correction buttons directly
@@ -4478,28 +4493,28 @@ export async function mountTaskflowApp(opts = {}) {
       tbody.appendChild(tr);
     });
   }
-  
+
   // ─── Reschedule ───────────────────────────────────────────────────────────────
   function openRescheduleModal(taskId, currentTargetDate) {
-  //   state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
-  //   els.rescheduleDate.value = toDatetimeLocalValue(currentTargetDate);
-  //   els.rescheduleModal.hidden = false;
-  // }
-  // els.closeRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
-  // els.cancelRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
-  // els.rescheduleForm?.addEventListener('submit', async (e) => {
-  //   e.preventDefault(); els.rescheduleFormMsg.hidden = true;
-  //   try {
-  //     await api(`/tasks/${state.pendingTaskId}/reschedule`, {
-  //       method: 'PATCH', body: { target_date: els.rescheduleDate.value }
-  //     });
-  //     showToast('Task rescheduled ✅', 'success');
-  //     els.rescheduleModal.hidden = true; reloadCurrentTaskView(); refreshNavBadges();
-  //   } catch (err) { els.rescheduleFormMsg.textContent = err.message; els.rescheduleFormMsg.hidden = false; }
-  // });
-  
-  
-  state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
+    //   state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
+    //   els.rescheduleDate.value = toDatetimeLocalValue(currentTargetDate);
+    //   els.rescheduleModal.hidden = false;
+    // }
+    // els.closeRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+    // els.cancelRescheduleModal?.addEventListener('click', () => { els.rescheduleModal.hidden = true; });
+    // els.rescheduleForm?.addEventListener('submit', async (e) => {
+    //   e.preventDefault(); els.rescheduleFormMsg.hidden = true;
+    //   try {
+    //     await api(`/tasks/${state.pendingTaskId}/reschedule`, {
+    //       method: 'PATCH', body: { target_date: els.rescheduleDate.value }
+    //     });
+    //     showToast('Task rescheduled ✅', 'success');
+    //     els.rescheduleModal.hidden = true; reloadCurrentTaskView(); refreshNavBadges();
+    //   } catch (err) { els.rescheduleFormMsg.textContent = err.message; els.rescheduleFormMsg.hidden = false; }
+    // });
+
+
+    state.pendingTaskId = taskId; els.rescheduleFormMsg.hidden = true;
     els.rescheduleDate.value = toDatetimeLocalValue(currentTargetDate);
     els.rescheduleReason.value = '';
     els.rescheduleModal.hidden = false;
@@ -4516,13 +4531,13 @@ export async function mountTaskflowApp(opts = {}) {
       els.rescheduleModal.hidden = true; els.rescheduleReason.value = ''; reloadCurrentTaskView(); refreshNavBadges();
     } catch (err) { els.rescheduleFormMsg.textContent = err.message; els.rescheduleFormMsg.hidden = false; }
   });
-  
-  
-    //17th july chg above
+
+
+  //17th july chg above
   // ─── Reschedule request (employee — goes to admin for approval) ───────────────
   function openReschedRequestModal(taskId) {
     state.pendingTaskId = taskId; els.reschedRequestFormMsg.hidden = true;
-    els.reschedreqDate.value = ''; els.reschedreqReason.value = '';
+    els.reschedreqDate.value = ''; els.reschedreqAdditionalHours.value = ''; els.reschedreqReason.value = '';
     els.reschedRequestModal.hidden = false;
   }
   els.closeReschedRequestModal?.addEventListener('click', () => { els.reschedRequestModal.hidden = true; });
@@ -4530,15 +4545,27 @@ export async function mountTaskflowApp(opts = {}) {
   els.reschedRequestForm?.addEventListener('submit', async (e) => {
     e.preventDefault(); els.reschedRequestFormMsg.hidden = true;
     try {
-      await api(`/tasks/${state.pendingTaskId}/reschedule-request`, {
+      const additionalHours = Number(els.reschedreqAdditionalHours.value);
+      const request = await api(`/tasks/${state.pendingTaskId}/reschedule-request`, {
         method: 'POST',
-        body: { requested_date: els.reschedreqDate.value, reason: els.reschedreqReason.value }
+        body: {
+          requested_date: els.reschedreqDate.value,
+          additional_hours: additionalHours,
+          reason: els.reschedreqReason.value
+        }
       });
+      if (Number(request.reschedule_requested_additional_hours) !== additionalHours) {
+        els.reschedRequestModal.hidden = true;
+        reloadCurrentTaskView();
+        refreshNavBadges();
+        showToast('Request was submitted, but the server did not save the additional hours. Ask an admin to reject it, then retry after the backend is updated.', 'error');
+        return;
+      }
       showToast('Reschedule request sent ✅', 'success');
       els.reschedRequestModal.hidden = true; reloadCurrentTaskView(); refreshNavBadges();
     } catch (err) { els.reschedRequestFormMsg.textContent = err.message; els.reschedRequestFormMsg.hidden = false; }
   });
-  
+
   // ─── Reassign ─────────────────────────────────────────────────────────────────
   function openReassignModal(taskId) {
     state.pendingTaskId = taskId; els.reassignFormMsg.hidden = true;
@@ -4557,20 +4584,20 @@ export async function mountTaskflowApp(opts = {}) {
       els.reassignModal.hidden = true; reloadCurrentTaskView();
     } catch (err) { els.reassignFormMsg.textContent = err.message; els.reassignFormMsg.hidden = false; }
   });
-  
+
   // ─── Tickets ──────────────────────────────────────────────────────────────────
-  
+
   const TICKET_CATEGORY_LABELS = {
     'Technical': '🔧 Technical',
-    'Task':      '📋 Task related',
-    'Access':    '🔑 Access / Login',
-    'Other':     '📌 Other',
-    'General':   '📌 General'
+    'Task': '📋 Task related',
+    'Access': '🔑 Access / Login',
+    'Other': '📌 Other',
+    'General': '📌 General'
   };
-  
+
   // Categories that require screenshot / screen recording
   const TICKET_NEEDS_MEDIA = new Set(['Technical', 'Access']);
-  
+
   function openTicketModal(taskId, taskDescription) {
     state.pendingTaskId = taskId || null;
     els.ticketFormMsg.hidden = true;
@@ -4579,9 +4606,9 @@ export async function mountTaskflowApp(opts = {}) {
     document.getElementById('ticketMediaFields').hidden = true;
     const mediaInput = document.getElementById('ticket-media');
     if (mediaInput) mediaInput.value = '';
-  
+
     // Task banner
-    const banner     = document.getElementById('ticketTaskBanner');
+    const banner = document.getElementById('ticketTaskBanner');
     const bannerText = document.getElementById('ticketTaskBannerText');
     if (taskId && taskDescription) {
       bannerText.textContent = taskDescription.length > 80
@@ -4593,10 +4620,10 @@ export async function mountTaskflowApp(opts = {}) {
     } else {
       banner.hidden = true;
     }
-  
+
     els.ticketModal.hidden = false;
   }
-  
+
   // Show/hide media upload when category changes
   document.getElementById('ticket-category')?.addEventListener('change', function () {
     const mediaWrap = document.getElementById('ticketMediaFields');
@@ -4606,36 +4633,36 @@ export async function mountTaskflowApp(opts = {}) {
       if (mi) mi.value = '';
     }
   });
-  
+
   els.openRaiseTicket?.addEventListener('click', () => openTicketModal(null));
-  els.closeTicketModal?.addEventListener('click',  () => { els.ticketModal.hidden = true; });
+  els.closeTicketModal?.addEventListener('click', () => { els.ticketModal.hidden = true; });
   els.cancelTicketModal?.addEventListener('click', () => { els.ticketModal.hidden = true; });
-  
+
   els.ticketForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     els.ticketFormMsg.hidden = true;
-  
-    const category    = document.getElementById('ticket-category').value;
+
+    const category = document.getElementById('ticket-category').value;
     const description = els.ticketDescription.value.trim();
-    if (!category)    { els.ticketFormMsg.textContent = 'Please select a category'; els.ticketFormMsg.hidden = false; return; }
+    if (!category) { els.ticketFormMsg.textContent = 'Please select a category'; els.ticketFormMsg.hidden = false; return; }
     if (!description) { els.ticketFormMsg.textContent = 'Please describe the issue'; els.ticketFormMsg.hidden = false; return; }
-  
+
     try {
       const mediaInput = document.getElementById('ticket-media');
-      const hasMedia   = mediaInput && mediaInput.files[0] && TICKET_NEEDS_MEDIA.has(category);
-  
+      const hasMedia = mediaInput && mediaInput.files[0] && TICKET_NEEDS_MEDIA.has(category);
+
       if (hasMedia) {
         // Use FormData so the media file goes through the backend (same pattern as task attachments)
         const formData = new FormData();
-        formData.append('task_id',     state.pendingTaskId || '');
-        formData.append('category',    category);
+        formData.append('task_id', state.pendingTaskId || '');
+        formData.append('category', category);
         formData.append('description', description);
-        formData.append('media',       mediaInput.files[0]);
+        formData.append('media', mediaInput.files[0]);
         await api('/tickets', { method: 'POST', body: formData, isForm: true });
       } else {
         await api('/tickets', { method: 'POST', body: { task_id: state.pendingTaskId, category, description } });
       }
-  
+
       showToast('Ticket raised ✅', 'success');
       els.ticketModal.hidden = true;
       if (state.activeView === 'tickets') loadTickets();
@@ -4646,7 +4673,7 @@ export async function mountTaskflowApp(opts = {}) {
       els.ticketFormMsg.hidden = false;
     }
   });
-  
+
   // ─── Updation Modal (verifier/admin → employee: request task updation) ──────────
   function openUpdationModal(taskOrId) {
     const task = taskOrId && typeof taskOrId === 'object' ? taskOrId : { id: taskOrId };
@@ -4659,7 +4686,7 @@ export async function mountTaskflowApp(opts = {}) {
     fillDuePrompt('updation', task);
     if (modal) modal.hidden = false;
   }
-  
+
   function closeUpdationModal() {
     const modal = document.getElementById('updationModal');
     if (modal) modal.hidden = true;
@@ -4673,8 +4700,8 @@ export async function mountTaskflowApp(opts = {}) {
     if (msgEl) msgEl.hidden = true;
     if (!note) {
       if (msgEl) {
-      msgEl.textContent = 'Please write an updation note before sending';
-      msgEl.hidden = false;
+        msgEl.textContent = 'Please write an updation note before sending';
+        msgEl.hidden = false;
       }
       return;
     }
@@ -4699,14 +4726,14 @@ export async function mountTaskflowApp(opts = {}) {
       loadVerifications();
     } catch (err) {
       if (msgEl) {
-      msgEl.textContent = err.message;
-      msgEl.hidden = false;
+        msgEl.textContent = err.message;
+        msgEl.hidden = false;
       } else {
         showToast(err.message, 'error');
       }
     }
   });
-  
+
   // ─── Load & Render Updations (employee view) ──────────────────────────────────
   async function loadUpdations() {
     const listEl = document.getElementById('updationsList');
@@ -4717,7 +4744,7 @@ export async function mountTaskflowApp(opts = {}) {
       renderUpdationsList(updations);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   function renderUpdationsList(tasks) {
     const listEl = document.getElementById('updationsList');
     if (!listEl) return;
@@ -4752,15 +4779,15 @@ export async function mountTaskflowApp(opts = {}) {
       listEl.appendChild(card);
     });
   }
-  
+
   // ─── Solution Modal (admin / resolver) ───────────────────────────────────────
   let _solvingTicketId = null;
-  
+
   function openSolutionModal(ticket) {
     _solvingTicketId = ticket.id;
     document.getElementById('solution-text').value = '';
     document.getElementById('solutionFormMsg').hidden = true;
-  
+
     const info = document.getElementById('solutionTicketInfo');
     info.innerHTML = `
       <div class="solution-ticket-summary">
@@ -4768,10 +4795,10 @@ export async function mountTaskflowApp(opts = {}) {
           <span class="pill pill-Pending pill-sm">Open</span>
           <span class="ticket-category-chip">${escapeHtml(TICKET_CATEGORY_LABELS[ticket.category] || ticket.category)}</span>
         </div>
-        <p class="solution-ticket-desc">"${escapeHtml(ticket.description.length > 120 ? ticket.description.slice(0,120)+'…' : ticket.description)}"</p>
+        <p class="solution-ticket-desc">"${escapeHtml(ticket.description.length > 120 ? ticket.description.slice(0, 120) + '…' : ticket.description)}"</p>
         <p class="solution-ticket-meta">
           Raised by <strong>${escapeHtml(ticket.raised_by_user?.full_name ?? '—')}</strong>
-          ${ticket.task ? ` · Task: <em>${escapeHtml(ticket.task.description.slice(0,60))}${ticket.task.description.length > 60 ? '…' : ''}</em>` : ''}
+          ${ticket.task ? ` · Task: <em>${escapeHtml(ticket.task.description.slice(0, 60))}${ticket.task.description.length > 60 ? '…' : ''}</em>` : ''}
           · ${fmtDate(ticket.created_at)}
         </p>
         ${ticket.attachment_url ? `<div style="margin-top:6px"><a href="${escapeHtml(ticket.attachment_url)}" target="_blank" class="ghost-btn-text" style="font-size:0.8rem">📎 View attached screenshot/recording</a></div>` : ''}
@@ -4779,14 +4806,14 @@ export async function mountTaskflowApp(opts = {}) {
     `;
     document.getElementById('solutionModal').hidden = false;
   }
-  
-  document.getElementById('closeSolutionModal')?.addEventListener('click',  () => { document.getElementById('solutionModal').hidden = true; });
+
+  document.getElementById('closeSolutionModal')?.addEventListener('click', () => { document.getElementById('solutionModal').hidden = true; });
   document.getElementById('cancelSolutionModal')?.addEventListener('click', () => { document.getElementById('solutionModal').hidden = true; });
-  
+
   document.getElementById('submitSolutionBtn')?.addEventListener('click', async () => {
     const solution = document.getElementById('solution-text').value.trim();
-    const msgEl    = document.getElementById('solutionFormMsg');
-    msgEl.hidden   = true;
+    const msgEl = document.getElementById('solutionFormMsg');
+    msgEl.hidden = true;
     if (!solution) { msgEl.textContent = 'Please write a solution before submitting'; msgEl.hidden = false; return; }
     try {
       await api(`/tickets/${_solvingTicketId}/solve`, { method: 'PATCH', body: { solution } });
@@ -4798,13 +4825,13 @@ export async function mountTaskflowApp(opts = {}) {
       msgEl.hidden = false;
     }
   });
-  
+
   // ─── Load & Render ────────────────────────────────────────────────────────────
   async function loadTickets() {
     const titleEl = document.getElementById('ticketsViewTitle');
-    const subEl   = document.getElementById('ticketsViewSub');
+    const subEl = document.getElementById('ticketsViewSub');
     if (titleEl) titleEl.textContent = '🎫 Tickets';
-    if (subEl)   subEl.textContent   = 'Raise and track support issues.';
+    if (subEl) subEl.textContent = 'Raise and track support issues.';
     els.ticketsList.innerHTML = '<div class="empty-state">Loading tickets…</div>';
     if (els.ticketsTableBody) {
       els.ticketsTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">Loading tickets…</td></tr>';
@@ -4814,16 +4841,16 @@ export async function mountTaskflowApp(opts = {}) {
       renderTicketsList(tickets);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   async function loadTicketsFiltered(statusFilter) {
     // Update view heading dynamically
     const titleEl = document.getElementById('ticketsViewTitle');
-    const subEl   = document.getElementById('ticketsViewSub');
+    const subEl = document.getElementById('ticketsViewSub');
     if (titleEl) titleEl.textContent = statusFilter === 'Open' ? '🟠 Open Tickets' : '✅ Resolved Tickets';
-    if (subEl)   subEl.textContent   = statusFilter === 'Open'
+    if (subEl) subEl.textContent = statusFilter === 'Open'
       ? 'All open tickets pending resolution.'
       : 'All resolved / closed tickets.';
-  
+
     els.ticketsList.innerHTML = `<div class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</div>`;
     if (els.ticketsTableBody) {
       els.ticketsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">Loading ${statusFilter.toLowerCase()} tickets…</td></tr>`;
@@ -4834,11 +4861,11 @@ export async function mountTaskflowApp(opts = {}) {
       renderTicketsList(filtered, statusFilter);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   function renderTicketsList(tickets, statusFilter) {
     const emptyMsg = statusFilter === 'Open' ? '🟠 No open tickets right now'
-                : statusFilter === 'Resolved' ? '✅ No resolved tickets yet'
-                : '🎫 No tickets yet';
+      : statusFilter === 'Resolved' ? '✅ No resolved tickets yet'
+        : '🎫 No tickets yet';
     if (!tickets.length) {
       if (els.ticketsList) {
         els.ticketsList.innerHTML = `<div class="empty-state"><span class="emoji">🎫</span>${emptyMsg}</div>`;
@@ -4850,9 +4877,9 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (els.ticketsList) els.ticketsList.innerHTML = '';
     if (els.ticketsTableBody) els.ticketsTableBody.innerHTML = '';
-  
+
     const canSolve = state.user.role === 'admin' || !!state.user.can_resolve_tickets || !!state.user.is_mis_executive;
-  
+
     tickets.forEach((ticket, idx) => {
       const catLabel = TICKET_CATEGORY_LABELS[ticket.category] || ticket.category || '';
       const raisedBy = ticket.raised_by_user?.full_name ?? '—';
@@ -4934,7 +4961,7 @@ export async function mountTaskflowApp(opts = {}) {
       }
     });
   }
-  
+
   // ─── Leave: apply (everyone) ───────────────────────────────────────────────────
   async function fillLeaveBuddySelect() {
     const sel = els.leaveBuddy || document.getElementById('leave-buddy');
@@ -5518,7 +5545,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
     }
   }
-  
+
   async function loadMyLeaves() {
     const hist = document.getElementById('myLeavesHistory');
     if (hist) hist.innerHTML = '<div class="empty-state">Loading your leave requests…</div>';
@@ -5704,20 +5731,20 @@ export async function mountTaskflowApp(opts = {}) {
       else showToast(err.message, 'error');
     }
   });
-  
+
   function leavePillClass(status) {
     if (status === 'Approved') return 'pill-Completed';
     if (status === 'Rejected') return 'pill-Rejected';
     return 'pill-Pending';
   }
-  
+
   function leaveDateRangeLabel(leave) {
     const from = fmtDateOnly(leave.from_date);
     const to = fmtDateOnly(leave.to_date);
     const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
     return leave.is_half_day ? `${range} (Half day)` : range;
   }
-  
+
   function leaveMonthKey(leave) {
     const s = String(leave?.from_date || leave?.created_at || '').slice(0, 7);
     return /^\d{4}-\d{2}$/.test(s) ? s : 'unknown';
@@ -5795,7 +5822,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.myLeavesList) els.myLeavesList.innerHTML = '';
     if (els.myLeavesTableBody) els.myLeavesTableBody.innerHTML = '';
   }
-  
+
   // ─── Leave: approvals (admin) ──────────────────────────────────────────────────
   async function loadLeaveApprovals() {
     els.leaveApprovalsList.innerHTML = '<div class="empty-state">Loading leave requests…</div>';
@@ -5809,11 +5836,11 @@ export async function mountTaskflowApp(opts = {}) {
     } catch (err) { showToast(err.message, 'error'); }
   }
   els.leaveApprovalsStatusFilter?.addEventListener('change', loadLeaveApprovals);
-  
+
   function renderLeaveApprovalsList(leaves) {
     if (!leaves.length) {
       if (els.leaveApprovalsList) {
-      els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
+        els.leaveApprovalsList.innerHTML = `<div class="empty-state"><span class="emoji">🗒️</span>No leave requests found</div>`;
       }
       if (els.leaveApprovalsTableBody) {
         els.leaveApprovalsTableBody.innerHTML = `<tr><td colspan="6" class="empty-state">No leave requests found</td></tr>`;
@@ -6030,7 +6057,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.leaveCoverModal) els.leaveCoverModal.hidden = true;
     showToast('Reminder will show again next time you open TaskFlow', '');
   });
-  
+
   function openRejectLeaveModal(leaveId) {
     state.pendingLeaveId = leaveId;
     els.rejectLeaveFormMsg.hidden = true;
@@ -6051,7 +6078,7 @@ export async function mountTaskflowApp(opts = {}) {
       loadLeaveApprovals();
     } catch (err) { els.rejectLeaveFormMsg.textContent = err.message; els.rejectLeaveFormMsg.hidden = false; }
   });
-  
+
   // ─── Manage Employees ─────────────────────────────────────────────────────────
   function isClientUserRow(u) {
     const role = String(u?.role || '').toLowerCase().trim();
@@ -6132,7 +6159,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (els.empFilterStatus) els.empFilterStatus.value = '';
     applyEmployeesFilter();
   }
-  
+
   function renderEmployeesTable(employees) {
     if (!employees.length) {
       const emptyMsg = employeesCache.length ? 'No matching employees' : 'No employees yet';
@@ -6157,31 +6184,31 @@ export async function mountTaskflowApp(opts = {}) {
       statusBtn.textContent = emp.is_active ? 'Active' : 'Inactive';
       statusBtn.addEventListener('click', () => toggleEmployeeStatus(emp));
       statusCell.appendChild(statusBtn);
-  
+
       const verifierCell = tr.children[7];
       const verifierBtn = document.createElement('button');
       verifierBtn.className = `status-toggle ${emp.can_verify ? 'active' : 'inactive'}`;
       verifierBtn.textContent = emp.can_verify ? 'Yes' : 'No';
       verifierBtn.addEventListener('click', () => toggleEmployeeVerifier(emp));
       verifierCell.appendChild(verifierBtn);
-  
+
       const actionsCell = tr.children[8];
       const editBtn = document.createElement('button');
       editBtn.className = 'action-btn action-start';
       editBtn.textContent = '✏️ Edit';
       editBtn.addEventListener('click', () => openEditEmployeeModal(emp));
       actionsCell.appendChild(editBtn);
-  
+
       const resetBtn = document.createElement('button');
       resetBtn.className = 'action-btn action-start';
       resetBtn.textContent = '🔑 Reset password';
       resetBtn.addEventListener('click', () => resetEmployeePassword(emp));
       actionsCell.appendChild(resetBtn);
-  
+
       els.employeesTableBody.appendChild(tr);
     });
   }
-  
+
   // renders the "Manage employees" view as cards (shown on mobile)
   function renderEmployeesCards(employees) {
     if (!employees.length) {
@@ -6212,33 +6239,33 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="employee-card-toggles"></div>
         <div class="employee-card-actions"></div>
       `;
-  
+
       const togglesEl = card.querySelector('.employee-card-toggles');
       const statusBtn = document.createElement('button');
       statusBtn.className = `status-toggle ${emp.is_active ? 'active' : 'inactive'}`;
       statusBtn.textContent = emp.is_active ? 'Active' : 'Inactive';
       statusBtn.addEventListener('click', () => toggleEmployeeStatus(emp));
       togglesEl.appendChild(statusBtn);
-  
+
       const verifierBtn = document.createElement('button');
       verifierBtn.className = `status-toggle ${emp.can_verify ? 'active' : 'inactive'}`;
       verifierBtn.textContent = emp.can_verify ? 'Verifier: Yes' : 'Verifier: No';
       verifierBtn.addEventListener('click', () => toggleEmployeeVerifier(emp));
       togglesEl.appendChild(verifierBtn);
-  
+
       const actionsEl = card.querySelector('.employee-card-actions');
       const editBtn = document.createElement('button');
       editBtn.className = 'action-btn action-start';
       editBtn.textContent = '✏️ Edit';
       editBtn.addEventListener('click', () => openEditEmployeeModal(emp));
       actionsEl.appendChild(editBtn);
-  
+
       const resetBtn = document.createElement('button');
       resetBtn.className = 'action-btn action-start';
       resetBtn.textContent = '🔑 Reset password';
       resetBtn.addEventListener('click', () => resetEmployeePassword(emp));
       actionsEl.appendChild(resetBtn);
-  
+
       els.employeesCards.appendChild(card);
     });
   }
@@ -6247,7 +6274,7 @@ export async function mountTaskflowApp(opts = {}) {
   els.empFilterDepartment?.addEventListener('change', applyEmployeesFilter);
   els.empFilterStatus?.addEventListener('change', applyEmployeesFilter);
   els.clearEmpFilters?.addEventListener('click', clearEmployeesFilter);
-  
+
   async function toggleEmployeeStatus(emp) {
     try {
       await api(`/employees/${emp.id}`, { method: 'PATCH', body: { is_active: !emp.is_active } });
@@ -6272,7 +6299,7 @@ export async function mountTaskflowApp(opts = {}) {
       });
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   els.openAddEmployee?.addEventListener('click', () => {
     els.employeeForm.reset(); els.employeeFormMsg.hidden = true;
     fillSiteMultiSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], []);
@@ -6292,7 +6319,7 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
     const body = {
-      full_name:   document.getElementById('emp-fullname').value.trim(),
+      full_name: document.getElementById('emp-fullname').value.trim(),
       department,
       designation: document.getElementById('emp-designation').value.trim(),
       role,
@@ -6314,7 +6341,7 @@ export async function mountTaskflowApp(opts = {}) {
   });
   els.closeCredsModal?.addEventListener('click', () => { els.credsModal.hidden = true; });
   els.closeCredsModalBtn?.addEventListener('click', () => { els.credsModal.hidden = true; });
-  
+
   // ─── Edit employee (designation + role + department + optional new password) ─
   function openEditEmployeeModal(emp) {
     els.editEmployeeFormMsg.hidden = true;
@@ -6366,13 +6393,13 @@ export async function mountTaskflowApp(opts = {}) {
     let department = els.editEmpDepartment.value.trim();
     if (role === 'client' && !department) department = 'Client';
     const body = {
-      full_name:   els.editEmpFullname.value.trim(),
+      full_name: els.editEmpFullname.value.trim(),
       department,
       designation: els.editEmpDesignation.value.trim(),
       role,
-      is_head:     role === 'head',
+      is_head: role === 'head',
       reporting_head_id: els.editEmpReportingHead.value || null, // optional — blank clears it
-      is_active:   els.editEmpStatusToggle.dataset.active === 'true'
+      is_active: els.editEmpStatusToggle.dataset.active === 'true'
     };
     const sites = getSelectedSites(els.editEmpSite || document.getElementById('edit-emp-site'));
     if (role === 'client' && !sites.length) {
@@ -6391,7 +6418,7 @@ export async function mountTaskflowApp(opts = {}) {
       loadEmployees(); refreshEmployeeDropdowns();
     } catch (err) { els.editEmployeeFormMsg.textContent = err.message; els.editEmployeeFormMsg.hidden = false; }
   });
-  
+
   // ─── Org Hierarchy (admin only) ────────────────────────────────────────────────
   // Root = whoever has no reporting_head_id (normally just Chirag Sir). Everyone
   // else nests under their reporting_head_id, however many levels deep. Inactive
@@ -6795,7 +6822,7 @@ export async function mountTaskflowApp(opts = {}) {
 
     return lifted;
   }
-  
+
   function buildOrgTree(employees, siteSupervisorMap = new Map()) {
     const nodes = employees.map((employee) => ({
       ...employee,
@@ -7137,7 +7164,7 @@ export async function mountTaskflowApp(opts = {}) {
             ? 'Head role already has Office ↔ Site'
             : autoMdo
               ? 'Process Controller already has Office ↔ MDO'
-            : `Toggle "${label}" for ${emp.full_name}`;
+              : `Toggle "${label}" for ${emp.full_name}`;
         if (isAdminRow || autoSite || autoMdo) {
           btn.disabled = true;
         } else {
@@ -7176,9 +7203,8 @@ export async function mountTaskflowApp(opts = {}) {
         const tr = document.createElement('tr');
         const name = document.createElement('td');
         const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
-        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${
-          adminLocked ? ' · Admin always on; other roles editable' : ''
-        }</div>`;
+        name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${adminLocked ? ' · Admin always on; other roles editable' : ''
+          }</div>`;
         tr.appendChild(name);
         const row = state.navVis[mod.key] || {};
         roles.forEach((r) => {
@@ -7266,7 +7292,7 @@ export async function mountTaskflowApp(opts = {}) {
       btn.disabled = false;
     }
   });
-  
+
   // ─── Master data ──────────────────────────────────────────────────────────────
   async function loadMasterDataView() {
     try {
@@ -7308,7 +7334,7 @@ export async function mountTaskflowApp(opts = {}) {
       loadMasterDataView(); loadMasterData();
     } catch (err) { els.addTaskTypeMsg.textContent = err.message; els.addTaskTypeMsg.hidden = false; }
   });
-  
+
   // ─── Manage Sites ─────────────────────────────────────────────────────────────
   const DEFAULT_SITE_PROJECT_TYPES = ['Commercial', 'Industrial', 'Institutional', 'Residential'];
   let siteProjectTypeOptions = [...DEFAULT_SITE_PROJECT_TYPES];
@@ -7615,17 +7641,17 @@ export async function mountTaskflowApp(opts = {}) {
     e.preventDefault(); els.siteFormMsg.hidden = true;
     const editId = (els.siteEditId?.value || '').trim();
     const body = {
-      client_name:       document.getElementById('site-client').value.trim(),
-      name:              document.getElementById('site-name').value.trim(),
-      project_type:      document.getElementById('site-type').value,
-      location:          document.getElementById('site-location').value.trim(),
-      start_date:        document.getElementById('site-start').value,
+      client_name: document.getElementById('site-client').value.trim(),
+      name: document.getElementById('site-name').value.trim(),
+      project_type: document.getElementById('site-type').value,
+      location: document.getElementById('site-location').value.trim(),
+      start_date: document.getElementById('site-start').value,
       expected_end_date: document.getElementById('site-end').value || null,
-      team_leader_id:    els.siteTeamleader.value,
-      coordinator_id:    els.siteCoordinator.value,
-      site_incharge_id:  els.siteIncharge.value,
-      pc_id:             els.sitePc?.value || '',
-      description:       document.getElementById('site-description').value.trim()
+      team_leader_id: els.siteTeamleader.value,
+      coordinator_id: els.siteCoordinator.value,
+      site_incharge_id: els.siteIncharge.value,
+      pc_id: els.sitePc?.value || '',
+      description: document.getElementById('site-description').value.trim()
     };
     try {
       if (editId) {
@@ -7737,19 +7763,19 @@ export async function mountTaskflowApp(opts = {}) {
     const status = els.clientFilterStatus?.value || '';
     return clientsCache
       .filter((c) => {
-      if (site && String(c.site_name || '') !== site) return false;
-      if (status === 'active' && c.is_active === false) return false;
-      if (status === 'inactive' && c.is_active !== false) return false;
-      if (q) {
-        const sc = c.site_contacts || {};
-        const hay = [
-          c.full_name, c.username, c.site_name,
-          sc.head_name, sc.incharge_name, sc.pc_name
-        ].map((x) => String(x || '').toLowerCase()).join(' ');
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    })
+        if (site && String(c.site_name || '') !== site) return false;
+        if (status === 'active' && c.is_active === false) return false;
+        if (status === 'inactive' && c.is_active !== false) return false;
+        if (q) {
+          const sc = c.site_contacts || {};
+          const hay = [
+            c.full_name, c.username, c.site_name,
+            sc.head_name, sc.incharge_name, sc.pc_name
+          ].map((x) => String(x || '').toLowerCase()).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      })
       .sort((a, b) =>
         String(a.full_name || '').localeCompare(String(b.full_name || ''), undefined, { sensitivity: 'base' })
       );
@@ -7830,7 +7856,7 @@ export async function mountTaskflowApp(opts = {}) {
       await api(`/clients/${client.id}`, { method: 'PATCH', body: { is_active: next } });
       showToast(
         `${client.full_name} marked ${next ? 'active' : 'inactive'} ✅` +
-          (next ? '' : ' — client portal login blocked'),
+        (next ? '' : ' — client portal login blocked'),
         'success'
       );
       loadClients();
@@ -7884,47 +7910,47 @@ export async function mountTaskflowApp(opts = {}) {
       } else showToast(err.message, 'error');
     }
   });
-  
+
   // boot deferred to mountTaskflowApp
-  
+
   // ─── RECURRING TASKS ──────────────────────────────────────────────────────────
-  
+
   // Elem references (recurring modal)
   const recEls = {
-    modal:         () => document.getElementById('recurringModal'),
-    modalTitle:    () => document.getElementById('recurringModalTitle'),
-    editId:        () => document.getElementById('recurring-edit-id'),
-    department:    () => document.getElementById('rec-department'),
-    employee:      () => document.getElementById('rec-employee'),
-    taskType:      () => document.getElementById('rec-tasktype'),
-    project:       () => document.getElementById('rec-project'),
-    description:   () => document.getElementById('rec-description'),
-    priority:      () => document.getElementById('rec-priority'),
-    weeklyField:   () => document.getElementById('weeklyDaysField'),
-    monthlyField:  () => document.getElementById('monthlyDayField'),
-    monthlyDay:    () => document.getElementById('rec-monthly-day'),
-    monthlyFrom:   () => document.getElementById('rec-monthly-from'),
-    monthlyTo:     () => document.getElementById('rec-monthly-to'),
-    startDate:     () => document.getElementById('rec-start'),
-    endDate:       () => document.getElementById('rec-end'),
+    modal: () => document.getElementById('recurringModal'),
+    modalTitle: () => document.getElementById('recurringModalTitle'),
+    editId: () => document.getElementById('recurring-edit-id'),
+    department: () => document.getElementById('rec-department'),
+    employee: () => document.getElementById('rec-employee'),
+    taskType: () => document.getElementById('rec-tasktype'),
+    project: () => document.getElementById('rec-project'),
+    description: () => document.getElementById('rec-description'),
+    priority: () => document.getElementById('rec-priority'),
+    weeklyField: () => document.getElementById('weeklyDaysField'),
+    monthlyField: () => document.getElementById('monthlyDayField'),
+    monthlyDay: () => document.getElementById('rec-monthly-day'),
+    monthlyFrom: () => document.getElementById('rec-monthly-from'),
+    monthlyTo: () => document.getElementById('rec-monthly-to'),
+    startDate: () => document.getElementById('rec-start'),
+    endDate: () => document.getElementById('rec-end'),
     checkpointsList: () => document.getElementById('checkpointsList'),
-    formMsg:       () => document.getElementById('recurringFormMsg'),
-    saveBtn:       () => document.getElementById('saveRecurringBtn'),
-    openBtn:       () => document.getElementById('openAddRecurring'),
-    adminWrap:     () => document.getElementById('adminRecurringWrap'),
-    empWrap:       () => document.getElementById('employeeRecurringWrap'),
-    empList:       () => document.getElementById('employeeRecurringList'),
-    adminTable:    () => document.getElementById('recurringTasksTableBody'),
-    adminCards:    () => document.getElementById('adminRecurringCards'),
-    newTaskTypeRow:    () => document.getElementById('recNewTaskTypeRow'),
-    newTaskTypeInput:  () => document.getElementById('recNewTaskTypeInput'),
-    newTaskTypeSave:   () => document.getElementById('recNewTaskTypeSave'),
+    formMsg: () => document.getElementById('recurringFormMsg'),
+    saveBtn: () => document.getElementById('saveRecurringBtn'),
+    openBtn: () => document.getElementById('openAddRecurring'),
+    adminWrap: () => document.getElementById('adminRecurringWrap'),
+    empWrap: () => document.getElementById('employeeRecurringWrap'),
+    empList: () => document.getElementById('employeeRecurringList'),
+    adminTable: () => document.getElementById('recurringTasksTableBody'),
+    adminCards: () => document.getElementById('adminRecurringCards'),
+    newTaskTypeRow: () => document.getElementById('recNewTaskTypeRow'),
+    newTaskTypeInput: () => document.getElementById('recNewTaskTypeInput'),
+    newTaskTypeSave: () => document.getElementById('recNewTaskTypeSave'),
     newTaskTypeCancel: () => document.getElementById('recNewTaskTypeCancel'),
-    taskTypeMsg:       () => document.getElementById('recTaskTypeMsg'),
+    taskTypeMsg: () => document.getElementById('recTaskTypeMsg'),
   };
-  
+
   let recurringSelectedFreq = '';
-  
+
   function syncRecurringFreqFields() {
     if (recEls.weeklyField()) recEls.weeklyField().hidden = recurringSelectedFreq !== 'Weekly';
     if (recEls.monthlyField()) recEls.monthlyField().hidden = recurringSelectedFreq !== 'Monthly';
@@ -8004,27 +8030,27 @@ export async function mountTaskflowApp(opts = {}) {
       const to = Number(recEls.monthlyTo()?.value || from);
       setMonthlyDurationFields(from, Math.max(from, to));
     });
-  
+
     // Add checkpoint
     document.getElementById('addCheckpointBtn')?.addEventListener('click', () => {
       addCheckpointRow('');
     });
-  
+
     // Save button
     recEls.saveBtn().addEventListener('click', saveRecurringTask);
-  
+
     // Close/cancel
     document.getElementById('closeRecurringModal')?.addEventListener('click', closeRecurringModal);
     document.getElementById('cancelRecurringModal')?.addEventListener('click', closeRecurringModal);
-  
+
     // Open Add button (admin only)
     recEls.openBtn().addEventListener('click', () => openRecurringModal(null));
-  
+
     // Task type changed → either open the inline "add new" row, or
     // auto-load that type's saved checkpoint template.
     recEls.taskType().addEventListener('change', async () => {
       const taskTypeId = recEls.taskType().value;
-  
+
       if (taskTypeId === '__add_new__') {
         recEls.taskTypeMsg().hidden = true;
         recEls.newTaskTypeInput().value = '';
@@ -8035,10 +8061,10 @@ export async function mountTaskflowApp(opts = {}) {
         recEls.taskType().value = '';
         return;
       }
-  
+
       recEls.newTaskTypeRow().hidden = true;
       if (!taskTypeId) return;
-  
+
       const hasExisting = recEls.checkpointsList().children.length > 0;
       if (hasExisting) {
         const ok = confirm("Load this task type's saved checkpoints? This will replace the current checkpoint list.");
@@ -8054,7 +8080,7 @@ export async function mountTaskflowApp(opts = {}) {
         showToast(err.message, 'error');
       }
     });
-  
+
     recEls.newTaskTypeCancel().addEventListener('click', () => {
       recEls.newTaskTypeRow().hidden = true;
     });
@@ -8063,7 +8089,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (e.key === 'Enter') { e.preventDefault(); saveNewTaskTypeFromModal(); }
     });
   }
-  
+
   // Adds a new task type from inside the recurring-task modal, then refreshes
   // every task-type dropdown in the app (including this modal's) and selects
   // the freshly created type so the admin can keep going without re-opening
@@ -8098,7 +8124,7 @@ export async function mountTaskflowApp(opts = {}) {
       recEls.newTaskTypeSave().disabled = false;
     }
   }
-  
+
   function addCheckpointRow(value) {
     const list = recEls.checkpointsList();
     const row = document.createElement('div');
@@ -8110,13 +8136,13 @@ export async function mountTaskflowApp(opts = {}) {
     row.querySelector('.cp-remove').addEventListener('click', () => row.remove());
     list.appendChild(row);
   }
-  
+
   function getCheckpointValues() {
     return [...document.querySelectorAll('.checkpoint-input')]
       .map(i => i.value.trim())
       .filter(Boolean);
   }
-  
+
   function openRecurringModal(task) {
     recEls.formMsg().hidden = true;
     recEls.checkpointsList().innerHTML = '';
@@ -8130,7 +8156,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (recEls.monthlyDay()) recEls.monthlyDay().value = '1';
     if (recEls.monthlyFrom()) recEls.monthlyFrom().value = '1';
     if (recEls.monthlyTo()) recEls.monthlyTo().value = '1';
-  
+
     if (task) {
       // Edit mode
       recEls.modalTitle().textContent = '✏️ Edit Recurring Task';
@@ -8179,18 +8205,18 @@ export async function mountTaskflowApp(opts = {}) {
       recEls.endDate().value = '';
       recurringSelectedFreq = '';
     }
-  
+
     recEls.modal().hidden = false;
   }
-  
+
   function closeRecurringModal() {
     recEls.modal().hidden = true;
   }
-  
+
   async function saveRecurringTask() {
     recEls.formMsg().hidden = true;
     const editId = recEls.editId().value;
-  
+
     if (!recEls.employee().value) {
       recEls.formMsg().textContent = 'Please select an employee'; recEls.formMsg().hidden = false; return;
     }
@@ -8203,7 +8229,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!recEls.startDate().value) {
       recEls.formMsg().textContent = 'Please select a start date'; recEls.formMsg().hidden = false; return;
     }
-  
+
     const freqDays = [];
     if (recurringSelectedFreq === 'Weekly') {
       document.querySelectorAll('#weeklyDaysField input[type=checkbox]:checked').forEach(c => {
@@ -8229,21 +8255,21 @@ export async function mountTaskflowApp(opts = {}) {
       // Send [from, to] — backend stores as "14-17" and fires daily in that window
       freqDays.push(from, to);
     }
-  
+
     const body = {
-      assigned_to:    recEls.employee().value,
-      department_id:  recEls.department().value || null,
-      project_id:     recEls.project().value || null,
-      task_type_id:   recEls.taskType().value || null,
-      description:    recEls.description().value.trim(),
-      priority:       recEls.priority().value,
-      frequency:      recurringSelectedFreq,
+      assigned_to: recEls.employee().value,
+      department_id: recEls.department().value || null,
+      project_id: recEls.project().value || null,
+      task_type_id: recEls.taskType().value || null,
+      description: recEls.description().value.trim(),
+      priority: recEls.priority().value,
+      frequency: recurringSelectedFreq,
       frequency_days: freqDays,
-      start_date:     recEls.startDate().value,
-      end_date:       recEls.endDate().value || null,
-      checkpoints:    getCheckpointValues()
+      start_date: recEls.startDate().value,
+      end_date: recEls.endDate().value || null,
+      checkpoints: getCheckpointValues()
     };
-  
+
     recEls.saveBtn().disabled = true;
     try {
       if (editId) {
@@ -8262,8 +8288,8 @@ export async function mountTaskflowApp(opts = {}) {
       recEls.saveBtn().disabled = false;
     }
   }
-  
-  
+
+
   async function loadRecurringView() {
     const isAdmin = state.user.role === 'admin';
     // NOTE: this used to also check state.user.can_add_employee, which is an
@@ -8276,7 +8302,7 @@ export async function mountTaskflowApp(opts = {}) {
     recEls.openBtn().hidden = !canManageRecurring;
     recEls.adminWrap().hidden = !canManageRecurring;
     recEls.empWrap().hidden = canManageRecurring;
-  
+
     if (canManageRecurring) {
       await loadAdminRecurringTasks();
     } else {
@@ -8284,7 +8310,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
   // ─── Admin view ───────────────────────────────────────────────────────────────
-  
+
   async function loadAdminRecurringTasks() {
     const tbody = recEls.adminTable();
     tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
@@ -8295,10 +8321,10 @@ export async function mountTaskflowApp(opts = {}) {
       renderAdminRecurringCards(tasks);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   function freqLabel(task) {
     if (task.frequency === 'Weekly' && task.frequency_days) {
-      const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
       const days = task.frequency_days.split(',').map(Number).map(d => dayNames[d]).join(', ');
       return `Weekly (${days})`;
     }
@@ -8315,7 +8341,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return task.frequency;
   }
-  
+
   function renderAdminRecurringTable(tasks) {
     const tbody = recEls.adminTable();
     if (!tasks.length) {
@@ -8328,10 +8354,10 @@ export async function mountTaskflowApp(opts = {}) {
       const cpCount = (task.checkpoints || []).length;
       tr.innerHTML = `
         <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
-        <td style="max-width:200px">${escapeHtml(task.description?.slice(0,80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
+        <td style="max-width:200px">${escapeHtml(task.description?.slice(0, 80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
         <td>${escapeHtml(freqLabel(task))}</td>
         <td style="font-size:12px">${escapeHtml(task.start_date ?? '—')} → ${escapeHtml(task.end_date ?? 'ongoing')}</td>
-        <td>${cpCount ? `${cpCount} checkpoint${cpCount>1?'s':''}` : '<span style="color:#aaa">None</span>'}</td>
+        <td>${cpCount ? `${cpCount} checkpoint${cpCount > 1 ? 's' : ''}` : '<span style="color:#aaa">None</span>'}</td>
         <td><span class="pill ${task.is_active ? 'pill-In-Progress' : 'pill-Rejected'}">${task.is_active ? 'Active' : 'Inactive'}</span></td>
         <td class="row-actions"></td>
       `;
@@ -8346,7 +8372,7 @@ export async function mountTaskflowApp(opts = {}) {
       tbody.appendChild(tr);
     });
   }
-  
+
   function renderAdminRecurringCards(tasks) {
     const wrap = recEls.adminCards();
     if (!tasks.length) { wrap.innerHTML = `<div class="empty-state">No recurring tasks yet</div>`; return; }
@@ -8362,7 +8388,7 @@ export async function mountTaskflowApp(opts = {}) {
         </div>
         <div class="task-card-body">
           <div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
-          <div class="task-detail-line"><span class="task-detail-label">Task:</span> ${escapeHtml(task.description?.slice(0,100) ?? '—')}${task.description?.length>100?'…':''}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Task:</span> ${escapeHtml(task.description?.slice(0, 100) ?? '—')}${task.description?.length > 100 ? '…' : ''}</div>
           <div class="task-detail-line"><span class="task-detail-label">Period:</span> ${escapeHtml(task.start_date)} → ${escapeHtml(task.end_date ?? 'ongoing')}</div>
           <div class="task-detail-line"><span class="task-detail-label">Checkpoints:</span> ${cpCount ? `${cpCount}` : 'None'}</div>
         </div>
@@ -8376,18 +8402,18 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.appendChild(card);
     });
   }
-  
+
   async function deleteRecurringTask(task) {
-    if (!confirm(`Delete recurring task "${task.description?.slice(0,60)}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete recurring task "${task.description?.slice(0, 60)}"? This cannot be undone.`)) return;
     try {
       await api(`/recurring-tasks/${task.id}`, { method: 'DELETE' });
       showToast('Recurring task deleted', 'success');
       loadRecurringView();
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // ─── Employee view ────────────────────────────────────────────────────────────
-  
+
   // async function loadEmployeeRecurringTasks() {
   //   const wrap = recEls.empList();
   //   wrap.innerHTML = `<div class="empty-state">Loading your recurring tasks…</div>`;
@@ -8396,7 +8422,7 @@ export async function mountTaskflowApp(opts = {}) {
   //     renderEmployeeRecurringList(tasks);
   //   } catch (err) { showToast(err.message, 'error'); }
   // }
-  
+
   async function loadEmployeeRecurringTasks() {
     const wrap = recEls.empList();
     const tbody = document.getElementById('employeeRecurringTableBody');
@@ -8408,7 +8434,7 @@ export async function mountTaskflowApp(opts = {}) {
       renderEmployeeRecurringTable(tasks);
     } catch (err) { showToast(err.message, 'error'); }
   }
-  
+
   // Default refresh used after marking a recurring task done from the main
   // "My recurring tasks" page. (The admin's own recurring tasks inside "My
   // Tasks" are merged into that table directly and refresh via loadMyTasks.)
@@ -8417,7 +8443,7 @@ export async function mountTaskflowApp(opts = {}) {
     renderEmployeeRecurringList(refreshed);
     renderEmployeeRecurringTable(refreshed);
   }
-  
+
   // Desktop table view — same data as the card list above, laid out as rows.
   // tbody/refreshFn are overridable so this same renderer can also be reused
   // for an admin's own recurring tasks inside the "My Tasks" tab.
@@ -8448,29 +8474,29 @@ export async function mountTaskflowApp(opts = {}) {
       const canAct = !isCompleted;
       const statusText = isNa ? 'Not Applicable'
         : isCompleted ? 'Completed'
-        : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
-        : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+          : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+            : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
       const pillClass = isNa ? 'pill-InProgress'
         : isCompleted ? 'pill-Completed'
-        : isOverdue ? 'pill-Rejected'
-        : 'pill-InProgress';
-  
+          : isOverdue ? 'pill-Rejected'
+            : 'pill-InProgress';
+
       const tdTask = document.createElement('td');
       tdTask.innerHTML = `
         <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
         ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
         ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
       `;
-  
+
       const tdFreq = document.createElement('td');
       tdFreq.textContent = freqLabel(task);
-  
+
       // Each row is its own due date now — the 6th's missed instance shows
       // "6 Jul" here while the 7th's shows "7 Jul", side by side as separate rows.
       const tdDate = document.createElement('td');
       tdDate.style.whiteSpace = 'nowrap';
       tdDate.textContent = fmtDateOnly(task.due_date);
-  
+
       const tdStatus = document.createElement('td');
       tdStatus.innerHTML = `<span class="pill ${pillClass}">${escapeHtml(statusText)}</span>`;
       if (canAct) {
@@ -8482,12 +8508,12 @@ export async function mountTaskflowApp(opts = {}) {
         appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
         tdStatus.appendChild(actions);
       }
-  
+
       tr.append(tdTask, tdFreq, tdDate, tdStatus);
       tbody.appendChild(tr);
     });
   }
-  
+
   // Shared "Done" / "Not Applicable" buttons for recurring instances
   function appendRecurringActionButtons(container, task, inst, checkpoints, refreshFn) {
     const doneBtn = document.createElement('button');
@@ -8516,7 +8542,7 @@ export async function mountTaskflowApp(opts = {}) {
       showToast(err.message, 'error');
     }
   }
-  
+
   // Shared "Done" flow for a recurring task instance, used by both the table
   // and card views. Always opens a modal: tick checkpoints (if any) + optional
   // photo, then Submit. Photo is never required.
@@ -8628,21 +8654,21 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
     wrap.innerHTML = '';
-  
+
     // Backend already sends one row per pending due date, oldest first — a
     // missed day (e.g. the 6th) keeps its own row instead of vanishing once
     // the 7th's instance exists. Split just for a friendlier "Today" vs
     // "Overdue" heading; nothing gets filtered out here.
     const todays = tasks.filter(t => t.is_today);
     const overdue = tasks.filter(t => !t.is_today);
-  
+
     if (overdue.length) {
       const hdr = document.createElement('div');
       hdr.className = 'nav-section-label'; hdr.textContent = 'Overdue';
       wrap.appendChild(hdr);
       overdue.forEach(t => wrap.appendChild(buildEmployeeRecurringCard(t, refreshFn)));
     }
-  
+
     const hdr = document.createElement('div');
     hdr.className = 'nav-section-label'; hdr.style.marginTop = overdue.length ? '24px' : '0';
     hdr.textContent = "Today's tasks";
@@ -8656,7 +8682,7 @@ export async function mountTaskflowApp(opts = {}) {
       wrap.appendChild(empty);
     }
   }
-  
+
   function buildEmployeeRecurringCard(task, refreshFn = refreshMainRecurringView) {
     const card = document.createElement('div');
     card.className = 'task-card';
@@ -8672,14 +8698,14 @@ export async function mountTaskflowApp(opts = {}) {
     const canAct = !isCompleted;
     const status = isNa ? 'Not Applicable'
       : isCompleted ? 'Completed'
-      : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
-      : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
-  
+        : checkpoints.length === 0 ? (isOverdue ? 'Pending (overdue)' : 'Pending')
+          : `Pending (${completedIds.length}/${checkpoints.length} done)${isOverdue ? ' — overdue' : ''}`;
+
     const pillClass = isNa ? 'pill-InProgress'
       : isCompleted ? 'pill-Completed'
-      : isOverdue ? 'pill-Rejected'
-      : 'pill-In-Progress';
-  
+        : isOverdue ? 'pill-Rejected'
+          : 'pill-In-Progress';
+
     card.innerHTML = `
       <div class="task-card-header">
         <span class="pill ${pillClass}">${escapeHtml(status)}</span>
@@ -8693,20 +8719,20 @@ export async function mountTaskflowApp(opts = {}) {
       </div>
       ${canAct ? `<div class="task-card-actions" style="display:flex;gap:8px;flex-wrap:wrap"></div>` : ''}
     `;
-  
+
     if (canAct) {
       const actions = card.querySelector('.task-card-actions');
       appendRecurringActionButtons(actions, task, inst, checkpoints, refreshFn);
     }
-  
+
     return card;
   }
-  
+
   // ─── Boot recurring modal once DOM is ready ───────────────────────────────────
   __tfReadyFns.push(() => {
     initRecurringModal();
   });
-  
+
   // Fills the Department/Employee/Task Type/Project selects inside the
   // recurring-task modal from state.master. Called directly from
   // loadMasterData() once master data has loaded (not via monkey-patching —
@@ -8730,26 +8756,26 @@ export async function mountTaskflowApp(opts = {}) {
   // ═══════════════════════════════════════════════════════════════════
   // ─── DRAWINGS MODULE ───────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════
-  
+
   const DRAWING_CATEGORIES = ['Architectural', 'Layout', 'MEP', 'Others', 'Presentation', 'Structural'];
-  
+
   // ─── Add Drawing View ────────────────────────────────────────────────
   function renderDrawingAddView() {
     const view = document.getElementById('view-drawings-add');
     if (!view) return;
-  
+
     // Load projects for dropdown
     api('/master/projects').then(projects => {
       const projSel = view.querySelector('#drw-project');
       if (projSel) fillSelect(projSel, projects || [], { placeholder: '-- Select Project --' });
-    }).catch(() => {});
-  
+    }).catch(() => { });
+
     // Load verifiers/heads for dropdown
     api('/master/verifiers').then(users => {
       const headSel = view.querySelector('#drw-head');
       if (headSel) fillSelect(headSel, users || [], { placeholder: '-- Select Head --', labelKey: 'full_name' });
-    }).catch(() => {});
-  
+    }).catch(() => { });
+
     // Category change → update subcategory
     const catSel = view.querySelector('#drw-category');
     const sub1Sel = view.querySelector('#drw-sub1');
@@ -8758,32 +8784,32 @@ export async function mountTaskflowApp(opts = {}) {
         sub1Sel.innerHTML = '<option value="">-- Select Sub Category --</option>';
       });
     }
-  
+
     const form = view.querySelector('#drawingForm');
     const msgEl = view.querySelector('#drawingFormMsg');
     if (!form) return;
-  
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       msgEl.hidden = true;
-  
+
       const project_id = view.querySelector('#drw-project').value;
-      const category   = view.querySelector('#drw-category').value;
-      const sub_cat_1  = view.querySelector('#drw-sub1').value;
-      const sub_cat_2  = view.querySelector('#drw-sub2').value;
-      const sub_cat_3  = view.querySelector('#drw-sub3').value;
+      const category = view.querySelector('#drw-category').value;
+      const sub_cat_1 = view.querySelector('#drw-sub1').value;
+      const sub_cat_2 = view.querySelector('#drw-sub2').value;
+      const sub_cat_3 = view.querySelector('#drw-sub3').value;
       const drawing_date = view.querySelector('#drw-date').value;
-      const head_id    = view.querySelector('#drw-head').value;
-      const revision   = view.querySelector('#drw-revision').value || 'R0';
-      const remarks    = view.querySelector('#drw-remarks').value;
-      const fileInput  = view.querySelector('#drw-files');
-  
+      const head_id = view.querySelector('#drw-head').value;
+      const revision = view.querySelector('#drw-revision').value || 'R0';
+      const remarks = view.querySelector('#drw-remarks').value;
+      const fileInput = view.querySelector('#drw-files');
+
       if (!project_id || !category || !drawing_date || !head_id) {
         msgEl.textContent = 'Please fill in all required fields';
         msgEl.hidden = false;
         return;
       }
-  
+
       try {
         const fd = new FormData();
         fd.append('project_id', project_id);
@@ -8798,7 +8824,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (fileInput.files.length > 0) {
           Array.from(fileInput.files).forEach(f => fd.append('files', f));
         }
-  
+
         await api('/drawings', { method: 'POST', body: fd, isForm: true });
         showToast('Drawing saved ✅', 'success');
         form.reset();
@@ -8807,28 +8833,28 @@ export async function mountTaskflowApp(opts = {}) {
         msgEl.hidden = false;
       }
     });
-  
+
     // Reset button
     const resetBtn = view.querySelector('#drawingResetBtn');
     if (resetBtn) resetBtn.addEventListener('click', () => { form.reset(); msgEl.hidden = true; });
   }
-  
+
   // ─── All Drawings View ───────────────────────────────────────────────
   let allDrawingsCache = [];
-  
+
   async function loadAllDrawings() {
     const view = document.getElementById('view-drawings-all');
     if (!view) return;
     const tbody = view.querySelector('#drawingsTableBody');
     tbody.innerHTML = `<tr><td colspan="11" class="empty-state">Loading drawings…</td></tr>`;
-  
+
     try {
       allDrawingsCache = await api('/drawings');
       // Populate project filter
       const filterSel = view.querySelector('#drwFilterProject');
       if (filterSel) {
         const projects = [...new Map(allDrawingsCache.map(d => [d.project?.id, d.project?.name])).entries()]
-          .filter(([id]) => id).sort((a,b) => a[1].localeCompare(b[1]));
+          .filter(([id]) => id).sort((a, b) => a[1].localeCompare(b[1]));
         filterSel.innerHTML = '<option value="">All Projects</option>';
         projects.forEach(([id, name]) => {
           const opt = document.createElement('option');
@@ -8842,13 +8868,13 @@ export async function mountTaskflowApp(opts = {}) {
       showToast(err.message, 'error');
     }
   }
-  
+
   function renderDrawingsTable(drawings) {
     const view = document.getElementById('view-drawings-all');
     const tbody = view.querySelector('#drawingsTableBody');
     const countEl = view.querySelector('#drawingsCount');
     if (countEl) countEl.textContent = `${drawings.length} total`;
-  
+
     if (!drawings.length) {
       tbody.innerHTML = `<tr><td colspan="11" class="empty-state"><span class="emoji">📐</span>No drawings found</td></tr>`;
       return;
@@ -8860,9 +8886,9 @@ export async function mountTaskflowApp(opts = {}) {
       const previewHtml = fileUrls.length
         ? fileUrls.map(u => `<a href="${escapeHtml(u)}" target="_blank" class="media-link drw-view-btn">View</a>`).join(' ')
         : `<span class="media-none">—</span>`;
-  
+
       tr.innerHTML = `
-        <td><span class="sr-number">${i+1}</span></td>
+        <td><span class="sr-number">${i + 1}</span></td>
         <td><strong style="font-weight:600">${escapeHtml(d.project?.name ?? '—')}</strong></td>
         <td><span class="ticket-category-chip">${escapeHtml(d.category ?? '—')}</span></td>
         <td>${escapeHtml(d.sub_cat_1 || '—')}</td>
@@ -8878,7 +8904,7 @@ export async function mountTaskflowApp(opts = {}) {
       `;
       tbody.appendChild(tr);
     });
-  
+
     // Delete listeners
     tbody.querySelectorAll('.drw-delete-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -8891,7 +8917,7 @@ export async function mountTaskflowApp(opts = {}) {
       });
     });
   }
-  
+
   // Filter by project
   document.addEventListener('change', (e) => {
     if (e.target.id === 'drwFilterProject') {
@@ -8902,24 +8928,24 @@ export async function mountTaskflowApp(opts = {}) {
       renderDrawingsTable(filtered);
     }
   });
-  
+
   // ═══════════════════════════════════════════════════════════════════
   // ─── DAILY REPORT MODULE ──────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════════════
-  
+
   let _drptMode = 'single'; // 'single' | 'range'
-  
+
   function loadDailyReport() {
-    const dateInput   = document.getElementById('drptDate');
-    const fromInput   = document.getElementById('drptFromDate');
-    const toInput     = document.getElementById('drptToDate');
-    const genBtn      = document.getElementById('drptGenBtn');
-    const dlBtn       = document.getElementById('drptDownloadBtn');
-    const modeSingle  = document.getElementById('drptModeSingle');
-    const modeRange   = document.getElementById('drptModeRange');
-    const singleWrap  = document.getElementById('drptSingleWrap');
-    const rangeWrap   = document.getElementById('drptRangeWrap');
-  
+    const dateInput = document.getElementById('drptDate');
+    const fromInput = document.getElementById('drptFromDate');
+    const toInput = document.getElementById('drptToDate');
+    const genBtn = document.getElementById('drptGenBtn');
+    const dlBtn = document.getElementById('drptDownloadBtn');
+    const modeSingle = document.getElementById('drptModeSingle');
+    const modeRange = document.getElementById('drptModeRange');
+    const singleWrap = document.getElementById('drptSingleWrap');
+    const rangeWrap = document.getElementById('drptRangeWrap');
+
     // Default: yesterday
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -8933,7 +8959,7 @@ export async function mountTaskflowApp(opts = {}) {
       toInput.value = new Date().toISOString().slice(0, 10);
       fromInput._drptInit = true;
     }
-  
+
     // Mode toggle
     if (modeSingle && !modeSingle._drptBound) {
       modeSingle._drptBound = true;
@@ -8952,7 +8978,7 @@ export async function mountTaskflowApp(opts = {}) {
         rangeWrap.style.display = 'flex';
       });
     }
-  
+
     // Generate on button click
     if (genBtn && !genBtn._drptBound) {
       genBtn._drptBound = true;
@@ -8961,28 +8987,28 @@ export async function mountTaskflowApp(opts = {}) {
       // Auto-generate on first load
       generateDailyReport();
     }
-  
+
     if (dlBtn && !dlBtn._drptBound) {
       dlBtn._drptBound = true;
       dlBtn.addEventListener('click', () => downloadDailyReportPdf());
     }
   }
-  
+
   async function generateDailyReport() {
-    const dateInput  = document.getElementById('drptDate');
-    const fromInput  = document.getElementById('drptFromDate');
-    const toInput    = document.getElementById('drptToDate');
-    const body       = document.getElementById('drptBody');
-    const subtitle   = document.getElementById('drptSubtitle');
-    const dlBtn      = document.getElementById('drptDownloadBtn');
-  
+    const dateInput = document.getElementById('drptDate');
+    const fromInput = document.getElementById('drptFromDate');
+    const toInput = document.getElementById('drptToDate');
+    const body = document.getElementById('drptBody');
+    const subtitle = document.getElementById('drptSubtitle');
+    const dlBtn = document.getElementById('drptDownloadBtn');
+
     let reportDateStr, rangeLabel;
-  
+
     if (_drptMode === 'range') {
       const fromStr = fromInput?.value;
-      const toStr   = toInput?.value;
+      const toStr = toInput?.value;
       if (!fromStr || !toStr) return;
-      const fmtD = (s) => new Date(s).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+      const fmtD = (s) => new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
       rangeLabel = `${fmtD(fromStr)} – ${fmtD(toStr)}`;
       if (subtitle) subtitle.textContent = `Report: ${rangeLabel}`;
       reportDateStr = null; // signal range mode
@@ -8990,34 +9016,34 @@ export async function mountTaskflowApp(opts = {}) {
       await _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel);
       return;
     }
-  
+
     reportDateStr = dateInput?.value;
     if (!reportDateStr) return;
-  
+
     const d = new Date(reportDateStr);
     const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'long' });
     if (subtitle) subtitle.textContent = `Report for ${label}`;
-  
+
     body.innerHTML = `<div class="empty-state">Generating report…</div>`;
-  
+
     try {
       const allTasks = await api('/tasks/all');
-      const rDate    = new Date(reportDateStr); rDate.setHours(0,0,0,0);
+      const rDate = new Date(reportDateStr); rDate.setHours(0, 0, 0, 0);
       const prevDate = new Date(rDate); prevDate.setDate(prevDate.getDate() - 1);
 
       const allForDay = classifyDailyReportTasks(allTasks, rDate);
-  
+
       body.innerHTML = '';
-  
+
       // ── PMS-style header (matching image format) ──
-      const periodLabel = `${d.toLocaleDateString('en-IN', {day:'2-digit',month:'2-digit',year:'numeric'})}`;
+      const periodLabel = `${d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
       const pmsHtml = `
         <div class="drpt-pms-header">
           <div class="drpt-pms-smile">☺</div>
           <div class="drpt-pms-title">PMS (${periodLabel})</div>
         </div>`;
       body.insertAdjacentHTML('beforeend', pmsHtml);
-  
+
       if (allForDay.length) {
         body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:20px">📋 Task Status Summary</div>`);
         const tbl = buildDrptPmsTable(allForDay, prevDate);
@@ -9091,10 +9117,10 @@ export async function mountTaskflowApp(opts = {}) {
   function buildDrptPmsTable(tasks, prevDate) {
     const wrap = document.createElement('div');
     wrap.className = 'table-wrap drpt-pms-wrap';
-    const tbl  = document.createElement('table');
+    const tbl = document.createElement('table');
     tbl.className = 'data-table drpt-table drpt-pms-table';
     const prevLabel = prevDate ? fmtDateOnly(prevDate) : '—';
-  
+
     tbl.innerHTML = `<thead><tr>
       <th class="col-sr">Sr.no</th>
       <th>Prev. date</th>
@@ -9104,18 +9130,18 @@ export async function mountTaskflowApp(opts = {}) {
       <th>Delay</th>
       <th>Remarks</th>
     </tr></thead>`;
-  
+
     const tbody = document.createElement('tbody');
     tasks.forEach((t, i) => {
       const tr = document.createElement('tr');
       const isDone = t._section === 'done';
       const daysLate = t._daysLate ?? 0;
-  
+
       let delayHtml;
       if (isDone) delayHtml = `<span class="drpt-done-badge">DONE</span>`;
       else if (daysLate > 0) delayHtml = `<span class="drpt-overdue-badge">${daysLate} Days</span>`;
       else delayHtml = `<span class="drpt-pending-badge">Today</span>`;
-  
+
       tr.innerHTML = `
         <td><span class="sr-number">${i + 1}</span></td>
         <td style="white-space:nowrap;font-size:0.82rem">${escapeHtml(prevLabel)}</td>
@@ -9136,28 +9162,28 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(tbl);
     return wrap;
   }
-  
+
   // Date-range report: one table per calendar day using the same overdue / pending / done-today rules
   async function _generateDailyReportForRange(fromStr, toStr, body, dlBtn, subtitle, rangeLabel) {
     try {
       const allTasks = await api('/tasks/all');
       const from = startOfLocalDay(parseLocalDate(fromStr));
-      const to   = startOfLocalDay(parseLocalDate(toStr));
-  
+      const to = startOfLocalDay(parseLocalDate(toStr));
+
       body.innerHTML = '';
       body.insertAdjacentHTML('beforeend', `
         <div class="drpt-pms-header">
           <div class="drpt-pms-smile">☺</div>
           <div class="drpt-pms-title">PMS (${rangeLabel})</div>
         </div>`);
-  
+
       let anyRows = false;
       for (let cursor = new Date(from); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
         const day = startOfLocalDay(cursor);
         const rows = classifyDailyReportTasks(allTasks, day);
         if (!rows.length) continue;
         anyRows = true;
-        const dayLabel = day.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', weekday:'long' });
+        const dayLabel = day.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', weekday: 'long' });
         const prevDate = new Date(day); prevDate.setDate(prevDate.getDate() - 1);
         body.insertAdjacentHTML('beforeend', `<div class="drpt-section-title" style="margin-top:28px">📅 ${dayLabel}</div>`);
         body.appendChild(buildDrptPmsTable(rows, prevDate));
@@ -9168,26 +9194,26 @@ export async function mountTaskflowApp(opts = {}) {
         if (dlBtn) dlBtn.style.display = 'none';
         return;
       }
-  
+
       if (dlBtn) dlBtn.style.display = '';
     } catch (err) {
       body.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(err.message)}</div>`;
     }
   }
-  
+
   function buildDrptTable(headers, rows, editableRemarks) {
     const wrap = document.createElement('div');
     wrap.className = 'table-wrap';
-  
+
     const colCount = headers.length;
     const tbl = document.createElement('table');
     tbl.className = 'data-table drpt-table';
-  
+
     // Head
     const thead = document.createElement('thead');
     thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
     tbl.appendChild(thead);
-  
+
     // Body
     const tbody = document.createElement('tbody');
     if (!rows.length) {
@@ -9218,13 +9244,13 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(tbl);
     return wrap;
   }
-  
+
   function downloadDailyReportPdf() {
-    const dateInput  = document.getElementById('drptDate');
+    const dateInput = document.getElementById('drptDate');
     const reportDate = dateInput?.value || 'report';
-    const body       = document.getElementById('drptBody');
-    const subtitle   = document.getElementById('drptSubtitle');
-  
+    const body = document.getElementById('drptBody');
+    const subtitle = document.getElementById('drptSubtitle');
+
     const win = window.open('', '_blank');
     win.document.write(`
       <!DOCTYPE html>
@@ -10094,6 +10120,43 @@ export async function mountTaskflowApp(opts = {}) {
   let _drLast = null;
   let _drEmpFilled = false;
 
+  /** Show a task-detail popup from any of the three report tables.
+   *  `fields` is an array of {label, value, cls?} objects. */
+  function showDrPopup(description, fields) {
+    const existing = document.getElementById('drTaskPopup');
+    if (existing) existing.remove();
+
+    const fieldsHtml = fields.map((f) =>
+      `<div class="dr-popup-field">
+        <span class="dr-popup-label">${escapeHtml(f.label)}</span>
+        <span class="dr-popup-value${f.cls ? ' ' + escapeHtml(f.cls) : ''}">${escapeHtml(String(f.value || '—'))}</span>
+      </div>`
+    ).join('');
+
+    const el = document.createElement('div');
+    el.id = 'drTaskPopup';
+    el.className = 'dr-popup-backdrop';
+    el.innerHTML = `
+      <div class="dr-popup" role="dialog" aria-modal="true" aria-label="Task details">
+        <div class="dr-popup-header">
+          <h3>Task Details</h3>
+          <button class="dr-popup-close" aria-label="Close">✕</button>
+        </div>
+        <div class="dr-popup-body">
+          <div class="dr-popup-desc">${escapeHtml(description || '—')}</div>
+          <div class="dr-popup-grid">${fieldsHtml}</div>
+        </div>
+      </div>`;
+
+    // close on backdrop click
+    el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+    el.querySelector('.dr-popup-close').addEventListener('click', () => el.remove());
+    // close on Escape
+    const onKey = (e) => { if (e.key === 'Escape') { el.remove(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+  }
+
   function renderDelayReportTable(data) {
     const rows = data.rows || [];
     const showEmp = !document.getElementById('drEmployee')?.value;
@@ -10113,11 +10176,11 @@ export async function mountTaskflowApp(opts = {}) {
       const planNote = r.reschedule_count > 0
         ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
         : '';
-      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}">
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}" data-idx="${i}">
         <td class="dr-c">${r.sr ?? '—'}</td>
         ${empTd}
         <td>${escapeHtml(r.project)}${planNote}</td>
-        <td class="dr-desc">${escapeHtml(r.description || '—')}</td>
+        <td class="dr-desc"><div class="dr-desc-clamp">${escapeHtml(r.description || '—')}</div></td>
         <td>${escapeHtml(r.assigned_label)}</td>
         <td>${escapeHtml(r.accepted_label)}</td>
         <td class="dr-c">${escapeHtml(r.hours_label)}</td>
@@ -10134,7 +10197,7 @@ export async function mountTaskflowApp(opts = {}) {
       </tr>`;
     }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
 
-    return `<div class="dr-report" id="drReport">
+    const html = `<div class="dr-report" id="drReport">
       <h1 class="dr-title">Task Delay Report</h1>
       <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
         · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
@@ -10154,6 +10217,37 @@ export async function mountTaskflowApp(opts = {}) {
         </table>
       </div>
     </div>`;
+
+    // Wire row click after injecting into DOM (caller sets innerHTML first)
+    setTimeout(() => {
+      document.getElementById('drReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        const fields = [];
+        if (showEmp) fields.push({ label: 'Employee', value: r.employee });
+        fields.push(
+          { label: 'Project', value: r.project },
+          { label: 'Timestamp (Assigned)', value: r.assigned_label },
+          { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Hrs to Complete', value: r.hours_label },
+          { label: 'Hold / Resume', value: r.hold_resume_label },
+          { label: 'Total Hold', value: r.total_hold_label },
+          { label: 'Due', value: r.deadline_label },
+          { label: 'Sent for Verification', value: r.submitted_label },
+          { label: 'Work Status', value: r.status, cls: r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Work Delay', value: r.delay_label },
+          { label: 'Start Verification', value: r.verify_started_label },
+          { label: 'Verified', value: r.verified_label },
+          { label: 'Verify Status', value: r.verify_status, cls: (r.verify_status === 'Delayed' || r.verify_status === 'Overdue') ? 'dr-delayed' : r.verify_status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Verify Delay', value: r.verify_delay_label },
+        );
+        showDrPopup(r.description, fields);
+      });
+    }, 0);
+
+    return html;
   }
 
   async function fillDelayEmployees() {
@@ -10230,11 +10324,11 @@ export async function mountTaskflowApp(opts = {}) {
       const planNote = r.reschedule_count > 0
         ? `<div class="dr-plan-note">rescheduled ${r.reschedule_count}×</div>`
         : '';
-      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}">
+      return `<tr class="${i % 2 === 0 ? 'dr-alt' : ''}" data-idx="${i}">
         <td class="dr-c">${r.sr ?? '—'}</td>
         ${empTd}
         <td>${escapeHtml(r.project)}${planNote}</td>
-        <td class="dr-desc">${escapeHtml(r.description || '—')}</td>
+        <td class="dr-desc"><div class="dr-desc-clamp">${escapeHtml(r.description || '—')}</div></td>
         <td>${escapeHtml(r.assigned_label)}</td>
         <td>${escapeHtml(r.accepted_label)}</td>
         <td class="dr-c">${escapeHtml(r.hours_label)}</td>
@@ -10247,7 +10341,7 @@ export async function mountTaskflowApp(opts = {}) {
       </tr>`;
     }).join('') || `<tr><td colspan="${colSpan}" class="empty-state">No tasks in this range</td></tr>`;
 
-    return `<div class="dr-report" id="erReport">
+    const html = `<div class="dr-report" id="erReport">
       <h1 class="dr-title">Emp Report</h1>
       <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
         · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
@@ -10265,6 +10359,32 @@ export async function mountTaskflowApp(opts = {}) {
         </table>
       </div>
     </div>`;
+
+    setTimeout(() => {
+      document.getElementById('erReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        const fields = [];
+        if (showEmp) fields.push({ label: 'Employee', value: r.employee });
+        fields.push(
+          { label: 'Project', value: r.project },
+          { label: 'Timestamp (Assigned)', value: r.assigned_label },
+          { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Hrs to Complete', value: r.hours_label },
+          { label: 'Hold / Resume', value: r.hold_resume_label },
+          { label: 'Total Hold', value: r.total_hold_label },
+          { label: 'Due', value: r.deadline_label },
+          { label: 'Submitted', value: r.submitted_label },
+          { label: 'Status', value: r.status, cls: r.status === 'Delayed' ? 'dr-delayed' : r.status === 'On Time' ? 'dr-ontime' : '' },
+          { label: 'Early / Delay', value: r.timing_label },
+        );
+        showDrPopup(r.description, fields);
+      });
+    }, 0);
+
+    return html;
   }
 
   async function loadEmpReport() {
@@ -10334,10 +10454,10 @@ export async function mountTaskflowApp(opts = {}) {
       const rows = data.rows || [];
       const s = data.summary || {};
       const tableRows = rows.map((r, i) => `
-        <tr class="${i % 2 === 0 ? 'dr-alt' : ''} ${r.delay ? 'dr-delayed-row' : ''}">
+        <tr class="${i % 2 === 0 ? 'dr-alt' : ''} ${r.delay ? 'dr-delayed-row' : ''}" data-idx="${i}">
           <td class="dr-c">${r.sr ?? '—'}</td>
           <td>${escapeHtml(r.employee)}</td>
-          <td>${escapeHtml(r.description)}</td>
+          <td><div class="dr-desc-clamp">${escapeHtml(r.description)}</div></td>
           <td>${escapeHtml(r.task_type)}</td>
           <td style="white-space:nowrap">${escapeHtml(r.accepted_label)}</td>
           <td style="white-space:nowrap">${escapeHtml(r.done_label)}</td>
@@ -10346,7 +10466,7 @@ export async function mountTaskflowApp(opts = {}) {
           <td>${escapeHtml(r.status)}</td>
         </tr>`).join('')
         || `<tr><td colspan="9" class="empty-state">No MDO Office Work tasks in this range</td></tr>`;
-      body.innerHTML = `<div class="dr-report">
+      body.innerHTML = `<div class="dr-report" id="mdoDrReport">
         <h1 class="dr-title">MDO Task Delay Report</h1>
         <p class="dr-sub">${escapeHtml(String(data.from || '').slice(0, 10))} → ${escapeHtml(String(data.to || '').slice(0, 10))}
           · ${s.total || 0} tasks · <span class="dr-delayed">${s.delayed || 0} delayed</span>
@@ -10360,6 +10480,23 @@ export async function mountTaskflowApp(opts = {}) {
           <tbody>${tableRows}</tbody>
         </table></div>
       </div>`;
+
+      // Wire row click
+      document.getElementById('mdoDrReport')?.querySelector('tbody')?.addEventListener('click', (e) => {
+        const tr = e.target.closest('tr[data-idx]');
+        if (!tr) return;
+        const r = rows[+tr.dataset.idx];
+        if (!r) return;
+        showDrPopup(r.description, [
+          { label: 'Employee', value: r.employee },
+          { label: 'Task Type', value: r.task_type },
+          { label: 'Accepted', value: r.accepted_label },
+          { label: 'Marked Done', value: r.done_label },
+          { label: 'Due', value: r.due_label },
+          { label: 'Delay?', value: r.delay ? `Yes — ${r.delay_label}` : r.delay_label, cls: r.delay ? 'dr-delayed' : 'dr-ontime' },
+          { label: 'Status', value: r.status },
+        ]);
+      });
     } catch (err) {
       body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
@@ -10426,6 +10563,272 @@ export async function mountTaskflowApp(opts = {}) {
     }
   });
 
+  // ─── Task History (employee's own completed / verified tasks) ───────────────
+  let _thAllRows = [];   // full unfiltered dataset for client-side filtering
+
+  function _thPopulateDropdowns(rows) {
+    const projSel = document.getElementById('th-filter-project');
+    const typeSel = document.getElementById('th-filter-type');
+    const empWrap = document.getElementById('th-filter-emp-wrap');
+    const empSel = document.getElementById('th-filter-employee');
+
+    const isAdmin = state?.user?.role === 'admin';
+    if (empWrap && empSel) {
+      if (isAdmin) {
+        empWrap.hidden = false;
+        const prevE = empSel.value;
+        const empList = state.master?.employees || [];
+        fillSelect(empSel, empList, {
+          placeholder: 'All employees',
+          labelKey: 'full_name',
+        });
+        if (prevE && empList.some((e) => e.id === prevE)) empSel.value = prevE;
+      } else {
+        empWrap.hidden = true;
+      }
+    }
+
+    if (!projSel || !typeSel) return;
+
+    // Only populate once per data load (preserve user's current selection)
+    const uniq = (arr, key) => [...new Map(arr.filter((x) => x[key]?.id).map((x) => [x[key].id, x[key]])).values()];
+    const sortedProj = sortByLabel(uniq(rows, 'project'));
+    const sortedType = sortByLabel(uniq(rows, 'task_type'));
+
+    const prevP = projSel.value;
+    projSel.innerHTML = '<option value="">All projects</option>' +
+      sortedProj.map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name)}</option>`).join('');
+    if ([...projSel.options].some((o) => o.value === prevP)) projSel.value = prevP;
+
+    const prevT = typeSel.value;
+    typeSel.innerHTML = '<option value="">All types</option>' +
+      sortedType.map((t) => `<option value="${escapeHtml(String(t.id))}">${escapeHtml(t.name)}</option>`).join('');
+    if ([...typeSel.options].some((o) => o.value === prevT)) typeSel.value = prevT;
+  }
+
+  function _thApplyFilters() {
+    const q = (document.getElementById('th-filter-q')?.value || '').toLowerCase().trim();
+    const emp = document.getElementById('th-filter-employee')?.value || '';
+    const project = document.getElementById('th-filter-project')?.value || '';
+    const type = document.getElementById('th-filter-type')?.value || '';
+    const status = document.getElementById('th-filter-status')?.value || '';
+    const from = document.getElementById('th-filter-from')?.value || '';
+    const to = document.getElementById('th-filter-to')?.value || '';
+
+    let rows = _thAllRows;
+    if (q) rows = rows.filter((r) =>
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.project?.name || '').toLowerCase().includes(q) ||
+      (r.task_type?.name || '').toLowerCase().includes(q) ||
+      (r.assigned_to_user?.full_name || '').toLowerCase().includes(q));
+    if (emp) rows = rows.filter((r) => String(r.assigned_to || r.assigned_to_user?.id || '') === emp);
+    if (project) rows = rows.filter((r) => String(r.project?.id || '') === project);
+    if (type) rows = rows.filter((r) => String(r.task_type?.id || '') === type);
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (from) rows = rows.filter((r) => r.target_date >= from);
+    if (to) rows = rows.filter((r) => r.target_date <= to);
+
+    _thRender(rows);
+
+    const countEl = document.getElementById('thFilterCount');
+    if (countEl) {
+      const isFiltered = q || emp || project || type || status || from || to;
+      countEl.hidden = !isFiltered;
+      countEl.textContent = isFiltered ? `Showing ${rows.length} of ${_thAllRows.length} tasks` : '';
+    }
+  }
+
+  function _thRender(rows) {
+    const tbody = document.getElementById('thTableBody');
+    const cardList = document.getElementById('thCardList');
+    if (!tbody) return;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state"><span class="emoji">📭</span>No completed tasks found</td></tr>`;
+      if (cardList) cardList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No completed tasks found</div>`;
+      return;
+    }
+
+    const isAdmin = state?.user?.role === 'admin';
+
+    // ── Desktop table ────────────────────────────────────────────────────────
+    tbody.innerHTML = '';
+    rows.forEach((task, i) => {
+      const tr = document.createElement('tr');
+
+      // Sr No
+      const tdSr = document.createElement('td');
+      tdSr.innerHTML = `<span class="sr-number">${i + 1}</span>`;
+
+      // Task details
+      const tdDetails = document.createElement('td');
+      tdDetails.className = 'task-name-cell';
+      tdDetails.innerHTML = buildTaskDetailsHtml(task, { showAssignee: isAdmin });
+
+      // Accepted date (after Task details)
+      const tdAccepted = document.createElement('td');
+      tdAccepted.className = 'th-date-cell';
+      tdAccepted.textContent = fmtDateOnly(task.accepted_at || task.first_accepted_at);
+
+      // Target date
+      const tdTarget = document.createElement('td');
+      tdTarget.className = 'th-date-cell';
+      tdTarget.textContent = fmtDateOnly(task.target_date);
+
+      // Completed on — use verified_at > sent_for_verification_at > updated_at as proxy
+      const completedAt = task.verified_at || task.sent_for_verification_at || task.updated_at;
+      const tdDone = document.createElement('td');
+      tdDone.className = 'th-date-cell';
+      tdDone.textContent = fmtDateOnly(completedAt);
+
+      // Priority
+      const tdPriority = document.createElement('td');
+      tdPriority.className = 'th-center';
+      tdPriority.innerHTML = `<span class="pill pill-${escapeHtml(task.priority || 'Low')}">${escapeHtml(task.priority || '—')}</span>`;
+
+      // Status
+      const tdStatus = document.createElement('td');
+      const statusCls = task.status === 'Verified' ? 'pill-Completed' : 'pill-InProgress';
+      const statusIcon = task.status === 'Verified' ? '✅' : '✔️';
+      tdStatus.innerHTML = `<span class="pill ${statusCls}">${statusIcon} ${escapeHtml(task.status)}</span>`;
+
+      // Verified by
+      const tdVerifier = document.createElement('td');
+      const verifierName = task.verifier?.full_name || task.verifier_user?.full_name || '';
+      tdVerifier.innerHTML = verifierName
+        ? `<span class="th-verifier">${escapeHtml(verifierName)}</span>`
+        : `<span class="media-none">—</span>`;
+
+      tr.append(tdSr, tdDetails, tdAccepted, tdTarget, tdDone, tdPriority, tdStatus, tdVerifier);
+
+      tbody.appendChild(tr);
+    });
+
+    // ── Mobile cards ─────────────────────────────────────────────────────────
+    if (!cardList) return;
+    cardList.innerHTML = '';
+    rows.forEach((task) => {
+      const completedAt = task.verified_at || task.sent_for_verification_at || task.updated_at;
+      const statusCls = task.status === 'Verified' ? 'pill-Completed' : 'pill-InProgress';
+      const statusIcon = task.status === 'Verified' ? '✅' : '✔️';
+      const verifierName = task.verifier?.full_name || task.verifier_user?.full_name || '';
+
+      const card = document.createElement('div');
+      card.className = 'task-card th-card';
+      card.innerHTML = `
+        <div class="task-card-header">
+          <span class="pill ${statusCls}" style="font-size:0.7rem">${statusIcon} ${escapeHtml(task.status)}</span>
+          <span class="pill pill-${escapeHtml(task.priority || 'Low')}" style="font-size:0.7rem">${escapeHtml(task.priority || '—')}</span>
+        </div>
+        <div class="task-card-body">
+          ${isAdmin && task.assigned_to_user?.full_name ? `<div class="task-detail-line"><span class="task-detail-label">Assignee:</span> ${escapeHtml(task.assigned_to_user.full_name)}</div>` : ''}
+          <div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project?.name ?? '—')}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type?.name ?? '—')}</div>
+          <div class="task-detail-line th-card-desc">${escapeHtml(task.description || '—')}</div>
+          <div class="task-card-meta">
+            <span>🤝 Accepted: ${escapeHtml(fmtDateOnly(task.accepted_at || task.first_accepted_at))}</span>
+            <span>🗓 Target: ${escapeHtml(fmtDateOnly(task.target_date))}</span>
+            <span>✔ Done: ${escapeHtml(fmtDateOnly(completedAt))}</span>
+            ${verifierName ? `<span>👤 ${escapeHtml(verifierName)}</span>` : ''}
+          </div>
+        </div>`;
+      cardList.appendChild(card);
+    });
+  }
+
+  async function loadTaskHistory() {
+    const tbody = document.getElementById('thTableBody');
+    const cardList = document.getElementById('thCardList');
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading task history…</td></tr>`;
+    if (cardList) cardList.innerHTML = `<div class="empty-state">Loading task history…</div>`;
+
+    try {
+      // Existing tasks table in Supabase via /tasks/my-history
+      // (No separate task-history table needed or created)
+      const role = String(state?.user?.role || '').toLowerCase();
+      const isAdmin = role === 'admin';
+      const empSel = document.getElementById('th-filter-employee');
+      const selectedEmp = empSel?.value || '';
+
+      let url = '/tasks/my-history';
+      const params = new URLSearchParams();
+      if (isAdmin) {
+        params.set('all', 'true');
+        if (selectedEmp) params.set('employee_id', selectedEmp);
+      }
+      const qs = params.toString();
+      if (qs) url += '?' + qs;
+
+      let all = await api(url).catch((err) => {
+        console.warn('my-history fetch error, trying fallback:', err);
+        return null;
+      });
+
+      if (!all) {
+        all = await api('/tasks/my?status=Completed').catch(() => []);
+      }
+
+      const isDone = (t) => {
+        const s = String(t.status || '').toLowerCase().trim();
+        const vs = String(t.verification_status || '').toLowerCase().trim();
+        return s.includes('completed') || s.includes('verified') || vs.includes('verified');
+      };
+
+      const doneAt = (t) =>
+        t.verified_at || t.first_verified_at || t.completed_at ||
+        t.sent_for_verification_at || t.updated_at || '';
+
+      _thAllRows = (Array.isArray(all) ? all : [])
+        .filter((t) => String(t.status || '').toLowerCase().trim() !== 'rejected' && isDone(t))
+        .map((t) => {
+          const vs = String(t.verification_status || '').toLowerCase().trim();
+          const s = String(t.status || '').toLowerCase().trim();
+          const isVerified = vs.includes('verified') || s === 'verified';
+          return {
+            ...t,
+            status: isVerified ? 'Verified' : 'Completed',
+          };
+        })
+        .sort((a, b) => String(doneAt(b)).localeCompare(String(doneAt(a))));
+
+      _thPopulateDropdowns(_thAllRows);
+      _thApplyFilters();
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${escapeHtml(err.message)}</td></tr>`;
+      if (cardList) cardList.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // wire filter controls once DOM is ready
+  __tfReadyFns.push(() => {
+    const applyBtn = document.getElementById('th-filter-apply');
+    const clearBtn = document.getElementById('th-filter-clear');
+    const qInput = document.getElementById('th-filter-q');
+
+    applyBtn?.addEventListener('click', () => _thApplyFilters());
+    clearBtn?.addEventListener('click', () => {
+      ['th-filter-q', 'th-filter-employee', 'th-filter-project', 'th-filter-type', 'th-filter-status', 'th-filter-from', 'th-filter-to']
+        .forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = '';
+        });
+      _thApplyFilters();
+    });
+
+    // Live search on Enter / after debounce
+    let _thDebounce;
+    qInput?.addEventListener('input', () => {
+      clearTimeout(_thDebounce);
+      _thDebounce = setTimeout(() => _thApplyFilters(), 320);
+    });
+
+    // Dropdowns + date pickers apply immediately
+    ['th-filter-employee', 'th-filter-project', 'th-filter-type', 'th-filter-status', 'th-filter-from', 'th-filter-to']
+      .forEach((id) => document.getElementById(id)?.addEventListener('change', () => _thApplyFilters()));
+  });
+
   // ─── FMS step tracker (Planned vs Actual per workflow step) ─────────────────
   let _fmsLastData = null;
 
@@ -10444,8 +10847,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return `<td>${escapeHtml(fmtSheetDateTime(step.planned))}</td>
       <td>${escapeHtml(step.actual ? fmtSheetDateTime(step.actual) : '—')}</td>
-      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span>${
-        step.actor ? `<div class="fms-actor">${escapeHtml(step.actor)}</div>` : ''
+      <td><span class="fms-pill fms-pill-${escapeHtml(step.status)}">${escapeHtml(step.status)}</span>${step.actor ? `<div class="fms-actor">${escapeHtml(step.actor)}</div>` : ''
       }</td>
       <td>${delayText}</td>`;
   }
@@ -10579,11 +10981,254 @@ export async function mountTaskflowApp(opts = {}) {
     URL.revokeObjectURL(a.href);
   }
 
+  // ─── FMS Excel export ────────────────────────────────────────────────────────
+  async function downloadFmsExcel(data) {
+    if (!data?.rows?.length) return showToast('Nothing to export yet', 'error');
+    const ExcelJS = (await import('exceljs')).default;
+    const { saveAs } = await import('file-saver');
+
+    const steps = data.steps || [];
+    const rows = data.rows || [];
+
+    // ── colour palette (mirrors taskflow.css exactly) ─────────────────────────
+    // Headers
+    const C_META_BG = 'FFD9E8EE'; // fms-meta-row th
+    const C_META_FG = 'FF134E4A';
+    const C_META_LBL = 'FFC5DDE6'; // fms-meta-label (sticky)
+    const C_META_LFGR = 'FF115E59';
+    const C_META_ALT = 'FFDCEBE1'; // fms-meta-cell--alt
+    const C_META_AFG = 'FF14532D';
+    const C_ID_BG = 'FFFDE9D9'; // fms-id-head
+    const C_ID_FG = 'FF7C2D12';
+    const C_STEP_ALT = 'FFDCEBE1'; // fms-step-head--alt
+    const C_STEP_AFG = 'FF14532D';
+    const C_SUB_BG = 'FFE8EEF4'; // fms-sub-head
+    const C_SUB_FG = 'FF334155';
+    // Status pills
+    const C_DONE_BG = 'FFDCFCE7'; const C_DONE_FG = 'FF15803D';
+    const C_DELAY_BG = 'FFFEE2E2'; const C_DELAY_FG = 'FFB91C1C';
+    const C_OVER_BG = 'FFFEF3C7'; const C_OVER_FG = 'FFB45309';
+    const C_PEND_BG = 'FFE5E7EB'; const C_PEND_FG = 'FF4B5563';
+    const C_NA_FG = 'FF9CA3AF';
+    // Delay text
+    const C_LATE_FG = 'FFB91C1C';
+    const C_EARLY_FG = 'FF15803D';
+    // Sticky / data cell defaults
+    const C_STICKY_BG = 'FFFAFBFF';
+    const C_WHITE = 'FFFFFFFF';
+    const C_ACTOR_FG = 'FF1D4ED8';
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'DIP TaskFlow';
+    const ws = wb.addWorksheet('FMS Tracker', { views: [{ state: 'frozen', xSplit: 1, ySplit: 6 }] });
+
+    // ── column widths ─────────────────────────────────────────────────────────
+    // Col 1 = Timestamp (sticky), cols 2-6 = identity, then 4 per step
+    ws.getColumn(1).width = 20;
+    ws.getColumn(2).width = 10; // JOB NO.
+    ws.getColumn(3).width = 22; // PROJECT NAME
+    ws.getColumn(4).width = 18; // WORK TYPE
+    ws.getColumn(5).width = 18; // PERSON
+    ws.getColumn(6).width = 12; // LEAD TIME
+    steps.forEach((_, i) => {
+      const base = 7 + i * 4;
+      ws.getColumn(base).width = 18; // Planned
+      ws.getColumn(base + 1).width = 18; // Actual
+      ws.getColumn(base + 2).width = 14; // Status
+      ws.getColumn(base + 3).width = 12; // Time Delay
+    });
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+    const totalCols = 6 + steps.length * 4;
+
+    /** Return an ExcelJS cell-style object. */
+    function style(bg, fg, { bold = false, wrap = false, hAlign = 'center', vAlign = 'middle', border = true } = {}) {
+      const base = {
+        font: { name: 'Calibri', size: 10, bold, color: { argb: fg || 'FF111827' } },
+        alignment: { horizontal: hAlign, vertical: vAlign, wrapText: wrap },
+        fill: bg ? { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } } : undefined,
+      };
+      if (border) {
+        base.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EF' } },
+        };
+      }
+      return base;
+    }
+
+    function applyStyle(cell, bg, fg, opts) {
+      Object.assign(cell, style(bg, fg, opts));
+    }
+
+    function setCell(row, col, value, bg, fg, opts) {
+      const cell = row.getCell(col);
+      cell.value = value ?? '';
+      applyStyle(cell, bg, fg, opts);
+    }
+
+    function mergeCols(rowObj, startCol, endCol, value, bg, fg, opts) {
+      ws.mergeCells(rowObj.number, startCol, rowObj.number, endCol);
+      setCell(rowObj, startCol, value, bg, fg, opts);
+      // fill merged cells with same style so borders look right
+      for (let c = startCol + 1; c <= endCol; c++) {
+        applyStyle(rowObj.getCell(c), bg, fg, opts);
+      }
+    }
+
+    // ── Row 1-4: What / Who / How / Why meta rows ─────────────────────────────
+    const metaKeys = ['What', 'Who', 'How', 'Why'];
+    metaKeys.forEach((key) => {
+      const r = ws.addRow([]);
+      r.height = 28;
+      // Sticky label cell (col 1)
+      setCell(r, 1, key, C_META_LBL, C_META_LFGR, { bold: true, hAlign: 'left', wrap: true });
+      // Identity cols 2-6 blank but styled
+      for (let c = 2; c <= 6; c++) setCell(r, c, '', C_META_BG, C_META_FG);
+      // Step meta cells
+      steps.forEach((s, i) => {
+        const base = 7 + i * 4;
+        const isAlt = i % 2 === 1;
+        const bg = isAlt ? C_META_ALT : C_META_BG;
+        const fg = isAlt ? C_META_AFG : C_META_FG;
+        const val = s[key.toLowerCase()] || s.label;
+        mergeCols(r, base, base + 3, val, bg, fg, { bold: false, wrap: true });
+      });
+    });
+
+    // ── Row 5: identity column headers + step group headers ──────────────────
+    const r5 = ws.addRow([]);
+    r5.height = 22;
+    const idLabels = ['Timestamp', 'JOB NO.', 'PROJECT NAME', 'WORK TYPE', 'PERSON', 'LEAD TIME'];
+    idLabels.forEach((lbl, i) => {
+      setCell(r5, i + 1, lbl, C_ID_BG, C_ID_FG, { bold: true });
+    });
+    steps.forEach((s, i) => {
+      const base = 7 + i * 4;
+      const isAlt = i % 2 === 1;
+      const bg = isAlt ? C_STEP_ALT : C_ID_BG;
+      const fg = isAlt ? C_STEP_AFG : C_ID_FG;
+      mergeCols(r5, base, base + 3, s.label, bg, fg, { bold: true });
+    });
+    // Merge identity headers vertically with row 6
+    for (let c = 1; c <= 6; c++) {
+      ws.mergeCells(5, c, 6, c);
+    }
+
+    // ── Row 6: sub-column headers (Planned / Actual / Status / Time Delay) ────
+    const r6 = ws.addRow([]);
+    r6.height = 22;
+    // Identity cells 1-6 are merged into row 5 — just style them
+    for (let c = 1; c <= 6; c++) {
+      applyStyle(r6.getCell(c), C_ID_BG, C_ID_FG, { bold: true });
+    }
+    steps.forEach((_, i) => {
+      const base = 7 + i * 4;
+      ['Planned', 'Actual', 'Status', 'Time Delay'].forEach((lbl, j) => {
+        setCell(r6, base + j, lbl, C_SUB_BG, C_SUB_FG, { bold: true });
+      });
+    });
+
+    // ── Row height for first 6 rows ───────────────────────────────────────────
+    ws.getRow(1).height = 40;
+    ws.getRow(2).height = 30;
+    ws.getRow(3).height = 22;
+    ws.getRow(4).height = 40;
+
+    // ── helper: format an ISO date-time string to readable form ───────────────
+    function fmtDt(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d)) return iso;
+      return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+
+    // ── helper: format delay hours into "+Xh" / "-Xd" style ──────────────────
+    function fmtDelay(delayHrs) {
+      if (delayHrs == null) return '';
+      const abs = Math.abs(delayHrs);
+      const label = abs >= 24 ? `${Math.round((abs / 24) * 10) / 10}d` : `${abs}h`;
+      return delayHrs > 0 ? `+${label}` : abs ? `-${label}` : 'on time';
+    }
+
+    // ── status → colours map ──────────────────────────────────────────────────
+    const STATUS_STYLE = {
+      Done: { bg: C_DONE_BG, fg: C_DONE_FG },
+      Delayed: { bg: C_DELAY_BG, fg: C_DELAY_FG },
+      Overdue: { bg: C_OVER_BG, fg: C_OVER_FG },
+      Pending: { bg: C_PEND_BG, fg: C_PEND_FG },
+      NA: { bg: C_WHITE, fg: C_NA_FG },
+    };
+
+    // ── data rows ─────────────────────────────────────────────────────────────
+    rows.forEach((r) => {
+      const dr = ws.addRow([]);
+      dr.height = 18;
+
+      // col 1 – Timestamp (sticky col)
+      setCell(dr, 1, fmtDt(r.timestamp), C_STICKY_BG, 'FF111827', { hAlign: 'left' });
+
+      // cols 2-6 – identity
+      setCell(dr, 2, r.job_no || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 3, r.project || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 4, r.work_type || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      setCell(dr, 5, r.person || '', C_WHITE, 'FF111827', { hAlign: 'left' });
+      // Lead time: e.g. "8 +2h +1d"
+      const lt = [String(r.lead_time_hrs || 0), r.extra_hours ? `+${r.extra_hours}h` : '', r.extra_days ? `+${r.extra_days}d` : ''].filter(Boolean).join(' ');
+      setCell(dr, 6, lt, C_WHITE, 'FF111827', { hAlign: 'center' });
+
+      // step cells
+      steps.forEach((s) => {
+        const st = r.steps?.[s.key] || {};
+        const base = 7 + steps.indexOf(s) * 4;
+        const isNA = !st || st.status === 'NA';
+
+        // Planned
+        setCell(dr, base, isNA ? '—' : fmtDt(st.planned), C_WHITE, 'FF374151');
+        // Actual
+        setCell(dr, base + 1, isNA ? '—' : (st.actual ? fmtDt(st.actual) : '—'), C_WHITE, 'FF374151');
+
+        // Status pill
+        const sc = STATUS_STYLE[st.status] || STATUS_STYLE.Pending;
+        const statusVal = isNA ? 'n/a' : (st.actor ? `${st.status}\n${st.actor}` : st.status || '');
+        setCell(dr, base + 2, statusVal, sc.bg, sc.fg, { bold: !isNA, wrap: !!st.actor, hAlign: 'center' });
+        // Actor gets a secondary blue annotation — ExcelJS doesn't support mixed rich text per cell,
+        // so we use newline (wrap is true when actor is set) and set the whole cell to a neutral fg,
+        // then override the status colour only on the bg.
+        if (st.actor && !isNA) {
+          const stCell = dr.getCell(base + 2);
+          stCell.value = {
+            richText: [
+              { text: st.status || '', font: { bold: true, color: { argb: sc.fg.replace('FF', '') !== sc.fg ? sc.fg : sc.fg }, name: 'Calibri', size: 10 } },
+              { text: `\n${st.actor}`, font: { color: { argb: C_ACTOR_FG }, name: 'Calibri', size: 9 } },
+            ]
+          };
+        }
+
+        // Time Delay
+        const delayVal = isNA ? '' : fmtDelay(st.delayHrs);
+        const delayFg = isNA ? C_NA_FG : (st.delayHrs > 0 ? C_LATE_FG : (st.delayHrs < 0 ? C_EARLY_FG : 'FF15803D'));
+        setCell(dr, base + 3, delayVal, C_WHITE, delayFg, { bold: !isNA && delayVal !== '', hAlign: 'center' });
+      });
+    });
+
+    // ── auto-filter on row 6 (the sub-header row) ─────────────────────────────
+    ws.autoFilter = { from: { row: 6, column: 1 }, to: { row: 6, column: totalCols } };
+
+    // ── download ──────────────────────────────────────────────────────────────
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `fms-tracker-${(data.from || '').slice(0, 10)}.xlsx`);
+  }
+
   document.getElementById('fmsGenBtn')?.addEventListener('click', () => loadFms());
   document.getElementById('fmsRange')?.addEventListener('change', () => loadFms());
   document.getElementById('fmsProject')?.addEventListener('change', () => loadFms());
   document.getElementById('fmsPerson')?.addEventListener('change', () => loadFms());
   document.getElementById('fmsCsvBtn')?.addEventListener('click', () => downloadFmsCsv(_fmsLastData));
+  document.getElementById('fmsXlsBtn')?.addEventListener('click', () => downloadFmsExcel(_fmsLastData));
 
   // ─── DIP AI Bot ─────────────────────────────────────────────────────────────
   // Bot answers arrive as plain text with SECTION HEADINGS, "• bullet" lines and
@@ -10648,7 +11293,7 @@ export async function mountTaskflowApp(opts = {}) {
         const parts = body.split('|').map((p) => p.trim()).filter(Boolean);
         const inner = parts.length > 1
           ? `<strong>${escapeHtml(parts[0])}</strong>` +
-            parts.slice(1).map((p) => `<span class="bot-chip">${escapeHtml(p)}</span>`).join('')
+          parts.slice(1).map((p) => `<span class="bot-chip">${escapeHtml(p)}</span>`).join('')
           : escapeHtml(body);
         list.push(`<li>${inner}</li>`);
         return;
@@ -10903,9 +11548,9 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function stopCallAudioBackup() {
-    try { _meetRecorder?.stop(); } catch (_) {}
+    try { _meetRecorder?.stop(); } catch (_) { }
     _meetRecorder = null;
-    try { _meetStream?.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    try { _meetStream?.getTracks().forEach((t) => t.stop()); } catch (_) { }
     _meetStream = null;
   }
 
@@ -10932,7 +11577,7 @@ export async function mountTaskflowApp(opts = {}) {
       try {
         const res = await api(`/bot/meetings/${_meetMomId}/transcribe-audio`, { method: 'POST', body: fd, isForm: true });
         if (res?.text) appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${res.text}`);
-      } catch (_) {}
+      } catch (_) { }
     };
     rec.start(12000);
     _meetRecorder = rec;
@@ -10944,7 +11589,7 @@ export async function mountTaskflowApp(opts = {}) {
       clearInterval(_meetFlushTimer);
       _meetFlushTimer = null;
     }
-    try { _meetRecog?.stop(); } catch (_) {}
+    try { _meetRecog?.stop(); } catch (_) { }
     _meetRecog = null;
     flushMeetCaptions();
     stopCallAudioBackup();
@@ -10981,10 +11626,10 @@ export async function mountTaskflowApp(opts = {}) {
         appendLiveCaptionLine(`${state.user?.full_name || 'You'}: ${piece}`);
       }
     };
-    rec.onerror = () => {};
+    rec.onerror = () => { };
     rec.onend = () => {
       if (_meetKeepListening) {
-        try { rec.start(); } catch (_) {}
+        try { rec.start(); } catch (_) { }
       }
     };
     _meetRecog = rec;
@@ -11009,7 +11654,7 @@ export async function mountTaskflowApp(opts = {}) {
         const rows = await api('/bot/meetings');
         const m = (rows || []).find((r) => String(r.id) === String(momId));
         if (m) openMomEditor(m);
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -11086,7 +11731,7 @@ export async function mountTaskflowApp(opts = {}) {
         await loadTeamChatRoomsOnly();
         const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
         setNavBadge('team-chat', chatUnread?.total || 0);
-      } catch (_) {}
+      } catch (_) { }
     }, 8000);
   }
 
@@ -11117,7 +11762,7 @@ export async function mountTaskflowApp(opts = {}) {
         btn.addEventListener('click', () => openChatRoom(r));
         list.appendChild(btn);
       });
-    } catch (_) {}
+    } catch (_) { }
   }
 
   async function loadTeamChat() {
@@ -11242,7 +11887,7 @@ export async function mountTaskflowApp(opts = {}) {
       b.classList.toggle('active', b.dataset.roomId === room.id);
       if (b.dataset.roomId === room.id) b.classList.remove('has-unread');
     });
-    await api(`/bot/chats/${room.id}/read`, { method: 'POST' }).catch(() => {});
+    await api(`/bot/chats/${room.id}/read`, { method: 'POST' }).catch(() => { });
     const chatUnread = await api('/bot/chats/unread-total').catch(() => ({ total: 0 }));
     setNavBadge('team-chat', chatUnread?.total || 0);
     await loadTeamChatRoomsOnly();
@@ -11257,7 +11902,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification(title, { body, icon: '/favicon.ico' });
       }
-    } catch (_) {}
+    } catch (_) { }
     showToast(`${title}: ${body}`, 'success');
   }
 
@@ -11432,7 +12077,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (_activeChatRoom) {
           try {
             await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
-          } catch (_) {}
+          } catch (_) { }
         }
       } catch (err) {
         showToast(err.message, 'error');
@@ -11465,7 +12110,7 @@ export async function mountTaskflowApp(opts = {}) {
         if (_activeChatRoom) {
           try {
             await openChatRoom({ id: _activeChatRoom, title: _activeChatTitle || 'Chat', kind: 'project' });
-          } catch (_) {}
+          } catch (_) { }
         }
       } catch (err) {
         showToast(err.message, 'error');
@@ -11528,12 +12173,12 @@ export async function mountTaskflowApp(opts = {}) {
         if (!detail) return;
         detail.innerHTML = dayTasks.length
           ? `<h3>${key}</h3>` +
-            dayTasks
-              .map((t) => {
-                const cls = calTaskClass(t, todayKey);
-                return `<div class="cal-detail-row ${cls}"><strong>${escapeHtml(t.description || 'Task')}</strong><span>${escapeHtml(t.status || '')} · ${escapeHtml(t.project?.name || '')}</span></div>`;
-              })
-              .join('')
+          dayTasks
+            .map((t) => {
+              const cls = calTaskClass(t, todayKey);
+              return `<div class="cal-detail-row ${cls}"><strong>${escapeHtml(t.description || 'Task')}</strong><span>${escapeHtml(t.status || '')} · ${escapeHtml(t.project?.name || '')}</span></div>`;
+            })
+            .join('')
           : `<h3>${key}</h3><p class="empty-state">No tasks</p>`;
       });
     });

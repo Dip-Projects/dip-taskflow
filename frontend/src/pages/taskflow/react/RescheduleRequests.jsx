@@ -11,6 +11,10 @@ function fmtHrs(h) {
   return mins ? `${hrs}h ${mins}m` : `${hrs}h`;
 }
 
+function fmtAdditionalHours(h) {
+  return h == null || h === '' ? 'Not saved' : fmtHrs(h);
+}
+
 function hoursSummary(task) {
   const assigned = Number(task?.original_hours_to_complete ?? task?.hours_to_complete) || 0;
   if (!task?.accepted_at) return { assigned, done: 0, remaining: assigned };
@@ -121,6 +125,9 @@ export default function RescheduleRequests() {
           <p className="tfr-sub">
             {t.assigned_to_user?.full_name || '—'} · {t.reschedule_reason || 'No reason'}
           </p>
+          <p className="tfr-sub">
+            Additional hours requested: {fmtAdditionalHours(t.reschedule_requested_additional_hours)}
+          </p>
           <div className="tfr-actions">
             <button type="button" disabled={busyId === t.id} onClick={() => openApprove(t)}>
               Approve
@@ -169,6 +176,7 @@ export default function RescheduleRequests() {
               <div><strong>Assigned hours:</strong> {fmtHrs(sum.assigned)}</div>
               <div><strong>Hours done:</strong> {fmtHrs(sum.done)}</div>
               <div><strong>Hours remaining:</strong> {fmtHrs(sum.remaining)}</div>
+              <div><strong>Additional hours requested:</strong> {fmtAdditionalHours(approveTask.reschedule_requested_additional_hours)}</div>
               <div style={{ marginTop: 6 }}>
                 <strong>Employee requested date:</strong> {String(approveTask.reschedule_requested_date || '—').slice(0, 10)}
               </div>
