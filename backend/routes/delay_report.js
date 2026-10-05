@@ -47,6 +47,20 @@ function parseRange(range, from, to) {
   return { startDate, endDate };
 }
 
+// const DELAY_TASK_SELECT = `
+//   id, description, status, hours_to_complete, original_hours_to_complete,
+//   created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
+//   verification_started_at, first_verification_started_at, verified_at, first_verified_at,
+//   verification_status, assigned_to,
+//   is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
+//   total_hold_seconds, last_hold_seconds, hold_count,
+//   target_date, original_target_date, reschedule_approved_target_date,
+//   reschedule_status, reschedule_count, reaccept_required,
+//   project:projects ( id, name ),
+//   task_type:task_types ( id, name ),
+//   department:departments ( id, name ),
+//   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
+// `;
 const DELAY_TASK_SELECT = `
   id, description, status, hours_to_complete, original_hours_to_complete,
   created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
@@ -55,13 +69,12 @@ const DELAY_TASK_SELECT = `
   is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
   total_hold_seconds, last_hold_seconds, hold_count,
   target_date, original_target_date, reschedule_approved_target_date,
-  reschedule_status, reschedule_count, reaccept_required,
+  reschedule_status, reschedule_count, reaccept_required, work_due_at,
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
   department:departments ( id, name ),
   assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name, whatsapp_number, reporting_head_id, department, role, is_active )
 `;
-
 // Same minus the plan-separation columns, for databases still on the older schema.
 const DELAY_TASK_SELECT_PRE_PLAN = `
   id, description, status, hours_to_complete, original_hours_to_complete,

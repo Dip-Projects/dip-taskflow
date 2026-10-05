@@ -158,6 +158,18 @@ function assignedWorkDeadline(t) {
 }
 
 /** Live work deadline once the task has been accepted (and not re-accept-pending). */
+// function employeeWorkDueDate(t) {
+//   if (needsReaccept(t)) return null;
+//   if (!t?.accepted_at) return null;
+//   // Prefer stored work_due_at (accept / resume / reschedule-approve set this).
+//   const stored = toDate(t.work_due_at);
+//   if (stored) return stored;
+//   const anchor = workTimerAnchor(t);
+//   const hours = workTimerBudgetHours(t);
+//   if (!anchor || !hours || hours <= 0) return null;
+//   return addWorkingHours(anchor, hours);
+// }
+/** Live work deadline once the task has been accepted (and not re-accept-pending). */
 function employeeWorkDueDate(t) {
   if (needsReaccept(t)) return null;
   if (!t?.accepted_at) return null;
@@ -166,10 +178,12 @@ function employeeWorkDueDate(t) {
   if (stored) return stored;
   const anchor = workTimerAnchor(t);
   const hours = workTimerBudgetHours(t);
-  if (!anchor || !hours || hours <= 0) return null;
-  return addWorkingHours(anchor, hours);
+  if (anchor && hours && hours > 0) return addWorkingHours(anchor, hours);
+  // Approved reschedule with no hours left: the approved date is the deadline.
+  const approved = toDate(t.reschedule_approved_target_date);
+  if (approved && wasRescheduled(t)) return endOfPlanDay(approved);
+  return null;
 }
-
 /**
  * The single date the employee should see in the Due column.
  * Never a plan / target date — always a real work deadline.

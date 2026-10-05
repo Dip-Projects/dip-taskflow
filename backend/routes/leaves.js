@@ -649,6 +649,178 @@ router.post('/mdo-notify', async (req, res) => {
 });
 
 // ----------------------------- apply for leave -----------------------------
+// router.post('/', async (req, res) => {
+//   try {
+//     const { from_date, to_date, is_half_day, reason, buddy_id, acknowledge_negative } = req.body || {};
+
+//     if (!from_date || !to_date) {
+//       return res.status(400).json({ error: 'Please select both from and to dates' });
+//     }
+//     if (!reason || !reason.trim()) {
+//       return res.status(400).json({ error: 'Please give a reason for the leave' });
+//     }
+//     if (new Date(to_date) < new Date(from_date)) {
+//       return res.status(400).json({ error: 'To date cannot be before from date' });
+//     }
+//     if (!buddy_id) {
+//       return res.status(400).json({ error: 'Please choose a buddy to cover your tasks' });
+//     }
+//     if (String(buddy_id) === String(req.user.id)) {
+//       return res.status(400).json({ error: 'You cannot select yourself as buddy' });
+//     }
+
+//     const requestedDays = leaveDayCount({ from_date, to_date, is_half_day: !!is_half_day });
+//     try {
+//       const existing = await selectLeaves((q) => q.eq('user_id', req.user.id));
+//       const bal = buildOfficeLeaveBalance(existing || []);
+//       const after = Math.round((bal.available - requestedDays) * 10) / 10;
+//       if ((bal.available < requestedDays || bal.in_deficit) && !acknowledge_negative) {
+//         return res.status(409).json({
+//           error: 'insufficient_leave_balance',
+//           message:
+//             bal.in_deficit || bal.available < 0
+//               ? `Your leave balance is ${bal.available} (in minus). Still want to apply for ${requestedDays} day(s)?`
+//               : `You have ${bal.available} leave day(s) left but this request is ${requestedDays} day(s). Still want to apply?`,
+//           balance: bal,
+//           requested_days: requestedDays,
+//           balance_after: after,
+//           needs_confirm: true,
+//         });
+//       }
+//     } catch (balErr) {
+//       console.warn('Leave balance check skip:', balErr.message);
+//     }
+
+//     let buddy = null;
+//     {
+//       const { data: buddyUser, error: buddyErr } = await supabase
+//         .from('users')
+//         .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
+//         .eq('id', buddy_id)
+//         .maybeSingle();
+//       if (buddyErr && isBuddySchemaError(buddyErr)) {
+//         const retry = await supabase
+//           .from('users')
+//           .select('id, full_name, is_active, role, department, department_id')
+//           .eq('id', buddy_id)
+//           .maybeSingle();
+//         if (retry.error) throw retry.error;
+//         buddy = retry.data ? { ...retry.data, whatsapp_number: null } : null;
+//       } else if (buddyErr) {
+//         throw buddyErr;
+//       } else {
+//         buddy = buddyUser;
+//       }
+//     }
+//     if (!buddy || buddy.is_active === false) {
+//       return res.status(400).json({ error: 'Selected buddy is not available' });
+//     }
+//     if ((buddy.role || '').toLowerCase() === 'client') {
+//       return res.status(400).json({ error: 'Client users cannot be leave buddies' });
+//     }
+
+//     // Buddy must be same department (MDO with MDO, Engg with Engg, …)
+//     {
+//       const { data: me } = await supabase
+//         .from('users')
+//         .select('department, department_id')
+//         .eq('id', req.user.id)
+//         .maybeSingle();
+//       const myDept = normDept(me?.department || req.user.department);
+//       const myDeptId = me?.department_id || req.user.department_id || null;
+//       const buddyDept = normDept(buddy.department);
+//       const sameById = myDeptId && buddy.department_id && String(myDeptId) === String(buddy.department_id);
+//       const sameByName = myDept && buddyDept && myDept === buddyDept;
+//       if (!sameById && !sameByName) {
+//         return res.status(400).json({
+//           error: 'Buddy must be from your own department (e.g. MDO OFFICE → MDO OFFICE only)',
+//         });
+//       }
+//     }
+
+//     const insertPayload = {
+//         user_id: req.user.id,
+//         from_date,
+//         to_date,
+//         is_half_day: !!is_half_day,
+//         reason: reason.trim(),
+//       status: 'Pending',
+//       buddy_id,
+//       buddy_status: 'Pending',
+//     };
+
+//     let { data, error } = await supabase
+//       .from('leaves')
+//       .insert(insertPayload)
+//       .select(LEAVE_SELECT)
+//       .single();
+
+//     if (error && isBuddySchemaError(error)) {
+//       return res.status(503).json({
+//         error:
+//           'Leave buddy setup is not ready in the database yet. Ask admin to run add_leave_buddy.sql in Supabase, then try again.',
+//       });
+//     }
+// if (error) throw error;
+
+//     let waStakeholders = [];
+//     let waBuddy = null;
+//     try {
+//       waStakeholders = await notifyOfficeLeaveStakeholders({
+//         applicantName: req.user.full_name,
+//         from_date,
+//         to_date,
+//         reason: reason.trim(),
+//         applicantId: req.user.id,
+//       });
+//       console.log(
+//         'Leave WA stakeholders:',
+//         (waStakeholders || []).map((r) => `${r.label}:${r.ok ? 'ok' : r.reason || 'fail'}`).join(', ') || 'none'
+//       );
+//     } catch (waErr) {
+//       console.warn('Leave WA (head/Chirag) skip:', waErr.message);
+//       waStakeholders = [{ ok: false, reason: waErr.message, label: 'stakeholders' }];
+//     }
+
+//     try {
+//       if (buddy.whatsapp_number) {
+//         const buddySent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
+//           buddyName: buddy.full_name,
+//           applicantName: req.user.full_name,
+//           from_date,
+//           to_date,
+//           reason: reason.trim(),
+//         });
+//         waBuddy = {
+//           label: buddy.full_name,
+//           ok: !!buddySent?.ok,
+//           reason: buddySent?.reason || null,
+//         };
+//         console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
+//       } else {
+//         waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
+//         console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
+//       }
+//     } catch (buddyWaErr) {
+//       console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
+//       waBuddy = { ok: false, reason: buddyWaErr.message, label: buddy?.full_name };
+//     }
+
+//     res.status(201).json({
+//       ...data,
+//       _whatsapp: {
+//         stakeholders: waStakeholders,
+//         buddy: waBuddy,
+//         ok:
+//           (waStakeholders || []).some((r) => r.ok) || !!(waBuddy && waBuddy.ok),
+//       },
+//     });
+//   } catch (err) {
+//     console.error('Apply leave error:', err.message);
+//     res.status(500).json({ error: err.message || 'Could not submit leave request' });
+//   }
+// });
+// ----------------------------- apply for leave -----------------------------
 router.post('/', async (req, res) => {
   try {
     const { from_date, to_date, is_half_day, reason, buddy_id, acknowledge_negative } = req.body || {};
@@ -662,10 +834,10 @@ router.post('/', async (req, res) => {
     if (new Date(to_date) < new Date(from_date)) {
       return res.status(400).json({ error: 'To date cannot be before from date' });
     }
-    if (!buddy_id) {
-      return res.status(400).json({ error: 'Please choose a buddy to cover your tasks' });
-    }
-    if (String(buddy_id) === String(req.user.id)) {
+
+    // Buddy is optional
+    const hasBuddy = !!buddy_id;
+    if (hasBuddy && String(buddy_id) === String(req.user.id)) {
       return res.status(400).json({ error: 'You cannot select yourself as buddy' });
     }
 
@@ -692,62 +864,66 @@ router.post('/', async (req, res) => {
     }
 
     let buddy = null;
-    {
-      const { data: buddyUser, error: buddyErr } = await supabase
-        .from('users')
-        .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
-        .eq('id', buddy_id)
-        .maybeSingle();
-      if (buddyErr && isBuddySchemaError(buddyErr)) {
-        const retry = await supabase
+    if (hasBuddy) {
+      {
+        const { data: buddyUser, error: buddyErr } = await supabase
           .from('users')
-          .select('id, full_name, is_active, role, department, department_id')
+          .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
           .eq('id', buddy_id)
           .maybeSingle();
-        if (retry.error) throw retry.error;
-        buddy = retry.data ? { ...retry.data, whatsapp_number: null } : null;
-      } else if (buddyErr) {
-        throw buddyErr;
-      } else {
-        buddy = buddyUser;
+        if (buddyErr && isBuddySchemaError(buddyErr)) {
+          const retry = await supabase
+            .from('users')
+            .select('id, full_name, is_active, role, department, department_id')
+            .eq('id', buddy_id)
+            .maybeSingle();
+          if (retry.error) throw retry.error;
+          buddy = retry.data ? { ...retry.data, whatsapp_number: null } : null;
+        } else if (buddyErr) {
+          throw buddyErr;
+        } else {
+          buddy = buddyUser;
+        }
       }
-    }
-    if (!buddy || buddy.is_active === false) {
-      return res.status(400).json({ error: 'Selected buddy is not available' });
-    }
-    if ((buddy.role || '').toLowerCase() === 'client') {
-      return res.status(400).json({ error: 'Client users cannot be leave buddies' });
-    }
+      if (!buddy || buddy.is_active === false) {
+        return res.status(400).json({ error: 'Selected buddy is not available' });
+      }
+      if ((buddy.role || '').toLowerCase() === 'client') {
+        return res.status(400).json({ error: 'Client users cannot be leave buddies' });
+      }
 
-    // Buddy must be same department (MDO with MDO, Engg with Engg, …)
-    {
-      const { data: me } = await supabase
-        .from('users')
-        .select('department, department_id')
-        .eq('id', req.user.id)
-        .maybeSingle();
-      const myDept = normDept(me?.department || req.user.department);
-      const myDeptId = me?.department_id || req.user.department_id || null;
-      const buddyDept = normDept(buddy.department);
-      const sameById = myDeptId && buddy.department_id && String(myDeptId) === String(buddy.department_id);
-      const sameByName = myDept && buddyDept && myDept === buddyDept;
-      if (!sameById && !sameByName) {
-        return res.status(400).json({
-          error: 'Buddy must be from your own department (e.g. MDO OFFICE → MDO OFFICE only)',
-        });
+      // Buddy must be same department (MDO with MDO, Engg with Engg, …)
+      {
+        const { data: me } = await supabase
+          .from('users')
+          .select('department, department_id')
+          .eq('id', req.user.id)
+          .maybeSingle();
+        const myDept = normDept(me?.department || req.user.department);
+        const myDeptId = me?.department_id || req.user.department_id || null;
+        const buddyDept = normDept(buddy.department);
+        const sameById = myDeptId && buddy.department_id && String(myDeptId) === String(buddy.department_id);
+        const sameByName = myDept && buddyDept && myDept === buddyDept;
+        if (!sameById && !sameByName) {
+          return res.status(400).json({
+            error: 'Buddy must be from your own department (e.g. MDO OFFICE → MDO OFFICE only)',
+          });
+        }
       }
     }
 
     const insertPayload = {
-        user_id: req.user.id,
-        from_date,
-        to_date,
-        is_half_day: !!is_half_day,
-        reason: reason.trim(),
+      user_id: req.user.id,
+      from_date,
+      to_date,
+      is_half_day: !!is_half_day,
+      reason: reason.trim(),
       status: 'Pending',
-      buddy_id,
-      buddy_status: 'Pending',
     };
+    if (hasBuddy) {
+      insertPayload.buddy_id = buddy_id;
+      insertPayload.buddy_status = 'Pending';
+    }
 
     let { data, error } = await supabase
       .from('leaves')
@@ -756,12 +932,22 @@ router.post('/', async (req, res) => {
       .single();
 
     if (error && isBuddySchemaError(error)) {
-      return res.status(503).json({
-        error:
-          'Leave buddy setup is not ready in the database yet. Ask admin to run add_leave_buddy.sql in Supabase, then try again.',
-      });
+      if (hasBuddy) {
+        return res.status(503).json({
+          error:
+            'Leave buddy setup is not ready in the database yet. Ask admin to run add_leave_buddy.sql in Supabase, then try again.',
+        });
+      }
+      const retry = await supabase
+        .from('leaves')
+        .insert(insertPayload)
+        .select(LEAVE_SELECT_BASIC)
+        .single();
+      if (retry.error) throw retry.error;
+      data = withBuddyDefaults([retry.data])[0];
+      error = null;
     }
-if (error) throw error;
+    if (error) throw error;
 
     let waStakeholders = [];
     let waBuddy = null;
@@ -782,28 +968,30 @@ if (error) throw error;
       waStakeholders = [{ ok: false, reason: waErr.message, label: 'stakeholders' }];
     }
 
-    try {
-      if (buddy.whatsapp_number) {
-        const buddySent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
-          buddyName: buddy.full_name,
-          applicantName: req.user.full_name,
-          from_date,
-          to_date,
-          reason: reason.trim(),
-        });
-        waBuddy = {
-          label: buddy.full_name,
-          ok: !!buddySent?.ok,
-          reason: buddySent?.reason || null,
-        };
-        console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
-      } else {
-        waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
-        console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
+    if (hasBuddy) {
+      try {
+        if (buddy.whatsapp_number) {
+          const buddySent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
+            buddyName: buddy.full_name,
+            applicantName: req.user.full_name,
+            from_date,
+            to_date,
+            reason: reason.trim(),
+          });
+          waBuddy = {
+            label: buddy.full_name,
+            ok: !!buddySent?.ok,
+            reason: buddySent?.reason || null,
+          };
+          console.log('Leave WA buddy:', buddy.full_name, buddySent?.ok ? 'ok' : buddySent?.reason || 'fail');
+        } else {
+          waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
+          console.warn('Leave WA buddy: no whatsapp_number', buddy.id, buddy.full_name);
+        }
+      } catch (buddyWaErr) {
+        console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
+        waBuddy = { ok: false, reason: buddyWaErr.message, label: buddy?.full_name };
       }
-    } catch (buddyWaErr) {
-      console.warn('Leave WA (buddy) skip:', buddyWaErr.message);
-      waBuddy = { ok: false, reason: buddyWaErr.message, label: buddy?.full_name };
     }
 
     res.status(201).json({
@@ -820,7 +1008,6 @@ if (error) throw error;
     res.status(500).json({ error: err.message || 'Could not submit leave request' });
   }
 });
-
 // ----------------------------- open tasks for leave planning popup -----------------------------
 router.get('/:id/open-tasks', async (req, res) => {
   try {
