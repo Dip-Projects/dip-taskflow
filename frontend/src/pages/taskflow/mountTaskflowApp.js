@@ -1361,6 +1361,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
     if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
     if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
+    // if (visOk('all-task')) taskItems.push({ key: 'all_task', label: '📋 All Tasks' });
     if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? '🔁 Recurring tasks' : '🔁 My recurring tasks' });
     if (visOk('my')) taskItems.push({ key: 'task-history', label: '📜 Task History' });
 
