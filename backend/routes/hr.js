@@ -1069,6 +1069,139 @@ router.get('/candidate-applications', requireAdminOrHr, async (_req, res) => {
   }
 });
 
+async function ensureHiredCandidateEmployee(candidate, actor) {
+  const application = candidate.application || {};
+  const fullName = String(candidate.candidate_name || application.full_name || '').trim();
+  if (!fullName) throw new Error('Candidate name is required to add an employee');
+
+  const linkedSystemId = candidate.hired_employee_source === 'system'
+    ? candidate.hired_employee_id
+    : null;
+  let user = null;
+  if (linkedSystemId) {
+    const result = await supabase
+      .from('users')
+      .select('id, full_name, department, designation, role, is_active, whatsapp_number')
+      .eq('id', linkedSystemId)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    user = result.data;
+  }
+  if (!user) {
+    const result = await supabase
+      .from('users')
+      .select('id, full_name, department, designation, role, is_active, whatsapp_number')
+      .ilike('full_name', fullName)
+      .limit(1)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    if (String(result.data?.full_name || '').trim().toLowerCase() === fullName.toLowerCase()) {
+      user = result.data;
+    }
+  }
+
+  if (user && !isClientStaff(user)) {
+    const profiles = await readJson(PROFILES_PATH, []);
+    const profileIndex = profiles.findIndex((profile) => profile.employee_id === user.id);
+    const previous = profileIndex >= 0 ? profiles[profileIndex] : null;
+    const onboardToken = previous?.onboard_token || makeToken();
+    const profile = {
+      ...(previous || {}),
+      id: previous?.id || uid(),
+      employee_id: user.id,
+      employee_name: user.full_name,
+      department: user.department || previous?.department || '',
+      designation: user.designation || previous?.designation || '',
+      whatsapp_number: user.whatsapp_number || previous?.whatsapp_number || candidate.phone || application.mobile || '',
+      dob: previous?.dob || application.dob || null,
+      onboard_token: onboardToken,
+      joining_form_submitted_at: previous?.joining_form_submitted_at || null,
+      joining_form_id: previous?.joining_form_id || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (profileIndex >= 0) profiles[profileIndex] = profile;
+    else profiles.push(profile);
+    await writeJson(PROFILES_PATH, profiles);
+    return {
+      id: user.id,
+      full_name: user.full_name,
+      source: 'system',
+      onboard_token: onboardToken,
+      onboard_path: `/onboard/${onboardToken}`,
+    };
+  }
+
+  const staff = await readJson(HR_STAFF_PATH, []);
+  const linkedHrId = candidate.hired_employee_source === 'hr_only'
+    ? candidate.hired_employee_id
+    : null;
+  let staffIndex = staff.findIndex(
+    (row) => row.source_candidate_application_id === candidate.id || (linkedHrId && row.id === linkedHrId)
+  );
+  if (staffIndex < 0) {
+    staffIndex = staff.findIndex(
+      (row) => String(row.full_name || '').trim().toLowerCase() === fullName.toLowerCase()
+    );
+  }
+
+  const now = new Date().toISOString();
+  const row = staffIndex >= 0
+    ? staff[staffIndex]
+    : {
+        id: uid(),
+        full_name: fullName,
+        department: 'General',
+        designation: String(application.current_designation || application.position_applied || candidate.role_applied || 'Staff').trim(),
+        whatsapp_number: String(candidate.phone || application.mobile || '').trim(),
+        dob: application.dob || null,
+        joining_date: null,
+        email: String(application.email || '').trim(),
+        notes: '',
+        is_active: true,
+        source: 'hr_only',
+        onboard_token: makeToken(),
+        joining_form_submitted_at: null,
+        joining_form_id: null,
+        created_at: now,
+        created_by: actor?.id || null,
+      };
+  row.source_candidate_application_id = candidate.id;
+  row.onboard_token = row.onboard_token || makeToken();
+  row.updated_at = now;
+  if (staffIndex >= 0) staff[staffIndex] = row;
+  else staff.unshift(row);
+  await writeJson(HR_STAFF_PATH, staff);
+
+  if (row.dob || row.whatsapp_number) {
+    const profiles = await readJson(PROFILES_PATH, []);
+    const profileIndex = profiles.findIndex((profile) => profile.hr_staff_id === row.id);
+    const previous = profileIndex >= 0 ? profiles[profileIndex] : null;
+    const profile = {
+      ...(previous || {}),
+      id: previous?.id || uid(),
+      hr_staff_id: row.id,
+      employee_id: null,
+      employee_name: row.full_name,
+      dob: row.dob,
+      whatsapp_number: row.whatsapp_number,
+      designation: row.designation,
+      department: row.department,
+      updated_at: now,
+    };
+    if (profileIndex >= 0) profiles[profileIndex] = profile;
+    else profiles.push(profile);
+    await writeJson(PROFILES_PATH, profiles);
+  }
+
+  return {
+    id: row.id,
+    full_name: row.full_name,
+    source: 'hr_only',
+    onboard_token: row.onboard_token,
+    onboard_path: `/onboard/${row.onboard_token}`,
+  };
+}
+
 router.patch('/candidate-applications/:id', requireAdminOrHr, async (req, res) => {
   try {
     await migrateWalkInCandidates();
@@ -1099,8 +1232,14 @@ router.patch('/candidate-applications/:id', requireAdminOrHr, async (req, res) =
     fresh[idx].status_history = history;
     fresh[idx].pipeline_step = nextStatus;
     fresh[idx].updated_at = new Date().toISOString();
+    let employee = null;
+    if (nextStatus === 'Hired') {
+      employee = await ensureHiredCandidateEmployee(fresh[idx], req.user);
+      fresh[idx].hired_employee_id = employee.id;
+      fresh[idx].hired_employee_source = employee.source;
+    }
     await writeJson(CANDIDATES_PATH, fresh);
-    res.json({ application: fresh[idx] });
+    res.json({ application: fresh[idx], employee });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Update failed' });
   }
@@ -1660,12 +1799,15 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
     // HR-only adds — skip if same name already exists in main users
     const extras = (hrOnly || [])
       .filter((r) => {
-        if (isClientStaff(r)) return false;
+        const hiredFromCandidate = !!r.source_candidate_application_id;
+        if (!hiredFromCandidate && isClientStaff(r)) return false;
         const n = String(r.full_name || '').trim().toLowerCase();
         if (!n) return false;
-        // also skip if fuzzy-matches a system user name
-        for (const sn of systemNames) {
-          if (nameMatchScore(n, sn) >= 88) return false;
+        if (!hiredFromCandidate) {
+          // Generic HR-only rows are deduplicated; hires remain visible as distinct records.
+          for (const sn of systemNames) {
+            if (nameMatchScore(n, sn) >= 88) return false;
+          }
         }
         return true;
       })
@@ -1687,6 +1829,7 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
           joining_date: r.joining_date || null,
           email: r.email || '',
           source: 'hr_only',
+          hired_from_candidate: !!r.source_candidate_application_id,
           onboard_token: r.onboard_token || null,
           joining_form_submitted_at:
             r.joining_form_submitted_at || form?.submitted_at || null,
