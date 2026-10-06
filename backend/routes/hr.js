@@ -514,7 +514,7 @@ function docsFromBodyMeta(raw) {
 
 /**
  * Public candidate application (QR / interview walk-in) — no login.
- * Required: name, mobile, aadhaar. Rest optional + file uploads.
+ * Required: name, mobile. Rest optional + file uploads.
  * Prefer JSON + pre-uploaded docs (signed URL); multipart still works for small files.
  */
 router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
@@ -525,7 +525,6 @@ router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
     const aadhaar = String(body.aadhaar || body.aadhaar_id || '').replace(/\D/g, '');
     if (!name) return res.status(400).json({ error: 'Full name is required' });
     if (phone.length < 10) return res.status(400).json({ error: 'Valid mobile number is required' });
-    if (aadhaar.length < 12) return res.status(400).json({ error: 'Valid Aadhaar (12 digits) is required' });
 
     let docs = docsFromBodyMeta(body.documents);
     if (!docs.cv && req.files?.cv?.length) {
