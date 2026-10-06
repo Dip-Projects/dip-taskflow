@@ -416,6 +416,7 @@ const HR_DEPARTMENTS_FALLBACK = [
   'MDO OFFICE',
   'PMC',
   'Sales',
+  'Site Engineer',
 ];
 
 const HR_DESIGNATIONS_FALLBACK = [
@@ -517,8 +518,8 @@ function asEmpShape(s) {
 }
 
 function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, designations }) {
-  const depts = [...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK)]
-    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  const depts = [...new Set([...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK), 'Site Engineer'])]
+  .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const desigs = [...(designations?.length ? designations : HR_DESIGNATIONS_FALLBACK)]
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const [busy, setBusy] = useState(false);
@@ -663,52 +664,85 @@ function EmployeesView({ staff, loading, error, q, setQ, onReload, departments, 
         <div className="hr-toolbar">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search employees…" />
           <span style={{ color: 'var(--hr-muted)', fontSize: '0.85rem' }}>{filtered.length} people</span>
-          <button type="button" className="hr-btn" onClick={() => setShowAdd((v) => !v)}>
-            {showAdd ? 'Close form' : '+ Add HR-only employee'}
+          <button type="button" className="hr-btn" onClick={() => setShowAdd(true)}>
+            + Add HR-only employee
           </button>
         </div>
 
         {showAdd && (
-          <div className="hr-form" style={{ marginBottom: 16 }}>
-            <p className="full" style={{ margin: 0, fontSize: '0.85rem', color: 'var(--hr-muted)' }}>
-              Yeh sirf HR register mein save hoga — TaskFlow / main users table touch nahi hogi. Add ke baad
-              joining-form QR milega.
-            </p>
-            <label>Full name *
-              <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-            </label>
-            <label>Department *
-              <select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
-                {depts.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </label>
-            <label>Designation *
-              <DesignationPicker
-                value={form.designation}
-                onChange={(v) => setForm({ ...form, designation: v })}
-                designations={desigs}
-                required
-              />
-            </label>
-            <label>WhatsApp
-              <input value={form.whatsapp_number} onChange={(e) => setForm({ ...form, whatsapp_number: e.target.value })} placeholder="91xxxxxxxxxx" />
-            </label>
-            <label>Date of birth
-              <input type="date" value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} />
-            </label>
-            <label>Joining date
-              <input type="date" value={form.joining_date} onChange={(e) => setForm({ ...form, joining_date: e.target.value })} />
-            </label>
-            <label>Email
-              <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </label>
-            <div className="actions">
-              <button type="button" className="hr-btn" disabled={busy} onClick={saveNew}>
-                {busy ? 'Saving…' : 'Save + show joining QR'}
-              </button>
-            </div>
-          </div>
-        )}
+  <div className="hr-modal-backdrop" onClick={() => !busy && setShowAdd(false)} role="presentation">
+    <div
+      className="hr-modal hr-modal--form"
+      onClick={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-label="Add HR-only employee"
+    >
+      <div className="hr-modal-head">
+        <h3>Add HR-only employee</h3>
+        <button
+          type="button"
+          className="hr-modal-x"
+          onClick={() => setShowAdd(false)}
+          disabled={busy}
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
+      <p className="hr-sub" style={{ marginTop: 0 }}>
+        Saved only in the HR register. TaskFlow users are not touched. A joining-form QR is shown after saving.
+      </p>
+
+      <div className="hr-form hr-form--modal">
+        <label>Full name *
+          <input
+            value={form.full_name}
+            onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+            autoFocus
+          />
+        </label>
+        <label>Department *
+          <select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
+            {depts.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </label>
+        <label className="full">Designation *
+          <DesignationPicker
+            value={form.designation}
+            onChange={(v) => setForm({ ...form, designation: v })}
+            designations={desigs}
+            required
+          />
+        </label>
+        <label>WhatsApp
+          <input
+            value={form.whatsapp_number}
+            onChange={(e) => setForm({ ...form, whatsapp_number: e.target.value })}
+            placeholder="91xxxxxxxxxx"
+          />
+        </label>
+        <label>Email
+          <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </label>
+        <label>Date of birth
+          <input type="date" value={form.dob} onChange={(e) => setForm({ ...form, dob: e.target.value })} />
+        </label>
+        <label>Joining date
+          <input type="date" value={form.joining_date} onChange={(e) => setForm({ ...form, joining_date: e.target.value })} />
+        </label>
+      </div>
+
+      <div className="hr-modal-actions">
+        <button type="button" className="hr-btn ghost" disabled={busy} onClick={() => setShowAdd(false)}>
+          Cancel
+        </button>
+        <button type="button" className="hr-btn" disabled={busy} onClick={saveNew}>
+          {busy ? 'Saving…' : 'Save + show joining QR'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
         {error && <div className="hr-error">{error}</div>}
         {loading ? (
@@ -2755,8 +2789,8 @@ function PayrollView({ employees }) {
 }
 
 function LettersView({ employees, onEmployeesReload, departments, designations }) {
-  const depts = [...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK)]
-    .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  const depts = [...new Set([...(departments?.length ? departments : HR_DEPARTMENTS_FALLBACK), 'Site Engineer'])]
+  .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const desigs = [...(designations?.length ? designations : HR_DESIGNATIONS_FALLBACK)]
     .sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const [letterTab, setLetterTab] = useState('exp');
