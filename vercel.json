@@ -1,14 +1,5 @@
 {
-  "framework": null,
-  "installCommand": "cd backend && npm install && cd ../frontend && npm install",
-  "buildCommand": "cd frontend && npm run build && node scripts/copy-to-vercel-public.mjs && test -f public/index.html && ls public | head",
-  "outputDirectory": "public",
-  "functions": {
-    "api/index.js": {
-      "maxDuration": 60,
-      "memory": 1024
-    }
-  },
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
       "path": "/api/bot/cron/overdue-whatsapp",
@@ -39,41 +30,129 @@
     {
       "source": "/assets/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     },
     {
       "source": "/index.html",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
       ]
     },
     {
       "source": "/",
       "headers": [
-        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
       ]
     }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/config.js", "destination": "/api" },
-    { "source": "/legacy/(.*)", "destination": "/api" },
-    { "source": "/login", "destination": "/index.html" },
-    { "source": "/apply", "destination": "/index.html" },
-    { "source": "/apply/(.*)", "destination": "/index.html" },
-    { "source": "/onboard", "destination": "/index.html" },
-    { "source": "/onboard/(.*)", "destination": "/index.html" },
-    { "source": "/app", "destination": "/index.html" },
-    { "source": "/app/(.*)", "destination": "/index.html" },
-    { "source": "/site", "destination": "/index.html" },
-    { "source": "/site/(.*)", "destination": "/index.html" },
-    { "source": "/mdo", "destination": "/index.html" },
-    { "source": "/mdo/(.*)", "destination": "/index.html" },
-    { "source": "/client", "destination": "/index.html" },
-    { "source": "/client/(.*)", "destination": "/index.html" },
-    { "source": "/hr", "destination": "/index.html" },
-    { "source": "/hr/(.*)", "destination": "/index.html" },
-    { "source": "/((?!api/|assets/|legacy/).*)", "destination": "/index.html" }
-  ]
+    {
+      "source": "/api(/.*)?",
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/config.js",
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/legacy/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/apply",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/apply/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/onboard",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/onboard/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/app",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/app/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/site",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/site/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/mdo",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/mdo/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/client",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/client/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/hr",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/hr/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!api/|assets/|legacy/).*)",
+      "destination": {
+        "type": "service",
+        "service": "frontend"
+      }
+    }
+  ],
+  "services": {
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "index.js"
+    }
+  }
 }
