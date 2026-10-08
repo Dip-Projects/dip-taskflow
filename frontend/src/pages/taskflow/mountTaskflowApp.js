@@ -1358,6 +1358,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (isAdmin || canAddTask || visOk('add')) {
       taskItems.push({ key: 'add', label: '➕ Add new task' });
     }
+    if (isAdmin || canAddTask) taskItems.push({ key: 'taskbank', label: '📋 Pre-defined Task List' });
     if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
     if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
     if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
@@ -1783,6 +1784,7 @@ export async function mountTaskflowApp(opts = {}) {
       b.classList.toggle('active', b.dataset.view === viewKey);
     });
     if (viewKey === 'add') loadMasterData();
+    if (viewKey === 'taskbank') loadTaskBank();
     if (viewKey === 'all') loadAllTasks();
     if (viewKey === 'overdue') loadOverdueTasks();
     if (viewKey === 'my') loadMyTasks();
@@ -8290,6 +8292,315 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+
+  // ─── PRE-DEFINED TASK LIST (task_bank) ───────────────────────────────────────
+  // Everything is saved in advance except hours + target date, which are set
+  // when the task is assigned. A row only becomes a real task (Delegated) at assign.
+  let tbItems = [];
+  let tbDelegateId = null;
+  let tbLastType = '';
+  let tbXlItems = [];
+  const tbEl = (id) => document.getElementById(id);
+  const TB_COLS = ['Task Name', 'Project', 'Department', 'Task Type', 'Assign To', 'Priority', 'Rescheduling Possible', 'Description'];
+
+  function tbFillEmployees(selId, deptId, keep, placeholder) {
+    const sel = tbEl(selId);
+    const dept = state.master.departments.find((d) => d.id === deptId);
+    let list = state.master.employees;
+    if (dept) {
+      const m = list.filter((e) => normDeptName(e.department) === normDeptName(dept.name));
+      if (m.length) list = m;
+    }
+    fillSelect(sel, list, { placeholder, labelKey: 'full_name' });
+    if (keep && list.some((e) => e.id === keep)) sel.value = keep;
+  }
+
+  async function loadTaskBank() {
+    await loadMasterData();
+    fillSelect(tbEl('tb-department'), state.master.departments, { placeholder: 'Select department' });
+    fillSelect(tbEl('tb-project'), state.master.projects, { placeholder: 'Select project' });
+    fillSelect(tbEl('tb-tasktype'), state.master.taskTypes, { placeholder: 'Select task type' });
+    tbFillEmployees('tb-employee', '', '', 'Assign later');
+    await refreshTaskBank();
+  }
+
+  async function refreshTaskBank() {
+    const box = tbEl('tbList');
+    if (!box) return;
+    box.innerHTML = '<tr><td colspan="7" class="empty-state">Loading…</td></tr>';
+    try {
+      tbItems = await api('/task-bank');
+      renderTaskBank();
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+
+  function renderTaskBank() {
+    const box = tbEl('tbList');
+    if (!tbItems.length) {
+      box.innerHTML = '<tr><td colspan="7" class="empty-state">The list is empty. Add a task from the side panel or upload an Excel file.</td></tr>';
+      return;
+    }
+    const nameOf = (list, id, key = 'name') => list.find((x) => x.id === id)?.[key] || '';
+    box.innerHTML = tbItems.map((t) => {
+      const dept = nameOf(state.master.departments, t.department_id);
+      const type = nameOf(state.master.taskTypes, t.task_type_id);
+      const emp = nameOf(state.master.employees, t.assigned_to, 'full_name');
+      const used = t.times_delegated
+        ? `Assigned ${t.times_delegated}× · last ${escapeHtml(fmtDateOnly(t.last_delegated_at))}`
+        : 'Not assigned yet';
+      return `
+      <tr>
+        <td><strong>${escapeHtml(t.title)}</strong><div style="font-size:.72rem;color:#64748B;margin-top:3px">${used}</div></td>
+        <td>${escapeHtml(t.project?.name || '—')}</td>
+        <td>${escapeHtml(dept || '—')}${type ? `<div style="font-size:.74rem;color:#64748B">${escapeHtml(type)}</div>` : ''}</td>
+        <td>${escapeHtml(emp || '—')}</td>
+        <td>${escapeHtml(t.priority || 'Medium')}</td>
+        <td style="white-space:pre-wrap">${escapeHtml(t.details || '—')}</td>
+        <td>
+          <button class="action-btn action-accept" style="display:block;width:100%;margin-bottom:6px" data-tb-delegate="${t.id}">➡️ Assign</button>
+          <button class="action-btn action-reject" style="display:block;width:100%" data-tb-delete="${t.id}">🗑️ Delete</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ----- assign popup: only hours + target date are new here -----
+  function openTbDelegate(id) {
+    const t = tbItems.find((x) => x.id === id);
+    if (!t) return;
+    tbDelegateId = id;
+    tbEl('tbdTitle').textContent = t.title;
+    fillSelect(tbEl('tbd-department'), state.master.departments, { placeholder: 'Select department' });
+    fillSelect(tbEl('tbd-project'), state.master.projects, { placeholder: 'Select project' });
+    fillSelect(tbEl('tbd-tasktype'), state.master.taskTypes, { placeholder: 'Select task type' });
+    tbFillEmployees('tbd-employee', '', t.assigned_to, 'Select employee');
+    tbEl('tbd-department').value = t.department_id || '';
+    tbEl('tbd-project').value = t.project_id || '';
+    tbEl('tbd-tasktype').value = t.task_type_id || tbLastType;
+    tbEl('tbd-hours').value = '';
+    tbEl('tbd-priority').value = t.priority || 'Medium';
+    tbEl('tbd-reschedule').value = t.rescheduling_possible ? 'true' : 'false';
+    tbEl('tbd-date').value = '';
+    tbEl('tbd-attachment').value = '';
+    tbEl('tbd-voicenote').value = '';
+    tbEl('tbd-remove').checked = false;
+    hideFormMsg(tbEl('tbdMsg'));
+    tbEl('tbDelegateModal').hidden = false;
+  }
+
+  function closeTbDelegate() {
+    tbEl('tbDelegateModal').hidden = true;
+    tbDelegateId = null;
+  }
+
+  async function confirmTbDelegate() {
+    const msg = tbEl('tbdMsg');
+    hideFormMsg(msg);
+    const t = tbItems.find((x) => x.id === tbDelegateId);
+    if (!t) return;
+    const employee = tbEl('tbd-employee').value;
+    const department = tbEl('tbd-department').value;
+    const taskType = tbEl('tbd-tasktype').value;
+    const hours = tbEl('tbd-hours').value;
+    const date = tbEl('tbd-date').value;
+    if (!employee || !department || !taskType || !hours || !date) {
+      showFormMsg(msg, 'Assign to, department, task type, hours and target date are required');
+      return;
+    }
+    const btn = tbEl('tbdConfirm');
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('department_id', department);
+      fd.append('assigned_to', employee);
+      fd.append('project_id', tbEl('tbd-project').value);
+      fd.append('task_type_id', taskType);
+      fd.append('description', t.details ? `${t.title}\n${t.details}` : t.title);
+      fd.append('hours_to_complete', hours);
+      fd.append('target_date', date);
+      fd.append('priority', tbEl('tbd-priority').value);
+      fd.append('rescheduling_possible', tbEl('tbd-reschedule').value);
+      const attachment = tbEl('tbd-attachment').files[0];
+      const voiceNote = tbEl('tbd-voicenote').files[0];
+      if (attachment) fd.append('attachment', attachment);
+      if (voiceNote) fd.append('voice_note', voiceNote);
+      await api('/tasks', { method: 'POST', body: fd, isForm: true });
+      tbLastType = taskType;
+      if (tbEl('tbd-remove').checked) await api(`/task-bank/${t.id}`, { method: 'DELETE' });
+      else await api(`/task-bank/${t.id}/delegated`, { method: 'PATCH' });
+      showToast('Task assigned ✅', 'success');
+      closeTbDelegate();
+      await refreshTaskBank();
+    } catch (err) {
+      showFormMsg(msg, err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ----- Excel: format download + upload -----
+  async function tbDownloadFormat() {
+    const XLSX = await import('xlsx');
+    const m = state.master;
+    const wb = XLSX.utils.book_new();
+    const tasks = XLSX.utils.aoa_to_sheet([
+      TB_COLS,
+      ['Example: Weekly site visit report', 'Project name', 'Department name', 'Task type', 'Employee name (optional)', 'Medium', 'No', 'Task details (delete this example row)'],
+    ]);
+    tasks['!cols'] = TB_COLS.map(() => ({ wch: 26 }));
+    XLSX.utils.book_append_sheet(wb, tasks, 'Tasks');
+    const pri = ['Low', 'Medium', 'High'];
+    const yn = ['Yes', 'No'];
+    const n = Math.max(m.projects.length, m.departments.length, m.taskTypes.length, m.employees.length, 3);
+    const rows = [['Projects', 'Departments', 'Task Types', 'Employees', 'Priority', 'Rescheduling']];
+    for (let i = 0; i < n; i += 1) {
+      rows.push([m.projects[i]?.name || '', m.departments[i]?.name || '', m.taskTypes[i]?.name || '', m.employees[i]?.full_name || '', pri[i] || '', yn[i] || '']);
+    }
+    const ref = XLSX.utils.aoa_to_sheet(rows);
+    ref['!cols'] = rows[0].map(() => ({ wch: 26 }));
+    XLSX.utils.book_append_sheet(wb, ref, 'Valid values');
+    XLSX.writeFile(wb, 'predefined-task-list-format.xlsx');
+  }
+
+  async function tbParseExcel(file) {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const norm = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const find = (list, v, key = 'name') => {
+      const t = norm(v);
+      return t ? list.find((x) => norm(x[key]) === t) : null;
+    };
+    const get = (r, col) => {
+      const hit = Object.keys(r).find((c) => norm(c).replace(/\*/g, '').trim() === norm(col));
+      return hit ? String(r[hit]).trim() : '';
+    };
+    const m = state.master;
+    const items = [];
+    const warns = [];
+    rows.forEach((r, i) => {
+      const title = get(r, 'Task Name');
+      if (!title || /^example:/i.test(title)) return;
+      const line = i + 2;
+      const lookup = (col, list, key) => {
+        const v = get(r, col);
+        if (!v) return '';
+        const hit = find(list, v, key);
+        if (!hit) warns.push(`Row ${line}: ${col} "${v}" was not found in the system (left blank)`);
+        return hit ? hit.id : '';
+      };
+      const pr = norm(get(r, 'Priority'));
+      items.push({
+        title,
+        details: get(r, 'Description'),
+        project_id: lookup('Project', m.projects),
+        department_id: lookup('Department', m.departments),
+        task_type_id: lookup('Task Type', m.taskTypes),
+        assigned_to: lookup('Assign To', m.employees, 'full_name'),
+        priority: pr === 'high' ? 'High' : pr === 'low' ? 'Low' : 'Medium',
+        rescheduling_possible: /^y/i.test(get(r, 'Rescheduling Possible')),
+      });
+    });
+    return { items, warns };
+  }
+
+  function tbShowTab(which) {
+    const add = which === 'add';
+    tbEl('tbForm').hidden = !add;
+    tbEl('tbXlPane').hidden = add;
+    tbEl('tbTabAdd').classList.toggle('active', add);
+    tbEl('tbTabXl').classList.toggle('active', !add);
+  }
+
+  // Handlers assigned with on* (not addEventListener) so a remount can never double-bind
+  // them — a double-bound Assign/Import button would create duplicates.
+  if (tbEl('tbForm')) {
+    tbEl('tbTabAdd').onclick = () => tbShowTab('add');
+    tbEl('tbTabXl').onclick = () => tbShowTab('xl');
+    tbEl('tb-department').onchange = () => {
+      tbFillEmployees('tb-employee', tbEl('tb-department').value, tbEl('tb-employee').value, 'Assign later');
+    };
+    tbEl('tbForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const msg = tbEl('tbMsg');
+      hideFormMsg(msg);
+      try {
+        await api('/task-bank', {
+          method: 'POST',
+          body: {
+            title: tbEl('tb-title').value,
+            details: tbEl('tb-details').value,
+            department_id: tbEl('tb-department').value || null,
+            assigned_to: tbEl('tb-employee').value || null,
+            project_id: tbEl('tb-project').value || null,
+            task_type_id: tbEl('tb-tasktype').value || null,
+            priority: tbEl('tb-priority').value,
+            rescheduling_possible: tbEl('tb-reschedule').value,
+          },
+        });
+        // bulk entry: keep the common fields, clear only the per-task ones
+        tbEl('tb-title').value = '';
+        tbEl('tb-details').value = '';
+        tbEl('tb-title').focus();
+        showToast('Saved to list ✅', 'success');
+        await refreshTaskBank();
+      } catch (err) { showFormMsg(msg, err.message); }
+    };
+    tbEl('tbList').onclick = async (e) => {
+      const d = e.target.closest('[data-tb-delegate]');
+      if (d) return openTbDelegate(d.dataset.tbDelegate);
+      const x = e.target.closest('[data-tb-delete]');
+      if (x) {
+        if (!confirm('Delete this task from the list?')) return;
+        try {
+          await api(`/task-bank/${x.dataset.tbDelete}`, { method: 'DELETE' });
+          await refreshTaskBank();
+        } catch (err) { showToast(err.message, 'error'); }
+      }
+    };
+    tbEl('tbd-employee').onchange = () => {
+      const emp = state.master.employees.find((u) => u.id === tbEl('tbd-employee').value);
+      const dept = state.master.departments.find((d) => normDeptName(d.name) === normDeptName(emp?.department));
+      if (dept) tbEl('tbd-department').value = dept.id;
+    };
+    tbEl('tbdConfirm').onclick = confirmTbDelegate;
+    tbEl('tbdCancel').onclick = closeTbDelegate;
+    tbEl('tbdClose').onclick = closeTbDelegate;
+
+    tbEl('tbXlFormat').onclick = () => tbDownloadFormat().catch((err) => showToast(err.message, 'error'));
+    tbEl('tbXlFile').onchange = async () => {
+      const file = tbEl('tbXlFile').files[0];
+      const msg = tbEl('tbXlMsg');
+      tbXlItems = [];
+      tbEl('tbXlImport').hidden = true;
+      if (!file) { msg.textContent = ''; return; }
+      try {
+        const { items, warns } = await tbParseExcel(file);
+        tbXlItems = items;
+        msg.textContent = items.length
+          ? `${items.length} task(s) ready to import.${warns.length ? `\n\n⚠️ ${warns.length} warning(s):\n${warns.slice(0, 8).join('\n')}${warns.length > 8 ? '\n…' : ''}` : ''}`
+          : 'No tasks found in this file. Please use the downloaded format.';
+        tbEl('tbXlImport').hidden = !items.length;
+        tbEl('tbXlImport').textContent = `Import ${items.length} task(s)`;
+      } catch (err) { msg.textContent = `Could not read the file: ${err.message}`; }
+    };
+    tbEl('tbXlImport').onclick = async () => {
+      if (!tbXlItems.length) return;
+      const btn = tbEl('tbXlImport');
+      btn.disabled = true;
+      try {
+        const r = await api('/task-bank/bulk', { method: 'POST', body: { items: tbXlItems } });
+        showToast(`${r.imported} tasks added to the list ✅`, 'success');
+        tbXlItems = [];
+        tbEl('tbXlFile').value = '';
+        tbEl('tbXlMsg').textContent = '';
+        btn.hidden = true;
+        tbShowTab('add');
+        await refreshTaskBank();
+      } catch (err) { showToast(err.message, 'error'); }
+      finally { btn.disabled = false; }
+    };
+  }
 
   async function loadRecurringView() {
     const isAdmin = state.user.role === 'admin';

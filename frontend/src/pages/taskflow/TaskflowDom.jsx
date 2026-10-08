@@ -223,6 +223,111 @@ export default function TaskflowDom() {
             </section>
 
             {/* ALL DELEGATED TASKS */}
+
+            {/* PRE-DEFINED TASK LIST */}
+            <section id="view-taskbank" className="view" hidden={true}>
+              <div className="view-heading">
+                <h2 className="view-title">📋 Pre-defined Task List</h2>
+                <p className="view-sub">Save your tasks here in advance. When you assign one, you only set the hours and target date. A task appears in Delegated tasks only after you assign it.</p>
+              </div>
+              <div className="tb-layout">
+                <div className="tb-main">
+                  <div className="table-card">
+                    <div className="table-scroll">
+                      <table className="data-table tb-table">
+                        <colgroup>
+                          <col style={{ width: 190 }} />
+                          <col style={{ width: 150 }} />
+                          <col style={{ width: 150 }} />
+                          <col style={{ width: 130 }} />
+                          <col style={{ width: 80 }} />
+                          <col style={{ width: 210 }} />
+                          <col style={{ width: 110 }} />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th>Task</th>
+                            <th>Project</th>
+                            <th>Department / Type</th>
+                            <th>Assign to</th>
+                            <th>Priority</th>
+                            <th>Description</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody id="tbList"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+                <aside className="tb-side">
+                  <div className="tb-tabs">
+                    <button type="button" id="tbTabAdd" className="tb-tab active">➕ Add task</button>
+                    <button type="button" id="tbTabXl" className="tb-tab">📤 Excel upload</button>
+                  </div>
+
+                  <form id="tbForm" className="task-form">
+                    <div className="field">
+                      <label htmlFor="tb-title">Task name <span className="req">*</span></label>
+                      <input id="tb-title" type="text" required />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="tb-project">Project</label>
+                      <select id="tb-project"><option value="">Select project</option></select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="tb-department">Department</label>
+                      <select id="tb-department"><option value="">Select department</option></select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="tb-employee">Assign to <span className="optional">(optional)</span></label>
+                      <select id="tb-employee"><option value="">Assign later</option></select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="tb-tasktype">Task type</label>
+                      <select id="tb-tasktype"><option value="">Select task type</option></select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="tb-details">Task description</label>
+                      <textarea id="tb-details" rows={3} placeholder="Describe the task in detail..."></textarea>
+                    </div>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="tb-priority">Priority</label>
+                        <select id="tb-priority" defaultValue="Medium">
+                          <option value="Low">Low</option>
+                          <option value="Medium">Medium</option>
+                          <option value="High">High</option>
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label htmlFor="tb-reschedule">Rescheduling possible</label>
+                        <select id="tb-reschedule" defaultValue="false">
+                          <option value="false">No</option>
+                          <option value="true">Yes</option>
+                        </select>
+                      </div>
+                    </div>
+                    <p id="tbMsg" className="form-error" hidden={true}></p>
+                    <div className="form-footer">
+                      <button type="submit" className="primary-btn">Save to list</button>
+                    </div>
+                  </form>
+
+                  <div id="tbXlPane" hidden={true}>
+                    <p className="form-note">1) Download the format &nbsp;2) Fill in your tasks &nbsp;3) Upload the file here. Hours and target date are not part of the file; you set them when you assign a task.</p>
+                    <button type="button" id="tbXlFormat" className="ghost-btn-text">⬇️ Download Excel format</button>
+                    <div className="field" style={{ marginTop: 12 }}>
+                      <label htmlFor="tbXlFile">Upload filled file</label>
+                      <input id="tbXlFile" type="file" accept=".xlsx,.xls,.csv" />
+                    </div>
+                    <div id="tbXlMsg" className="form-note" style={{ whiteSpace: 'pre-wrap' }}></div>
+                    <button type="button" id="tbXlImport" className="primary-btn primary-btn-inline" hidden={true}>Import</button>
+                  </div>
+                </aside>
+              </div>
+            </section>
+
             <section id="view-all" className="view" hidden={true}>
               <div className="view-heading">
                 <h2 className="view-title">All delegated tasks</h2>
@@ -2811,6 +2916,84 @@ export default function TaskflowDom() {
             <div className="modal-actions">
               <button type="button" className="ghost-btn-text" id="cancelRecurringModal">Cancel</button>
               <button type="button" id="saveRecurringBtn" className="primary-btn primary-btn-inline">Create Recurring Task</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Task Bank: delegate modal */}
+      <div id="tbDelegateModal" className="modal-backdrop" hidden={true}>
+        <div className="modal modal-wide">
+          <div className="modal-header">
+            <h3>Assign task</h3>
+            <button className="modal-close" id="tbdClose">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p id="tbdTitle" style={{ fontWeight: 600 }}></p>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="tbd-employee">Assign to <span className="req">*</span></label>
+                <select id="tbd-employee"></select>
+              </div>
+              <div className="field">
+                <label htmlFor="tbd-department">Department <span className="req">*</span></label>
+                <select id="tbd-department"></select>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="tbd-project">Project</label>
+                <select id="tbd-project"></select>
+              </div>
+              <div className="field">
+                <label htmlFor="tbd-tasktype">Task type <span className="req">*</span></label>
+                <select id="tbd-tasktype"></select>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="tbd-hours">Hours to complete <span className="req">*</span></label>
+                <input id="tbd-hours" type="number" min="0" step="0.5" placeholder="e.g. 4" />
+              </div>
+              <div className="field">
+                <label htmlFor="tbd-date">Target date <span className="req">*</span></label>
+                <input id="tbd-date" type="date" />
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="tbd-priority">Priority</label>
+                <select id="tbd-priority" defaultValue="Medium">
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div className="field">
+                <label><input id="tbd-remove" type="checkbox" /> Remove from list after assigning</label>
+              </div>
+            </div>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="tbd-reschedule">Rescheduling possible</label>
+                <select id="tbd-reschedule" defaultValue="false">
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="tbd-attachment">Attachment <span className="optional">(optional)</span></label>
+                <input id="tbd-attachment" type="file" />
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="tbd-voicenote">Voice note <span className="optional">(optional)</span></label>
+              <input id="tbd-voicenote" type="file" accept="audio/*" />
+            </div>
+            <p id="tbdMsg" className="form-error" hidden={true}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="tbdCancel">Cancel</button>
+              <button type="button" id="tbdConfirm" className="primary-btn primary-btn-inline">Assign</button>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, requireAdmin, requireAdminOrMis, requireCanAddTask } = require('../middleware/auth');
+const { notifyIfEmployeeFree } = require('../lib/employeeFree');
 const { addWorkingHours, addCalendarDays, fmtEmployeeDueLabel, elapsedWorkingHours, endOfIstCalendarDay } = require('../lib/workingHours');
 const {
   workTimerAnchor,
@@ -1156,6 +1157,7 @@ router.patch('/:id/reject', async (req, res) => {
       .single();
 
     if (error) throw error;
+    await notifyIfEmployeeFree(existing.assigned_to);
     res.json(data);
   } catch (err) {
     console.error('Reject task error:', err.message);
@@ -1213,6 +1215,9 @@ router.patch('/:id/status', async (req, res) => {
     }
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    if ((status === 'Completed' || status === 'Rejected') && existing.status !== status) {
+      await notifyIfEmployeeFree(existing.assigned_to);
+    }
     res.json(data);
   } catch (err) {
     console.error('Update status error:', err.message);
@@ -1323,6 +1328,8 @@ router.patch(
         verification_started_at: null,
         task_events: withTaskEvent(existing, 'send_for_verification', req.user.id),
       }, TASK_SELECT);
+
+      await notifyIfEmployeeFree(existing.assigned_to);
 
       const { data: verifierUser } = await supabase
         .from('users')

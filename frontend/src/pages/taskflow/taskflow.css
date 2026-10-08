@@ -7919,3 +7919,20 @@ body.org-print-mode .org-tree-svg .org-line {
 [data-theme="dark"] .th-card-desc {
   background: #202d38;
 }
+
+
+/* Pre-defined Task List */
+.tb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.tb-side { position: sticky; top: 12px; padding: 14px; border: 1px solid rgba(128,128,128,.25); border-radius: 12px; }
+.tb-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tb-tab { flex: 1; padding: 8px 10px; border: 1px solid rgba(128,128,128,.35); border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit; }
+.tb-tab.active { background: rgba(37,99,235,.12); border-color: rgba(37,99,235,.5); font-weight: 600; }
+@media (max-width: 900px) {
+  .tb-layout { grid-template-columns: 1fr; }
+  .tb-side { position: static; }
+}
+
+.tb-table { min-width: 1000px; }
+.tb-table td { vertical-align: top; }
+.tb-table th:first-child, .tb-table td:first-child { position: sticky; left: 0; background: #fff; z-index: 1; box-shadow: 1px 0 0 var(--border-soft); }
+.tb-table thead th:first-child { background: #F8FAFC; z-index: 3; }
