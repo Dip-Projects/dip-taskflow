@@ -226,7 +226,11 @@ async function renderChunk(html) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export async function generateSiteReportPDF(formData, photos, logoSrc) {
+export async function generateSiteReportPDF(formData, photos, logoSrc, reportConfig = {}) {
+  const reportTitle = reportConfig.reportTitle || "SITE VISIT REPORT";
+  const reportTitleDisplay = reportTitle.toUpperCase();
+  const reportSubtitle = reportConfig.reportSubtitle || "An official site visit report prepared by the Project Management Consultant.";
+  const reportPrefix = reportConfig.filePrefix || "SVR";
   await ensurePdfDeps();
   const logoBase64 = await getSvrLogoBase64(logoSrc);
 
@@ -338,7 +342,7 @@ export async function generateSiteReportPDF(formData, photos, logoSrc) {
     hour: "2-digit", minute: "2-digit",
   });
   const safeSite = (formData.site_name || "site").replace(/[\s/\\:*?"<>|]/g, "_");
-  const fileName = `SVR_${safeSite}_${formData.visit_date}.pdf`;
+  const fileName = `${reportPrefix}_${safeSite}_${formData.visit_date}.pdf`;
 
   // ── 1. COVER ──────────────────────────────────────────────────────────────
   const coverHtml = `
@@ -358,9 +362,9 @@ export async function generateSiteReportPDF(formData, photos, logoSrc) {
           <div class="doc-sub">${esc(formData.reporter_name)} · ${esc(dispDate)}</div>
         </div>
       </div>
-      <div class="cover-doc-type">O F F I C I A L &nbsp; S I T E &nbsp; V I S I T &nbsp; R E P O R T</div>
-      <div class="cover-main-title">SITE VISIT REPORT</div>
-      <div class="cover-subtitle">An official site visit report prepared by the Project Management Consultant.</div>
+      <div class="cover-doc-type">O F F I C I A L &nbsp; ${reportTitleDisplay.replace(/ /g, " &nbsp; ")}</div>
+      <div class="cover-main-title">${esc(reportTitleDisplay)}</div>
+      <div class="cover-subtitle">${esc(reportSubtitle)}</div>
       <div class="meta-bar">
         <div class="meta-cell">
           <span class="meta-key">P R O J E C T &nbsp; S I T E</span>
@@ -483,7 +487,7 @@ export async function generateSiteReportPDF(formData, photos, logoSrc) {
       <div class="ty-title">Thank You</div>
       <div class="ty-sub">This report has been prepared to ensure transparency, quality, and continuous improvement at the project site.</div>
       <div class="ty-badge">DIP PROJECTS</div>
-      <div class="ty-meta">Generated ${esc(genTime)} · Site Visit Report · ${esc(formData.site_name)}</div>
+      <div class="ty-meta">Generated ${esc(genTime)} · ${esc(reportTitle)} · ${esc(formData.site_name)}</div>
     </div>`;
   const tyCanvas = await renderChunk(tyHtml);
   const tyPxPerMm  = tyCanvas.width / CONTENT_W;
