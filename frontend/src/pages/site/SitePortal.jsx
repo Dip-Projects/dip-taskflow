@@ -497,6 +497,17 @@ function visibilityRole(user) {
   return "employee";
 }
 
+function isSiteEngineerRole(user) {
+  const blob = `${user?.role || ""} ${user?.department || ""} ${user?.designation || ""} ${user?.site_role || ""}`.toLowerCase();
+  const isSiteEngineer = /(?:^|\s)(?:jr\.?\s*|junior\s+|senior\s+)?site engineer(?:\s|$)/.test(blob);
+  const isHeadOrCoordinator = /site incharge|site head|project head|co-?ordinator|\bhead\b/.test(blob);
+  return isSiteEngineer && !isHeadOrCoordinator;
+}
+
+function siteReportLabel(user) {
+  return isSiteEngineerRole(user) ? "Quality Audit Report" : "Site Visit Report";
+}
+
 function flagOn(value) {
   return value === true || value === "true" || value === 1;
 }
@@ -576,7 +587,7 @@ function buildNav(user, visMap) {
         ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
         : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
-      { key: "site-report", label: "Site Visit Report", icon: Ico.site },
+      { key: "site-report", label: siteReportLabel(user), icon: Ico.site },
       { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     ];
     if (visAllows(visMap, "site-team-submissions", user)) {
@@ -606,7 +617,7 @@ function buildNav(user, visMap) {
     ...(showWeeklyPlan(user, visMap)
       ? [{ key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan }]
       : []),
-    { key: "site-report", label: "Site Visit Report", icon: Ico.site },
+    { key: "site-report", label: siteReportLabel(user), icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
   ];
@@ -2552,8 +2563,8 @@ useEffect(() => {
                 <div className="head-sub-kicker">Project Head Overview</div>
                 <h3>Report Submissions</h3>
                 <p>
-                  Daily, weekly and site visit reports from your team. Your own
-                  site visit reports are in My Reports.
+                  Daily, weekly and {isSiteEngineerRole(user) ? "quality audit" : "site visit"} reports from your team. Your own
+                  {isSiteEngineerRole(user) ? "quality audit" : "site visit"} reports are in My Reports.
                 </p>
               </div>
               <div className="head-sub-stats">
