@@ -259,7 +259,6 @@ function collectEls() {
   };
 }
 
-
 /**
  * @param {{ getToken?: () => string|null, getUser?: () => object|null, onLogout?: () => void }} [opts]
  */
@@ -1442,7 +1441,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
       if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
-      if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
+      //if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
       if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
       appendCollapsibleNav(
         isMis && !isAdmin ? 'MIS' : 'Administration',
@@ -1691,7 +1690,7 @@ export async function mountTaskflowApp(opts = {}) {
       } else {
         // Admin: all tasks pending, overdue (delegated + recurring), verifications, open tickets
         const allTasks = await api('/tasks/all');
-        const now = new Date();
+        const now = new Date(); 
         // Open delegated work: Pending + In Progress + ticket/verify queues
         const pendingCount = allTasks.filter((t) => {
           const st = String(t.status || '');
@@ -1815,7 +1814,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (viewKey === 'time-dashboard') loadTimeDashboard();
     if (viewKey === 'delay-report') loadDelayReport();
     if (viewKey === 'emp-report') loadEmpReport();
-    if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
+    //if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
     if (viewKey === 'fms') loadFms();
     if (viewKey === 'ai-bot') loadAiBot();
     if (viewKey === 'team-chat') loadTeamChat();
@@ -3955,7 +3954,7 @@ export async function mountTaskflowApp(opts = {}) {
       if (sub) sub.textContent = 'Only admins review reschedule requests.';
       if (wrap) wrap.innerHTML = '<div class="empty-state">Reschedule requests are handled by admin.</div>';
       const tbody = document.getElementById('reschedRequestsTableBody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="empty-state">Reschedule requests are handled by admin.</td></tr>`;
       return;
     }
     if (filtersCard) filtersCard.hidden = false;
@@ -3964,7 +3963,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (wrap) wrap.innerHTML = '<div class="empty-state">Loading…</div>';
     const tbody = document.getElementById('reschedRequestsTableBody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading…</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" class="empty-state">Loading…</td></tr>`;
     try {
       const st = filterEl?.value ?? 'Pending';
       const qs = st ? `?status=${encodeURIComponent(st)}` : '';
@@ -3991,9 +3990,23 @@ export async function mountTaskflowApp(opts = {}) {
   // Desktop table view — was previously missing, so the desktop table stayed
   // empty forever even though the nav badge and the mobile card list both had
   // the right count/data.
+  function getRescheduleHistory(task) {
+    const dates = (Array.isArray(task.task_events) ? task.task_events : [])
+      .filter((event) => event && ['rescheduled_by_admin', 'reschedule_approved'].includes(event.action))
+      .map((event) => event.to_target_date)
+      .filter((date) => typeof date === 'string' && date.trim())
+      .map((date) => date.slice(0, 10));
+    const count = Math.max(Number(task.reschedule_count) || 0, dates.length);
+    if (!dates.length && count > 0) {
+      const latestDate = task.reschedule_approved_target_date || task.target_date;
+      if (latestDate) dates.push(String(latestDate).slice(0, 10));
+    }
+    return { count, dates };
+  }
+
   function renderRescheduleRequestsTable(tbody, tasks, isAdmin, emptyMsg) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="11" class="empty-state"><span class="emoji">🎉</span>${emptyMsg || (isAdmin ? 'No reschedule requests pending' : 'You have no reschedule requests')}</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -4008,6 +4021,22 @@ export async function mountTaskflowApp(opts = {}) {
 
       const tdTask = document.createElement('td');
       tdTask.textContent = task.description ?? '—';
+
+      const tdRescheduleHistory = document.createElement('td');
+      tdRescheduleHistory.className = 'resched-history-cell';
+      const history = getRescheduleHistory(task);
+      const historyCount = document.createElement('strong');
+      historyCount.className = 'resched-history-count';
+      historyCount.textContent = history.count
+        ? `Rescheduled ${history.count} ${history.count === 1 ? 'time' : 'times'}`
+        : 'Never rescheduled';
+      tdRescheduleHistory.appendChild(historyCount);
+      if (history.dates.length) {
+        const historyDates = document.createElement('div');
+        historyDates.className = 'resched-history-dates';
+        historyDates.textContent = history.dates.map((date) => fmtDateOnly(date)).join(' · ');
+        tdRescheduleHistory.appendChild(historyDates);
+      }
 
       const tdCurrentDate = document.createElement('td');
       tdCurrentDate.textContent = fmtDate(task.target_date);
@@ -4046,7 +4075,7 @@ export async function mountTaskflowApp(opts = {}) {
         tdActions.textContent = '—';
       }
 
-      tr.append(tdSr, tdEmployee, tdTask, tdCurrentDate, tdRequestedDate, tdAdditionalHours, tdReason, tdStatus, tdDecidedBy, tdActions);
+      tr.append(tdSr, tdEmployee, tdTask, tdRescheduleHistory, tdCurrentDate, tdRequestedDate, tdAdditionalHours, tdReason, tdStatus, tdDecidedBy, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -4063,6 +4092,11 @@ export async function mountTaskflowApp(opts = {}) {
       const statusPill = task.reschedule_status === 'Pending' ? 'pill-Pending'
         : task.reschedule_status === 'Approved' ? 'pill-Completed'
           : 'pill-Rejected';
+      const history = getRescheduleHistory(task);
+      const historyLabel = history.count
+        ? `Rescheduled ${history.count} ${history.count === 1 ? 'time' : 'times'}`
+        : 'Never rescheduled';
+      const historyDates = history.dates.map((date) => fmtDateOnly(date)).join(' · ');
       card.innerHTML = `
         <div class="task-card-header">
           <span class="pill ${statusPill}">${escapeHtml(task.reschedule_status)}</span>
@@ -4071,6 +4105,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="task-card-body">
           ${isAdmin ? `<div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>` : ''}
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
+          <div class="task-detail-line"><span class="task-detail-label">Reschedule history:</span> ${escapeHtml(historyLabel)}${historyDates ? ` · ${escapeHtml(historyDates)}` : ''}</div>
           <div class="task-detail-line"><span class="task-detail-label">Current date:</span> ${escapeHtml(fmtDate(task.target_date))}</div>
           <div class="task-detail-line"><span class="task-detail-label">Requested date:</span> ${escapeHtml(fmtDateOnly(task.reschedule_requested_date))}</div>
           <div class="task-detail-line"><span class="task-detail-label">Additional hours:</span> ${task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === '' ? 'Not saved' : escapeHtml(fmtHrsLabel(task.reschedule_requested_additional_hours))}</div>
@@ -9405,18 +9440,19 @@ export async function mountTaskflowApp(opts = {}) {
 
       if (verified) {
         if (doneDay && doneDay.getTime() === rDate.getTime()) {
-          doneToday.push({ ...t, _section: 'done', _daysLate: 0 });
+          doneToday.push({ ...t, _reportTargetDate: activePlanDate(t), _section: 'done', _daysLate: 0 });
         }
         return;
       }
 
-      const targetD = t.target_date ? parseLocalDate(t.target_date) : null;
+      const reportTargetDate = activePlanDate(t);
+      const targetD = reportTargetDate ? parseLocalDate(reportTargetDate) : null;
       if (!targetD || Number.isNaN(targetD.getTime())) return;
       targetD.setHours(0, 0, 0, 0);
       if (targetD > rDate) return;
 
       const daysLate = Math.floor((rDate - targetD) / 86400000);
-      const row = { ...t, _daysLate: Math.max(0, daysLate), _section: daysLate > 0 ? 'overdue' : 'pending' };
+      const row = { ...t, _reportTargetDate: reportTargetDate, _daysLate: Math.max(0, daysLate), _section: daysLate > 0 ? 'overdue' : 'pending' };
       if (daysLate > 0) overdue.push(row);
       else pending.push(row);
     });
@@ -9425,7 +9461,7 @@ export async function mountTaskflowApp(opts = {}) {
     return [...overdue, ...pending, ...doneToday];
   }
 
-  // Builds the PMS-style main table (Sr, Prev. date, Target date, Task, Assignee, Delay, Remarks)
+  // Builds the PMS-style main table with task type and assignment details.
   function buildDrptPmsTable(tasks, prevDate) {
     const wrap = document.createElement('div');
     wrap.className = 'table-wrap drpt-pms-wrap';
@@ -9437,8 +9473,10 @@ export async function mountTaskflowApp(opts = {}) {
       <th class="col-sr">Sr.no</th>
       <th>Prev. date</th>
       <th>Target date</th>
+      <th>Task Type</th>
       <th>Task</th>
-      <th>Assigne</th>
+      <th>Assigned By</th>
+      <th>Assignee</th>
       <th>Delay</th>
       <th>Remarks</th>
     </tr></thead>`;
@@ -9457,16 +9495,18 @@ export async function mountTaskflowApp(opts = {}) {
       tr.innerHTML = `
         <td><span class="sr-number">${i + 1}</span></td>
         <td style="white-space:nowrap;font-size:0.82rem">${escapeHtml(prevLabel)}</td>
-        <td style="white-space:nowrap;font-size:0.82rem">${t.target_date ? fmtDateOnly(t.target_date) : '—'}</td>
+        <td style="white-space:nowrap;font-size:0.82rem">${t._reportTargetDate ? fmtDateOnly(t._reportTargetDate) : '—'}</td>
+        <td style="font-size:0.82rem">${escapeHtml(t.task_type?.name ?? '—')}</td>
         <td class="drpt-task-cell">
           <div style="font-size:0.8rem;font-weight:700;color:var(--indigo,#4f46e5);text-transform:uppercase">${escapeHtml(t.project?.name ?? '')}</div>
           <div style="font-size:0.82rem">${escapeHtml(t.description)}</div>
         </td>
+        <td style="font-size:0.82rem">${escapeHtml(t.assigned_by_user?.full_name ?? '—')}</td>
         <td style="font-weight:600;font-size:0.82rem">${escapeHtml(t.assigned_to_user?.full_name ?? '—')}</td>
         <td>${delayHtml}</td>
         <td></td>
       `;
-      const remarksCell = tr.children[6];
+      const remarksCell = tr.children[8];
       remarksCell.innerHTML = `<input type="text" value="" placeholder="Add remark…" class="drpt-remark-input" />`;
       tbody.appendChild(tr);
     });
@@ -10042,10 +10082,11 @@ export async function mountTaskflowApp(opts = {}) {
         },
         {
           heading: '5a. Task completion time',
-          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours'],
+          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Accepted', 'Submitted', 'Office hours'],
           body: (ct.rows || []).map((r) => [
             pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
             pdfCell(r.task_type), pdfCell(fmtWvdDateTime(r.assigned_at)),
+            pdfCell(fmtWvdDateTime(r.accepted_at)),
             pdfCell(fmtWvdDateTime(r.submitted_at)), pdfCell(fmtHrs(r.hours)),
           ]),
         },
@@ -10253,9 +10294,10 @@ export async function mountTaskflowApp(opts = {}) {
       <td class="wvd-desc">${escapeHtml(r.description || '—')}</td>
       <td>${escapeHtml(r.task_type)}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.assigned_at))}</td>
+      <td>${escapeHtml(fmtWvdDateTime(r.accepted_at))}</td>
       <td>${escapeHtml(fmtWvdDateTime(r.submitted_at))}</td>
       <td>${fmtHrs(r.hours)}</td>
-    </tr>`).join('') || `<tr><td colspan="8" class="empty-state">No matched assignment → submission pairs</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="9" class="empty-state">No matched assignment → submission pairs</td></tr>`;
 
     // 5b · Verify turnaround
     const vt = dash.verify_turnaround || {};
@@ -10334,7 +10376,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
             <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK DESCRIPTION</th><th>TASK TYPE</th>
-            <th>ASSIGNED (TIME STAMP)</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
+            <th>ASSIGNED (TIME STAMP)</th><th>ACCEPTED TIME</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${ctRows}</tbody>
         </table></div>
@@ -10543,6 +10585,9 @@ export async function mountTaskflowApp(opts = {}) {
           { label: 'Project', value: r.project },
           { label: 'Timestamp (Assigned)', value: r.assigned_label },
           { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Original Due Date', value: r.original_target_date || '—' },
+          { label: 'Rescheduled To', value: (r.rescheduled_to_dates || []).join(', ') || '—' },
+          { label: 'Reschedule Count', value: r.reschedule_count ?? 0 },
           { label: 'Hrs to Complete', value: r.hours_label },
           { label: 'Hold / Resume', value: r.hold_resume_label },
           { label: 'Total Hold', value: r.total_hold_label },
@@ -10684,6 +10729,9 @@ export async function mountTaskflowApp(opts = {}) {
           { label: 'Project', value: r.project },
           { label: 'Timestamp (Assigned)', value: r.assigned_label },
           { label: 'Emp Acceptance Time', value: r.accepted_label },
+          { label: 'Original Due Date', value: r.original_target_date || '—' },
+          { label: 'Rescheduled To', value: (r.rescheduled_to_dates || []).join(', ') || '—' },
+          { label: 'Reschedule Count', value: r.reschedule_count ?? 0 },
           { label: 'Hrs to Complete', value: r.hours_label },
           { label: 'Hold / Resume', value: r.hold_resume_label },
           { label: 'Total Hold', value: r.total_hold_label },
