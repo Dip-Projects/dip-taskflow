@@ -16,7 +16,9 @@ const {
   holdResumeSummary,
   holdResumeLabel,
   needsReaccept,
+  wasRescheduled,
   activePlanDate,
+  endOfPlanDay,
   originalPlanDate,
   fmtDuration,
   verificationWorkDueDate,
@@ -79,6 +81,21 @@ function assignedHours(t) {
   return numOrNull(t.hours_to_complete);
 }
 
+function rescheduledTargetDates(t) {
+  const events = Array.isArray(t.task_events) ? t.task_events : [];
+  const dates = events
+    .filter((event) => event && ['rescheduled_by_admin', 'reschedule_approved'].includes(event.action))
+    .map((event) => event.to_target_date)
+    .filter((date) => typeof date === 'string' && date.trim())
+    .map((date) => date.slice(0, 10));
+
+  if (!dates.length && t.reschedule_count > 0) {
+    const currentDate = t.reschedule_approved_target_date || t.target_date;
+    if (currentDate) dates.push(String(currentDate).slice(0, 10));
+  }
+  return dates;
+}
+
 /** Hours used for live deadline after accept / resume. */
 function timerHours(t) {
   return workTimerBudgetHours(t);
@@ -121,8 +138,17 @@ function buildDelayReportRows(tasks, opts = {}) {
       let status = 'N/A';
       let delayLabel = 'Due starts after acceptance';
       let delayMs = null;
+      const hasRescheduledPlanDue = wasRescheduled(t) && !!activePlanDate(t);
 
-      if (awaitingReaccept) {
+      if (hasRescheduledPlanDue) {
+        const planDue = endOfPlanDay(activePlanDate(t));
+        if (planDue) {
+          deadlineIso = planDue.toISOString();
+          const suffix = awaitingReaccept ? ' (awaiting re-accept)' : '';
+          deadlineLabel = `${fmtDelayStamp(planDue)} (rescheduled plan due${suffix})`;
+        }
+        if (awaitingReaccept) acceptedLabel = 'Rescheduled — not accepted again';
+      } else if (awaitingReaccept) {
         acceptedLabel = 'Rescheduled — not accepted again';
         deadlineLabel = 'Waiting for re-accept';
       } else if (acceptedAt) {
@@ -144,12 +170,11 @@ function buildDelayReportRows(tasks, opts = {}) {
         submittedLabel = fmtDelayStamp(submittedAt) || '—';
       }
 
-      if (awaitingReaccept) {
+      if (!acceptedAt && !hasRescheduledPlanDue) {
         status = 'N/A';
-        delayLabel = 'Rescheduled — accept again to restart the timer';
-      } else if (!acceptedAt) {
-        status = 'N/A';
-        delayLabel = 'Due starts after acceptance';
+        delayLabel = awaitingReaccept
+          ? 'Rescheduled — accept again to restart the timer'
+          : 'Due starts after acceptance';
       } else if (deadlineIso) {
         const compareAt = submittedAt ? new Date(submittedAt) : now;
         const due = new Date(deadlineIso);
@@ -254,6 +279,7 @@ function buildDelayReportRows(tasks, opts = {}) {
         original_target_date: localDayString(originalPlanDate(t)),
         active_target_date: localDayString(activePlanDate(t)),
         reschedule_count: numOrNull(t.reschedule_count) || 0,
+        rescheduled_to_dates: rescheduledTargetDates(t),
         awaiting_reaccept: awaitingReaccept,
         deadline_at: deadlineIso,
         deadline_label: deadlineLabel,
@@ -395,6 +421,9 @@ function buildEmpReportRows(tasks, opts = {}) {
       status: r.status,
       timing_label: timingLabel,
       delay_label: r.delay_label,
+      original_target_date: r.original_target_date,
+      active_target_date: r.active_target_date,
+      rescheduled_to_dates: r.rescheduled_to_dates,
       reschedule_count: r.reschedule_count,
     };
   });
