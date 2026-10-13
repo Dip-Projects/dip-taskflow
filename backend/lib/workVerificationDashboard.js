@@ -289,6 +289,7 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
         description: String(t.description || '').trim() || '—',
         task_type: typeName(t),
         assigned_at: assigned,
+        accepted_at: t.accepted_at || null,
         submitted_at: submitted,
         hours: officeHrsBetween(assigned, submitted),
         calendar_hours: hrsBetween(assigned, submitted),
