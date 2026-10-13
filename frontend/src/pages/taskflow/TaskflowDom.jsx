@@ -1,4 +1,4 @@
-/* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
+  /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
 import { useEffect, useLayoutEffect, useState } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
 import SiteReport from '../site/Sitereport';
@@ -1093,12 +1093,13 @@ export default function TaskflowDom() {
               </div>
               <div className="table-card view-desktop-only">
                 <div className="table-scroll">
-                  <table className="data-table">
+                  <table className="data-table resched-requests-table">
                     <thead>
                       <tr>
                         <th className="col-sr">Sr No</th>
                         <th className="col-resched-emp">Employee</th>
                         <th className="col-resched-task">Task</th>
+                        <th className="col-resched-history">Reschedule history</th>
                         <th className="col-resched-date">Current date</th>
                         <th className="col-resched-date">Requested date</th>
                         <th className="col-resched-date">Additional hours</th>
