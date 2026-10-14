@@ -4038,8 +4038,9 @@ export async function mountTaskflowApp(opts = {}) {
         tdRescheduleHistory.appendChild(historyDates);
       }
 
+      // Current date = when the reschedule request was sent; Requested date = the date the task is moved to
       const tdCurrentDate = document.createElement('td');
-      tdCurrentDate.textContent = fmtDate(task.target_date);
+      tdCurrentDate.textContent = fmtDate(task.reschedule_requested_at);
 
       const tdRequestedDate = document.createElement('td');
       tdRequestedDate.textContent = fmtDateOnly(task.reschedule_requested_date);
@@ -4106,7 +4107,7 @@ export async function mountTaskflowApp(opts = {}) {
           ${isAdmin ? `<div class="task-detail-line"><span class="task-detail-label">Employee:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>` : ''}
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
           <div class="task-detail-line"><span class="task-detail-label">Reschedule history:</span> ${escapeHtml(historyLabel)}${historyDates ? ` · ${escapeHtml(historyDates)}` : ''}</div>
-          <div class="task-detail-line"><span class="task-detail-label">Current date:</span> ${escapeHtml(fmtDate(task.target_date))}</div>
+          <div class="task-detail-line"><span class="task-detail-label">Current date:</span> ${escapeHtml(fmtDate(task.reschedule_requested_at))}</div>
           <div class="task-detail-line"><span class="task-detail-label">Requested date:</span> ${escapeHtml(fmtDateOnly(task.reschedule_requested_date))}</div>
           <div class="task-detail-line"><span class="task-detail-label">Additional hours:</span> ${task.reschedule_requested_additional_hours == null || task.reschedule_requested_additional_hours === '' ? 'Not saved' : escapeHtml(fmtHrsLabel(task.reschedule_requested_additional_hours))}</div>
           ${task.reschedule_reason ? `<div class="task-detail-line"><span class="task-detail-label">Reason:</span> ${escapeHtml(task.reschedule_reason)}</div>` : ''}
@@ -10376,7 +10377,7 @@ export async function mountTaskflowApp(opts = {}) {
         <div class="wvd-table-wrap"><table class="wvd-matrix wvd-detail">
           <thead><tr>
             <th>SR</th><th>EMPLOYEE</th><th>PROJECT</th><th>TASK DESCRIPTION</th><th>TASK TYPE</th>
-            <th>ASSIGNED (TIME STAMP)</th><th>ACCEPTED TIME</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
+            <th>ASSIGNED (TIME STAMP)</th><th>Accepted Time</th><th>SUBMITTED FOR VERIFICATION</th><th>TIME TAKEN (OFFICE HRS)</th>
           </tr></thead>
           <tbody>${ctRows}</tbody>
         </table></div>
