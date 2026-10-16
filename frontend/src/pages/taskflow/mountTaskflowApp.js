@@ -7,6 +7,7 @@ const API_BASE = '/api';
 
 let _onLogout = null;
 let _listenersBound = false;
+let _sidebarResizeHandler = null;
 let _enterApp = null;
 let els = {};
 let state = {
@@ -323,6 +324,8 @@ export async function mountTaskflowApp(opts = {}) {
     els.credsPassword.textContent = password;
     els.credsModal.hidden = false;
   }
+  
+
 
   function hideFormMsg(el) {
     if (el) el.hidden = true;
@@ -357,7 +360,6 @@ export async function mountTaskflowApp(opts = {}) {
         localStorage.setItem('tf_token', newToken);
       }
     }
-
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) {
       // Login attempt ke liye backend ka asli message dikhao (e.g. "Invalid
@@ -590,13 +592,20 @@ export async function mountTaskflowApp(opts = {}) {
     return false;
   }
 
+  // Fallback only for legacy verifications started before the verifier chose hours
   const VERIFICATION_SLA_HOURS = 2;
+
+  /** Hours the verifier chose at Start Verification (legacy rows fall back to 2h). */
+  function verificationAllowedHoursOf(task) {
+    const allowed = Number(task?.verification_allowed_hours);
+    return allowed > 0 ? allowed : VERIFICATION_SLA_HOURS;
+  }
 
   function verificationWorkDueDate(task) {
     if (!task?.verification_started_at) return null;
     const started = parseLocalDate(task.verification_started_at);
     if (!started || Number.isNaN(started.getTime())) return null;
-    return addWorkingHours(started, VERIFICATION_SLA_HOURS, { fromNowIfToday: false });
+    return addWorkingHours(started, verificationAllowedHoursOf(task), { fromNowIfToday: false });
   }
 
   function verificationOverdueWorkingHours(task, now = new Date()) {
@@ -784,7 +793,7 @@ export async function mountTaskflowApp(opts = {}) {
       const hrsPast = verificationOverdueWorkingHours(task, now);
       return `
         <div>Verify due: ${fmtDate(due.toISOString())}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past 2 working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past ${verificationAllowedHoursOf(task)}h working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
       `;
     }
     // Rescheduled but never accepted again — the plan date is the miss here.
@@ -811,7 +820,7 @@ export async function mountTaskflowApp(opts = {}) {
       <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
     `;
   }
-
+  
   function fmtDate(iso) {
     if (!iso) return '—';
     return parseLocalDate(iso).toLocaleString(undefined, {
@@ -831,20 +840,12 @@ export async function mountTaskflowApp(opts = {}) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
-  // Admin-facing deadline: ONLY the target date, no time. The employee-facing
-  // calculated deadline (fmtCalculatedDeadline / fmtDueDateFromCreated below)
-  // is the one that shows an actual time, since that's the real computed
-  // due-by moment; the raw target_date has no meaningful time of its own.
+  
   function fmtDeadlineDateOnlyWithHours(iso, hours) {
     const d = fmtDateOnly(iso);
     return hours != null ? `${d} · ${hours}h` : d;
   }
 
-  // ── Office-hours-aware due date calculator ─────────────────────────────────
-  // Office hours: 9:30 AM – 6:30 PM, Monday–Saturday (Sunday off), with a
-  // 1-hour lunch break from 1:00 PM – 2:00 PM that doesn't count as work time.
-  // Due date = task's target date/time + hours_to_complete of *working* time,
-  // skipping nights, lunch, and Sundays.
   const OFFICE_HOURS = {
     startH: 9, startM: 30,
     endH: 18, endM: 30,
@@ -884,13 +885,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     return d;
   }
-
-  // Adds `hours` of working time (office hours, minus lunch, Mon–Sat only) to
-  // a starting datetime and returns the resulting Date.
-  // function addWorkingHours(startDate, hours) {
-  //   let remainingMs = (Number(hours) || 0) * 3600000;
-  //   let current = snapToWorkingMoment(parseLocalDate(startDate));
-  //   if (remainingMs <= 0) return current;
+  
   function addWorkingHours(startDate, hours, { fromNowIfToday = true } = {}) {
     let remainingMs = (Number(hours) || 0) * 3600000;
     let current = snapToWorkingMoment(parseLocalDate(startDate));
@@ -1215,18 +1210,22 @@ export async function mountTaskflowApp(opts = {}) {
     }
     document.body.classList.add('sidebar-open');
   }
+  // Assign (not addEventListener) so a re-mount replaces the handler instead of
+  // stacking a second one — two handlers on ☰ open and close the drawer in the same click.
   if (els.menuToggle) {
-    els.menuToggle.addEventListener('click', (e) => {
+    els.menuToggle.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (els.sidebar?.classList.contains('open')) closeSidebar();
       else openSidebar();
-    });
+    };
   }
   // Do not close on overlay / outside / main clicks — only ☰ toggles.
-  window.addEventListener('resize', () => {
+  if (_sidebarResizeHandler) window.removeEventListener('resize', _sidebarResizeHandler);
+  _sidebarResizeHandler = () => {
     if (els.sidebar?.classList.contains('open')) openSidebar();
-  });
+  };
+  window.addEventListener('resize', _sidebarResizeHandler);
 
   // ─── app shell ───────────────────────────────────────────────────────────────
   async function enterApp() {
@@ -2305,7 +2304,7 @@ export async function mountTaskflowApp(opts = {}) {
       } else if (task.verification_status === 'Pending Verification') {
         statusHtml += verifyingStatusPillHtml(task);
       } else if (task.verification_status === 'Verified') {
-        statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
+        statusHtml += verifiedStatusPillHtml(task);
       } else if (task.verification_status === 'Verification Rejected') {
         statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
       } else if (task.verification_status === 'Updation Required') {
@@ -2487,7 +2486,7 @@ export async function mountTaskflowApp(opts = {}) {
         ? `<span class="source-badge source-verification">⏳ Verification</span>`
         : `<span class="source-badge source-assignment">📋 Assignment</span>`;
 
-      // Overdue detail (assignment work hours or verification 2h SLA)
+      // Overdue detail (assignment work hours or verification SLA — verifier's chosen hours)
       const tdDate = document.createElement('td');
       tdDate.style.wordBreak = 'break-word';
       tdDate.innerHTML = fmtOverdueDateCell(task);
@@ -2503,7 +2502,7 @@ export async function mountTaskflowApp(opts = {}) {
       const tdVerifier = document.createElement('td');
       if (task.verifier?.full_name) {
         const verifyNote = isVerificationOverdueTask(task)
-          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;2h</div>`
+          ? `<div style="color:#d33;font-size:0.75rem;margin-top:2px">Pending verify &gt;${escapeHtml(String(verificationAllowedHoursOf(task)))}h</div>`
           : (task.verification_status === 'Pending Verification' && !task.verification_started_at
             ? `<div style="color:var(--muted);font-size:0.75rem;margin-top:2px">Not started yet</div>`
             : '');
@@ -3078,7 +3077,7 @@ export async function mountTaskflowApp(opts = {}) {
       } else if (task.verification_status === 'Pending Verification') {
         statusHtml += verifyingStatusPillHtml(task);
       } else if (task.verification_status === 'Verified') {
-        statusHtml += `<br><span class="pill pill-Completed" style="margin-top:4px">✅ Verified</span>`;
+        statusHtml += verifiedStatusPillHtml(task);
       } else if (task.verification_status === 'Verification Rejected') {
         statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
       } else if (task.verification_status === 'Updation Required') {
@@ -3183,6 +3182,14 @@ export async function mountTaskflowApp(opts = {}) {
     return `<br><span class="pill pill-PendingVerification" style="margin-top:4px" title="${who ? `Verifier: ${escapeHtml(who)}` : ''}">${label}</span>`;
   }
 
+  function verifiedStatusPillHtml(task) {
+    const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
+    const label = who
+      ? `✅ Verified by ${escapeHtml(who)}`
+      : '✅ Verified';
+    return `<br><span class="pill pill-Completed" style="margin-top:4px" title="${who ? `Verified by: ${escapeHtml(who)}` : ''}">${label}</span>`;
+  }
+
   function verificationBadgeHtml(task) {
     if (task.verification_status === 'Updation Required') {
       return `<span class="pill pill-Pending" style="font-size:0.7rem">📝 Updation Required</span>`;
@@ -3216,6 +3223,8 @@ export async function mountTaskflowApp(opts = {}) {
     const isMdoOffice = isMdoOfficeUser();
     const isTicketRaised = task.status === 'Ticket Raised';
     const isReschedulePending = task.reschedule_status === 'Pending';
+    // Employees may send only one reschedule request per task
+    const hasRescheduleRequest = !!task.reschedule_requested_at;
     const items = [];
 
     if (!isAdminManaging && !isMdoOffice && task.status === 'Pending') {
@@ -3271,6 +3280,8 @@ export async function mountTaskflowApp(opts = {}) {
         items.push({ label: '🗓️ Reschedule blocked — ticket raised', disabled: true });
       } else if (isReschedulePending) {
         items.push({ label: '🗓️ Reschedule request pending…', disabled: true });
+      } else if (hasRescheduleRequest) {
+        items.push({ label: '🗓️ Reschedule already requested', disabled: true });
       } else {
         items.push({ label: '🗓️ Request reschedule', onClick: () => openReschedRequestModal(task.id) });
       }
@@ -3884,13 +3895,65 @@ export async function mountTaskflowApp(opts = {}) {
     return !!(task?.verification_started_at || task?.verification_started_by);
   }
 
-  async function startVerification(taskId) {
-    return api(`/tasks/${taskId}/start-verification`, { method: 'PATCH' });
+  async function startVerification(taskId, verificationHours) {
+    return api(`/tasks/${taskId}/start-verification`, {
+      method: 'PATCH',
+      body: { verification_hours: verificationHours },
+    });
+  }
+
+  /** Popup asking how many hours the verification will take. Resolves to the hours, or null if cancelled. */
+  function askVerificationHours() {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-backdrop';
+      wrap.innerHTML = `
+        <div class="modal" role="dialog" aria-modal="true" aria-label="Verification time">
+          <div class="modal-header">
+            <h3>Start verification</h3>
+            <button type="button" class="modal-close" aria-label="Close">&times;</button>
+          </div>
+          <form class="modal-body">
+            <p>How many hours will this verification take? Verification becomes overdue once this time is over.</p>
+            <div class="field">
+              <label for="verifyHoursInput">Hours required <span class="req">*</span></label>
+              <input id="verifyHoursInput" type="number" min="0.5" max="24" step="any" required />
+            </div>
+            <p class="form-error" hidden></p>
+            <div class="modal-actions">
+              <button type="button" class="ghost-btn-text" data-act="cancel">Cancel</button>
+              <button type="submit" class="primary-btn primary-btn-inline">Start verification</button>
+            </div>
+          </form>
+        </div>`;
+      const close = (value) => {
+        wrap.remove();
+        resolve(value);
+      };
+      const input = wrap.querySelector('#verifyHoursInput');
+      const msg = wrap.querySelector('.form-error');
+      wrap.querySelector('.modal-close').addEventListener('click', () => close(null));
+      wrap.querySelector('[data-act="cancel"]').addEventListener('click', () => close(null));
+      wrap.querySelector('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const hours = Number(input.value);
+        if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
+          msg.textContent = 'Enter how many hours the verification will take (more than 0, up to 24)';
+          msg.hidden = false;
+          return;
+        }
+        close(hours);
+      });
+      document.body.appendChild(wrap);
+      input.focus();
+    });
   }
 
   async function clickStartVerification(task, actionsEl, btn) {
     const id = task?.id;
     if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
+    const verificationHours = await askVerificationHours();
+    if (verificationHours == null) return;
     _startVerifyBusy.add(id);
     if (btn) {
       btn.disabled = true;
@@ -3900,7 +3963,7 @@ export async function mountTaskflowApp(opts = {}) {
     }
     showBusyOverlay('Starting verification…');
     try {
-      const updated = await startVerification(id);
+      const updated = await startVerification(id, verificationHours);
       const next = {
         ...task,
         ...(updated || {}),
@@ -3908,7 +3971,12 @@ export async function mountTaskflowApp(opts = {}) {
         verification_started_by: updated?.verification_started_by || state.user?.id,
       };
       startVerificationInline(next, actionsEl);
-      showToast('Verification started', 'success');
+      if (Number(updated?.verification_allowed_hours) === verificationHours) {
+        showToast('Verification started', 'success');
+      } else {
+        // Server answered without saving the hours — its backend code is out of date
+        showToast(`Verification started, but ${verificationHours}h was not saved. Restart/redeploy the backend.`, 'error');
+      }
       await loadVerifications({ quiet: true });
     } catch (err) {
       if (btn) {
@@ -3927,7 +3995,7 @@ export async function mountTaskflowApp(opts = {}) {
   async function loadVerifications(opts = {}) {
     if (!opts.quiet) {
       if (els.verificationsTableBody) {
-        els.verificationsTableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Loading…</td></tr>`;
+        els.verificationsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading…</td></tr>`;
       }
       if (els.verificationsList) {
         els.verificationsList.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -4444,7 +4512,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   function renderVerificationsTable(tbody, tasks) {
     if (!tasks || tasks.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">📭</span>No verification requests</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -4481,6 +4549,32 @@ export async function mountTaskflowApp(opts = {}) {
       const tdPendingWith = document.createElement('td');
       tdPendingWith.className = 'col-vpending';
       tdPendingWith.innerHTML = `<strong style="font-weight:600">${escapeHtml(task.verifier?.full_name ?? '—')}</strong>`;
+
+      // Verification timer — due time and time left / overdue, from Start Verification + chosen hours
+      const tdTimer = document.createElement('td');
+      tdTimer.className = 'col-vtimer';
+      if (!verificationHasStarted(task)) {
+        tdTimer.innerHTML = `<div class="vt-timer vt-timer--idle"><span class="vt-timer-main">Not started</span></div>`;
+      } else {
+        const due = verificationWorkDueDate(task);
+        const fmtHm = (h) => {
+          const mins = Math.round(h * 60);
+          return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+        };
+        if (!due) {
+          tdTimer.innerHTML = `<div class="vt-timer vt-timer--idle"><span class="vt-timer-main">—</span></div>`;
+        } else if (isVerificationOverdueTask(task)) {
+          const over = verificationOverdueWorkingHours(task);
+          tdTimer.innerHTML = `<div class="vt-timer vt-timer--overdue">`
+            + `<span class="vt-timer-main">Overdue by ${escapeHtml(fmtHm(over))}</span>`
+            + `<span class="vt-timer-due">Due ${escapeHtml(fmtDate(due.toISOString()))}</span></div>`;
+        } else {
+          const left = elapsedWorkingHoursBetween(new Date(), due);
+          tdTimer.innerHTML = `<div class="vt-timer vt-timer--running">`
+            + `<span class="vt-timer-main">${escapeHtml(fmtHm(left))} left</span>`
+            + `<span class="vt-timer-due">Due ${escapeHtml(fmtDate(due.toISOString()))}</span></div>`;
+        }
+      }
 
       // Attachments
       const tdAttach = document.createElement('td');
@@ -4528,7 +4622,7 @@ export async function mountTaskflowApp(opts = {}) {
         tdActions.appendChild(startBtn);
         appendForwardVerificationBtn(tdActions, task);
       }
-      tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdAttach, tdDate, tdActions);
+      tr.append(tdSr, tdProject, tdTaskType, tdDesc, tdSubmittedBy, tdPendingWith, tdTimer, tdAttach, tdDate, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -5117,6 +5211,7 @@ export async function mountTaskflowApp(opts = {}) {
       row.className = 'leave-task-action-row';
       row.dataset.taskId = t.id;
       const canResched = !!t.rescheduling_possible && t.reschedule_status !== 'Pending'
+        && !t.reschedule_requested_at
         && t.status !== 'Ticket Raised' && t.verification_status !== 'Pending Verification';
       const proj = t.project?.name ? ` · ${t.project.name}` : '';
       const windowTag = t.in_leave_window
@@ -5506,7 +5601,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   function attachBuddyRespondButtons(container, leave) {
     if (!container) return;
-    const yesBtn = document.createElement('button');
+    const yesBtn = document.createElement('button');  
     yesBtn.className = 'action-btn action-complete';
     yesBtn.textContent = '✅ Yes, I\'ll cover';
     yesBtn.addEventListener('click', async () => {
@@ -9990,6 +10085,20 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
+  /** Project-wise lines for one employee, worded like the Work By Employee card. */
+  function pdfProjectLines(e) {
+    const personal = e.is_verifier ? 'Personal: ' : '';
+    return (e.projects || [])
+      .filter((p) => p.count || p.verified)
+      .map((p) => {
+        const parts = [];
+        if (p.count) parts.push(`${personal}${p.count} ${p.count === 1 ? 'task' : 'tasks'} (${fmtWorkedHours(p.hours)})`);
+        if (p.verified) parts.push(`Verified: ${p.verified} ${p.verified === 1 ? 'task' : 'tasks'} (${fmtWorkedHours(p.verify_hours)})`);
+        return `${p.name}: ${parts.join(' · ')}`;
+      })
+      .join('\n') || '—';
+  }
+
   function downloadReportPdf({ title, subtitle, sections }) {
     const win = window.open('', '_blank');
     if (!win) return showToast('Allow pop-ups so the print box can open', 'error');
@@ -10007,7 +10116,7 @@ export async function mountTaskflowApp(opts = {}) {
         .sub { text-align: center; font-size: 11pt; color: #444; margin: 0 0 12px; }
         h2 { font-size: 12pt; margin: 12px 0 6px; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-line; }
         th { background: #1f2937; color: #fff; font-weight: 700; }
         tr:nth-child(even) td { background: #f7f3ec; }
         thead { display: table-header-group; }
@@ -10045,7 +10154,7 @@ export async function mountTaskflowApp(opts = {}) {
             pdfCell(e.total),
             pdfCell(e.verified),
             pdfCell(e.pending),
-            pdfCell((e.projects || []).map((p) => `${p.name}: ${p.count}`).join(', ')),
+            pdfProjectLines(e),
           ]),
         },
         {
@@ -10103,6 +10212,90 @@ export async function mountTaskflowApp(opts = {}) {
       ],
     });
     showToast('Print box opened. All columns are on the page.', 'success');
+  }
+
+  /** Task-wise time popup for one employee on one project (from the Work By Employee card). */
+  function showEmpProjectPopup(emp, proj) {
+    const existing = document.getElementById('empProjPopup');
+    if (existing) existing.remove();
+
+    const done = proj.completed_tasks || [];
+    const verified = proj.verified_tasks || [];
+    const totalHrs = done.reduce((sum, t) => sum + (Number(t.hours) || 0), 0);
+
+
+    const doneRows = done.map((t) => `<tr>
+        <td>${escapeHtml(String(t.sr ?? '—'))}</td>
+        <td class="epp-desc">${escapeHtml(t.description || '—')}</td>
+        <td>${escapeHtml(t.task_type || '—')}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.assigned_at))}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.accepted_at))}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.submitted_at))}</td>
+        <td class="epp-time">${escapeHtml(fmtWorkedHours(t.hours))}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty-state">No completed tasks</td></tr>';
+
+    const verifiedSection = verified.length ? `
+          <h4 class="epp-sec-title">Verified by ${escapeHtml(emp.name)} <small>time = start verification → verified (office hrs)</small></h4>
+          <div class="epp-table-wrap"><table class="epp-table">
+            <thead><tr><th>SR</th><th>Task</th><th>Submitted by</th><th>Type</th><th>Start verification</th><th>Verified</th><th>Time taken</th></tr></thead>
+            <tbody>${verified.map((t) => `<tr>
+              <td>${escapeHtml(String(t.sr ?? '—'))}</td>
+              <td class="epp-desc">${escapeHtml(t.description || '—')}</td>
+              <td>${escapeHtml(t.employee || '—')}</td>
+              <td>${escapeHtml(t.task_type || '—')}</td>
+              <td>${escapeHtml(fmtWvdDateTime(t.verify_started_at))}</td>
+              <td>${escapeHtml(fmtWvdDateTime(t.verified_at))}</td>
+              <td class="epp-time">${escapeHtml(fmtWorkedHours(t.verify_hours))}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>` : '';
+
+    const el = document.createElement('div');
+    el.id = 'empProjPopup';
+    el.className = 'dr-popup-backdrop';
+    el.innerHTML = `
+      <div class="dr-popup epp-popup" role="dialog" aria-modal="true" aria-label="Task-wise time">
+        <div class="dr-popup-header">
+          <h3>${escapeHtml(emp.name)} · ${escapeHtml(proj.name)}</h3>
+          <button class="dr-popup-close" aria-label="Close">✕</button>
+        </div>
+        <div class="dr-popup-body">
+          <div class="epp-summary">
+            <span><strong>${done.length}</strong> ${done.length === 1 ? 'task' : 'tasks'} completed</span>
+            <span>Total time <strong>${escapeHtml(fmtWorkedHours(totalHrs))}</strong> <small>(office hrs)</small></span>
+          </div>
+          <h4 class="epp-sec-title">Completed tasks <small>time = accepted → sent for verification, minus hold time</small></h4>
+          <div class="epp-table-wrap"><table class="epp-table">
+            <thead><tr><th>SR</th><th>Task</th><th>Type</th><th>Assigned</th><th>Accepted</th><th>Submitted</th><th>Time taken</th></tr></thead>
+            <tbody>${doneRows}</tbody>
+          </table></div>
+          ${verifiedSection}
+        </div>
+      </div>`;
+
+    const close = () => {
+      el.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    el.addEventListener('click', (e) => { if (e.target === el) close(); });
+    el.querySelector('.dr-popup-close').addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+  }
+
+  function openEmpProjectPopupFromRow(row) {
+    const emp = _tdDash?.by_employee?.[Number(row.dataset.empIdx)];
+    const proj = emp?.projects?.[Number(row.dataset.projIdx)];
+    if (!emp || !proj) {
+      showToast('Could not find this project in the dashboard data — reload the dashboard', 'error');
+      return;
+    }
+    showEmpProjectPopup(emp, proj, {
+      empIdx: row.dataset.empIdx,
+      projIdx: row.dataset.projIdx,
+      rowCount: row.dataset.count,
+      rowVerified: row.dataset.verified,
+    });
   }
 
   function filterDashboardData(dash, allEmps) {
@@ -10193,6 +10386,12 @@ export async function mountTaskflowApp(opts = {}) {
     </table></div>`;
   }
 
+  /** "2h 15m" from office hours, matching the Work By Employee card. */
+  function fmtWorkedHours(h) {
+    const minutes = Math.round((Number(h) || 0) * 60);
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  }
+
   function renderWorkVerificationDashboard(dash, meta = {}) {
     const s = dash.summary || {};
     const srLabel = s.sr_from != null
@@ -10204,19 +10403,31 @@ export async function mountTaskflowApp(opts = {}) {
       : '';
 
     // 1 · Work by employee
-    const empCols = (dash.by_employee || []).map((e) => {
-      const pills = [
-        e.verified ? wvdPill(`Verified: ${e.verified}`, 'ok') : '',
-        e.pending ? wvdPill(`Pending Verification: ${e.pending}`, 'warn') : '',
-      ].filter(Boolean).join('');
-      const projects = (e.projects || []).map((p) => `
-        <div class="wvd-proj-row"><span>${escapeHtml(p.name)}</span><strong>${p.count}</strong></div>`).join('');
-      return `<div class="wvd-emp-col">
-        <div class="wvd-emp-head"><span>${escapeHtml((e.name || '').toUpperCase())}</span><em>${e.total} tasks</em></div>
-        <div class="wvd-pills">${pills || wvdPill('No status', 'muted')}</div>
-        <div class="wvd-proj-list">${projects || '<div class="wvd-muted">No projects</div>'}</div>
+    const empCols = (dash.by_employee || [])
+      .map((e, empIdx) => ({ e, empIdx }))
+      .filter(({ e }) => (e.projects || []).some((p) => p.count || p.verified))
+      .map(({ e, empIdx }) => {
+        const projects = (e.projects || []).map((p, projIdx) => {
+          const lines = [];
+          if (p.count) {
+            const personalLabel = e.is_verifier ? 'Personal' : '';
+            lines.push(`<strong>${personalLabel ? `${personalLabel}: ` : ''}${p.count} ${p.count === 1 ? 'task' : 'tasks'} (${escapeHtml(fmtWorkedHours(p.hours))})</strong>`);
+          }
+          if (p.verified) {
+            lines.push(`<strong>Verified: ${p.verified} ${p.verified === 1 ? 'task' : 'tasks'} (${escapeHtml(fmtWorkedHours(p.verify_hours))})</strong>`);
+          }
+          if (!lines.length) return '';
+          return `<div class="wvd-proj-row wvd-proj-clickable" role="button" tabindex="0" data-emp-idx="${empIdx}" data-proj-idx="${projIdx}" title="View task-wise time for ${escapeHtml(p.name)}"><span>${escapeHtml(p.name)}</span><div class="wvd-proj-vals">${lines.join('')}</div></div>`;
+        }).join('');
+        const cardTaskCount = (e.projects || []).reduce(
+          (total, p) => total + (p.count || 0) + (p.verified || 0),
+          0
+        );
+        return `<div class="wvd-emp-col">
+        <div class="wvd-emp-head"><span>${escapeHtml((e.name || '').toUpperCase())}</span><em>(${cardTaskCount} tasks)</em></div>
+        <div class="wvd-proj-list">${projects}</div>
       </div>`;
-    }).join('') || '<div class="empty-state">No employees in this range</div>';
+      }).join('') || '<div class="wvd-muted">No completed or verified task activity in this range</div>';
 
     // 2 · Project × Employee
     const pem = dash.project_employee_matrix || { employees: [], projects: [] };
@@ -10428,16 +10639,36 @@ export async function mountTaskflowApp(opts = {}) {
     }
   }
 
+  // Default From = 1st of this month, To = today (local dates, YYYY-MM-DD)
+  function fillTdDateDefaults() {
+    const fromEl = document.getElementById('tdFrom');
+    const toEl = document.getElementById('tdTo');
+    const pad = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (fromEl && !fromEl.value) fromEl.value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+    if (toEl && !toEl.value) toEl.value = ymd(now);
+  }
+
   async function loadTimeDashboard(opts = {}) {
     const body = document.getElementById('tdBody');
-    const rangeEl = document.getElementById('tdRange');
+    fillTdDateDefaults();
+    const fromVal = document.getElementById('tdFrom')?.value || '';
+    const toVal = document.getElementById('tdTo')?.value || '';
     if (!body) return;
-    const range = rangeEl?.value || 'month';
+    if (!fromVal || !toVal) {
+      body.innerHTML = '<div class="empty-state">Pick the From and To dates</div>';
+      return;
+    }
+    if (fromVal > toVal) {
+      body.innerHTML = '<div class="empty-state">From date must be on or before To date</div>';
+      return;
+    }
     try {
       let data = opts.fromCache ? _tdLastData : null;
       if (!data) {
         if (!opts.quiet) body.innerHTML = '<div class="empty-state">Building Work &amp; Verification Dashboard…</div>';
-        data = await api(`/tasks/report?range=${encodeURIComponent(range)}`);
+        data = await api(`/tasks/report?range=custom&from=${encodeURIComponent(fromVal)}&to=${encodeURIComponent(toVal)}`);
       }
       _tdLastData = data;
       const allEmps = data.report || [];
@@ -10461,15 +10692,29 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   document.getElementById('tdGenBtn')?.addEventListener('click', () => loadTimeDashboard());
-  document.getElementById('tdRange')?.addEventListener('change', () => {
-    const deptSel = document.getElementById('tdDept');
-    if (deptSel) delete deptSel.dataset.filled;
-    loadTimeDashboard();
+  // Changing either date reloads the dashboard for the new range
+  ['tdFrom', 'tdTo'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('change', () => {
+      const deptSel = document.getElementById('tdDept');
+      if (deptSel) delete deptSel.dataset.filled;
+      loadTimeDashboard();
+    });
   });
   document.getElementById('tdPerson')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
   document.getElementById('tdDept')?.addEventListener('change', () => loadTimeDashboard({ fromCache: true, quiet: true }));
   document.getElementById('tdCsvBtn')?.addEventListener('click', () => downloadTimeCsv(_tdLastData));
   document.getElementById('tdPdfBtn')?.addEventListener('click', () => printWorkDashboardPdf());
+  // Project rows in the Work By Employee cards open the task-wise time popup
+  document.getElementById('tdBody')?.addEventListener('click', (e) => {
+    const row = e.target.closest?.('.wvd-proj-clickable');
+    if (row) openEmpProjectPopupFromRow(row);
+  });
+  document.getElementById('tdBody')?.addEventListener('keydown', (e) => {
+    const row = e.target.closest?.('.wvd-proj-clickable');
+    if (!row || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault();
+    openEmpProjectPopupFromRow(row);
+  });
 
   // ─── Emp Delay Report (Task Delay Report sheet format) ─────────────────────
   let _drLast = null;

@@ -39,7 +39,7 @@ const {
   overdueSource,
   employeeWorkDueDate,
   verificationDueAt,
-  VERIFICATION_SLA_HOURS,
+  verificationAllowedHours,
 } = require('./taskOverdue');
 const { elapsedWorkingHours } = require('./workingHours');
 
@@ -168,7 +168,7 @@ async function companyTaskSummary() {
   const pageSize = 1000;
   const tasks = [];
   const select =
-    'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, accepted_at, is_on_hold, verification_started_at, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department), verifier:users!tasks_verifier_id_fkey(full_name)';
+    'id, status, verification_status, target_date, assigned_to, description, priority, hours_to_complete, accepted_at, is_on_hold, verification_started_at, verification_allowed_hours, project:projects(name), assigned_to_user:users!tasks_assigned_to_fkey(id, full_name, department), verifier:users!tasks_verifier_id_fkey(full_name)';
   for (let from = 0; from < 20000; from += pageSize) {
     const { data, error } = await supabase
       .from('tasks')
@@ -370,7 +370,7 @@ function formatOverdueBlock(t, { showAssignee = false } = {}) {
     const verifier = t.verifier?.full_name || 'Verifier';
     return (
       `  • ${(t.description || 'Task').replace(/\s+/g, ' ').slice(0, 90)}\n` +
-      `    Verify overdue: ${hrsPast}h past ${VERIFICATION_SLA_HOURS}h office limit | with ${verifier} | ${state}${who}`
+      `    Verify overdue: ${hrsPast}h past ${verificationAllowedHours(t)}h office limit | with ${verifier} | ${state}${who}`
     );
   }
 
@@ -1383,7 +1383,7 @@ async function listOverdueTasksForWa() {
   const columns =
     'id, description, target_date, priority, status, verification_status, assigned_to, ' +
     'assigned_at, created_at, accepted_at, resumed_at, hours_to_complete, original_hours_to_complete, ' +
-    'is_on_hold, hold_remaining_hours, held_at, verification_started_at, ' +
+    'is_on_hold, hold_remaining_hours, held_at, verification_started_at, verification_allowed_hours, ' +
     'project:projects(name), assignee:users!tasks_assigned_to_fkey(id, full_name, whatsapp_number)';
   const extras = ', original_target_date, reschedule_approved_target_date, reaccept_required, overdue_since_at';
 

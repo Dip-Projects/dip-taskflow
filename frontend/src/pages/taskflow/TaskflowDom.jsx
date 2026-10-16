@@ -1059,6 +1059,7 @@ export default function TaskflowDom() {
                         <th className="col-vdesc">Task / Description</th>
                         <th className="col-vsubmitted">Submitted By</th>
                         <th className="col-vpending">Pending with</th>
+                        <th className="col-vtimer">Verification timer</th>
                         <th className="col-vattach">Attachments</th>
                         <th className="col-vdate">Sent for verification</th>
                         <th className="col-vactions">Actions</th>
@@ -1742,14 +1743,12 @@ export default function TaskflowDom() {
                 </div>
                 <div className="td-toolbar mis-toolbar">
                   <label className="mis-field">
-                    <span>Range</span>
-                    <select id="tdRange">
-                      <option value="month">This month</option>
-                      <option value="last-month">Last month</option>
-                      <option value="week">This week</option>
-                      <option value="day">Today</option>
-                      <option value="all">All time</option>
-                    </select>
+                    <span>From</span>
+                    <input type="date" id="tdFrom" />
+                  </label>
+                  <label className="mis-field">
+                    <span>To</span>
+                    <input type="date" id="tdTo" />
                   </label>
                   <label className="mis-field">
                     <span>Department</span>
@@ -1773,7 +1772,7 @@ export default function TaskflowDom() {
               <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
                 <div className="view-heading" style={{ marginBottom: 0 }}>
                   <h2 className="view-title">Task Report</h2>
-                  <p className="view-sub">Employee-wise assigned → accept → deadline → submit → Start Verification → verified. Work + verify delays use office hours (9:30–6:30, lunch 1–2, Mon–Sat; verify SLA = 2h).</p>
+                  <p className="view-sub">Employee-wise assigned → accept → deadline → submit → Start Verification → verified. Work + verify delays use office hours (9:30–6:30, lunch 1–2, Mon–Sat; verify time = the hours the verifier sets at Start Verification).</p>
                 </div>
                 <div className="mis-toolbar">
                   <label className="mis-field">

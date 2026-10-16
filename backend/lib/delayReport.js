@@ -18,6 +18,7 @@ const {
   needsReaccept,
   wasRescheduled,
   activePlanDate,
+  verificationAllowedHours,
   endOfPlanDay,
   originalPlanDate,
   fmtDuration,
@@ -122,6 +123,7 @@ function buildDelayReportRows(tasks, opts = {}) {
     .map((t) => {
       const assignedAt = t.assigned_at || t.created_at || null;
       const acceptedAt = t.accepted_at || null;
+      const firstAcceptedAt = t.first_accepted_at || acceptedAt;
       const submittedAt = t.sent_for_verification_at || null;
       const verifyStartedAt = t.verification_started_at || t.first_verification_started_at || null;
       const verifiedAt = t.verified_at || t.first_verified_at || null;
@@ -147,9 +149,9 @@ function buildDelayReportRows(tasks, opts = {}) {
           const suffix = awaitingReaccept ? ' (awaiting re-accept)' : '';
           deadlineLabel = `${fmtDelayStamp(planDue)} (rescheduled plan due${suffix})`;
         }
-        if (awaitingReaccept) acceptedLabel = 'Rescheduled — not accepted again';
+        acceptedLabel = fmtDelayStamp(firstAcceptedAt) || 'Not yet accepted';
       } else if (awaitingReaccept) {
-        acceptedLabel = 'Rescheduled — not accepted again';
+        acceptedLabel = fmtDelayStamp(firstAcceptedAt) || 'Rescheduled — not accepted again';
         deadlineLabel = 'Waiting for re-accept';
       } else if (acceptedAt) {
         acceptedLabel = fmtDelayStamp(acceptedAt) || '—';
@@ -202,7 +204,7 @@ function buildDelayReportRows(tasks, opts = {}) {
         delayLabel = 'No hours set';
       }
 
-      // —— Verification trail (Start Verification → Verified), 2 office-hour SLA ——
+      // —— Verification trail (Start Verification → Verified), SLA = verifier's chosen office hours ——
       let verifyStartedLabel = 'Not started';
       let verifiedLabel = 'Not verified';
       let verifyDueLabel = '—';
@@ -219,7 +221,10 @@ function buildDelayReportRows(tasks, opts = {}) {
         verifyStatus = 'Pending';
       } else {
         verifyStartedLabel = fmtDelayStamp(verifyStartedAt) || '—';
-        const vDue = verificationWorkDueDate({ verification_started_at: verifyStartedAt });
+        const vDue = verificationWorkDueDate({
+          verification_started_at: verifyStartedAt,
+          verification_allowed_hours: t.verification_allowed_hours,
+        });
         if (vDue) verifyDueLabel = fmtDelayStamp(vDue) || '—';
 
         if (verifiedAt) {
@@ -247,7 +252,7 @@ function buildDelayReportRows(tasks, opts = {}) {
               verifyDelayLabel = formatWorkingDuration(elapsedWorkingHours(vDue, now));
             } else {
               verifyStatus = 'In progress';
-              verifyDelayLabel = 'Within 2h SLA';
+              verifyDelayLabel = `Within ${verificationAllowedHours(t)}h SLA`;
             }
           } else {
             verifyStatus = 'In progress';

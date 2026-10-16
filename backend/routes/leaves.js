@@ -840,7 +840,7 @@ router.get('/:id/open-tasks', async (req, res) => {
     const { data: tasks, error: tErr } = await supabase
       .from('tasks')
       .select(
-        'id, description, status, priority, target_date, hours_to_complete, accepted_at, is_on_hold, rescheduling_possible, reschedule_status, verification_status, project:projects(id, name)'
+        'id, description, status, priority, target_date, hours_to_complete, accepted_at, is_on_hold, rescheduling_possible, reschedule_status, reschedule_requested_at, verification_status, project:projects(id, name)'
       )
       .eq('assigned_to', leave.user_id)
       .in('status', ['Pending', 'In Progress', 'Ticket Raised'])
@@ -902,7 +902,7 @@ router.post('/:id/task-actions', async (req, res) => {
         const { data: task, error: tErr } = await supabase
           .from('tasks')
           .select(
-            'id, assigned_to, status, description, target_date, accepted_at, hours_to_complete, original_hours_to_complete, is_on_hold, hold_remaining_hours, held_at, hold_count, verification_status, reschedule_status, rescheduling_possible, task_events, leave_cover_id'
+            'id, assigned_to, status, description, target_date, accepted_at, hours_to_complete, original_hours_to_complete, is_on_hold, hold_remaining_hours, held_at, hold_count, verification_status, reschedule_status, reschedule_requested_at, rescheduling_possible, task_events, leave_cover_id'
           )
           .eq('id', taskId)
           .maybeSingle();
@@ -1057,6 +1057,10 @@ router.post('/:id/task-actions', async (req, res) => {
           }
           if (task.reschedule_status === 'Pending') {
             results.push({ task_id: taskId, action, ok: false, error: 'Reschedule already pending' });
+            continue;
+          }
+          if (task.reschedule_requested_at) {
+            results.push({ task_id: taskId, action, ok: false, error: 'Reschedule already requested for this task' });
             continue;
           }
           const reason =

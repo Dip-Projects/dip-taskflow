@@ -80,18 +80,14 @@
   line-height: 1.5;
 }
 
-.tf-shell h1,
-.tf-shell h2,
-.tf-shell h3,
-.tf-shell h4 {
+/* :where() keeps these at zero specificity so a component's own class rule
+   (e.g. Sitereport.css .svr-input) always wins, wherever it is rendered. */
+:where(.tf-shell) :is(h1, h2, h3, h4) {
   font-family: var(--font-display);
   line-height: 1.25;
 }
 
-.tf-shell input,
-.tf-shell select,
-.tf-shell textarea,
-.tf-shell button {
+:where(.tf-shell) :is(input, select, textarea, button) {
   font-family: var(--font-body);
   font-size: 0.875rem;
 }
@@ -291,7 +287,7 @@ html:has(.tf-shell) body {
   color: var(--muted);
 }
 
-.hint {
+.tf-shell .hint {
   margin: 22px 0 0;
   text-align: center;
   font-size: 0.76rem;
@@ -760,7 +756,7 @@ body.sidebar-open {
   box-shadow: 0 1px 2px rgba(15, 17, 35, .04);
 }
 
-.filter-row {
+.tf-shell .filter-row {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -825,7 +821,7 @@ body.sidebar-open {
 /* ================================================================
    TABLE CARD
    ================================================================ */
-.table-card {
+.tf-shell .table-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -843,7 +839,7 @@ body.sidebar-open {
   border-radius: 0 var(--r-lg) 0 0;
 }
 
-.table-scroll {
+.tf-shell .table-scroll {
   max-width: 100%;
   overflow-x: auto;
 }
@@ -1372,37 +1368,99 @@ body.sidebar-open {
 }
 
 .col-vproject {
-  width: 10%;
+  width: 9%;
 }
 
 .col-vtasktype {
-  width: 10%;
+  width: 9%;
 }
 
 .col-vdesc {
-  width: 16%;
+  width: 14%;
 }
 
 .col-vsubmitted {
-  width: 12%;
+  width: 10%;
 }
 
 .col-vpending {
-  width: 12%;
+  width: 10%;
+}
+
+.col-vtimer {
+  width: 13%;
+  min-width: 150px;
 }
 
 .col-vattach {
-  width: 7%;
+  width: 6%;
   text-align: center;
 }
 
 .col-vdate {
-  width: 12%;
+  width: 11%;
   white-space: nowrap;
 }
 
 .col-vactions {
-  width: 16%;
+  width: 14%;
+}
+
+/* Verification timer cell: due time + time left / overdue */
+.vt-timer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  white-space: nowrap;
+  padding-left: 10px;
+  border-left: 3px solid #cbd5e1;
+}
+
+.vt-timer-main {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  font-variant-numeric: tabular-nums;
+}
+
+.vt-timer-due {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.vt-timer--running {
+  border-left-color: #2563eb;
+}
+
+.vt-timer--overdue {
+  border-left-color: #dc2626;
+}
+
+.vt-timer--overdue .vt-timer-main {
+  color: #b91c1c;
+}
+
+.vt-timer--idle {
+  border-left-color: #cbd5e1;
+}
+
+.vt-timer--idle .vt-timer-main {
+  color: #64748b;
+  font-weight: 500;
+}
+
+#view-verifications .data-table thead th {
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+#view-verifications .data-table tbody td {
+  vertical-align: top;
+  padding-top: 14px;
+  padding-bottom: 14px;
 }
 
 .sr-number {
@@ -2108,7 +2166,7 @@ body.sidebar-open {
   color: var(--rose);
 }
 
-.req {
+.tf-shell .req {
   color: var(--rose);
   font-size: 0.9em;
 }
@@ -2984,7 +3042,7 @@ body.sidebar-open {
 /* ================================================================
    EMPTY STATE
    ================================================================ */
-.empty-state:not(td) {
+.tf-shell .empty-state:not(td) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2998,7 +3056,7 @@ body.sidebar-open {
   box-sizing: border-box;
 }
 
-.empty-state .emoji {
+.tf-shell .empty-state .emoji {
   font-size: 2.4rem;
   display: block;
   margin-bottom: 10px;
@@ -4525,22 +4583,22 @@ body.sidebar-open {
    ================================================================ */
 
 /* Table scroll chrome (laptop + desktop) */
-.table-scroll {
+.tf-shell .table-scroll {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
 
-.table-scroll::-webkit-scrollbar {
+.tf-shell .table-scroll::-webkit-scrollbar {
   height: 8px;
 }
 
-.table-scroll::-webkit-scrollbar-thumb {
+.tf-shell .table-scroll::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 99px;
 }
 
-.table-scroll::-webkit-scrollbar-track {
+.tf-shell .table-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -5699,7 +5757,7 @@ body.sidebar-open {
 
 /* Calendar — Google-like month grid */
 #appScreen .cal-wrap,
-.cal-wrap {
+.tf-shell .cal-wrap {
   max-width: 1080px;
   background: #fff;
   border: 1px solid #dadce0;
@@ -5707,7 +5765,7 @@ body.sidebar-open {
   overflow: hidden;
 }
 
-.cal-nav {
+.tf-shell .cal-nav {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -5716,7 +5774,7 @@ body.sidebar-open {
   border-bottom: 1px solid #dadce0;
 }
 
-.cal-nav-btn {
+.tf-shell .cal-nav-btn {
   width: 36px;
   height: 36px;
   border: none;
@@ -5728,11 +5786,11 @@ body.sidebar-open {
   cursor: pointer;
 }
 
-.cal-nav-btn:hover {
+.tf-shell .cal-nav-btn:hover {
   background: #f1f3f4;
 }
 
-.cal-month-title {
+.tf-shell .cal-month-title {
   font-size: 1.35rem;
   font-weight: 400;
   color: #3c4043;
@@ -5740,13 +5798,13 @@ body.sidebar-open {
   min-width: 180px;
 }
 
-.cal-grid {
+.tf-shell .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0;
 }
 
-.cal-head {
+.tf-shell .cal-head {
   text-align: center;
   font-size: 0.7rem;
   font-weight: 500;
@@ -5756,7 +5814,7 @@ body.sidebar-open {
 }
 
 #appScreen .cal-cell,
-.cal-cell {
+.tf-shell .cal-cell {
   min-height: 104px;
   border-right: 1px solid #dadce0;
   border-bottom: 1px solid #dadce0;
@@ -5770,20 +5828,20 @@ body.sidebar-open {
   border-radius: 0;
 }
 
-.cal-cell:nth-child(7n) {
+.tf-shell .cal-cell:nth-child(7n) {
   border-right: none;
 }
 
-.cal-cell.cal-empty {
+.tf-shell .cal-cell.cal-empty {
   background: #fff;
   cursor: default;
 }
 
-.cal-cell:hover:not(.cal-empty) {
+.tf-shell .cal-cell:hover:not(.cal-empty) {
   background: #f8f9fa;
 }
 
-.cal-daynum {
+.tf-shell .cal-daynum {
   align-self: center;
   width: 24px;
   height: 24px;
@@ -5797,13 +5855,13 @@ body.sidebar-open {
   margin-bottom: 2px;
 }
 
-.cal-is-today .cal-daynum {
+.tf-shell .cal-is-today .cal-daynum {
   background: #1a73e8;
   color: #fff;
   font-weight: 600;
 }
 
-.cal-chip {
+.tf-shell .cal-chip {
   font-size: 0.7rem;
   font-weight: 500;
   border-radius: 4px;
@@ -5814,41 +5872,41 @@ body.sidebar-open {
   color: #fff;
 }
 
-.cal-chip.cal-today {
+.tf-shell .cal-chip.cal-today {
   background: #1a73e8;
 }
 
-.cal-chip.cal-done {
+.tf-shell .cal-chip.cal-done {
   background: #188038;
 }
 
-.cal-chip.cal-overdue {
+.tf-shell .cal-chip.cal-overdue {
   background: #d93025;
 }
 
-.cal-chip.cal-upcoming {
+.tf-shell .cal-chip.cal-upcoming {
   background: #f9ab00;
   color: #3c4043;
 }
 
-.cal-more {
+.tf-shell .cal-more {
   font-size: 0.68rem;
   color: #70757a;
   padding-left: 6px;
 }
 
-.cal-day-detail {
+.tf-shell .cal-day-detail {
   padding: 12px 16px 16px;
 }
 
-.cal-day-detail h3 {
+.tf-shell .cal-day-detail h3 {
   font-size: 0.95rem;
   font-weight: 500;
   color: #3c4043;
   margin: 0 0 8px;
 }
 
-.cal-detail-row {
+.tf-shell .cal-detail-row {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -5859,25 +5917,25 @@ body.sidebar-open {
   color: #fff;
 }
 
-.cal-detail-row.cal-today {
+.tf-shell .cal-detail-row.cal-today {
   background: #1a73e8;
 }
 
-.cal-detail-row.cal-done {
+.tf-shell .cal-detail-row.cal-done {
   background: #188038;
 }
 
-.cal-detail-row.cal-overdue {
+.tf-shell .cal-detail-row.cal-overdue {
   background: #d93025;
 }
 
-.cal-detail-row.cal-upcoming {
+.tf-shell .cal-detail-row.cal-upcoming {
   background: #f9ab00;
   color: #3c4043;
 }
 
 @media (max-width: 640px) {
-  .cal-cell {
+  .tf-shell .cal-cell {
     min-height: 72px;
   }
 }
@@ -6965,8 +7023,40 @@ body.sidebar-open {
   border-bottom: 0;
 }
 
+.wvd-proj-clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background .15s;
+}
+
+.wvd-proj-clickable:hover,
+.wvd-proj-clickable:focus-visible {
+  background: #F5F3FF;
+  outline: none;
+}
+
+.wvd-proj-clickable:hover > span:first-child {
+  color: #4338CA;
+  text-decoration: underline;
+}
+
+/* Verifier site rows: personal completed and verified counts stacked on the right */
+.wvd-proj-vals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  gap: 2px;
+}
+
 .wvd-proj-row strong {
   color: var(--wvd-ink);
+}
+
+.wvd-proj-vals small {
+  color: var(--wvd-muted, #78716C);
+  font-size: 0.68rem;
+  max-width: 260px;
 }
 
 .wvd-table-wrap {
@@ -7300,6 +7390,97 @@ body.sidebar-open {
 
 .dr-table tbody tr:hover td {
   background: #EFF6FF !important;
+}
+
+/* ── employee × project task-wise time popup ─────────────────────────────── */
+.epp-popup {
+  max-width: 980px;
+}
+
+.epp-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.epp-summary span {
+  padding: 8px 14px;
+  background: #fff;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  font-size: .86rem;
+  color: #334155;
+}
+
+.epp-summary strong {
+  color: #0F172A;
+}
+
+.epp-summary small {
+  color: #64748B;
+}
+
+.epp-sec-title {
+  margin: 18px 0 8px;
+  font-size: .92rem;
+  font-weight: 750;
+  color: #172554;
+}
+
+.epp-sec-title small {
+  margin-left: 6px;
+  font-size: .72rem;
+  font-weight: 500;
+  color: #64748B;
+}
+
+.epp-table-wrap {
+  overflow: auto;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.epp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .8rem;
+}
+
+.epp-table th,
+.epp-table td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #F1F5F9;
+  white-space: nowrap;
+}
+
+.epp-table th {
+  position: sticky;
+  top: 0;
+  background: #F8FAFC;
+  font-size: .66rem;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #64748B;
+}
+
+.epp-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.epp-table .epp-desc {
+  white-space: normal;
+  min-width: 220px;
+  color: #0F172A;
+}
+
+.epp-table .epp-time {
+  font-weight: 750;
+  color: #4338CA;
 }
 
 /* ── task detail popup ───────────────────────────────────────────────────── */

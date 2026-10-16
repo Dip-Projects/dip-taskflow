@@ -1104,6 +1104,7 @@ function MyLeave({ user, onApply }) {
     </div>
   );
 }
+
 function LeaveApprovals({ user }) {
   const [leaves, setLeaves] = useState([]);
   const [managed, setManaged] = useState({ siteNames: [], headSites: new Set(), coordSites: new Set() });
@@ -1941,11 +1942,8 @@ export function mergeRejectionReason(existing, slot, by, reason) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function SitePortal() {
-  const navigate = useNavigate();
-  const { logout: authLogout, user: authUser, isAuthenticated } = useAuth();
-const [hoveredNavKey, setHoveredNavKey] = useState(null);
-
+// Module scope on purpose: a component defined inside SitePortal gets a new identity
+// on every render, so each hover update remounted the sidebar buttons.
 const NAV_COLORS = {
   "clock-in": "#2563eb",
   "calendar": "#2563eb",
@@ -1962,11 +1960,17 @@ const NAV_COLORS = {
   "manpower-reports": "#16a34a",
   "report-submissions": "#0891b2",
   "profile": "#bd3c0a",
+  "dpr": "#0f766e",
+  "wpr": "#db2777",
+  "svr": "#c96a10",
+  "ea-attendance": "#b45309",
+  "team-chat": "#4f46e5",
 };
 
 function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave, onClick, badge, style }) {
   const highlighted = isActive || isHovered;
-  const color = NAV_COLORS[itemKey] || "var(--amber2)";
+  // Must be a hex value: the hover tint appends an alpha byte (`${color}18`).
+  const color = NAV_COLORS[itemKey] || "#d97706";
   return (
     <button
       className={`sni${isActive ? " act" : ""}`}
@@ -1988,6 +1992,11 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
     </button>
   );
 }
+
+export default function SitePortal() {
+  const navigate = useNavigate();
+  const { logout: authLogout, user: authUser, isAuthenticated } = useAuth();
+const [hoveredNavKey, setHoveredNavKey] = useState(null);
   const [user, setUser] = useState(null);
   const [userReady, setUserReady] = useState(false);
   const [visMap, setVisMap] = useState(null);

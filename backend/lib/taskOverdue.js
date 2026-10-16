@@ -14,7 +14,8 @@
  *     Until that Accept happens the work timer is not running, but the task
  *     still goes overdue once the approved plan date has passed.
  *
- * Verification: 2 working hours from verification_started_at.
+ * Verification: the verifier's chosen hours (verification_allowed_hours) from
+ *   verification_started_at; 2 working hours only for legacy rows without a value.
  */
 const { addWorkingHours, elapsedWorkingHours } = require('./workingHours');
 
@@ -62,10 +63,16 @@ function isFinishedTask(t) {
 
 // ── verification SLA ─────────────────────────────────────────────────────────
 
+/** Hours the verifier chose when starting; falls back to 2h only for legacy rows without it. */
+function verificationAllowedHours(t) {
+  const h = num(t?.verification_allowed_hours);
+  return h && h > 0 ? h : VERIFICATION_SLA_HOURS;
+}
+
 function verificationWorkDueDate(t) {
   const started = toDate(t?.verification_started_at);
   if (!started) return null;
-  return addWorkingHours(started, VERIFICATION_SLA_HOURS);
+  return addWorkingHours(started, verificationAllowedHours(t));
 }
 
 /** @deprecated alias — botData and legacy callers */
@@ -431,6 +438,7 @@ function holdResumeLabel(t, fmtStamp, now = new Date()) {
 
 module.exports = {
   VERIFICATION_SLA_HOURS,
+  verificationAllowedHours,
   /** @deprecated use VERIFICATION_SLA_HOURS + addWorkingHours */
   VERIFICATION_SLA_MS: VERIFICATION_SLA_HOURS * 60 * 60 * 1000,
   ACCEPT_NUDGE_MINUTES,

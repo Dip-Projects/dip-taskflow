@@ -9,6 +9,7 @@ const {
   workTimerBudgetHours,
   assignedWorkDeadline,
   holdSecondsBetween,
+  verificationAllowedHours,
 } = require('../lib/taskOverdue');
 const {
   sendWhatsAppTemplate,
@@ -173,7 +174,7 @@ async function loadTaskForStamp(id) {
   if (error && /column|schema cache/i.test(error.message || '')) {
     const retry = await supabase
       .from('tasks')
-      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, is_on_hold, hold_remaining_hours, held_at, resumed_at')
+      .select('id, assigned_to, status, verifier_id, verification_status, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at, verification_started_at, verification_allowed_hours, verification_started_by, verified_at, rejected_at, task_events, extra_hours, extra_days, correction_extensions, hours_to_complete, original_hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, is_on_hold, hold_remaining_hours, held_at, resumed_at')
       .eq('id', id)
       .maybeSingle();
     data = retry.data;
@@ -182,7 +183,7 @@ async function loadTaskForStamp(id) {
   if (error && /column|schema cache/i.test(error.message || '')) {
     const retry2 = await supabase
       .from('tasks')
-      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours')
+      .select('id, assigned_to, status, verifier_id, verification_status, accepted_at, sent_for_verification_at, verification_started_at, verification_allowed_hours, verification_started_by, verified_at, rejected_at, extra_hours, extra_days, correction_extensions, hours_to_complete, target_date, reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours')
       .eq('id', id)
       .maybeSingle();
     data = retry2.data;
@@ -230,7 +231,7 @@ const TASK_SELECT_PLAN = `
   is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
-  verification_started_by, verification_started_at,
+  verification_started_by, verification_started_at, verification_allowed_hours,
   correction_voice_url, updation_note, task_events,
   reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
@@ -250,7 +251,7 @@ const TASK_SELECT_FULL = `
   is_on_hold, hold_remaining_hours, held_at, resumed_at, first_accepted_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
-  verification_started_by, verification_started_at,
+  verification_started_by, verification_started_at, verification_allowed_hours,
   correction_voice_url, updation_note, task_events,
   reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
@@ -270,7 +271,7 @@ const TASK_SELECT_LEGACY = `
   is_on_hold, hold_remaining_hours, held_at, resumed_at,
   accepted_at, rejected_at, sent_for_verification_at, verified_at,
   verification_status, verification_note, verification_attachment_urls,
-  verification_started_by, verification_started_at,
+  verification_started_by, verification_started_at, verification_allowed_hours,
   correction_voice_url, updation_note, task_events,
   reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
@@ -788,6 +789,8 @@ router.get('/verifications', async (req, res) => {
 router.patch('/:id/start-verification', async (req, res) => {
   try {
     const { id } = req.params;
+    // Hours the verifier says this verification will take (1–24).
+    const allowedHours = Number(req.body?.verification_hours);
 
     // const { data: existing, error: fetchErr } = await supabase
     //   .from('tasks')
@@ -805,21 +808,26 @@ router.patch('/:id/start-verification', async (req, res) => {
       return res.status(400).json({ error: 'This task is not awaiting verification' });
     }
 
-    // Already started this cycle — keep the original start time.
+    // Already started this cycle — keep the original start time and allowed hours.
     if (existing.verification_started_at || existing.verification_started_by) {
       const { data, error } = await supabase.from('tasks').select(TASK_SELECT).eq('id', id).single();
       if (error) throw error;
       return res.json(data);
     }
 
+    if (!Number.isFinite(allowedHours) || allowedHours <= 0 || allowedHours > 24) {
+      return res.status(400).json({ error: 'Enter how many hours the verification will take (more than 0, up to 24)' });
+    }
+
     const at = nowIso();
-    // Stamp these two fields on their own so a missing task_events column
+    // Stamp these fields on their own so a missing task_events column
     // cannot swallow the start time (that is what made the button return after refresh).
     const { error: stampErr } = await supabase
       .from('tasks')
       .update({
         verification_started_by: req.user.id,
         verification_started_at: at,
+        verification_allowed_hours: allowedHours,
       })
       .eq('id', id);
     if (stampErr) throw stampErr;
@@ -888,6 +896,7 @@ router.patch('/:id/forward-verification', async (req, res) => {
       verifier_id,
       verification_started_by: null,
       verification_started_at: null,
+      verification_allowed_hours: null,
       task_events: withTaskEvent(existing, 'forward_verification', req.user.id, {
         from_verifier_id: existing.verifier_id || null,
         to_verifier_id: verifier_id,
@@ -1199,8 +1208,7 @@ router.patch('/:id/status', async (req, res) => {
     } else if (status === 'Pending') {
       updates.status_note = null;
     } else if (status === 'In Progress') {
-      // Explicitly starting work also satisfies a pending re-accept, so the
-      // timer anchors here rather than at the pre-reschedule accept.
+      
       const isReaccept = !!existing.reaccept_required;
       updates.accepted_at = isReaccept ? at : firstStamp(existing, 'accepted_at', at);
       updates.first_accepted_at = firstStamp(existing, 'first_accepted_at', at);
@@ -1708,7 +1716,7 @@ router.post('/:id/reschedule-request', async (req, res) => {
 
     const { data: existing, error: fetchErr } = await supabase
       .from('tasks')
-      .select('id, assigned_to, rescheduling_possible, reschedule_status, status, verification_status')
+      .select('id, assigned_to, rescheduling_possible, reschedule_status, reschedule_requested_at, status, verification_status')
       .eq('id', id).maybeSingle();
     if (fetchErr) throw fetchErr;
     if (!existing) return res.status(404).json({ error: 'Task not found' });
@@ -1731,6 +1739,9 @@ router.post('/:id/reschedule-request', async (req, res) => {
     }
     if (existing.reschedule_status === 'Pending') {
       return res.status(400).json({ error: 'A reschedule request is already pending for this task' });
+    }
+    if (existing.reschedule_requested_at) {
+      return res.status(400).json({ error: 'A reschedule request has already been sent for this task' });
     }
 
     const { data, error } = await supabase
@@ -2102,7 +2113,8 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         created_at, assigned_at, accepted_at, sent_for_verification_at,
         verification_started_at, verified_at, rejected_at,
         hours_to_complete, target_date, extra_hours, extra_days,
-        verification_status, verification_note, correction_extensions,
+        total_hold_seconds, is_on_hold, held_at,
+        verification_status, verification_note, verification_decided_at, correction_extensions,
         project:projects ( id, name ),
         task_type:task_types ( id, name ),
         department:departments ( id, name ),
@@ -2117,11 +2129,16 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     // Optional columns (may be missing on older DBs)
     if (!error) {
       try {
-        const { data: extra } = await supabase
-          .from('tasks')
-          .select('id, first_sent_for_verification_at, task_events')
-          .in('id', (tasks || []).map((t) => t.id).slice(0, 1000));
-        const byId = Object.fromEntries((extra || []).map((t) => [t.id, t]));
+        const ids = (tasks || []).map((t) => t.id);
+        const extra = [];
+        for (let start = 0; start < ids.length; start += 1000) {
+          const { data } = await supabase
+            .from('tasks')
+            .select('id, first_sent_for_verification_at, task_events')
+            .in('id', ids.slice(start, start + 1000));
+          extra.push(...(data || []));
+        }
+        const byId = Object.fromEntries(extra.map((t) => [t.id, t]));
         tasks = (tasks || []).map((t) => ({ ...t, ...byId[t.id] }));
       } catch (_) { /* ignore */ }
     }
@@ -2271,7 +2288,15 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     }));
 
     const srMap = buildSrMap(tasks || []);
-    const dashboard = buildWorkVerificationDashboard(enriched, { srMap });
+    // Admins can verify tasks without being flagged in can_verify.
+    const { data: verifierRows } = await supabase
+      .from('users')
+      .select('id, full_name, role, can_verify')
+      .or('can_verify.eq.true,role.eq.admin');
+    const userRows = verifierRows || [];
+    const verifierIds = userRows.filter((user) => user.can_verify).map((user) => user.id);
+    const adminUsers = userRows.filter((user) => user.role === 'admin');
+    const dashboard = buildWorkVerificationDashboard(enriched, { srMap, verifierIds, adminUsers });
 
     res.json({
       range: range || 'month',
@@ -2315,7 +2340,7 @@ const FMS_STEPS = [
     what: 'Verify, send correction, or request update',
     who: 'Verifier',
     how: 'In TaskFlow',
-    why: 'Delay if not decided within 2 working hours of Start Verification',
+    why: "Delay if not decided within the verifier's chosen hours of Start Verification",
     when: '3',
   },
 ];
@@ -2438,9 +2463,7 @@ function fmsSubmitStep(t) {
   return step;
 }
 
-const FMS_VERIFICATION_SLA_HOURS = 2;
-
-/** Verification FMS: planned = Start Verification + 2 working hours; actual = Verify/Correction/Updation only. */
+/** Verification FMS: planned = Start Verification + the verifier's chosen working hours; actual = Verify/Correction/Updation only. */
 function fmsVerifyStep(t) {
   const sentAt = t.sent_for_verification_at || t.first_sent_for_verification_at;
   if (!sentAt) {
@@ -2451,7 +2474,7 @@ function fmsVerifyStep(t) {
   const decidedAt = t.verification_decided_at || verifiedAt || t.rejected_at;
   const verifyActual = decidedAt || null;
   const verifyPlanned = startVerifyAt
-    ? addWorkingHours(startVerifyAt, FMS_VERIFICATION_SLA_HOURS)
+    ? addWorkingHours(startVerifyAt, verificationAllowedHours(t))
     : null;
   const step = fmsStep(
     verifyPlanned ? verifyPlanned.toISOString() : null,
@@ -2486,7 +2509,7 @@ router.get('/fms', requireAdminOrMis, async (req, res) => {
 
     const columns = `
       id, description, status, priority, created_at, assigned_at, accepted_at,
-      sent_for_verification_at, verification_started_at, verified_at, rejected_at,
+      sent_for_verification_at, verification_started_at, verification_allowed_hours, verified_at, rejected_at,
       verification_status, verification_decided_at, first_verified_at,
       first_sent_for_verification_at, first_verification_started_at,
       hours_to_complete, original_hours_to_complete, target_date, assigned_deadline_at,
