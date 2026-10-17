@@ -896,6 +896,7 @@ router.patch('/:id/forward-verification', async (req, res) => {
       verifier_id,
       verification_started_by: null,
       verification_started_at: null,
+      verification_allowed_hours: null,
       task_events: withTaskEvent(existing, 'forward_verification', req.user.id, {
         from_verifier_id: existing.verifier_id || null,
         to_verifier_id: verifier_id,
