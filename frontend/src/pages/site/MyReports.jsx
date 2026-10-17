@@ -16,13 +16,14 @@ function isMine(row, user, fields) {
   return fields.some((f) => ids.has(String(f || "").toLowerCase().trim()));
 }
 
+function isSiteEngineerRole(user) {
+  const blob = `${user?.role || ""} ${user?.department || ""} ${user?.designation || ""} ${user?.site_role || ""}`.toLowerCase();
+  const isSiteEngineer = /(?:^|\s)(?:jr\.?\s*|junior\s+|senior\s+)?site engineer(?:\s|$)/.test(blob);
+  const isHeadOrCoordinator = /site incharge|site head|project head|co-?ordinator|\bhead\b/.test(blob);
+  return isSiteEngineer && !isHeadOrCoordinator;
+}
 
-
-
-
-
-const fmtD  = (d)  => d  ? new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}) : "—";
-const fmtDT = (dt) => dt ? new Date(dt).toLocaleString("en-IN",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:true}) : "—";
+const fmtD  = (d)  => d  ? new Date(d+"T00:00:00").toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}) : "—";const fmtDT = (dt) => dt ? new Date(dt).toLocaleString("en-IN",{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:true}) : "—";
 const isMobileDevice = () =>
   /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -59,8 +60,10 @@ const TAB_CONFIG = [
   { key:"svr", label:"SVR", color:"#c96a10", bg:"#f0fdf4", border:"#bbf7d0" },
 ];
 
-const getBadge = (r) => {
-  if (r._source === "svr") return { bg:"#f0fdf4", color:"#c96a10", border:"#bbf7d0", label:"Site Visit"   };
+const getSvrBadgeLabel = (user) => (isSiteEngineerRole(user) ? "Quality Audit" : "Site Visit");
+
+const getBadge = (r, user) => {
+  if (r._source === "svr") return { bg:"#f0fdf4", color:"#c96a10", border:"#bbf7d0", label: isSiteEngineerRole(user) ? "Quality Audit" : "Site Visit" };
   if (r._source === "wpr") return { bg:"#f5f3ff", color:"#a55622", border:"#e0e7ff", label:"Weekly Report" };
   if (r.report_type === "morning") return { bg:"#fffbeb", color:"#d97706", border:"#fde68a", label:"Morning DPR" };
   if (r.report_type === "evening") return { bg:"#eff6ff", color:"#7a2e00", border:"#bfdbfe", label:"Evening DPR" };
@@ -142,9 +145,9 @@ function SvrDetail({ r }) {
 }
 
 // ── Single report card ────────────────────────────────────────────────────────
-function ReportCard({ r }) {
+function ReportCard({ r, user }) {
   const [open, setOpen] = useState(false);
-  const badge  = getBadge(r);
+  const badge  = getBadge(r, user);
   const accent = getAccent(r);
 const isOfficeDoc = (url) => /\.(pptx|ppt|docx|doc|xlsx|xls)(\?|$)/i.test(url || "");
   const displayDate  = r._source === "svr" ? r.visit_date : r.date;
@@ -270,6 +273,11 @@ const isOfficeDoc = (url) => /\.(pptx|ppt|docx|doc|xlsx|xls)(\?|$)/i.test(url ||
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function MyReports({ user }) {
+  const isEngineerMode = isSiteEngineerRole(user);
+  const svrTabLabel = isEngineerMode ? "QAR" : "SVR";
+  const tabConfig = TAB_CONFIG.map((t) =>
+    t.key === "svr" ? { ...t, label: svrTabLabel } : t
+  );
   const [tab,        setTab]        = useState(() => (isOfficeSiteViewer(user) ? "svr" : "dpr"));
   const [month,      setMonth]      = useState(new Date().toISOString().slice(0,7));
   const [siteFilter, setSiteFilter] = useState("");
@@ -451,7 +459,7 @@ const hasMore = paginated.length < totalReports;
           {[
             { label:"DPR", color:"#60a5fa", active: tab === "dpr" },
             { label:"WPR", color:"#c4b5fd", active: tab === "wpr" },
-            { label:"SVR", color:"#86efac", active: tab === "svr" },
+            { label: svrTabLabel, color:"#86efac", active: tab === "svr" },
           ].map(s => (
             <div key={s.label} style={{
               display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
@@ -479,7 +487,7 @@ const hasMore = paginated.length < totalReports;
         display:"inline-flex", gap:4, padding:4, borderRadius:10,
         background:"#f1f5f9", border:"1px solid #e8edf3", marginBottom:20, flexWrap:"wrap",
       }}>
-        {TAB_CONFIG.map(t => (
+        {tabConfig.map(t => (
           <button
             key={t.key}
             onClick={() => { setTab(t.key); setPage(1); }}
@@ -590,7 +598,7 @@ const hasMore = paginated.length < totalReports;
                 <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
               </svg>
               <p style={{ fontWeight:700, color:"#64748b", margin:0 }}>
-                No {tab.toUpperCase()} reports found{siteFilter ? ` for "${siteFilter}"` : ""} this month
+                No {(tab === "svr" && isEngineerMode ? "QAR" : tab.toUpperCase())} reports found{siteFilter ? ` for "${siteFilter}"` : ""} this month
               </p>
               <p style={{ fontSize:12, color:"#94a3b8", margin:0 }}>Try selecting a different month above.</p>
             </div>
@@ -619,7 +627,7 @@ const hasMore = paginated.length < totalReports;
                     gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))",
                     gap:12,
                   }}>
-                    {paginatedGrouped[date].map(r => <ReportCard key={r.id} r={r}/>)}
+                    {paginatedGrouped[date].map(r => <ReportCard key={r.id} r={r} user={user} />)}
                   </div>
                 </div>
               ))}

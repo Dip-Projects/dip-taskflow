@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { uploadPublicHrFiles } from '../../lib/publicHrUpload';
+import { friendlyNetworkError, uploadPublicHrFilesBestEffort } from '../../lib/publicHrUpload';
 import './publicForms.css';
 
 export default function EmployeeOnboardPage() {
@@ -10,6 +10,7 @@ export default function EmployeeOnboardPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [already, setAlready] = useState(false);
+  const [fileNote, setFileNote] = useState('');
   const [error, setError] = useState('');
   const [files, setFiles] = useState({});
   const [departments, setDepartments] = useState([
@@ -77,7 +78,7 @@ export default function EmployeeOnboardPage() {
           }));
         }
       } catch (e) {
-        if (!cancelled) setError(e.message || 'Could not load form');
+        if (!cancelled) setError(friendlyNetworkError(e, 'Could not load form'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -88,6 +89,34 @@ export default function EmployeeOnboardPage() {
   }, [token]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const postOnboard = async (payload) => {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(`/api/hr/public/onboard/${encodeURIComponent(token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok || res.status === 409) return data;
+        const msg = data.error || 'Submit failed';
+        if (/expired|invalid|session/i.test(msg)) {
+          throw new Error(
+            'Link expired while submitting. Ask HR to reopen the QR and fill the form again (login not required).'
+          );
+        }
+        throw new Error(msg);
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err?.message || '');
+        if (!/network|failed to fetch|load failed/i.test(msg)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 700 * (attempt + 1)));
+      }
+    }
+    throw new Error(friendlyNetworkError(lastErr, 'Could not submit'));
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -101,26 +130,25 @@ export default function EmployeeOnboardPage() {
 
     setBusy(true);
     try {
+      // Save the typed answers first. A failed photo must not wipe the form.
+      await postOnboard({ ...form, documents: {} });
       const folder = `hr/joining/${encodeURIComponent(token).slice(0, 40)}`;
-      const documents = await uploadPublicHrFiles(files, folder);
-      const res = await fetch(`/api/hr/public/onboard/${encodeURIComponent(token)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, documents }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = data.error || 'Submit failed';
-        if (/expired|invalid|session/i.test(msg)) {
-          throw new Error(
-            'Link expired while submitting. Ask HR to reopen the QR and fill the form again (login not required).'
-          );
+      const { documents, failed } = await uploadPublicHrFilesBestEffort(files, folder);
+      if (Object.keys(documents).length) {
+        try {
+          await postOnboard({ ...form, documents });
+        } catch (err) {
+          failed.push(friendlyNetworkError(err, 'Could not attach files'));
         }
-        throw new Error(msg);
+      }
+      if (failed.length) {
+        setFileNote(
+          `Your details are saved with HR. These files did not upload — send them to HR separately: ${failed.join('; ')}`
+        );
       }
       setDone(true);
     } catch (err) {
-      setError(err.message || 'Could not submit');
+      setError(friendlyNetworkError(err, 'Could not submit'));
     } finally {
       setBusy(false);
     }
@@ -143,6 +171,7 @@ export default function EmployeeOnboardPage() {
             Thank you. Your details are with DIP Projects HR. You do not need to download or keep any PDF —
             HR will handle records internally.
           </p>
+          {fileNote ? <p>{fileNote}</p> : null}
         </div>
       </div>
     );

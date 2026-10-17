@@ -11,6 +11,7 @@ import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
 import WprGenerator from "./Wprgenerator.jsx";
 import MatRequirement from "./MatRequirement.jsx";
+import MaterialReceived from "./MaterialReceived.jsx";
 import SiteTeamChat from "./SiteTeamChat.jsx";
 import { useMaterialUnseenCount } from "./MatRequirement"; // adjust path
 import { canAccessPortal } from '../../access.js';
@@ -39,6 +40,7 @@ const OFFICE_SITE_TABS = new Set([
   "site-report",
   "my-reports",
   "leave-approvals",
+  "material-received",
 ]);
 // ─── Supabase ────────────────────────────────────────────────────────────────
 
@@ -473,6 +475,63 @@ function visAllows(visMap, key, user) {
   return row.site !== false;
 }
 
+function visibilityRole(user) {
+  const role = String(user?.role || "").toLowerCase().trim();
+  const dept = String(user?.department || "").toLowerCase().trim();
+  const desig = String(user?.designation || user?.site_role || "").toLowerCase().trim();
+  if (role === "client" || dept === "client") return "client";
+  if (role === "admin") return "admin";
+  if (user?.is_mis_executive || /\bmis\b/.test(`${dept} ${desig}`)) return "mis";
+  const blob = `${role} ${dept} ${desig}`;
+  const head =
+    !!user?.is_head ||
+    role === "head" ||
+    desig === "head" ||
+    /site incharge|project head|site head/.test(blob);
+  if (
+    dept === "site engineer" ||
+    /site engineer|jr\.?\s*site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+  ) {
+    return head ? "site_head" : "site";
+  }
+  if (head && /incharge|project head|\bhead\b/.test(blob)) return "site_head";
+  return "employee";
+}
+
+function isSiteEngineerRole(user) {
+  const blob = `${user?.role || ""} ${user?.department || ""} ${user?.designation || ""} ${user?.site_role || ""}`.toLowerCase();
+  const isSiteEngineer = /(?:^|\s)(?:jr\.?\s*|junior\s+|senior\s+)?site engineer(?:\s|$)/.test(blob);
+  const isHeadOrCoordinator = /site incharge|site head|project head|co-?ordinator|\bhead\b/.test(blob);
+  return isSiteEngineer && !isHeadOrCoordinator;
+}
+
+function siteReportLabel(user) {
+  return isSiteEngineerRole(user) ? "Quality Audit Report" : "Site Visit Report";
+}
+
+function flagOn(value) {
+  return value === true || value === "true" || value === 1;
+}
+
+/** Who sees what row. Site off hides site staff. Site head off hides incharge. */
+function showWhenVisibilityOn(user, visMap, key, untilLoaded = false) {
+  if (!visMap) return untilLoaded;
+  const row = visMap[key];
+  if (!row) return untilLoaded;
+  const who = visibilityRole(user);
+  if (who === "site") return flagOn(row.site);
+  if (who === "site_head") return flagOn(row.site_head) && flagOn(row.site);
+  return flagOn(row[who]);
+}
+
+function showMaterialReceived(user, visMap) {
+  return canRecordMaterial(user) && showWhenVisibilityOn(user, visMap, "material-received", false);
+}
+
+function showWeeklyPlan(user, visMap) {
+  return showWhenVisibilityOn(user, visMap, "weekly-plan", true);
+}
+
 // ─── Nav structure ────────────────────────────────────────────────────────────
 function reportMatchesTeam(rawName, teamNames) {
   const n = String(rawName || "").toLowerCase().trim();
@@ -494,6 +553,23 @@ function showLeaveApprovalsMenu(user, visMap) {
 }
 
 /** Base Site Engineer menu + Head oversight items when isSiteHead */
+function canRecordMaterial(user) {
+  const norm = (v) =>
+    String(v || "")
+      .toLowerCase()
+      .replace(/[.\-_]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const role = norm(user?.role);
+  const des = norm(user?.designation || user?.site_role);
+  const dept = norm(user?.department);
+  const title = `${role} ${des}`;
+  if (/coordinator|co ordinator/.test(title)) return false;
+  if (/incharge/.test(title)) return true;
+  if (dept === "site engineer" || role === "site engineer" || des === "site engineer") return true;
+  return /(?:jr |junior |sr |senior )?site engineer/.test(title);
+}
+
 function isBeenaOrPcUser(user) {
   if (!user) return false;
   if (String(user.role || "").toLowerCase() === "admin") return false;
@@ -508,6 +584,9 @@ function buildNav(user, visMap) {
 
   if (isOfficeSiteViewer(user)) {
     const items = [
+      ...(showMaterialReceived(user, visMap)
+        ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
+        : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
     ];
     if (visAllows(visMap, "site-report", user)) {
@@ -538,8 +617,10 @@ function buildNav(user, visMap) {
   const reportChildren = [
     { key: "daily-report", label: "Daily Report (DPR)", icon: Ico.report },
     { key: "wpr-generator", label: "Weekly Report (WPR)", icon: Ico.weekly },
-    { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan },
-    { key: "site-report", label: "Site Visit Report", icon: Ico.site },
+    ...(showWeeklyPlan(user, visMap)
+      ? [{ key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan }]
+      : []),
+    { key: "site-report", label: siteReportLabel(user), icon: Ico.site },
     { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     { key: "manpower-reports", label: "Manpower Report", icon: Ico.manRpt },
   ];
@@ -559,6 +640,9 @@ function buildNav(user, visMap) {
   });
 
   return [
+    ...(showMaterialReceived(user, visMap)
+      ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
+      : []),
     ...(showEaReport
       ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
       : []),
@@ -1023,6 +1107,7 @@ function MyLeave({ user, onApply }) {
     </div>
   );
 }
+
 function LeaveApprovals({ user }) {
   const [leaves, setLeaves] = useState([]);
   const [managed, setManaged] = useState({ siteNames: [], headSites: new Set(), coordSites: new Set() });
@@ -1860,14 +1945,12 @@ export function mergeRejectionReason(existing, slot, by, reason) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function SitePortal() {
-  const navigate = useNavigate();
-  const { logout: authLogout, user: authUser, isAuthenticated } = useAuth();
-const [hoveredNavKey, setHoveredNavKey] = useState(null);
-
+// Module scope on purpose: a component defined inside SitePortal gets a new identity
+// on every render, so each hover update remounted the sidebar buttons.
 const NAV_COLORS = {
   "clock-in": "#2563eb",
   "calendar": "#2563eb",
+  "material-received": "#c2410c",
   "apply-leave": "#7c3aed",
   "my-leave": "#7c3aed",
   "leave-approvals": "#7c3aed",
@@ -1880,11 +1963,17 @@ const NAV_COLORS = {
   "manpower-reports": "#16a34a",
   "report-submissions": "#0891b2",
   "profile": "#bd3c0a",
+  "dpr": "#0f766e",
+  "wpr": "#db2777",
+  "svr": "#c96a10",
+  "ea-attendance": "#b45309",
+  "team-chat": "#4f46e5",
 };
 
 function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave, onClick, badge, style }) {
   const highlighted = isActive || isHovered;
-  const color = NAV_COLORS[itemKey] || "var(--amber2)";
+  // Must be a hex value: the hover tint appends an alpha byte (`${color}18`).
+  const color = NAV_COLORS[itemKey] || "#d97706";
   return (
     <button
       className={`sni${isActive ? " act" : ""}`}
@@ -1906,6 +1995,11 @@ function SniButton({ itemKey, icon, label, isActive, isHovered, onEnter, onLeave
     </button>
   );
 }
+
+export default function SitePortal() {
+  const navigate = useNavigate();
+  const { logout: authLogout, user: authUser, isAuthenticated } = useAuth();
+const [hoveredNavKey, setHoveredNavKey] = useState(null);
   const [user, setUser] = useState(null);
   const [userReady, setUserReady] = useState(false);
   const [visMap, setVisMap] = useState(null);
@@ -2269,19 +2363,23 @@ useEffect(() => {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const loadVis = async () => {
       try {
         const res = await fetch("/api/master/nav-visibility", {
           headers: { Authorization: `Bearer ${localStorage.getItem("tf_token") || ""}` },
         });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setVisMap(data.map || {});
+        if (!cancelled && data?.map) setVisMap(data.map);
       } catch {
-        if (!cancelled) setVisMap({});
+        /* keep the last map */
       }
-    })();
+    };
+    loadVis();
+    const onFocus = () => loadVis();
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -2336,6 +2434,9 @@ useEffect(() => {
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":
         return <CalendarView user={user} supabase={supabase} />;
+      case "material-received":
+        if (!showMaterialReceived(navUser, visMap)) return null;
+        return <MaterialReceived user={user} />;
       case "my-leave":
         return <MyLeave user={user} onApply={() => nav("apply-leave")} />;
       case "apply-leave":
@@ -2359,6 +2460,7 @@ useEffect(() => {
       case "my-reports":
         return <MyReports user={user} />;
       case "weekly-plan":
+        if (!showWeeklyPlan(navUser, visMap)) return null;
         return <WeeklyPlanReport user={user} />;
       case "manpower-reports":
         return <ManpowerReport user={user} />;
@@ -2480,8 +2582,8 @@ useEffect(() => {
                 <div className="head-sub-kicker">Project Head Overview</div>
                 <h3>Report Submissions</h3>
                 <p>
-                  Daily, weekly and site visit reports from your team. Your own
-                  site visit reports are in My Reports.
+                  Daily, weekly and {isSiteEngineerRole(user) ? "quality audit" : "site visit"} reports from your team. Your own
+                  {isSiteEngineerRole(user) ? "quality audit" : "site visit"} reports are in My Reports.
                 </p>
               </div>
               <div className="head-sub-stats">

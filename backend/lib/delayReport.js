@@ -16,7 +16,10 @@ const {
   holdResumeSummary,
   holdResumeLabel,
   needsReaccept,
+  wasRescheduled,
   activePlanDate,
+  verificationAllowedHours,
+  endOfPlanDay,
   originalPlanDate,
   fmtDuration,
   verificationWorkDueDate,
@@ -79,6 +82,21 @@ function assignedHours(t) {
   return numOrNull(t.hours_to_complete);
 }
 
+function rescheduledTargetDates(t) {
+  const events = Array.isArray(t.task_events) ? t.task_events : [];
+  const dates = events
+    .filter((event) => event && ['rescheduled_by_admin', 'reschedule_approved'].includes(event.action))
+    .map((event) => event.to_target_date)
+    .filter((date) => typeof date === 'string' && date.trim())
+    .map((date) => date.slice(0, 10));
+
+  if (!dates.length && t.reschedule_count > 0) {
+    const currentDate = t.reschedule_approved_target_date || t.target_date;
+    if (currentDate) dates.push(String(currentDate).slice(0, 10));
+  }
+  return dates;
+}
+
 /** Hours used for live deadline after accept / resume. */
 function timerHours(t) {
   return workTimerBudgetHours(t);
@@ -105,6 +123,7 @@ function buildDelayReportRows(tasks, opts = {}) {
     .map((t) => {
       const assignedAt = t.assigned_at || t.created_at || null;
       const acceptedAt = t.accepted_at || null;
+      const firstAcceptedAt = t.first_accepted_at || acceptedAt;
       const submittedAt = t.sent_for_verification_at || null;
       const verifyStartedAt = t.verification_started_at || t.first_verification_started_at || null;
       const verifiedAt = t.verified_at || t.first_verified_at || null;
@@ -121,9 +140,18 @@ function buildDelayReportRows(tasks, opts = {}) {
       let status = 'N/A';
       let delayLabel = 'Due starts after acceptance';
       let delayMs = null;
+      const hasRescheduledPlanDue = wasRescheduled(t) && !!activePlanDate(t);
 
-      if (awaitingReaccept) {
-        acceptedLabel = 'Rescheduled — not accepted again';
+      if (hasRescheduledPlanDue) {
+        const planDue = endOfPlanDay(activePlanDate(t));
+        if (planDue) {
+          deadlineIso = planDue.toISOString();
+          const suffix = awaitingReaccept ? ' (awaiting re-accept)' : '';
+          deadlineLabel = `${fmtDelayStamp(planDue)} (rescheduled plan due${suffix})`;
+        }
+        acceptedLabel = fmtDelayStamp(firstAcceptedAt) || 'Not yet accepted';
+      } else if (awaitingReaccept) {
+        acceptedLabel = fmtDelayStamp(firstAcceptedAt) || 'Rescheduled — not accepted again';
         deadlineLabel = 'Waiting for re-accept';
       } else if (acceptedAt) {
         acceptedLabel = fmtDelayStamp(acceptedAt) || '—';
@@ -144,12 +172,11 @@ function buildDelayReportRows(tasks, opts = {}) {
         submittedLabel = fmtDelayStamp(submittedAt) || '—';
       }
 
-      if (awaitingReaccept) {
+      if (!acceptedAt && !hasRescheduledPlanDue) {
         status = 'N/A';
-        delayLabel = 'Rescheduled — accept again to restart the timer';
-      } else if (!acceptedAt) {
-        status = 'N/A';
-        delayLabel = 'Due starts after acceptance';
+        delayLabel = awaitingReaccept
+          ? 'Rescheduled — accept again to restart the timer'
+          : 'Due starts after acceptance';
       } else if (deadlineIso) {
         const compareAt = submittedAt ? new Date(submittedAt) : now;
         const due = new Date(deadlineIso);
@@ -177,7 +204,7 @@ function buildDelayReportRows(tasks, opts = {}) {
         delayLabel = 'No hours set';
       }
 
-      // —— Verification trail (Start Verification → Verified), 2 office-hour SLA ——
+      // —— Verification trail (Start Verification → Verified), SLA = verifier's chosen office hours ——
       let verifyStartedLabel = 'Not started';
       let verifiedLabel = 'Not verified';
       let verifyDueLabel = '—';
@@ -194,7 +221,10 @@ function buildDelayReportRows(tasks, opts = {}) {
         verifyStatus = 'Pending';
       } else {
         verifyStartedLabel = fmtDelayStamp(verifyStartedAt) || '—';
-        const vDue = verificationWorkDueDate({ verification_started_at: verifyStartedAt });
+        const vDue = verificationWorkDueDate({
+          verification_started_at: verifyStartedAt,
+          verification_allowed_hours: t.verification_allowed_hours,
+        });
         if (vDue) verifyDueLabel = fmtDelayStamp(vDue) || '—';
 
         if (verifiedAt) {
@@ -222,7 +252,7 @@ function buildDelayReportRows(tasks, opts = {}) {
               verifyDelayLabel = formatWorkingDuration(elapsedWorkingHours(vDue, now));
             } else {
               verifyStatus = 'In progress';
-              verifyDelayLabel = 'Within 2h SLA';
+              verifyDelayLabel = `Within ${verificationAllowedHours(t)}h SLA`;
             }
           } else {
             verifyStatus = 'In progress';
@@ -254,6 +284,7 @@ function buildDelayReportRows(tasks, opts = {}) {
         original_target_date: localDayString(originalPlanDate(t)),
         active_target_date: localDayString(activePlanDate(t)),
         reschedule_count: numOrNull(t.reschedule_count) || 0,
+        rescheduled_to_dates: rescheduledTargetDates(t),
         awaiting_reaccept: awaitingReaccept,
         deadline_at: deadlineIso,
         deadline_label: deadlineLabel,
@@ -395,6 +426,9 @@ function buildEmpReportRows(tasks, opts = {}) {
       status: r.status,
       timing_label: timingLabel,
       delay_label: r.delay_label,
+      original_target_date: r.original_target_date,
+      active_target_date: r.active_target_date,
+      rescheduled_to_dates: r.rescheduled_to_dates,
       reschedule_count: r.reschedule_count,
     };
   });

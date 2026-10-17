@@ -64,7 +64,7 @@ function parseRange(range, from, to) {
 const DELAY_TASK_SELECT = `
   id, description, status, hours_to_complete, original_hours_to_complete,
   created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
-  verification_started_at, first_verification_started_at, verified_at, first_verified_at,
+  verification_started_at, first_verification_started_at, verification_allowed_hours, verified_at, first_verified_at,
   verification_status, assigned_to,
   is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
   total_hold_seconds, last_hold_seconds, hold_count,
@@ -79,7 +79,7 @@ const DELAY_TASK_SELECT = `
 const DELAY_TASK_SELECT_PRE_PLAN = `
   id, description, status, hours_to_complete, original_hours_to_complete,
   created_at, assigned_at, accepted_at, first_accepted_at, sent_for_verification_at,
-  verification_started_at, verified_at,
+  verification_started_at, verification_allowed_hours, verified_at,
   verification_status, assigned_to,
   is_on_hold, hold_remaining_hours, held_at, resumed_at, task_events,
   target_date, reschedule_status,
@@ -92,7 +92,7 @@ const DELAY_TASK_SELECT_PRE_PLAN = `
 const DELAY_TASK_SELECT_FALLBACK = `
   id, description, status, hours_to_complete,
   created_at, assigned_at, accepted_at, sent_for_verification_at,
-  verification_started_at, verified_at,
+  verification_started_at, verification_allowed_hours, verified_at,
   verification_status, assigned_to,
   project:projects ( id, name ),
   task_type:task_types ( id, name ),
@@ -116,7 +116,12 @@ async function loadTasksForDelayReport({ startDate, endDate, employeeId }) {
   const schemaMiss = (e) =>
     e && /column|schema cache|original_hours|task_events|is_on_hold|first_accepted/i.test(e.message || '');
 
-  for (const fallback of [DELAY_TASK_SELECT_PRE_PLAN, DELAY_TASK_SELECT_FALLBACK]) {
+  for (const fallback of [
+    DELAY_TASK_SELECT_NO_WORK_DUE,
+    DELAY_TASK_SELECT_NO_TASK_EVENTS,
+    DELAY_TASK_SELECT_PRE_PLAN,
+    DELAY_TASK_SELECT_FALLBACK,
+  ]) {
     if (!schemaMiss(error)) break;
     let retryQ = supabase
       .from('tasks')

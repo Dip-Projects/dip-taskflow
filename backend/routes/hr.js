@@ -185,9 +185,11 @@ async function ensureBucket() {
   if (error && !/already exists/i.test(error.message || '')) throw error;
 }
 
-async function readJson(path, fallback) {
+async function readJson(path, fallback, opts = {}) {
+  const strict = !!opts.strict;
   await ensureBucket();
   // Authenticated fetch with no-store — public CDN was serving a stale empty cvs.json.
+  let sawMissing = false;
   try {
     const base = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '';
@@ -202,30 +204,82 @@ async function readJson(path, fallback) {
         },
         cache: 'no-store',
       });
-      if (res.status === 404) return fallback;
-      if (res.ok) {
+      if (res.status === 404) sawMissing = true;
+      else if (res.ok) {
         const text = await res.text();
         try {
           return JSON.parse(text);
-        } catch {
-          /* fall through */
+        } catch (err) {
+          if (strict) throw err;
         }
+      } else if (strict && res.status >= 500) {
+        throw new Error(`Storage read failed (${res.status}) for ${path}`);
       }
     }
-  } catch {
-    /* fall through */
+  } catch (err) {
+    if (strict && !sawMissing) throw err;
   }
+  if (sawMissing) return fallback;
   const { data, error } = await supabase.storage.from(BUCKET).download(path);
   if (error) {
     if (/not found|404/i.test(error.message || '')) return fallback;
+    if (strict) throw error;
     return fallback;
   }
   const text = await data.text();
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (err) {
+    if (strict) throw err;
     return fallback;
   }
+}
+
+function joiningFormFilePath(id) {
+  return `hr/_meta/joining_forms/${id}.json`;
+}
+
+/**
+ * Each submission is its own file first, then merged into the index.
+ * A failed index read must not rewrite the index as [] and wipe older forms.
+ */
+async function saveJoiningForm(form) {
+  await writeJson(joiningFormFilePath(form.id), form);
+  let lastErr = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    let forms;
+    try {
+      forms = await readJson(JOINING_FORMS_PATH, [], { strict: true });
+    } catch (err) {
+      lastErr = err;
+      continue;
+    }
+    if (!Array.isArray(forms)) {
+      lastErr = new Error('joining forms index is not a list');
+      continue;
+    }
+    if (!forms.some((f) => f && f.id === form.id)) forms.unshift(form);
+    try {
+      await writeJson(JOINING_FORMS_PATH, forms);
+      const check = await readJson(JOINING_FORMS_PATH, null, { strict: true });
+      if (Array.isArray(check) && check.some((f) => f && f.id === form.id)) {
+        return { indexed: true };
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  console.error('joining form index merge failed:', lastErr && lastErr.message);
+  return { indexed: false, error: lastErr };
+}
+
+async function loadJoiningFormRecord(id) {
+  if (!id) return null;
+  const forms = await readJson(JOINING_FORMS_PATH, []);
+  const hit = (forms || []).find((f) => f && f.id === id);
+  if (hit) return hit;
+  const single = await readJson(joiningFormFilePath(id), null);
+  return single && single.id ? single : null;
 }
 
 async function writeJson(path, value) {
@@ -260,16 +314,20 @@ function isClientStaff(row) {
   return /\bclient\b/.test(blob);
 }
 
+function tokenKey(raw) {
+  return String(raw || '').trim().replace(/[^a-f0-9]/gi, '').toLowerCase();
+}
+
 async function findOnboardTarget(token) {
-  const clean = String(token || '').trim().replace(/[^a-f0-9]/gi, '');
+  const clean = tokenKey(token);
   if (!clean || clean.length < 16) return null;
   const staff = await readJson(HR_STAFF_PATH, []);
-  const hrIdx = staff.findIndex((r) => String(r.onboard_token || '').trim() === clean);
+  const hrIdx = staff.findIndex((r) => tokenKey(r.onboard_token) === clean);
   if (hrIdx >= 0) {
     return { kind: 'hr_only', staff, hrIdx, profiles: null, profileIdx: -1 };
   }
   const profiles = await readJson(PROFILES_PATH, []);
-  const profileIdx = profiles.findIndex((r) => String(r.onboard_token || '').trim() === clean);
+  const profileIdx = profiles.findIndex((r) => tokenKey(r.onboard_token) === clean);
   if (profileIdx >= 0) {
     return { kind: 'system', staff: null, hrIdx: -1, profiles, profileIdx };
   }
@@ -512,9 +570,45 @@ function docsFromBodyMeta(raw) {
   return out;
 }
 
+async function mirrorJoiningDocs({ docs, empKey, name, department, designation, now }) {
+  const docMeta = await readJson(DOCS_META_PATH, []);
+  const docEntries = [];
+  const pushDoc = (docType, file) => {
+    if (!file?.url) return;
+    docEntries.push({
+      id: uid(),
+      employee_id: empKey,
+      employee_name: name,
+      department: department || 'General',
+      designation: designation || 'Staff',
+      doc_type: docType,
+      title: file.name || docType,
+      category: docType,
+      file_name: file.name,
+      file_path: file.path,
+      file_url: file.url,
+      uploaded_by: null,
+      uploaded_by_name: 'Employee QR form',
+      source: 'joining_qr',
+      created_at: now,
+    });
+  };
+  pushDoc('CV', docs.cv);
+  pushDoc('Aadhaar', docs.aadhaar_file);
+  pushDoc('PAN', docs.pan_file);
+  pushDoc('Photo', docs.photo);
+  pushDoc('Bank details', docs.bank_details);
+  pushDoc('Salary slip', docs.salary_slip);
+  (docs.education_certs || []).forEach((f) => pushDoc('Education certificate', f));
+  if (docEntries.length) {
+    await writeJson(DOCS_META_PATH, [...docEntries, ...docMeta]);
+  }
+  return docEntries.length;
+}
+
 /**
  * Public candidate application (QR / interview walk-in) — no login.
- * Required: name, mobile, aadhaar. Rest optional + file uploads.
+ * Required: name, mobile. Rest optional + file uploads.
  * Prefer JSON + pre-uploaded docs (signed URL); multipart still works for small files.
  */
 router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
@@ -525,7 +619,6 @@ router.post('/public/apply', publicDocsUploadMaybe, async (req, res) => {
     const aadhaar = String(body.aadhaar || body.aadhaar_id || '').replace(/\D/g, '');
     if (!name) return res.status(400).json({ error: 'Full name is required' });
     if (phone.length < 10) return res.status(400).json({ error: 'Valid mobile number is required' });
-    if (aadhaar.length < 12) return res.status(400).json({ error: 'Valid Aadhaar (12 digits) is required' });
 
     let docs = docsFromBodyMeta(body.documents);
     if (!docs.cv && req.files?.cv?.length) {
@@ -731,11 +824,42 @@ router.post('/public/onboard/:token', publicDocsUploadMaybe, async (req, res) =>
 
     const target =
       hit.kind === 'hr_only' ? hit.staff[hit.hrIdx] : hit.profiles[hit.profileIdx];
+    const body = req.body || {};
     if (target.joining_form_submitted_at) {
-      return res.status(409).json({ error: 'Form already submitted. Thank you.' });
+      const extraDocs = docsFromBodyMeta(body.documents);
+      const existing = await loadJoiningFormRecord(target.joining_form_id);
+      let documentsSaved = 0;
+      if (existing && Object.keys(extraDocs).length) {
+        const prevCerts = (existing.documents && existing.documents.education_certs) || [];
+        const nextCerts = extraDocs.education_certs || [];
+        const seen = new Set(prevCerts.map((f) => f && f.path).filter(Boolean));
+        existing.documents = {
+          ...(existing.documents || {}),
+          ...extraDocs,
+          education_certs: [
+            ...prevCerts,
+            ...nextCerts.filter((f) => f && f.path && !seen.has(f.path)),
+          ],
+        };
+        await saveJoiningForm(existing);
+        documentsSaved = await mirrorJoiningDocs({
+          docs: extraDocs,
+          empKey:
+            hit.kind === 'hr_only' ? hit.staff[hit.hrIdx].id : target.employee_id || target.id,
+          name: existing.employee_name || target.full_name || target.employee_name || 'Employee',
+          department: existing.department || target.department || 'General',
+          designation: existing.designation || target.designation || 'Staff',
+          now: new Date().toISOString(),
+        });
+      }
+      return res.json({
+        ok: true,
+        already_submitted: true,
+        message: 'Form already submitted. Thank you.',
+        documents_saved: documentsSaved,
+      });
     }
 
-    const body = req.body || {};
     const name = String(
       body.employee_name ||
         body.full_name ||
@@ -785,9 +909,10 @@ router.post('/public/onboard/:token', publicDocsUploadMaybe, async (req, res) =>
       submitted_at: now,
     };
 
-    const forms = await readJson(JOINING_FORMS_PATH, []);
-    forms.unshift(form);
-    await writeJson(JOINING_FORMS_PATH, forms);
+    const savedForm = await saveJoiningForm(form);
+    if (!savedForm.indexed) {
+      console.warn('Joining form stored as its own file; index merge pending', form.id);
+    }
 
     if (hit.kind === 'hr_only') {
       const row = hit.staff[hit.hrIdx];
@@ -1070,6 +1195,139 @@ router.get('/candidate-applications', requireAdminOrHr, async (_req, res) => {
   }
 });
 
+async function ensureHiredCandidateEmployee(candidate, actor) {
+  const application = candidate.application || {};
+  const fullName = String(candidate.candidate_name || application.full_name || '').trim();
+  if (!fullName) throw new Error('Candidate name is required to add an employee');
+
+  const linkedSystemId = candidate.hired_employee_source === 'system'
+    ? candidate.hired_employee_id
+    : null;
+  let user = null;
+  if (linkedSystemId) {
+    const result = await supabase
+      .from('users')
+      .select('id, full_name, department, designation, role, is_active, whatsapp_number')
+      .eq('id', linkedSystemId)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    user = result.data;
+  }
+  if (!user) {
+    const result = await supabase
+      .from('users')
+      .select('id, full_name, department, designation, role, is_active, whatsapp_number')
+      .ilike('full_name', fullName)
+      .limit(1)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    if (String(result.data?.full_name || '').trim().toLowerCase() === fullName.toLowerCase()) {
+      user = result.data;
+    }
+  }
+
+  if (user && !isClientStaff(user)) {
+    const profiles = await readJson(PROFILES_PATH, []);
+    const profileIndex = profiles.findIndex((profile) => profile.employee_id === user.id);
+    const previous = profileIndex >= 0 ? profiles[profileIndex] : null;
+    const onboardToken = previous?.onboard_token || makeToken();
+    const profile = {
+      ...(previous || {}),
+      id: previous?.id || uid(),
+      employee_id: user.id,
+      employee_name: user.full_name,
+      department: user.department || previous?.department || '',
+      designation: user.designation || previous?.designation || '',
+      whatsapp_number: user.whatsapp_number || previous?.whatsapp_number || candidate.phone || application.mobile || '',
+      dob: previous?.dob || application.dob || null,
+      onboard_token: onboardToken,
+      joining_form_submitted_at: previous?.joining_form_submitted_at || null,
+      joining_form_id: previous?.joining_form_id || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (profileIndex >= 0) profiles[profileIndex] = profile;
+    else profiles.push(profile);
+    await writeJson(PROFILES_PATH, profiles);
+    return {
+      id: user.id,
+      full_name: user.full_name,
+      source: 'system',
+      onboard_token: onboardToken,
+      onboard_path: `/onboard/${onboardToken}`,
+    };
+  }
+
+  const staff = await readJson(HR_STAFF_PATH, []);
+  const linkedHrId = candidate.hired_employee_source === 'hr_only'
+    ? candidate.hired_employee_id
+    : null;
+  let staffIndex = staff.findIndex(
+    (row) => row.source_candidate_application_id === candidate.id || (linkedHrId && row.id === linkedHrId)
+  );
+  if (staffIndex < 0) {
+    staffIndex = staff.findIndex(
+      (row) => String(row.full_name || '').trim().toLowerCase() === fullName.toLowerCase()
+    );
+  }
+
+  const now = new Date().toISOString();
+  const row = staffIndex >= 0
+    ? staff[staffIndex]
+    : {
+        id: uid(),
+        full_name: fullName,
+        department: 'General',
+        designation: String(application.current_designation || application.position_applied || candidate.role_applied || 'Staff').trim(),
+        whatsapp_number: String(candidate.phone || application.mobile || '').trim(),
+        dob: application.dob || null,
+        joining_date: null,
+        email: String(application.email || '').trim(),
+        notes: '',
+        is_active: true,
+        source: 'hr_only',
+        onboard_token: makeToken(),
+        joining_form_submitted_at: null,
+        joining_form_id: null,
+        created_at: now,
+        created_by: actor?.id || null,
+      };
+  row.source_candidate_application_id = candidate.id;
+  row.onboard_token = row.onboard_token || makeToken();
+  row.updated_at = now;
+  if (staffIndex >= 0) staff[staffIndex] = row;
+  else staff.unshift(row);
+  await writeJson(HR_STAFF_PATH, staff);
+
+  if (row.dob || row.whatsapp_number) {
+    const profiles = await readJson(PROFILES_PATH, []);
+    const profileIndex = profiles.findIndex((profile) => profile.hr_staff_id === row.id);
+    const previous = profileIndex >= 0 ? profiles[profileIndex] : null;
+    const profile = {
+      ...(previous || {}),
+      id: previous?.id || uid(),
+      hr_staff_id: row.id,
+      employee_id: null,
+      employee_name: row.full_name,
+      dob: row.dob,
+      whatsapp_number: row.whatsapp_number,
+      designation: row.designation,
+      department: row.department,
+      updated_at: now,
+    };
+    if (profileIndex >= 0) profiles[profileIndex] = profile;
+    else profiles.push(profile);
+    await writeJson(PROFILES_PATH, profiles);
+  }
+
+  return {
+    id: row.id,
+    full_name: row.full_name,
+    source: 'hr_only',
+    onboard_token: row.onboard_token,
+    onboard_path: `/onboard/${row.onboard_token}`,
+  };
+}
+
 router.patch('/candidate-applications/:id', requireAdminOrHr, async (req, res) => {
   try {
     await migrateWalkInCandidates();
@@ -1100,8 +1358,14 @@ router.patch('/candidate-applications/:id', requireAdminOrHr, async (req, res) =
     fresh[idx].status_history = history;
     fresh[idx].pipeline_step = nextStatus;
     fresh[idx].updated_at = new Date().toISOString();
+    let employee = null;
+    if (nextStatus === 'Hired') {
+      employee = await ensureHiredCandidateEmployee(fresh[idx], req.user);
+      fresh[idx].hired_employee_id = employee.id;
+      fresh[idx].hired_employee_source = employee.source;
+    }
     await writeJson(CANDIDATES_PATH, fresh);
-    res.json({ application: fresh[idx] });
+    res.json({ application: fresh[idx], employee });
   } catch (err) {
     res.status(500).json({ error: err.message || 'Update failed' });
   }
@@ -1627,12 +1891,10 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
       if (f?.staff_id) formByStaffId.set(String(f.staff_id), f);
     }
 
-    const systemNames = new Set();
     const system = (users || [])
       .filter((u) => !isClientStaff(u))
       .map((u) => {
       const name = String(u.full_name || '').trim();
-      if (name) systemNames.add(name.toLowerCase());
       const { profile: prof } = findBestProfile(name, u.id, profiles);
       // Token / joining form ONLY from exact employee_id match — never fuzzy (avoids shared Adbhi QR)
       const byId = profiles.find((p) => p.employee_id === u.id);
@@ -1658,15 +1920,24 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
       };
     });
 
-    // HR-only adds — skip if same name already exists in main users
+    // HR-only adds — skip if same name already exists in main users.
+    // A hidden row that already has a joining form must still show on that system user.
+    const hiddenJoining = [];
     const extras = (hrOnly || [])
       .filter((r) => {
-        if (isClientStaff(r)) return false;
-        const n = String(r.full_name || '').trim().toLowerCase();
+        const hiredFromCandidate = !!r.source_candidate_application_id;
+        if (!hiredFromCandidate && isClientStaff(r)) return false;
+        const n = String(r.full_name || '').trim();
         if (!n) return false;
-        // also skip if fuzzy-matches a system user name
-        for (const sn of systemNames) {
-          if (nameMatchScore(n, sn) >= 88) return false;
+        if (!hiredFromCandidate) {
+          const match = system.find((s) => nameMatchScore(n, s.full_name) >= 88);
+          if (match) {
+            const form = formByStaffId.get(String(r.id));
+            if (r.joining_form_submitted_at || form) {
+              hiddenJoining.push({ systemId: match.id, row: r, form });
+            }
+            return false;
+          }
         }
         return true;
       })
@@ -1688,12 +1959,21 @@ router.get('/staff', requireAdminOrHr, async (req, res) => {
           joining_date: r.joining_date || null,
           email: r.email || '',
           source: 'hr_only',
+          hired_from_candidate: !!r.source_candidate_application_id,
           onboard_token: r.onboard_token || null,
           joining_form_submitted_at:
             r.joining_form_submitted_at || form?.submitted_at || null,
           joining_form_id: r.joining_form_id || form?.id || null,
         };
       });
+
+    for (const hidden of hiddenJoining) {
+      const row = system.find((s) => s.id === hidden.systemId);
+      if (!row || row.joining_form_submitted_at) continue;
+      row.joining_form_submitted_at =
+        hidden.row.joining_form_submitted_at || hidden.form?.submitted_at || null;
+      row.joining_form_id = hidden.row.joining_form_id || hidden.form?.id || null;
+    }
 
     let list = [...system, ...extras].filter((r) => !isClientStaff(r));
     if (q) {
@@ -1997,10 +2277,31 @@ router.get('/joining-forms/:staffId', requireAdminOrHr, async (req, res) => {
     const profiles = await readJson(PROFILES_PATH, []);
     const emp = staff.find((r) => r.id === id) || null;
     const prof = profiles.find((p) => p.employee_id === id || p.id === id) || null;
-    const form =
+    let form =
       forms.find((f) => f.staff_id === id || f.employee_id === id) ||
-      (emp?.joining_form_id ? forms.find((f) => f.id === emp.joining_form_id) : null) ||
-      (prof?.joining_form_id ? forms.find((f) => f.id === prof.joining_form_id) : null);
+      (await loadJoiningFormRecord(emp?.joining_form_id)) ||
+      (await loadJoiningFormRecord(prof?.joining_form_id));
+    if (!form) {
+      let personName = emp?.full_name || prof?.employee_name || '';
+      if (!personName) {
+        const { data: user } = await supabase
+          .from('users')
+          .select('full_name')
+          .eq('id', id)
+          .maybeSingle();
+        personName = user?.full_name || '';
+      }
+      const named = staff.find(
+        (r) =>
+          r.id !== id &&
+          (r.joining_form_id || r.joining_form_submitted_at) &&
+          nameMatchScore(r.full_name, personName) >= 88
+      );
+      form = await loadJoiningFormRecord(named?.joining_form_id);
+      if (!form && named) {
+        form = forms.find((f) => f.staff_id === named.id) || null;
+      }
+    }
     if (!form) return res.status(404).json({ error: 'No joining form submitted yet' });
     res.json({ form, staff: emp || prof || null });
   } catch (err) {

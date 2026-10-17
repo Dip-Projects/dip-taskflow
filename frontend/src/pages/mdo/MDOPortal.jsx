@@ -1021,6 +1021,316 @@ async function fetchEngineerExcelReport(sites, from, to, employeeKey = "all") {
   return sheets;
 }
 
+// ─── Employee summary: one row per employee, counts/totals for the period ───
+// Shift rules mirror Clockinout.jsx (SHIFT_START 09:00, SHIFT_END 19:00, IST).
+const SUMMARY_SHIFT_START_MIN = 9 * 60;
+const SUMMARY_SHIFT_END_MIN = 19 * 60;
+
+function istMinutesOfDay(ts) {
+  const parts = new Date(ts).toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).split(":");
+  return Number(parts[0]) * 60 + Number(parts[1]);
+}
+
+// Prefer the status the site app stored; fall back to the clock time for older rows.
+function summaryClockInCategory(att) {
+  const stored = String(att?.clock_in_status || "").toLowerCase();
+  if (stored === "ontime" || stored === "early" || stored === "late") return stored;
+  const diff = istMinutesOfDay(att.clock_in) - SUMMARY_SHIFT_START_MIN;
+  if (diff < 0) return "early";
+  if (diff === 0) return "ontime";
+  return "late";
+}
+
+function summaryClockOutCategory(att) {
+  const stored = String(att?.clock_out_status || "").toLowerCase();
+  if (stored === "ontime" || stored === "early" || stored === "overtime") return stored;
+  const diff = istMinutesOfDay(att.clock_out) - SUMMARY_SHIFT_END_MIN;
+  if (diff > 0) return "overtime";
+  if (diff === 0) return "ontime";
+  return "early";
+}
+
+async function fetchEmployeeAttendanceSummary(sites, from, to) {
+  const dates = dateRange(from, to);
+  if (!dates.length) return { dayCount: 0, rows: [] };
+
+  const [engineers, nameByUser, leaveDays] = await Promise.all([
+    resolveAllSiteEngineers(sites),
+    resolveNameByUsername(),
+    fetchApprovedLeaveDays(from, to),
+  ]);
+
+  const byUser = new Map();
+  engineers.forEach((e) => {
+    applyOfficialName(e, nameByUser);
+    byUser.set(normKey(e.username), e);
+  });
+
+  const baseCols = "user_name, date, clock_in, clock_out, clock_in_status";
+  const applyRange = (q) => q.gte("date", from).lte("date", to);
+  let attendance;
+  try {
+    attendance = await fetchPagedRows("attendance", `${baseCols}, clock_out_status`, applyRange);
+  } catch (e) {
+    if (!/clock_out_status/i.test(String(e.message || ""))) throw e;
+    attendance = await fetchPagedRows("attendance", baseCols, applyRange);
+  }
+  const dprs = await fetchPagedRows("dpr_reports", "engineer, date, report_type", applyRange);
+  const dprByNameDate = new Map();
+  dprs.forEach((r) => {
+    const key = `${normKey(r.engineer)}__${r.date}`;
+    if (!dprByNameDate.has(key)) dprByNameDate.set(key, { morning: false, evening: false });
+    const bucket = dprByNameDate.get(key);
+    const type = String(r.report_type || "").toLowerCase();
+    if (type === "morning") bucket.morning = true;
+    if (type === "evening") bucket.evening = true;
+  });
+
+  // People who clocked in but are not in the engineer list still get a row (same as Employee Report).
+  attendance.forEach((r) => {
+    const key = normKey(r.user_name);
+    if (!key || byUser.has(key)) return;
+    const name = nameByUser.get(key) || r.user_name;
+    byUser.set(key, applyOfficialName({ username: r.user_name, name }, nameByUser));
+  });
+
+  const attByUserDate = new Map();
+  attendance.forEach((r) => {
+    attByUserDate.set(`${normKey(r.user_name)}__${r.date}`, r);
+  });
+
+  const rows = [...byUser.values()]
+    .map((eng) => {
+      const s = {
+        name: eng.name,
+        username: eng.username,
+        onTimeIn: 0,
+        lateIn: 0,
+        earlyIn: 0,
+        pendingIn: 0,
+        pendingOut: 0,
+        onTimeOut: 0,
+        overtimeOut: 0,
+        earlyOut: 0,
+        morningReport: 0,
+        eveningDpr: 0,
+      };
+      dates.forEach((date) => {
+        const dpr = dprByNameDate.get(`${normKey(eng.name)}__${date}`)
+          || dprByNameDate.get(`${normKey(eng.username)}__${date}`);
+        if (dpr?.morning) s.morningReport += 1;
+        if (dpr?.evening) s.eveningDpr += 1;
+
+        const onLeave = leaveDays.has(`${normKey(eng.username)}__${date}`)
+          || leaveDays.has(`${normKey(eng.name)}__${date}`);
+        if (onLeave) return;
+        const att = attByUserDate.get(`${normKey(eng.username)}__${date}`)
+          || attByUserDate.get(`${normKey(eng.name)}__${date}`);
+
+        if (!att?.clock_in) {
+          s.pendingIn += 1;
+          return;
+        }
+        const inCat = summaryClockInCategory(att);
+        if (inCat === "ontime") s.onTimeIn += 1;
+        else if (inCat === "late") s.lateIn += 1;
+        else s.earlyIn += 1;
+
+        if (!att.clock_out) {
+          s.pendingOut += 1;
+          return;
+        }
+        const outCat = summaryClockOutCategory(att);
+        if (outCat === "overtime") s.overtimeOut += 1;
+        else if (outCat === "ontime") s.onTimeOut += 1;
+        else s.earlyOut += 1;
+      });
+      return s;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return { dayCount: dates.length, rows };
+}
+
+const EMP_SUMMARY_TONE = {
+  good: { ui: "#16a34a", excel: "FF16A34A" },
+  bad: { ui: "#dc2626", excel: "FFDC2626" },
+};
+
+const EMP_SUMMARY_COLUMNS = [
+  { key: "name", label: "Employee Name", align: "left" },
+  { key: "earlyIn", label: "Early Clock In (count)" },
+  { key: "onTimeIn", label: "On Time Clock In (count)", tone: "good" },
+  { key: "lateIn", label: "Late Clock In (count)" },
+  { key: "pendingIn", label: "Pending Clock In (count)", tone: "bad" },
+  { key: "overtimeOut", label: "Overtime Clock Out (count)" },
+  { key: "onTimeOut", label: "On Time Clock Out (count)", tone: "good" },
+  { key: "earlyOut", label: "Early Clock Out (count)" },
+  { key: "pendingOut", label: "Pending Clock Out (count)", tone: "bad" },
+  { key: "morningReport", label: "Morning Report (count)" },
+  { key: "eveningDpr", label: "Evening DPR (count)" },
+];
+
+function employeeSummaryCellText(row, col) {
+  return row[col.key];
+}
+
+function downloadEmployeeSummaryExcel(result) {
+  const cols = EMP_SUMMARY_COLUMNS;
+  const { from, to, dayCount, rows } = result;
+  const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+  const titleStyle = {
+    font: { bold: true, sz: 14, name: "Calibri", color: { rgb: "FF1A3A5C" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FFBDD7EE" } },
+    alignment: { horizontal: "center", vertical: "center" },
+    border,
+  };
+  const headStyle = {
+    font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border,
+  };
+  const bodyStyle = (align) => ({
+    font: { sz: 10, name: "Calibri", color: { rgb: "FF1A2E42" } },
+    alignment: { horizontal: align, vertical: "center" },
+    border,
+  });
+
+  const aoa = [
+    ["EMPLOYEE ATTENDANCE SUMMARY"],
+    [`Duration: ${fmtDMonYYYY(from)} to ${fmtDMonYYYY(to)} (${dayCount} day${dayCount !== 1 ? "s" : ""})`],
+    cols.map((c) => c.label),
+    ...rows.map((r) => cols.map((c) => employeeSummaryCellText(r, c))),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const lastCol = cols.length - 1;
+  ws["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
+  ];
+
+  for (let c = 0; c <= lastCol; c++) {
+    const t = XLSX.utils.encode_cell({ r: 0, c });
+    ws[t] = { ...ws[t], s: titleStyle };
+    const d = XLSX.utils.encode_cell({ r: 1, c });
+    ws[d] = { ...ws[d], s: { ...titleStyle, font: { ...titleStyle.font, sz: 11, bold: false } } };
+    const h = XLSX.utils.encode_cell({ r: 2, c });
+    ws[h] = { ...ws[h], s: headStyle };
+  }
+  rows.forEach((_, i) => {
+    cols.forEach((col, c) => {
+      const addr = XLSX.utils.encode_cell({ r: 3 + i, c });
+      if (!ws[addr]) return;
+      ws[addr].s = bodyStyle(col.align || "center");
+      if (col.tone) {
+        ws[addr].s.font = { ...ws[addr].s.font, bold: true, color: { rgb: EMP_SUMMARY_TONE[col.tone].excel } };
+      }
+    });
+  });
+
+  ws["!cols"] = [
+    { wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+    { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+  ];
+  ws["!rows"] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 34 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Employee Summary");
+  XLSX.writeFile(wb, `EMP_ATT_SUMMARY_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
+}
+
+function EmployeeAttendanceSummary({ sites }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const generate = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const data = await fetchEmployeeAttendanceSummary(sites, from, to);
+      setResult({ ...data, from, to });
+    } catch (e) {
+      setErr(e.message || "Failed to build employee summary.");
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <RangeFilter from={from} to={to} setFrom={setFrom} setTo={setTo} onGenerate={generate} busy={busy} />
+      {err && <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>{err}</div>}
+
+      {result && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+              Duration: {fmtDMonYYYY(result.from)} to {fmtDMonYYYY(result.to)} · {result.dayCount} day{result.dayCount !== 1 ? "s" : ""}
+            </div>
+            <button
+              className="btn btn-out"
+              onClick={() => downloadEmployeeSummaryExcel(result)}
+              disabled={!result.rows.length}
+              title="All employees on one sheet"
+            >
+              {Ico.dl} Download Excel (single sheet)
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink2)", marginBottom: 12 }}>
+            Shift 09:00–19:00 IST. Pending = no clock-in / clock-out record on a day that is not approved leave.
+          </div>
+
+          {result.rows.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-title">No employees found</div>
+              <div className="empty-sub">No site employees are assigned for the selected sites.</div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                    {EMP_SUMMARY_COLUMNS.map((c) => (
+                      <th key={c.key} style={{ padding: "8px 8px", textAlign: c.align || "center" }}>{c.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.rows.map((r) => (
+                    <tr key={r.username} style={{ borderBottom: "1px solid var(--line)" }}>
+                      {EMP_SUMMARY_COLUMNS.map((c) => (
+                        <td key={c.key} style={{
+                          padding: "7px 8px",
+                          textAlign: c.align || "center",
+                          fontWeight: c.key === "name" ? 600 : c.tone ? 700 : undefined,
+                          color: c.tone ? EMP_SUMMARY_TONE[c.tone].ui : undefined,
+                        }}>
+                          {employeeSummaryCellText(r, c)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function engineerExcelTableStyles() {
   const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
   const border = { top: thin, bottom: thin, left: thin, right: thin };
@@ -2985,6 +3295,7 @@ const BASE_NAV = [
   { key: "attendance", label: "Attendance Report", icon: Ico.attendance },
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
+  { key: "employee-summary", label: "Employee Summary", icon: Ico.excel },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
   { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan, pcOnly: true },
   { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_only" },
@@ -3011,10 +3322,19 @@ function getNavItems(user) {
   });
 }
 
+// Mix a #rrggbb color toward white by `amount` (0–1).
+function lightenHex(hex, amount) {
+  const n = parseInt(String(hex).replace("#", ""), 16);
+  const mix = (c) => Math.round(c + (255 - c) * amount);
+  const parts = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => mix(c).toString(16).padStart(2, "0"));
+  return `#${parts.join("")}`;
+}
+
 const NAV_COLORS = {
   attendance: "#2563eb",
   "attendance-log": "#2563eb",
   "engineer-excel": "#0f766e",
+  "employee-summary": "#b45309",
   dpr: "#16a34a",
   "weekly-plan": "#0f766e",
   "task-delay": "#c2410c",
@@ -3569,8 +3889,32 @@ const fmtD = (d) =>
         year: "numeric",
       })
     : "—";
+function mdoCanSeeWeeklyPlan(user, visMap) {
+  if (!visMap || !visMap["weekly-plan"]) return true;
+  const row = visMap["weekly-plan"];
+  const role = String(user?.role || "").toLowerCase().trim();
+  const dept = String(user?.department || "").toLowerCase().trim();
+  const desig = String(user?.designation || user?.site_role || "").toLowerCase().trim();
+  const blob = `${role} ${dept} ${desig}`;
+  const on = (value) => value === true || value === "true" || value === 1;
+  if (role === "admin") return on(row.admin);
+  if (user?.is_mis_executive || /\bmis\b/.test(`${dept} ${desig}`)) return on(row.mis);
+  const head =
+    !!user?.is_head ||
+    role === "head" ||
+    /site incharge|project head|site head/.test(blob);
+  if (
+    dept === "site engineer" ||
+    /site engineer|site incharge|site coordinator|co-?ordinator/.test(blob)
+  ) {
+    return head ? on(row.site_head) && on(row.site) : on(row.site);
+  }
+  return on(row.employee);
+}
+
 export default function MDOPortal({ onLogout }) {
   const [user, setUser] = useState(null);
+  const [visMap, setVisMap] = useState(null);
   const [activeTab, setActiveTab] = useState("attendance");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [hoveredNavKey, setHoveredNavKey] = useState(null);
@@ -3714,7 +4058,26 @@ useEffect(() => {
     if (names.length) setAllSites(names);
   });
 }, []);
-useEffect(() => {
+  useEffect(() => {
+    let cancelled = false;
+    const loadVis = async () => {
+      try {
+        const data = await api("/master/nav-visibility");
+        if (!cancelled && data?.map) setVisMap(data.map);
+      } catch {
+        /* keep the last map */
+      }
+    };
+    loadVis();
+    const onFocus = () => loadVis();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
     loadUser();
     const onResize = () => {
       if (window.innerWidth <= 768) setSidebarOpen(false);
@@ -3746,9 +4109,11 @@ useEffect(() => {
         : []
   ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const sites = ownSites.length ? ownSites : allSites;
-  const NAV = getNavItems(user).filter(
-    (n) => n.restricted !== "chirag_only" || canSeeMdoTaskDelayReport(user)
-  );
+  const NAV = getNavItems(user).filter((n) => {
+    if (n.restricted === "chirag_only" && !canSeeMdoTaskDelayReport(user)) return false;
+    if (n.key === "weekly-plan" && !mdoCanSeeWeeklyPlan(user, visMap)) return false;
+    return true;
+  });
   const activeItem = NAV.find((n) => n.key === activeTab);
 
   return (
@@ -3776,11 +4141,13 @@ useEffect(() => {
           >
           {NAV.map((n) => {
             const color = NAV_COLORS[n.key] || "#2563eb";
+            // Dark theme: the dark accent colors vanish on the dark sidebar, so lift them.
+            const shown = isDark ? lightenHex(color, 0.45) : color;
             const highlighted = activeTab === n.key || hoveredNavKey === n.key;
             return (
               <button
                 key={n.key}
-                className={`sni${activeTab === n.key ? " act" : ""}`}
+                className={`sni mdo-nav-item${activeTab === n.key ? " act" : ""}${highlighted ? " mdo-nav-highlighted" : ""}`}
                 onClick={() => {
                   setActiveTab(n.key);
                   if (window.innerWidth <= 999) setSidebarOpen(false);
@@ -3806,8 +4173,8 @@ useEffect(() => {
                   height: "auto",
                   minHeight: 40,
                   flexShrink: 0,
-                  background: highlighted ? `${color}18` : undefined,
-                  color: highlighted ? color : undefined,
+                  "--mdo-nav-accent": shown,
+                  "--mdo-nav-hover-bg": `${shown}${isDark ? "38" : "28"}`,
                 }}
               >
                 {n.icon} {n.label}
@@ -3895,6 +4262,8 @@ useEffect(() => {
               <AttendanceLog sites={sites} />
             ) : activeTab === "engineer-excel" ? (
               <EngineerExcelReport sites={sites} />
+            ) : activeTab === "employee-summary" ? (
+              <EmployeeAttendanceSummary sites={sites} />
             ) : activeTab === "dpr" ? (
               <DprSheetReport sites={sites} />
             ) : activeTab === "weekly-plan" ? (

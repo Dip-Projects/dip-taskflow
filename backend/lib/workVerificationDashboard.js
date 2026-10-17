@@ -32,6 +32,22 @@ function daysBetweenDates(a, b) {
   return Math.max(0, Math.round((utcB - utcA) / 86400000));
 }
 
+/**
+ * Office hours the employee actually worked on a task: from accept until the
+ * task was sent for verification (or now, if still open / on hold since held_at),
+ * minus the hold time already recorded.
+ */
+function taskHoursTaken(t, now = new Date()) {
+  if (!t.accepted_at) return 0;
+  const start = new Date(t.accepted_at);
+  const end = t.is_on_hold && t.held_at
+    ? new Date(t.held_at)
+    : new Date(t.sent_for_verification_at || t.verified_at || t.rejected_at || now);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+  const worked = elapsedWorkingHours(start, end) - (Number(t.total_hold_seconds) || 0) / 3600;
+  return Math.max(0, Math.round(worked * 10) / 10);
+}
+
 function avg(nums) {
   const v = nums.filter((n) => n != null && !Number.isNaN(n));
   if (!v.length) return null;
@@ -39,7 +55,13 @@ function avg(nums) {
 }
 
 function isVerified(t) {
-  return t.verification_status === 'Verified' || t.status === 'Completed';
+  return !isPendingTask(t) &&
+    !isPendingVerify(t) &&
+    (t.verification_status === 'Verified' || t.status === 'Verified' || t.status === 'Completed');
+}
+
+function isPendingTask(t) {
+  return t.status === 'Pending';
 }
 
 function isPendingVerify(t) {
@@ -105,8 +127,9 @@ function countVerificationSubmissions(tasks) {
   return n;
 }
 
-function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
+function buildWorkVerificationDashboard(tasks, { srMap, verifierIds = [] } = {}) {
   const list = tasks || [];
+  const verifierSet = new Set((verifierIds || []).map(String));
   const sr = srMap || buildSrMap(list);
   const withSr = list.map((t) => ({ ...t, sr: sr[t.id] || null }));
 
@@ -132,21 +155,111 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
   };
 
   // —— 1 · Work By Employee ——
-  const by_employee = employees.map((name) => {
-    const mine = withSr.filter((t) => empName(t) === name);
+  const now = new Date();
+  const people = new Map();
+  const addPerson = (user, fallbackName) => {
+    const name = (user?.full_name || fallbackName || '').trim();
+    if (!name) return;
+    const id = user?.id == null ? null : String(user.id);
+    const key = id || `name:${name}`;
+    if (!people.has(key)) people.set(key, { id, name });
+  };
+  const completedVerifications = withSr.filter((t) =>
+    t.verifier &&
+    isVerified(t) &&
+    (t.verified_at || t.first_verified_at ||
+      t.status === 'Verified' || t.verification_status === 'Verified')
+  );
+  withSr.forEach((t) => {
+    addPerson(t.assigned_to_user, empName(t));
+  });
+  completedVerifications.forEach((t) => {
+    addPerson(t.verifier, verName(t));
+  });
+
+  const by_employee = [...people.values()].map((person) => {
+    const mine = withSr.filter((t) => person.id
+      ? String(t.assigned_to_user?.id) === person.id
+      : empName(t) === person.name);
+    const isVerifier = person.id != null && verifierSet.has(person.id);
+    // Per site, count completed personal tasks and completed tasks this person verified.
     const projCounts = {};
-    mine.forEach((t) => {
-      const p = projName(t);
-      projCounts[p] = (projCounts[p] || 0) + 1;
+    const ensure = (p) => {
+      if (!projCounts[p]) {
+        projCounts[p] = {
+          count: 0,
+          hours: 0,
+          completedTasks: [],
+          verified: 0,
+          verifyHours: 0,
+          verifiedTasks: [],
+        };
+      }
+      return projCounts[p];
+    };
+    const personal = mine.filter(isVerified);
+    personal.forEach((t) => {
+      const row = ensure(projName(t));
+      row.count += 1;
+      row.hours += taskHoursTaken(t, now);
+      row.completedTasks.push({
+        sr: t.sr,
+        description: String(t.description || '').trim() || '—',
+        task_type: typeName(t),
+        assigned_at: t.assigned_at || t.created_at || null,
+        accepted_at: t.accepted_at || null,
+        submitted_at: t.sent_for_verification_at || null,
+        hours: Math.round(taskHoursTaken(t, now) * 10) / 10,
+      });
     });
+    completedVerifications
+      .filter((t) => person.id != null
+        ? String(t.verifier?.id) === person.id
+        : verName(t) === person.name)
+      .forEach((t) => {
+        const isOwnTask = person.id != null && t.assigned_to_user?.id != null
+          ? String(t.assigned_to_user.id) === person.id
+          : empName(t) === person.name;
+        if (isOwnTask) return;
+        const row = ensure(projName(t));
+        row.verified += 1;
+        row.verifyHours += officeHrsBetween(
+          t.verification_started_at,
+          t.verified_at || t.first_verified_at
+        ) || 0;
+        row.verifiedTasks.push({
+          sr: t.sr,
+          description: String(t.description || '').trim() || '—',
+          employee: empName(t),
+          task_type: typeName(t),
+          verify_started_at: t.verification_started_at || null,
+          verified_at: t.verified_at || t.first_verified_at || null,
+          verify_hours: officeHrsBetween(
+            t.verification_started_at,
+            t.verified_at || t.first_verified_at
+          ),
+        });
+      });
     return {
-      name,
+      name: person.name,
       total: mine.length,
+      is_verifier: isVerifier,
       verified: mine.filter(isVerified).length,
       pending: mine.filter(isPendingVerify).length,
       projects: Object.entries(projCounts)
-        .map(([n, count]) => ({ name: n, count }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+        .map(([n, v]) => ({
+          name: n,
+          count: v.count,
+          hours: Math.round(v.hours * 10) / 10,
+          completed_tasks: v.completedTasks,
+          verified: v.verified,
+          verify_hours: Math.round(v.verifyHours * 10) / 10,
+          verified_tasks: v.verifiedTasks,
+        }))
+        .sort((a, b) =>
+          (b.count + b.verified) - (a.count + a.verified) ||
+          a.name.localeCompare(b.name)
+        ),
     };
   }).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
 
@@ -289,6 +402,7 @@ function buildWorkVerificationDashboard(tasks, { srMap } = {}) {
         description: String(t.description || '').trim() || '—',
         task_type: typeName(t),
         assigned_at: assigned,
+        accepted_at: t.accepted_at || null,
         submitted_at: submitted,
         hours: officeHrsBetween(assigned, submitted),
         calendar_hours: hrsBetween(assigned, submitted),

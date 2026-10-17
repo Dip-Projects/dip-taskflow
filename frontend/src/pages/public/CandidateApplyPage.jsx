@@ -44,8 +44,6 @@ export default function CandidateApplyPage() {
     current_address: '',
     permanent_address: '',
     email: '',
-    aadhaar: '',
-    pan: '',
     source_other: '',
     current_organization: '',
     current_designation: '',
@@ -68,10 +66,8 @@ export default function CandidateApplyPage() {
     setError('');
     const name = form.full_name.trim();
     const mobile = form.mobile.replace(/\D/g, '');
-    const aadhaar = form.aadhaar.replace(/\D/g, '');
     if (!name) return setError('Full name is required');
     if (mobile.length < 10) return setError('Valid mobile number is required');
-    if (aadhaar.length < 12) return setError('Valid Aadhaar (12 digits) is required');
     if (!files.cv?.length) return setError('Updated CV is required');
     if (!form.declaration) return setError('Please confirm the declaration');
 
@@ -119,8 +115,7 @@ export default function CandidateApplyPage() {
         <p className="pf-brand">DIP PROJECTS</p>
         <h1 className="pf-title">Candidate Application Form</h1>
         <p className="pf-sub">
-          Fill this form for interview / walk-in. Required: <b>Name</b>, <b>Mobile</b>, <b>Aadhaar</b> and{' '}
-          <b>Updated CV</b>.
+          Fill this form for interview / walk-in. Required: <b>Name</b>, <b>Mobile</b> and <b>Updated CV</b>.
         </p>
 
         {error ? <div className="pf-error">{error}</div> : null}
@@ -181,6 +176,10 @@ export default function CandidateApplyPage() {
             Alternate number
             <input value={form.alternate_number} onChange={(e) => set('alternate_number', e.target.value)} />
           </label>
+           <label className="pf-field">
+            Email
+            <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+          </label>
           <label className="pf-field full">
             Current address
             <textarea value={form.current_address} onChange={(e) => set('current_address', e.target.value)} />
@@ -188,23 +187,6 @@ export default function CandidateApplyPage() {
           <label className="pf-field full">
             Permanent address
             <textarea value={form.permanent_address} onChange={(e) => set('permanent_address', e.target.value)} />
-          </label>
-          <label className="pf-field">
-            Email
-            <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
-          </label>
-          <label className="pf-field">
-            Aadhaar ID <span className="pf-req">*</span>
-            <input
-              inputMode="numeric"
-              value={form.aadhaar}
-              onChange={(e) => set('aadhaar', e.target.value)}
-              placeholder="12 digits"
-            />
-          </label>
-          <label className="pf-field">
-            PAN No.
-            <input value={form.pan} onChange={(e) => set('pan', e.target.value)} />
           </label>
         </div>
 

@@ -59,6 +59,7 @@ app.use('/api/employees',       require('./routes/employees'));
 app.use('/api/clients',         require('./routes/clients_admin'));
 app.use('/api/sites',           require('./routes/sites'));
 app.use('/api/recurring-tasks', require('./routes/recurring_tasks'));
+app.use('/api/task-bank',       require('./routes/task_bank'));
 app.use('/api/leaves',          require('./routes/leaves'));
 app.use('/api/hr',              require('./routes/hr'));
 app.use('/api/tickets',         require('./routes/tickets'));

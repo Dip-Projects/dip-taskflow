@@ -150,6 +150,12 @@ function ymdOf(raw) {
   return null;
 }
 
+function ymdAddDays(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00+05:30`);
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
 /** Monday (IST) of the week containing ymd (YYYY-MM-DD). */
 function weekStartMonday(ymd) {
   const d = new Date(`${ymd}T12:00:00+05:30`);
@@ -472,6 +478,7 @@ async function loadWeeklyPlanDayBundle(employeeUsername, dayYmd = istYmd()) {
     weekStart,
     eaAttendanceId: eaId,
     today,
+    upcoming,
     priorPending,
     openOrdered,
     employeeName: rows[0]?.employee_name || null,
@@ -520,7 +527,7 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
     '',
   ];
 
-  if (!todayOpen.length && !todayDone.length && !prior.length) {
+  if (!todayOpen.length && !todayDone.length && !prior.length && !upcoming.length) {
     return [
       [...header, '_No tasks for today, and nothing pending from earlier this week._', '', 'Reply *PLAN* anytime to refresh.'].join(
         '\n'
@@ -548,6 +555,24 @@ function formatWeeklyPlanMessageParts(bundle, opts = {}) {
       bodyLines.push('');
     }
     while (bodyLines[bodyLines.length - 1] === '') bodyLines.pop();
+  }
+
+  if (upcoming.length) {
+    const byDay = new Map();
+    for (const t of upcoming) {
+      const d = ymdOf(t.task_date) || '';
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(t);
+    }
+    for (const [d, list] of byDay) {
+      bodyLines.push('');
+      bodyLines.push(`—— *${shortDay(d)}* (${list.length} open) ——`);
+      for (const t of list) {
+        const n = idToNum.get(t.id);
+        if (n == null) continue;
+        bodyLines.push(formatTaskLine(t, n));
+      }
+    }
   }
 
   if (prior.length) {

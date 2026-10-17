@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import logo from "../assets/logo.png";
 import "./Navbar.css";
 
+
 export default function Navbar({ onMenuToggle, menuOpen, onLogout, showQrScanner = false, qrActive = false }) {
   const navigate = useNavigate();
   const { user: authUser, logout } = useAuth();
