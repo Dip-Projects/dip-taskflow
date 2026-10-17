@@ -4,7 +4,6 @@ import Navbar from '../../components/Navbar';
 import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
-import SiteMyTasks from "./SiteMyTasks";
 import EaMeetingReport from "./EaMeetingReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
@@ -588,11 +587,9 @@ function buildNav(user, visMap) {
         ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
         : []),
       { key: "leave-approvals", label: "Leave Approvals", icon: Ico.leave },
+      { key: "site-report", label: siteReportLabel(user), icon: Ico.site },
+      { key: "my-reports", label: "My Reports", icon: Ico.myRpt },
     ];
-    if (visAllows(visMap, "site-report", user)) {
-      items.push({ key: "site-report", label: "Site Visit Report", icon: Ico.site });
-    }
-    items.push({ key: "my-reports", label: "My Reports", icon: Ico.myRpt });
     if (visAllows(visMap, "site-team-submissions", user)) {
       items.push({ key: "report-submissions", label: "Team Submissions", icon: Ico.myRpt });
     }
@@ -2323,11 +2320,6 @@ useEffect(() => {
     );
   }, [user, authUser]);
 
-  // My Tasks removed from sidebar — old links land on Weekly Plan
-  useEffect(() => {
-    if (activeTab === "my-tasks") setActiveTab("weekly-plan");
-  }, [activeTab]);
-
   useEffect(() => {
     if (!user?.user_name) return;
     const t = setInterval(() => {
@@ -2426,8 +2418,6 @@ useEffect(() => {
     switch (tab) {
       case "team-chat":
         return <SiteTeamChat user={user} />;
-      case "my-tasks":
-        return <SiteMyTasks />;
       case "ea-attendance":
         return <EaMeetingReport />;
       case "clock-in":
