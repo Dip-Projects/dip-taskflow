@@ -769,6 +769,9 @@ export default function QrAttendance() {
                 </p>
               ) : null}
               <div className="qr-plan-actions">
+                <button type="button" className="qr-btn-primary" onClick={() => navigate("/site?tab=my-tasks")}>
+                  Open My Tasks
+                </button>
                 <button type="button" className="qr-btn-secondary" onClick={() => navigate("/site")}>
                   Site Portal
                 </button>

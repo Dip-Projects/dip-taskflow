@@ -14,12 +14,14 @@ const {
   notifyWeeklyPlanAfterUpload,
   istYmd: weeklyPlanIstYmd,
 } = require('../lib/weeklyPlanDayList');
-const { ingestWeeklyPlanFromEaRow } = require('../lib/weeklyPlanTasks');
+const {
+  canonicalizeEaPlanTasks,
+  excelCellKey,
+  slotQuality,
+} = require('../lib/weeklyPlanCellSync');
 
 const router = express.Router();
 router.use(requireAuth);
-
-const DAILY_STATUS_MIGRATION_CUTOFF = '2026-09-26T12:30:00.000Z';
 
 function usernamesFor(user) {
   return [...new Set(
@@ -158,38 +160,6 @@ async function loadOwnEaRows(user) {
   return [...byId.values()].sort((a, b) =>
     String(b.meeting_week_start || '').localeCompare(String(a.meeting_week_start || ''))
   );
-}
-
-function latestEaRowsByWeek(rows) {
-  const byWeek = new Map();
-  const rank = (row) =>
-    String(
-      row?.plan_submitted_at ||
-        row?.updated_at ||
-        row?.scanned_at ||
-        row?.created_at ||
-        row?.id ||
-        ''
-    );
-
-  for (const row of rows || []) {
-    const week = String(row?.meeting_week_start || '').slice(0, 10);
-    if (!week) continue;
-    const previous = byWeek.get(week);
-    if (!previous) {
-      byWeek.set(week, row);
-      continue;
-    }
-    const rowHasPlan = Boolean(row?.plan_submitted_at);
-    const previousHasPlan = Boolean(previous?.plan_submitted_at);
-    if (
-      (rowHasPlan && !previousHasPlan) ||
-      (rowHasPlan === previousHasPlan && rank(row) > rank(previous))
-    ) {
-      byWeek.set(week, row);
-    }
-  }
-  return [...byWeek.values()];
 }
 
 async function loadAllEaRows(limit = 200) {
@@ -404,73 +374,128 @@ async function notifyUserEaAndTasks(user, opts = {}) {
 }
 
 /**
- * Save browser-parsed plan cells into weekly_plan_tasks.
- * Replace-by-source so re-parse fixes wrong half/date bindings and
- * preserves Completed status when the dedupe key still matches.
+ * Save browser-parsed plan cells into weekly_plan_tasks (deduped).
+ * Shared by POST /:id/ingest and upload notify.
  */
 async function ingestParsedBatches(ea, batches) {
-  const clientParsed = (batches || [])
-    .map((batch) => ({
-      source_file: normalizeSourceFile(batch?.source_file),
-      tasks: Array.isArray(batch?.tasks) ? batch.tasks.slice(0, 400) : [],
-      meta: batch?.meta || null,
-    }))
-    .filter((b) => b.tasks.length);
+  const rows = [];
+  for (const batch of batches || []) {
+    const sourceFile = normalizeSourceFile(batch?.source_file);
+    const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
+    for (const t of tasks.slice(0, 400)) {
+      const row = mapIngestTask(t, ea, sourceFile);
+      if (row) rows.push(row);
+    }
+  }
 
-  if (!clientParsed.length) {
+  if (!rows.length) {
     return { ok: true, inserted: 0, note: 'No tasks to save' };
   }
 
-  try {
-    const result = await ingestWeeklyPlanFromEaRow(ea, clientParsed);
-    const inserted = Number(result?.inserted) || 0;
-    const failed = (result?.details || []).find((d) => d.error);
-    if (failed) {
-      const msg = String(failed.error || '');
-      if (/relation .* does not exist|schema cache|PGRST205|42P01/i.test(msg)) {
-        return {
-          ok: false,
-          inserted,
-          note: 'Missing table weekly_plan_tasks. Run backend/sql/weekly_plan_tasks.sql in Supabase.',
-          error: msg,
-        };
-      }
-      if (/column .*half.* does not exist/i.test(msg)) {
-        return {
-          ok: false,
-          inserted,
-          note: 'Column half is missing. Run backend/sql/weekly_plan_tasks_half_fix.sql in Supabase.',
-          error: msg,
-        };
-      }
-      return { ok: false, inserted, error: msg || 'Ingest failed', details: result?.details };
-    }
-    return {
-      ok: true,
-      inserted,
-      details: result?.details || [],
-      note: inserted ? null : 'Tasks refreshed (no new rows)',
-    };
-  } catch (err) {
-    const msg = err?.message || String(err);
-    if (/relation .* does not exist|schema cache|PGRST205|42P01/i.test(msg)) {
+  const sourceFiles = [...new Set(rows.map((r) => r.source_file))];
+  let existingQ = supabase
+    .from('weekly_plan_tasks')
+    .select('id, task_date, source_file, sr_no, task_name, half, time_slot, status, completed_at, completed_via')
+    .eq('ea_attendance_id', ea.id);
+  if (sourceFiles.length === 1) existingQ = existingQ.eq('source_file', sourceFiles[0]);
+  const { data: existing, error: existingErr } = await existingQ;
+
+  if (existingErr) {
+    if (/relation .* does not exist|schema cache|PGRST205|42P01/i.test(existingErr.message || '')) {
       return {
         ok: false,
         inserted: 0,
         note: 'Missing table weekly_plan_tasks. Run backend/sql/weekly_plan_tasks.sql in Supabase.',
-        error: msg,
+        error: existingErr.message,
       };
     }
-    if (/column .*half.* does not exist/i.test(msg)) {
+    if (/column .*half.* does not exist/i.test(existingErr.message || '')) {
       return {
         ok: false,
         inserted: 0,
         note: 'Column half is missing. Run backend/sql/weekly_plan_tasks_half_fix.sql in Supabase.',
-        error: msg,
+        error: existingErr.message,
       };
     }
-    throw err;
+    throw existingErr;
   }
+
+  // One Excel cell = date|half|sr|task_name (NOT time_slot — that caused duplicates).
+  const byCell = new Map();
+  for (const r of existing || []) {
+    byCell.set(excelCellKey(r), r);
+  }
+
+  const toInsert = [];
+  let updated = 0;
+  for (const r of rows) {
+    const key = excelCellKey(r);
+    const prev = byCell.get(key);
+    if (!prev) {
+      toInsert.push(r);
+      byCell.set(key, r);
+      continue;
+    }
+    // Same cell already saved — refresh work text if better; never lose Completed.
+    const patch = {};
+    if (slotQuality(r) > slotQuality(prev) && r.time_slot) {
+      patch.time_slot = r.time_slot;
+    }
+    if (Object.keys(patch).length && prev.id) {
+      patch.updated_at = new Date().toISOString();
+      const { error: upErr } = await supabase
+        .from('weekly_plan_tasks')
+        .update(patch)
+        .eq('id', prev.id);
+      if (!upErr) {
+        updated += 1;
+        byCell.set(key, { ...prev, ...patch });
+      }
+    }
+  }
+
+  let inserted = 0;
+  const chunkSize = 80;
+  for (let i = 0; i < toInsert.length; i += chunkSize) {
+    const chunk = toInsert.slice(i, i + chunkSize);
+    const { data, error } = await supabase.from('weekly_plan_tasks').insert(chunk).select('id');
+    if (error) {
+      if (/relation .* does not exist|schema cache|PGRST205|42P01/i.test(error.message || '')) {
+        return {
+          ok: false,
+          inserted,
+          note: 'Missing table weekly_plan_tasks. Run backend/sql/weekly_plan_tasks.sql in Supabase.',
+          error: error.message,
+        };
+      }
+      if (/column .*half.* does not exist/i.test(error.message || '')) {
+        return {
+          ok: false,
+          inserted,
+          note: 'Column half is missing. Run backend/sql/weekly_plan_tasks_half_fix.sql in Supabase.',
+          error: error.message,
+        };
+      }
+      for (const row of chunk) {
+        const { error: oneErr } = await supabase.from('weekly_plan_tasks').insert(row);
+        if (!oneErr) inserted += 1;
+        else if (!/duplicate|unique|23505/i.test(oneErr.message || '')) {
+          return { ok: false, inserted, error: oneErr.message || 'Ingest failed' };
+        }
+      }
+      continue;
+    }
+    inserted += Array.isArray(data) ? data.length : chunk.length;
+  }
+
+  const canon = await canonicalizeEaPlanTasks(ea.id);
+  return {
+    ok: true,
+    inserted,
+    updated,
+    canonicalized: canon,
+    note: canon?.deleted ? `Removed ${canon.deleted} duplicate cell rows` : undefined,
+  };
 }
 
 router.post('/notify', async (req, res) => {
@@ -630,27 +655,24 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
           return res.status(403).json({ error: 'Not allowed to update this task' });
         }
       }
-      // Update every clone of this sheet cell. Older parses created duplicate
-      // IDs with the same date/work text, so updating only one made UI and WA disagree.
-      const canonical = (patch) => {
-        let q = supabase
-          .from('weekly_plan_tasks')
-          .update(patch)
-          .eq('ea_attendance_id', existing.ea_attendance_id)
-          .eq('task_date', String(existing.task_date || '').slice(0, 10))
-          .eq('task_name', existing.task_name || '')
-          .eq('time_slot', existing.time_slot || '');
-        if (existing.source_file) q = q.eq('source_file', existing.source_file);
-        return q;
-      };
+      if (String(existing.status) === nextStatus) {
+        return res.json({ ok: true, task: mapTaskRow(existing) });
+      }
 
       // 1) status-only (most compatible)
-      let { error } = await canonical(patchStatusOnly);
-      let data = existing;
+      let { data, error } = await supabase
+        .from('weekly_plan_tasks')
+        .update(patchStatusOnly)
+        .eq('id', taskId)
+        .select('*')
+        .maybeSingle();
 
       // 2) enrich completed_* when columns exist
-      if (!error) {
-        const { error: enrichErr } = await canonical(patchTasksFull);
+      if (!error && data) {
+        const { error: enrichErr } = await supabase
+          .from('weekly_plan_tasks')
+          .update(patchTasksFull)
+          .eq('id', taskId);
         if (!enrichErr) {
           const refreshed = await supabase
             .from('weekly_plan_tasks')
@@ -658,8 +680,6 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
             .eq('id', taskId)
             .maybeSingle();
           if (refreshed.data) data = refreshed.data;
-        } else {
-          data = { ...existing, ...patchStatusOnly };
         }
       }
 
@@ -667,25 +687,6 @@ async function setWeeklyPlanTaskStatus(req, res, nextStatus) {
       if (!data) {
         return res.status(404).json({ error: 'Task not found or could not be updated' });
       }
-
-      // Mirror the toggle into the flattened weekly-plan sheet table.
-      // That table stores the category in `task` (not the work text/time_slot).
-      try {
-        let sheetSync = supabase
-          .from('weekly_plan_sheet')
-          .update(patchSheet)
-          .eq('ea_attendance_id', existing.ea_attendance_id)
-          .eq('task_date', String(existing.task_date || '').slice(0, 10))
-          .eq('task', existing.task_name || '');
-        if (existing.source_file) sheetSync = sheetSync.eq('source_file', existing.source_file);
-        const { error: sheetSyncErr } = await sheetSync;
-        if (sheetSyncErr && !isMissingRelation(sheetSyncErr)) {
-          console.warn('weekly_plan_sheet status sync:', sheetSyncErr.message);
-        }
-      } catch (sheetSyncErr) {
-        console.warn('weekly_plan_sheet status sync:', sheetSyncErr.message);
-      }
-
       return res.json({ ok: true, task: mapTaskRow(data) });
     }
 
@@ -794,9 +795,7 @@ async function fetchWeeklyPlanTasksForUser({ eaIds, uid, namesLower }) {
     merge(data);
   }
 
-  // When attendance IDs are available they are authoritative. Falling back to
-  // username/employee ID as well would pull stale re-uploads from the same week.
-  if (!eaIds.length && uid) {
+  if (uid) {
     const { data, error } = await supabase
       .from('weekly_plan_tasks')
       .select('*')
@@ -810,7 +809,7 @@ async function fetchWeeklyPlanTasksForUser({ eaIds, uid, namesLower }) {
   }
 
   const orFilter = usernameOrFilter(namesLower);
-  if (!eaIds.length && orFilter) {
+  if (orFilter) {
     const { data, error } = await supabase
       .from('weekly_plan_tasks')
       .select('*')
@@ -867,7 +866,7 @@ async function fetchWeeklyPlanSheetForUser({ eaIds, uid, namesLower }) {
     merge(data);
   }
 
-  if (!eaIds.length && uid) {
+  if (uid) {
     const { data, error } = await supabase
       .from('weekly_plan_sheet')
       .select('*')
@@ -881,7 +880,7 @@ async function fetchWeeklyPlanSheetForUser({ eaIds, uid, namesLower }) {
   }
 
   const orFilter = usernameOrFilter(namesLower);
-  if (!eaIds.length && orFilter) {
+  if (orFilter) {
     const { data, error } = await supabase
       .from('weekly_plan_sheet')
       .select('*')
@@ -922,8 +921,7 @@ router.get('/my-plan-tasks', async (req, res) => {
       return res.json({ tasks: [], weeks: [], uploads: [], note: 'Weekly plan tasks are hidden for admin.' });
     }
 
-    const allOwnRows = await loadOwnEaRows(profile);
-    const ownRows = latestEaRowsByWeek(allOwnRows);
+    const ownRows = await loadOwnEaRows(profile);
     const namesLower = usernameSetLower(profile, ownRows);
     const uid = profile?.id != null ? String(profile.id) : null;
     const eaIds = [...new Set(ownRows.map((r) => r.id).filter(Boolean))];
@@ -1064,31 +1062,6 @@ router.get('/:id/tasks', async (req, res) => {
     }
 
     const source = String(req.query.source || '').trim();
-
-    // One-time cleanup for the TIME + WORK STATUS parser bug. Only daily rows
-    // (half=0) written before the fix are reset; two-half plans are untouched.
-    try {
-      let cleanup = supabase
-        .from('weekly_plan_tasks')
-        .update({
-          status: 'Pending',
-          completed_at: null,
-          completed_via: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('ea_attendance_id', eaId)
-        .eq('half', 0)
-        .neq('status', 'Pending')
-        .lt('updated_at', DAILY_STATUS_MIGRATION_CUTOFF);
-      if (source) cleanup = cleanup.eq('source_file', normalizeSourceFile(source));
-      const { error: cleanupError } = await cleanup;
-      if (cleanupError && !/half|completed_at|completed_via/i.test(cleanupError.message || '')) {
-        console.warn('daily weekly-plan status cleanup:', cleanupError.message);
-      }
-    } catch (cleanupError) {
-      console.warn('daily weekly-plan status cleanup:', cleanupError.message);
-    }
-
     let q = supabase
       .from('weekly_plan_tasks')
       .select('*')
@@ -1104,7 +1077,17 @@ router.get('/:id/tasks', async (req, res) => {
       }
       throw error;
     }
-    res.json({ tasks: data || [], ea_id: eaId });
+    // Ensure UI sees one row per Excel cell (same as WhatsApp).
+    await canonicalizeEaPlanTasks(eaId);
+    const refreshed = await supabase
+      .from('weekly_plan_tasks')
+      .select('*')
+      .eq('ea_attendance_id', eaId)
+      .order('task_date', { ascending: true })
+      .order('sr_no', { ascending: true });
+    const tasks =
+      !refreshed.error && Array.isArray(refreshed.data) ? refreshed.data : data || [];
+    res.json({ tasks, ea_id: eaId });
   } catch (err) {
     console.error('EM tasks list:', err.message);
     res.status(500).json({ error: err.message || 'Could not load tasks', tasks: [] });
@@ -1113,7 +1096,7 @@ router.get('/:id/tasks', async (req, res) => {
 
 /**
  * POST /api/ea-meeting/:id/send-day-list
- * Re-ingest plan Excel if needed, then WhatsApp today's open task list.
+ * Resend today's weekly-plan WhatsApp list to the plan owner.
  */
 router.post('/:id/send-day-list', async (req, res) => {
   try {
@@ -1144,10 +1127,6 @@ router.post('/:id/send-day-list', async (req, res) => {
       });
     }
 
-    // Sending is read-only. Re-ingesting here used to delete/recreate task IDs,
-    // causing WhatsApp and the UI to update different rows.
-    const ingest = { ok: true, inserted: 0, skipped: 'send_is_read_only' };
-
     const whatsapp = await notifyWeeklyPlanAfterUpload({
       username,
       user: owner,
@@ -1156,55 +1135,11 @@ router.post('/:id/send-day-list', async (req, res) => {
       dayYmd: weeklyPlanIstYmd(),
     });
 
-    // If Site Incharge / PC clicked Send, also ping their own WhatsApp when different.
-    let cc = null;
-    const viewerProfile = await loadUserProfile(req.user);
-    const viewerTo = normalizeWhatsAppNumber(viewerProfile?.whatsapp_number);
-    const ownerTo = normalizeWhatsAppNumber(toNumber);
-    if (viewerTo && viewerTo !== ownerTo) {
-      try {
-        cc = await notifyWeeklyPlanAfterUpload({
-          username: viewerProfile.username || req.user?.username,
-          user: viewerProfile,
-          toNumber: viewerTo,
-          fullName: viewerProfile.full_name || req.user?.full_name,
-          dayYmd: weeklyPlanIstYmd(),
-        });
-      } catch (ccErr) {
-        cc = { ok: false, error: ccErr.message };
-      }
-    }
-
-    const openCount = Number(whatsapp?.openCount) || 0;
-    const waOk = !!whatsapp?.ok && !whatsapp?.skipped;
-    const emptyOk = whatsapp?.skipped === 'empty' || (whatsapp?.ok && openCount === 0);
-    let error = null;
-    if (!waOk && !emptyOk) {
-      error =
-        whatsapp?.templateError?.error ||
-        whatsapp?.textError?.error ||
-        whatsapp?.reason ||
-        whatsapp?.error ||
-        'WhatsApp send failed';
-    } else if (emptyOk && !(Number(ingest?.inserted) > 0) && openCount === 0) {
-      error =
-        'No weekly-plan tasks in database for this week. Open the Excel preview (Refresh) so tasks save, then try WhatsApp again.';
-    }
-
-    const toDisplay = ownerTo || normalizeWhatsAppNumber(toNumber);
     res.json({
-      ok: waOk || (whatsapp?.ok && openCount > 0),
-      to: toDisplay,
+      ok: !!whatsapp?.ok,
+      to: normalizeWhatsAppNumber(toNumber),
       username,
-      ingest,
-      openCount,
       whatsapp,
-      cc,
-      error: error || undefined,
-      note:
-        openCount > 0 && (waOk || whatsapp?.ok)
-          ? `Sent ${openCount} open task(s) via ${whatsapp?.via || 'whatsapp'} to ${toDisplay}${cc?.ok ? ` (+ copy to ${viewerTo})` : ''}`
-          : error || whatsapp?.note || null,
     });
   } catch (err) {
     console.error('EM send-day-list:', err.message);
@@ -1235,9 +1170,10 @@ router.post('/:id/ingest', async (req, res) => {
       return res.status(500).json(result);
     }
 
-    // Only send WhatsApp when the client explicitly asks — never on sheet Refresh / week dropdown load.
+    // First time tasks are saved (or explicit notify), send today's WhatsApp list.
     let whatsapp = null;
     const wantNotify =
+      Number(result.inserted || 0) > 0 ||
       req.body?.notifyWhatsApp === true ||
       req.query?.notify === '1';
     if (wantNotify) {

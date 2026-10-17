@@ -1,27 +1,11 @@
-  /* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
-import { useEffect, useLayoutEffect, useState } from 'react';
+/* Auto-converted from backend/legacy/index.html — keep element IDs for mountTaskflowApp bridge */
+import { useLayoutEffect } from 'react';
 import MonthlyReport from '../site/MonthlyReport';
-import SiteReport from '../site/Sitereport';
-import MyReports from '../site/MyReports';
-import BotLetterPanel from './BotLetterPanel';
-
-function readOfficeUser() {
-  let user = null;
-  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
-  return user;
-}
 
 function OfficeMonthlyReport() {
-  const user = readOfficeUser();
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('tf_user') || 'null'); } catch { /* ignore */ }
   return <MonthlyReport user={user} />;
-}
-
-function OfficeSiteReport() {
-  return <SiteReport user={readOfficeUser()} />;
-}
-
-function OfficeMyReports() {
-  return <MyReports user={readOfficeUser()} />;
 }
 
 /** Re-apply sidebar open/overlay after React re-renders (MonthlyReport etc. wipe className). */
@@ -42,25 +26,8 @@ function restoreSidebarDom() {
 }
 
 export default function TaskflowDom() {
-  const [botLetter, setBotLetter] = useState('');
-
-  useEffect(() => {
-    const onLetter = (e) => {
-      const kind = e.detail === 'exp' ? 'exp' : 'offer';
-      setBotLetter(kind);
-    };
-    window.addEventListener('dip-bot-letter', onLetter);
-    return () => window.removeEventListener('dip-bot-letter', onLetter);
-  }, []);
-
   useLayoutEffect(() => {
     restoreSidebarDom();
-    const key = window.__tfActiveView;
-    if (!key) return;
-    const htmlKey = (key === 'tickets-open' || key === 'tickets-resolved') ? 'tickets' : key;
-    document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
-    const viewEl = document.getElementById(`view-${htmlKey}`);
-    if (viewEl) viewEl.hidden = false;
   });
 
   return (
@@ -1079,16 +1046,135 @@ export default function TaskflowDom() {
                 <h2 className="view-title">🗓️ Reschedule requests</h2>
                 <p className="view-sub" id="reschedViewSub">Tasks where a new date has been requested.</p>
               </div>
-              <div className="filters-card" id="reschedFiltersCard">
-                <div className="filters-row">
-                  <div className="filter-field">
-                    <label className="filter-label" htmlFor="resched-filter-status">Status</label>
-                    <select id="resched-filter-status" defaultValue="Pending">
-                      <option value="Pending">Pending</option>
-                      <option value="Approved">Approved</option>
-                      <option value="Rejected">Rejected</option>
-                      <option value="">All</option>
-                    </select>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="emp-filter-department">Department</label>
+                <select id="emp-filter-department"><option value="">All departments</option></select>
+              </div>
+              <div className="filter-field">
+                <label className="filter-label" htmlFor="emp-filter-status">Status</label>
+                <select id="emp-filter-status">
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+              <button type="button" id="clearEmpFilters" className="clear-btn">✕ Clear</button>
+            </div>
+            <p id="empFilterCount" className="range-count" hidden={true}></p>
+          </div>
+
+          <div className="table-card view-desktop-only" style={{marginTop: 20}}>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Department</th><th>Designation</th><th>Reporting Head</th>
+                    <th>Role</th><th>Username</th><th>Status</th><th>Verifier</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="employeesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="employeesCards" className="employee-card-list view-mobile-only" style={{marginTop: 20}}></div>
+        </section>
+
+        {/* ORG HIERARCHY */}
+        <section id="view-hierarchy" className="view" hidden={true}>
+          <div className="view-header-row">
+            <div className="view-heading" style={{marginBottom: 0}}>
+              <h2 className="view-title">Org Hierarchy</h2>
+              <p className="view-sub">Reporting structure — inactive employees are hidden automatically.</p>
+            </div>
+          </div>
+          <div id="hierarchyTreeContainer" className="org-tree-container" style={{marginTop: 20}}></div>
+        </section>
+
+        {/* PROJECT MANAGEMENT — who is on which project + shift */}
+        <section id="view-project-mgmt" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">🗂️ Project management</h2>
+            <p className="view-sub">See who is on which project, shift people, and open project discussion (in-app group + WhatsApp alert).</p>
+          </div>
+          <div className="field-grid" style={{marginBottom: 16}}>
+            <div className="field">
+              <label>Project</label>
+              <select id="pmg-project"></select>
+            </div>
+            <div className="field">
+              <label>Assign employee</label>
+              <select id="pmg-employee"></select>
+            </div>
+          </div>
+          <div className="row-actions" style={{gap: 8, marginBottom: 16, display: 'flex', flexWrap: 'wrap'}}>
+            <button type="button" id="pmgAssignBtn" className="primary-btn primary-btn-inline">Assign to project</button>
+            <button type="button" id="pmgDiscussBtn" className="ghost-btn">Start / open discussion</button>
+          </div>
+          <div id="pmgInviteBox" className="form-note" hidden></div>
+          <div className="field-grid" style={{marginBottom: 16}}>
+            <div className="field">
+              <label>Shift from project</label>
+              <select id="pmg-from"></select>
+            </div>
+            <div className="field">
+              <label>Shift to project</label>
+              <select id="pmg-to"></select>
+            </div>
+          </div>
+          <div className="field" style={{maxWidth: 360}}>
+            <label>Employee to shift</label>
+            <select id="pmg-shift-emp"></select>
+          </div>
+          <button type="button" id="pmgShiftBtn" className="primary-btn primary-btn-inline" style={{marginBottom: 20}}>Shift employee</button>
+          <div id="pmgMembers" className="ticket-list"></div>
+        </section>
+
+        {/* DIP AI BOT */}
+        <section id="view-ai-bot" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title view-title--bot">
+              <img src="/logo192.png" alt="" className="view-bot-dp" width="28" height="28" />
+              DIP Bot
+            </h2>
+            <p className="view-sub">Ask one thing — overdue, a person, leave, attendance, or tickets. DIP Bot answers only that.</p>
+          </div>
+          <div className="bot-shell">
+            <div id="botChatLog" className="bot-chat-log"></div>
+            <form id="botAskForm" className="bot-ask-form">
+              <input id="botAskInput" type="text" placeholder="e.g. overdue tasks, pending leaves, MoM of last meeting, DPR for SMJV" autoComplete="off" />
+              <button type="submit" className="primary-btn primary-btn-inline">Ask</button>
+            </form>
+          </div>
+        </section>
+
+        {/* TEAM CHAT */}
+        <section id="view-team-chat" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">💬 Team chat</h2>
+            <p className="view-sub">Project group chat + individual DM (office &amp; site). Chats are saved. Unread shows only on your chats. Video meeting from any chat.</p>
+          </div>
+          <div className="chat-layout">
+            <aside className="chat-sidebar">
+              <div className="field">
+                <label>Start DM</label>
+                <select id="chatPeerSelect"><option value="">Select colleague…</option></select>
+              </div>
+              <button type="button" id="chatStartDmBtn" className="primary-btn primary-btn-inline" style={{width: '100%', marginBottom: 12}}>Start chat</button>
+              <div className="field">
+                <label>Join with invite code</label>
+                <input id="chatJoinCode" type="text" placeholder="Invite code" />
+              </div>
+              <button type="button" id="chatJoinBtn" className="ghost-btn" style={{width: '100%', marginBottom: 12}}>Join discussion</button>
+              <div id="chatRoomList" className="chat-room-list"></div>
+            </aside>
+            <div className="chat-main">
+              <div className="chat-main-header">
+                <div>
+                  <div id="chatRoomTitle" className="chat-room-title">Select a chat</div>
+                  <div id="chatInviteRow" className="chat-invite-row" hidden>
+                    Invite: <code id="chatInviteCodeShow"></code>
+                    <button type="button" id="chatCopyInviteBtn" className="ghost-btn" style={{padding: '2px 8px', fontSize: '0.75rem'}}>Copy</button>
+                    <button type="button" id="chatNewInviteBtn" className="ghost-btn" style={{padding: '2px 8px', fontSize: '0.75rem'}}>New code</button>
                   </div>
                 </div>
               </div>
@@ -2294,23 +2380,173 @@ export default function TaskflowDom() {
                 <option value="days">Give extra days</option>
                 <option value="new">Set a new date &amp; time</option>
               </select>
-            </div>
-            <div className="field" id="updationExtraWrap" hidden={true}>
-              <label htmlFor="updation-extra-amount">How much extra?</label>
-              <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
-              <input type="hidden" id="updation-extra-unit" value="" />
-            </div>
-            <div className="field" id="updationNewDueWrap" hidden={true}>
-              <label htmlFor="updation-new-due">New due date &amp; time</label>
-              <input id="updation-new-due" type="datetime-local" />
-              <p className="form-note">This exact date and time will become the new target date for this task.</p>
-            </div>
-            <p id="updationFormMsg" className="form-error" hidden={true}></p>
-            <div className="modal-actions">
-              <button type="button" className="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
-              <button type="submit" className="primary-btn primary-btn-inline">📤 Send Updation</button>
-            </div>
-          </form>
+            </label>
+            <label className="mis-field">
+              <span>Project</span>
+              <select id="fmsProject"><option value="">All projects</option></select>
+            </label>
+            <label className="mis-field">
+              <span>Person</span>
+              <select id="fmsPerson"><option value="">All people</option></select>
+            </label>
+            <button type="button" id="fmsGenBtn" className="primary-btn primary-btn-inline">Refresh</button>
+            <button type="button" id="fmsCsvBtn" className="ghost-btn">Export CSV</button>
+          </div>
+          <div id="fmsSummary" className="fms-summary"></div>
+          <div id="fmsBody"></div>
+        </section>
+
+        <section id="view-monthly-report" className="view" hidden={true}>
+          <div className="view-heading">
+            <h2 className="view-title">Monthly reports</h2>
+            <p className="view-sub">Submitted monthly packs. Add a folder when a new month is ready.</p>
+          </div>
+          <OfficeMonthlyReport />
+        </section>
+
+      </main>
+    </div>
+  </section>
+
+  {/* Add Employee Modal */}
+  <div id="employeeModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Add new employee</h3>
+        <button className="modal-close" id="closeEmployeeModal">&times;</button>
+      </div>
+      <form id="employeeForm" className="modal-body">
+        <div className="field">
+          <label htmlFor="emp-fullname">Full name <span className="req">*</span></label>
+          <input id="emp-fullname" type="text" placeholder="Enter full name" required />
+        </div>
+        <div className="field">
+          <label htmlFor="emp-department">Department <span className="req">*</span></label>
+          <input id="emp-department" type="text" placeholder="e.g., Site Execution" required />
+        </div>
+        <div className="field">
+          <label htmlFor="emp-designation">Designation <span className="req">*</span></label>
+          <input id="emp-designation" type="text" placeholder="e.g., Project Manager" required />
+        </div>
+        <div className="field">
+          <label htmlFor="emp-role">Role <span className="req">*</span></label>
+          <select id="emp-role" required>
+            <option value="">Select role</option>
+            <option value="employee">Employee</option>
+            <option value="head">Head</option>
+            <option value="hr">HR</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="emp-reporting-head">Reporting Head <span className="optional">(optional)</span></label>
+          <select id="emp-reporting-head">
+            <option value="">— None (Top level) —</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+          <div id="emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+          <p className="form-note" style={{marginTop: 6}}>You can assign multiple projects. Required for Site Engineers and Clients. Client login only shows these projects’ reports and materials.</p>
+        </div>
+        <div className="field">
+          <label htmlFor="emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+          <input id="emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
+          <p className="form-note" style={{marginTop: 6}}>Used for task / leave / verification WhatsApp alerts.</p>
+        </div>
+        <p className="form-note">Username and password will be auto-generated after submission.</p>
+        <p id="employeeFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelEmployeeModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Add employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Edit Employee Modal */}
+  <div id="editEmployeeModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Edit employee</h3>
+        <button className="modal-close" id="closeEditEmployeeModal">&times;</button>
+      </div>
+      <form id="editEmployeeForm" className="modal-body">
+        <input type="hidden" id="edit-emp-id" />
+        <div className="field">
+          <label htmlFor="edit-emp-fullname">Full name <span className="req">*</span></label>
+          <input id="edit-emp-fullname" type="text" required />
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-department">Department <span className="req">*</span></label>
+          <input id="edit-emp-department" type="text" required />
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-designation">Designation <span className="req">*</span></label>
+          <input id="edit-emp-designation" type="text" required />
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-role">Role <span className="req">*</span></label>
+          <select id="edit-emp-role" required>
+            <option value="employee">Employee</option>
+            <option value="head">Head</option>
+            <option value="hr">HR</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-reporting-head">Reporting Head <span className="optional">(optional)</span></label>
+          <select id="edit-emp-reporting-head">
+            <option value="">— None (Top level) —</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-site-toggle">Project / Site <span className="optional">(for Site Engineer)</span></label>
+          <div id="edit-emp-site" className="multi-select" data-placeholder="Select one or more sites"></div>
+          <p className="form-note" style={{marginTop: 6}}>Select every site this person should access. Click again to add or remove sites.</p>
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-whatsapp">WhatsApp number <span className="optional">(with country code)</span></label>
+          <input id="edit-emp-whatsapp" type="text" placeholder="e.g. 9198XXXXXXXX" />
+        </div>
+        <div className="field">
+          <label>Status</label>
+          <div>
+            <button type="button" id="edit-emp-status-toggle" className="status-toggle active" data-active="true">Active</button>
+          </div>
+          <p className="form-note" style={{marginTop: 6}}>Inactive employees are removed from the Org Hierarchy and from every "assign to / reporting head" dropdown.</p>
+        </div>
+        <div className="field">
+          <label htmlFor="edit-emp-password">New password <span className="optional">(leave blank to keep current)</span></label>
+          <div className="password-field">
+            <input id="edit-emp-password" type="password" placeholder="Set a new password" minLength="6" autoComplete="new-password" />
+            <button type="button" id="toggleEditPassword" className="ghost-btn" aria-label="Show password">👁</button>
+          </div>
+        </div>
+        <p id="editEmployeeFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelEditEmployeeModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Credentials Modal */}
+  <div id="credsModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3 id="credsModalTitle">Login created ✅</h3>
+        <button className="modal-close" id="closeCredsModal">&times;</button>
+      </div>
+      <div className="modal-body">
+        <p id="credsModalNote">Share these login details — they won't be shown again.</p>
+        <div className="creds-box">
+          <div><span>Username</span><strong id="credsUsername"></strong></div>
+          <div><span>Password</span><strong id="credsPassword"></strong></div>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="primary-btn primary-btn-inline" id="closeCredsModalBtn">Done</button>
         </div>
       </div>
 
@@ -2530,12 +2766,152 @@ export default function TaskflowDom() {
         </div>
       </div>
 
-      {/* Reschedule Modal */}
-      <div id="rescheduleModal" className="modal-backdrop" hidden={true}>
-        <div className="modal">
-          <div className="modal-header">
-            <h3>Reschedule task</h3>
-            <button className="modal-close" id="closeRescheduleModal">&times;</button>
+  {/* Verifier forwards a request already in their queue */}
+  <div id="forwardVerifyModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Send to another verifier</h3>
+        <button className="modal-close" id="closeForwardVerifyModal" type="button">&times;</button>
+      </div>
+      <form id="forwardVerifyForm" className="modal-body">
+        <p className="form-note" id="forwardVerifyHint">This task will leave the current verifier and show up for the person you pick.</p>
+        <div className="field">
+          <label htmlFor="forward-verify-person">Send to <span className="req">*</span></label>
+          <select id="forward-verify-person" required><option value="">Select a verifier</option></select>
+        </div>
+        <p id="forwardVerifyFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelForwardVerifyModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Ticket Modal */}
+  <div id="ticketModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Raise a ticket</h3>
+        <button className="modal-close" id="closeTicketModal">&times;</button>
+      </div>
+      <form id="ticketForm" className="modal-body">
+        {/* Shown only when raised from a task */}
+        <div id="ticketTaskBanner" className="ticket-task-banner" hidden={true}>
+          <span className="ticket-task-banner-icon">🔗</span>
+          <span>Linked to task: <strong id="ticketTaskBannerText"></strong></span>
+        </div>
+        <div className="field">
+          <label htmlFor="ticket-category">Category <span className="req">*</span></label>
+          <select id="ticket-category" required>
+            <option value="">Select category</option>
+            <option value="Technical">🔧 Technical issue</option>
+            <option value="Task">📋 Task related</option>
+            <option value="Access">🔑 Access / Login issue</option>
+            <option value="Other">📌 Other</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="ticket-description">Describe the issue <span className="req">*</span></label>
+          <textarea id="ticket-description" rows={4} placeholder="Explain your issue in detail..." required></textarea>
+        </div>
+        {/* Screenshot / screen recording — shown only for Technical or Access */}
+        <div id="ticketMediaFields" className="field" hidden={true}>
+          <label>Screenshot or screen recording <span className="optional">(optional)</span></label>
+          <p className="form-note">Attach a screenshot (PNG/JPG) or a short screen recording (MP4/WebM) to help us understand the issue.</p>
+          <input id="ticket-media" type="file" accept="image/png,image/jpeg,image/jpg,video/mp4,video/webm" />
+        </div>
+        <p id="ticketFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelTicketModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Submit ticket</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Updation Modal (verifier/admin → send updation note to employee) */}
+  <div id="updationModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>📝 Request Updation</h3>
+        <button className="modal-close" id="closeUpdationModal">&times;</button>
+      </div>
+      <form id="updationForm" className="modal-body">
+        <p className="form-note" style={{marginBottom: 12}}>Describe what needs to be updated. The employee will see this note in their Updations section.</p>
+        <div className="field">
+          <label htmlFor="updation-note">Updation note <span className="req">*</span></label>
+          <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
+        </div>
+        <div className="field">
+          <p id="updationCurrentDue" className="form-note" style={{marginBottom: 8}}>This was your target date.</p>
+          <label htmlFor="updation-due-action">Now what would you like to do?</label>
+          <select id="updation-due-action">
+            <option value="keep">Keep the same date</option>
+            <option value="hours">Give extra hours</option>
+            <option value="days">Give extra days</option>
+            <option value="new">Set a new date &amp; time</option>
+          </select>
+        </div>
+        <div className="field" id="updationExtraWrap" hidden={true}>
+          <label htmlFor="updation-extra-amount">How much extra?</label>
+          <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+          <input type="hidden" id="updation-extra-unit" value="" />
+        </div>
+        <div className="field" id="updationNewDueWrap" hidden={true}>
+          <label htmlFor="updation-new-due">New due date &amp; time</label>
+          <input id="updation-new-due" type="datetime-local" />
+          <p className="form-note">This exact date and time will become the new target date for this task.</p>
+        </div>
+        <p id="updationFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelUpdationModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">📤 Send Updation</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* Solution Modal (admin/resolver → write solution) */}
+  <div id="solutionModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>💡 Provide solution</h3>
+        <button className="modal-close" id="closeSolutionModal">&times;</button>
+      </div>
+      <div className="modal-body">
+        <div id="solutionTicketInfo" className="solution-ticket-info"></div>
+        <div className="field" style={{marginTop: 14}}>
+          <label htmlFor="solution-text">Solution / response <span className="req">*</span></label>
+          <textarea id="solution-text" rows={5} placeholder="Write the solution or action taken..."></textarea>
+        </div>
+        <p id="solutionFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelSolutionModal">Cancel</button>
+          <button type="button" className="primary-btn primary-btn-inline" id="submitSolutionBtn">Submit &amp; Resolve</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {/* Apply Leave Modal */}
+  <div id="leaveModal" className="modal-backdrop" hidden={true}>
+    <div className="modal">
+      <div className="modal-header">
+        <h3>Apply for leave</h3>
+        <button className="modal-close" id="closeLeaveModal">&times;</button>
+      </div>
+      <form id="leaveForm" className="modal-body">
+        <div id="leaveFormBalancePreview" className="leave-form-bal-preview">
+          <div><strong>Available:</strong> <span id="leaveFormBalAvail">—</span></div>
+          <div><strong>This request:</strong> <span id="leaveFormBalReq">—</span></div>
+          <div><strong>After apply:</strong> <span id="leaveFormBalAfter">—</span></div>
+          <p id="leaveFormBalWarn" className="leave-form-bal-warn" hidden={true}></p>
+        </div>
+        <div className="field-grid">
+          <div className="field">
+            <label htmlFor="leave-from">From date <span className="req">*</span></label>
+            <input id="leave-from" type="date" required />
           </div>
           <form id="rescheduleForm" className="modal-body">
 
@@ -2585,7 +2961,34 @@ export default function TaskflowDom() {
             </div>
           </form>
         </div>
-      </div>
+        <div className="field">
+          <label className="checkbox-label">
+            <input id="leave-halfday" type="checkbox" />
+            Half day leave
+          </label>
+        </div>
+        <div className="field">
+          <label htmlFor="leave-reason">Reason <span className="req">*</span></label>
+          <textarea id="leave-reason" rows={3} placeholder="Why are you taking leave..." required></textarea>
+        </div>
+        <div className="field">
+          <label htmlFor="leave-buddy">Buddy (task cover)</label>
+          <select id="leave-buddy">
+            <option value="">Select buddy…</option>
+          </select>
+          <p className="form-note" style={{marginTop: 6}}>
+            After you submit, choose per task: plan for buddy (moves only after buddy Accepts), keep on hold, or request a reschedule.
+            Head/admin can approve leave anytime. Tasks go to buddy only when they Accept — leave approve alone does not move tasks.
+          </p>
+        </div>
+        <p id="leaveFormMsg" className="form-error" hidden={true}></p>
+        <div className="modal-actions">
+          <button type="button" className="ghost-btn-text" id="cancelLeaveModal">Cancel</button>
+          <button type="submit" className="primary-btn primary-btn-inline">Submit request</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
       {/* Admin approve reschedule — hours summary + employee date vs own date/time.
       Use class is-open (not React hidden) so mountTaskflowApp can show it reliably. */}

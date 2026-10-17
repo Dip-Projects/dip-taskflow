@@ -116,22 +116,15 @@ export function parseDateFromText(raw) {
   return parseDateLoose(raw);
 }
 
-/** Whole-cell status only — never match substrings like PROGRESS inside task titles. */
 function normalizeStatus(raw) {
   const t = cellText(raw).toUpperCase();
   if (!t) return "Pending";
-  if (/^(COMPLETED|COMPLETE|DONE)$/.test(t)) return "Completed";
-  if (/^(IN\s*PROGRESS|PROGRESS)$/.test(t)) return "In Progress";
-  if (/^(ON\s*HOLD|HOLD)$/.test(t)) return "On Hold";
-  if (/^(CANCELLED|CANCELED|CANCEL)$/.test(t)) return "Cancelled";
-  if (/^PENDING$/.test(t)) return "Pending";
+  if (/(COMPLETED|COMPLETE|DONE)/.test(t)) return "Completed";
+  if (/IN\s*PROGRESS|PROGRESS/.test(t)) return "In Progress";
+  if (/ON\s*HOLD|HOLD/.test(t)) return "On Hold";
+  if (/CANCEL/.test(t)) return "Cancelled";
+  if (/PENDING/.test(t)) return "Pending";
   return "Pending";
-}
-
-function isPureStatusCell(text) {
-  return /^(PENDING|COMPLETED|COMPLETE|DONE|IN\s*PROGRESS|PROGRESS|ON\s*HOLD|HOLD|CANCELLED|CANCELED|CANCEL)$/i.test(
-    cellText(text)
-  );
 }
 
 function isHeaderTaskName(name) {
@@ -308,7 +301,7 @@ function isSecondHalfLabel(text) {
 
 /** Find the row (near the date row) that carries explicit "1st half" / "2nd half" labels. */
 function findHalfLabelRow(matrix, dateHeaderRow) {
-  const maxRows = Math.min(matrix.length, Math.max(dateHeaderRow + 30, 30));
+  const maxRows = Math.min(matrix.length, 12);
   for (let r = dateHeaderRow; r < maxRows; r += 1) {
     const row = matrix[r] || [];
     let firstHits = 0;
@@ -324,23 +317,16 @@ function findHalfLabelRow(matrix, dateHeaderRow) {
 }
 
 /**
- * Each calendar day owns exactly one 1st-half and one 2nd-half column.
- * Pair consecutive 1st→2nd half headers, then assign each pair to the nearest date.
+ * Each calendar day owns two partitions (1st half 8AM–1PM | 2nd half 2PM–7PM).
  */
 function findDateColumns(matrix) {
   let best = null;
   for (let r = 0; r < Math.min(matrix.length, 20); r += 1) {
     const row = matrix[r] || [];
     const dates = [];
-    const seenDates = new Set();
     for (let c = 0; c < row.length; c += 1) {
       const ymd = parseDateLoose(row[c]);
-      // Merged date headers are copied into both TIME and WORK STATUS columns.
-      // Keep the first occurrence so one calendar day never becomes two tasks.
-      if (ymd && !seenDates.has(ymd)) {
-        dates.push({ col: c, ymd });
-        seenDates.add(ymd);
-      }
+      if (ymd) dates.push({ col: c, ymd });
     }
     if (dates.length >= 2 && (!best || dates.length > best.dates.length)) {
       best = { row: r, dates };
@@ -354,29 +340,22 @@ function findDateColumns(matrix) {
   if (!hasHalfLayout) {
     return best.dates.map((cur) => {
       const label = findWeekdayLabelNear(matrix, best.row, cur.col);
-      let statusCol = null;
-      for (let c = cur.col + 1; c <= Math.min(cur.col + 2, (matrix[best.row] || []).length - 1); c += 1) {
-        const hasStatusHeader = matrix
-          .slice(best.row, Math.min(matrix.length, best.row + 6))
-          .some((row) => /^(WORK\s*STATUS|WORK\s*UPDATES?)$/i.test(cellText(row?.[c])));
-        if (hasStatusHeader) {
-          statusCol = c;
-          break;
-        }
-      }
       return {
         ymd: alignYmdToWeekdayLabel(cur.ymd, label),
         firstCol: cur.col,
         secondCol: null,
         timeCol: cur.col,
-        statusCol,
+        statusCol: cur.col,
         layout: "daily",
       };
     });
   }
 
-  const firstHalfCols = [];
-  const secondHalfCols = [];
+  // Prefer the *real* 1st half / 2nd half sub-header columns when present,
+  // instead of guessing offsets from date-cell spacing (which breaks on
+  // merged cells / uneven column widths).
+  let firstHalfCols = [];
+  let secondHalfCols = [];
   const row = matrix[halfRow] || [];
   for (let c = 0; c < row.length; c += 1) {
     const t = cellText(row[c]);
@@ -384,52 +363,57 @@ function findDateColumns(matrix) {
     else if (isSecondHalfLabel(t)) secondHalfCols.push(c);
   }
 
-  // Build (1st, 2nd) pairs left→right so days cannot steal each other's columns.
-  const pairs = [];
-  const usedSecond = new Set();
-  for (const fc of firstHalfCols) {
-    const sc = secondHalfCols.find((c) => c > fc && !usedSecond.has(c));
-    if (sc == null) continue;
-    usedSecond.add(sc);
-    pairs.push({ firstCol: fc, secondCol: sc, mid: (fc + sc) / 2 });
-  }
-
-  const usedPairs = new Set();
   const dayCols = [];
+  if (firstHalfCols.length >= best.dates.length && secondHalfCols.length >= best.dates.length) {
+    for (let i = 0; i < best.dates.length; i += 1) {
+      const cur = best.dates[i];
+      const firstCol = firstHalfCols[i];
+      const secondCol = secondHalfCols[i];
+      const label =
+        findWeekdayLabelNear(matrix, best.row, firstCol) ||
+        findWeekdayLabelNear(matrix, best.row, cur.col);
+      dayCols.push({
+        ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+        firstCol,
+        secondCol,
+        timeCol: firstCol,
+        statusCol: secondCol != null ? secondCol : firstCol,
+        layout: "half",
+      });
+    }
+    return dayCols;
+  }
 
   for (let i = 0; i < best.dates.length; i += 1) {
     const cur = best.dates[i];
-    let bestPairIdx = -1;
-    let bestDist = Infinity;
-    for (let p = 0; p < pairs.length; p += 1) {
-      if (usedPairs.has(p)) continue;
-      const dist = Math.abs(pairs[p].mid - cur.col);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestPairIdx = p;
-      }
-    }
+    const prev = best.dates[i - 1];
+    const next = best.dates[i + 1];
+    const rangeStart = prev ? Math.floor((prev.col + cur.col) / 2) + 1 : Math.max(0, cur.col - 1);
+    const rangeEnd = next ? Math.ceil((cur.col + next.col) / 2) : Infinity;
 
-    let firstCol;
-    let secondCol;
-    if (bestPairIdx >= 0) {
-      usedPairs.add(bestPairIdx);
-      firstCol = pairs[bestPairIdx].firstCol;
-      secondCol = pairs[bestPairIdx].secondCol;
-    } else {
-      const next = best.dates[i + 1];
+    let firstCol = firstHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+    let secondCol = secondHalfCols.find((c) => c >= rangeStart && c < rangeEnd);
+
+    if (firstCol == null || secondCol == null) {
+      // Fallback to the old spacing heuristic only if labels weren't found.
       const span = next ? Math.max(1, next.col - cur.col) : 2;
-      firstCol = cur.col;
-      secondCol = span >= 2 ? cur.col + 1 : null;
+      firstCol = firstCol != null ? firstCol : cur.col;
+      secondCol =
+        secondCol != null
+          ? secondCol
+          : span >= 4
+            ? cur.col + 2
+            : span >= 2
+              ? cur.col + 1
+              : null;
     }
-
-    const label =
-      findWeekdayLabelNear(matrix, best.row, firstCol) ||
-      findWeekdayLabelNear(matrix, best.row, cur.col) ||
-      findWeekdayLabelNear(matrix, best.row, secondCol);
 
     dayCols.push({
-      ymd: alignYmdToWeekdayLabel(cur.ymd, label),
+      ymd: alignYmdToWeekdayLabel(
+        cur.ymd,
+        findWeekdayLabelNear(matrix, best.row, firstCol) ||
+          findWeekdayLabelNear(matrix, best.row, cur.col)
+      ),
       firstCol,
       secondCol,
       timeCol: firstCol,
@@ -488,13 +472,16 @@ function pushHalfTask(tasks, { ymd, taskName, srNo, half, content }) {
   // One Excel cell → one task (matches the UI grid 1:1).
   // Do NOT split on "/" or newlines — that created dozens of phantom WA items
   // that did not match the sheet cells, so WhatsApp Done ≠ UI Completed.
-  const pureStatus = isPureStatusCell(text);
+  const maybeStatus = normalizeStatus(text);
+  const isPureStatus =
+    maybeStatus !== "Pending" ||
+    /^(COMPLETED|COMPLETE|DONE|PENDING|IN\s*PROGRESS|ON\s*HOLD|CANCELLED?)$/i.test(text);
 
   tasks.push({
     task_date: ymd,
     task_name: taskName,
-    time_slot: pureStatus ? "" : text,
-    status: pureStatus ? normalizeStatus(text) : "Pending",
+    time_slot: isPureStatus && maybeStatus !== "Pending" ? "" : text,
+    status: isPureStatus ? maybeStatus : "Pending",
     sr_no: srNo,
     half,
   });
@@ -538,13 +525,7 @@ export function parseWeeklyPlanMatrix(matrix) {
         }
       } else {
         const plan = day.firstCol != null ? cellText(row[day.firstCol]) : "";
-        pushHalfTask(tasks, {
-          ymd: day.ymd,
-          taskName,
-          srNo,
-          half: 0,
-          content: plan,
-        });
+        pushHalfTask(tasks, { ymd: day.ymd, taskName, srNo, half: 0, content: plan });
       }
     }
   }

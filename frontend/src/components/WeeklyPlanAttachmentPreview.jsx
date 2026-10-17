@@ -18,8 +18,6 @@ import { parseWeeklyPlanBuffer } from "../lib/weeklyPlanExcel";
 import { parseWeeklyPlanPdfBuffer } from "../lib/weeklyPlanPdf";
 import { ExcelSheetTable } from "./ExcelSheetTable";
 
-const DAILY_STATUS_FIX_CUTOFF = Date.parse("2026-09-26T12:30:00.000Z");
-
 function isPdfAttachment(fileName, fileUrl) {
   const lower = String(fileName || fileUrl || "").toLowerCase();
   return lower.includes(".pdf") || lower.endsWith("pdf");
@@ -48,46 +46,7 @@ function cellBusyKey(rowIdx, colIdx) {
 }
 
 function preparePreviewSheet(sheet) {
-  const cleaned = omitStatusHeaderColumns(sheet || { matrix: [], merges: [], colWidths: [] });
-  return fillMergedDisplayCells(cleaned);
-}
-
-/** Copy merge-master display into covered cells so row SR/name and date headers match the parser. */
-function fillMergedDisplayCells(sheet) {
-  const matrix = Array.isArray(sheet?.matrix)
-    ? sheet.matrix.map((row) => (Array.isArray(row) ? row.slice() : []))
-    : [];
-  const merges = Array.isArray(sheet?.merges) ? sheet.merges : [];
-  for (const m of merges) {
-    const r1 = Number(m.r1);
-    const c1 = Number(m.c1);
-    const r2 = Number(m.r2);
-    const c2 = Number(m.c2);
-    if (![r1, c1, r2, c2].every((n) => Number.isFinite(n))) continue;
-    const master = matrix[r1]?.[c1];
-    if (!master) continue;
-    for (let r = r1; r <= r2; r += 1) {
-      if (!matrix[r]) matrix[r] = [];
-      for (let c = c1; c <= c2; c += 1) {
-        if (r === r1 && c === c1) continue;
-        // Body TIME cells are often vertically merged. Copying their value into
-        // covered cells created a second hidden actionable cell and unstable status links.
-        if (c > 1) continue;
-        const cur = matrix[r][c];
-        const curText = String(cur?.display ?? cur ?? "").trim();
-        if (curText) continue;
-        matrix[r][c] =
-          typeof master === "object" && master
-            ? { ...master }
-            : master;
-      }
-    }
-  }
-  return {
-    matrix,
-    merges,
-    colWidths: Array.isArray(sheet?.colWidths) ? sheet.colWidths : [],
-  };
+  return omitStatusHeaderColumns(sheet || { matrix: [], merges: [], colWidths: [] });
 }
 
 function sheetCellText(matrix, r, c) {
@@ -131,36 +90,6 @@ function countActionableCells(matrix) {
   return n;
 }
 
-function savedTaskShapeKey(task) {
-  return [
-    String(task?.task_date || "").slice(0, 10),
-    String(task?.task_name || "").replace(/\s+/g, " ").trim().toLowerCase(),
-    String(task?.time_slot || "").replace(/\s+/g, " ").trim().toLowerCase(),
-  ].join("|");
-}
-
-function taskShapeNeedsRepair(saved, parsed) {
-  const savedKeys = new Set((saved || []).map(savedTaskShapeKey));
-  const parsedKeys = new Set((parsed || []).map(savedTaskShapeKey));
-  const hasImportedStatus = (saved || []).some((task) => {
-    const status = String(task?.status || "Pending");
-    return status !== "Pending" && !task?.completed_at && !task?.completed_via;
-  });
-  if (hasImportedStatus) return true;
-  const hasStaleDailyStatus = (saved || []).some((task) => {
-    const status = String(task?.status || "Pending");
-    const updatedAt = Date.parse(task?.updated_at || task?.created_at || "") || 0;
-    return status !== "Pending" && updatedAt < DAILY_STATUS_FIX_CUTOFF;
-  });
-  if (hasStaleDailyStatus) return true;
-  if ((saved || []).length !== parsedKeys.size) return true;
-  if (savedKeys.size !== parsedKeys.size) return true;
-  for (const key of parsedKeys) {
-    if (!savedKeys.has(key)) return true;
-  }
-  return false;
-}
-
 /**
  * Shows the submitted weekly-plan Excel as a same-layout sheet.
  * Each actionable cell is linked 1:1 to a saved weekly_plan_tasks row.
@@ -189,8 +118,6 @@ export function WeeklyPlanAttachmentPreview({
   const parsedRef = useRef([]);
   const sheetRef = useRef({ matrix: [], merges: [], colWidths: [] });
   const indexRef = useRef(new Map());
-  /** Sticky cellKey → taskId so badges don't jump between duplicate rows. */
-  const stickyIdsRef = useRef(new Map());
 
   useEffect(() => {
     tasksRef.current = tasks;
@@ -202,13 +129,10 @@ export function WeeklyPlanAttachmentPreview({
     sheetRef.current = sheet;
   }, [sheet]);
 
-  const cellTaskIndex = useMemo(() => {
-    const next = buildSheetTaskIndex(sheet.matrix, tasks, stickyIdsRef.current);
-    for (const [key, task] of next.entries()) {
-      if (task?.id) stickyIdsRef.current.set(key, String(task.id));
-    }
-    return next;
-  }, [sheet.matrix, tasks]);
+  const cellTaskIndex = useMemo(
+    () => buildSheetTaskIndex(sheet.matrix, tasks),
+    [sheet.matrix, tasks]
+  );
   useEffect(() => {
     indexRef.current = cellTaskIndex;
   }, [cellTaskIndex]);
@@ -226,19 +150,28 @@ export function WeeklyPlanAttachmentPreview({
 
   const loadTasks = useCallback(async () => {
     if (!eaId) return [];
-    const qs = new URLSearchParams();
-    if (sourceFile) qs.set("source", sourceFile);
-    qs.set("_ts", String(Date.now()));
-    const data = await api(`/ea-meeting/${eaId}/tasks?${qs.toString()}`, {
-      cache: "no-store",
-    });
-    const listed = Array.isArray(data?.tasks) ? data.tasks : [];
-    if (listed.length || !sourceFile) return listed;
-    const fallback = await api(`/ea-meeting/${eaId}/tasks?_ts=${Date.now()}`, {
-      cache: "no-store",
-    });
-    return Array.isArray(fallback?.tasks) ? fallback.tasks : [];
-  }, [eaId, sourceFile]);
+    // Always load all saved tasks for this attendance row (do not filter by
+    // source_file). Filtering was hiding WhatsApp Completed rows when source
+    // labels differed slightly, so the grid kept linking Pending duplicates.
+    const data = await api(`/ea-meeting/${eaId}/tasks`);
+    return Array.isArray(data?.tasks) ? data.tasks : [];
+  }, [eaId]);
+
+  /** Soft refresh: pull latest statuses from DB (WhatsApp Done) without re-ingest. */
+  const refreshFromDb = useCallback(async () => {
+    if (!eaId) return;
+    try {
+      const listed = await loadTasks();
+      if (cancelledRef.current) return;
+      setCellStatus({});
+      setTasks(listed);
+      setNote("");
+    } catch (err) {
+      if (!cancelledRef.current) {
+        setNote(err.message || "Could not refresh task statuses.");
+      }
+    }
+  }, [eaId, loadTasks]);
 
   const ingestParsed = useCallback(
     async (parsed) => {
@@ -270,26 +203,16 @@ export function WeeklyPlanAttachmentPreview({
     setWaSending(true);
     setWaNote("");
     try {
-      // Sending must be read-only: re-ingesting here recreated task IDs and
-      // made WhatsApp/UI attach status to different copies of the same cell.
-      const data = await api(`/ea-meeting/${eaId}/send-day-list`, {
-        method: "POST",
-        body: {},
-      });
+      const data = await api(`/ea-meeting/${eaId}/send-day-list`, { method: "POST", body: {} });
       if (data?.ok) {
         setWaNote(
-          data?.note ||
-            `WhatsApp sent (${data?.whatsapp?.via || "ok"}) · ${data?.openCount ?? 0} open · to ${data?.to || "?"}`
+          `WhatsApp list sent (${data?.whatsapp?.via || "ok"}) · ${data?.whatsapp?.openCount ?? 0} open · to ${data?.to || "number"}`
         );
       } else {
-        const wa = data?.whatsapp || {};
         setWaNote(
           data?.error ||
-            data?.note ||
-            wa?.templateError?.error ||
-            wa?.textError?.error ||
-            wa?.reason ||
-            wa?.error ||
+            data?.whatsapp?.error ||
+            data?.whatsapp?.reason ||
             "Could not send WhatsApp list"
         );
       }
@@ -363,17 +286,16 @@ export function WeeklyPlanAttachmentPreview({
       setFromPdf(convertedFromPdf);
       setSheet(nextSheet);
       setParsedTasks(Array.isArray(parsed?.tasks) ? parsed.tasks : []);
-      stickyIdsRef.current = new Map();
-      setCellStatus({});
 
       let nextTasks = Array.isArray(dbTasks) ? dbTasks : [];
-      // Initialize empty plans and repair legacy TIME + WORK STATUS parses
-      // where merged date headers previously created duplicate phantom tasks.
-      const repairDailyTemplate =
-        parsed?.tasks?.length &&
-        parsed?.meta?.halves === false &&
-        taskShapeNeedsRepair(nextTasks, parsed.tasks);
-      if (parsed?.tasks?.length && (!nextTasks.length || repairDailyTemplate)) {
+      // Only ingest when DB is empty or sheet cells are unlinked.
+      // Re-ingesting on every Refresh was rematching Pending duplicates over WhatsApp Completed rows.
+      const linkedBefore = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
+      const actionable = countActionableCells(nextSheet.matrix);
+      const needsIngest =
+        Boolean(parsed?.tasks?.length) &&
+        (nextTasks.length === 0 || (actionable > 0 && linkedBefore === 0));
+      if (needsIngest) {
         try {
           nextTasks = await ingestParsed(parsed);
         } catch (err) {
@@ -385,18 +307,11 @@ export function WeeklyPlanAttachmentPreview({
 
       if (!cancelledRef.current) {
         setTasks(nextTasks);
-        const linked = buildSheetTaskIndex(
-          nextSheet.matrix,
-          nextTasks,
-          stickyIdsRef.current
-        ).size;
-        const actionable = countActionableCells(nextSheet.matrix);
+        const linked = buildSheetTaskIndex(nextSheet.matrix, nextTasks).size;
         if (actionable > 0 && linked === 0 && nextTasks.length > 0) {
           setNote(
             "Saved tasks did not match this sheet layout. Click Pending on a cell to create the missing link."
           );
-        } else {
-          setNote("");
         }
       }
     } catch (err) {
@@ -419,49 +334,30 @@ export function WeeklyPlanAttachmentPreview({
     };
   }, [load]);
 
-  // Keep badges in sync when WhatsApp (or another tab) updates Supabase status.
+  // Pull WhatsApp / portal status changes while this preview is open.
   useEffect(() => {
     if (!eaId) return undefined;
-    let alive = true;
-    const refreshStatuses = async () => {
-      if (!alive || document.visibilityState === "hidden") return;
-      try {
-        const listed = await loadTasks();
-        if (!alive || !Array.isArray(listed)) return;
-        tasksRef.current = listed;
-        setTasks(listed);
-        // Remove optimistic overrides so WhatsApp/DB status becomes authoritative.
-        setCellStatus({});
-      } catch {
-        /* ignore transient poll errors */
-      }
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshFromDb();
     };
-    const onFocus = () => {
-      refreshStatuses();
+    const id = window.setInterval(tick, 12000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refreshFromDb();
     };
-    const timer = setInterval(refreshStatuses, 3000);
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
+    document.addEventListener("visibilitychange", onVis);
     return () => {
-      alive = false;
-      clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
     };
-  }, [eaId, loadTasks]);
+  }, [eaId, refreshFromDb]);
 
   const setTaskStatus = async (task, nextStatus, busyKey) => {
     const wanted = nextStatus === "Pending" ? "Pending" : "Completed";
     if (!task?.id) return;
     if (normalizeStatusLabel(task.status) === "Cancelled") return;
     if (normalizeStatusLabel(task.status) === wanted) {
-      if (busyKey) {
-        setCellStatus((prev) => {
-          const next = { ...prev };
-          delete next[busyKey];
-          return next;
-        });
-      }
+      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
       setBusyId("");
       return;
     }
@@ -495,13 +391,7 @@ export function WeeklyPlanAttachmentPreview({
           return { ...row, ...(result?.task || {}), status: wanted };
         });
       });
-      if (busyKey) {
-        setCellStatus((prev) => {
-          const next = { ...prev };
-          delete next[busyKey];
-          return next;
-        });
-      }
+      if (busyKey) setCellStatus((prev) => ({ ...prev, [busyKey]: wanted }));
     } catch (err) {
       setTasks((prev) =>
         prev.map((row) => (String(row.id) === taskId ? previous : row))
@@ -523,19 +413,8 @@ export function WeeklyPlanAttachmentPreview({
   const resolveTaskForCell = async (rowIdx, colIdx) => {
     const matrix = sheetRef.current.matrix;
     const key = `${rowIdx}:${colIdx}`;
-
-    // Prefer sticky / current index — never re-ingest just to rematch (that flipped statuses).
-    const stickyId = stickyIdsRef.current.get(key);
-    if (stickyId) {
-      const pinned =
-        tasksRef.current.find((row) => String(row.id) === String(stickyId)) || null;
-      if (pinned?.id) return pinned;
-    }
     let task = indexRef.current.get(key) || null;
-    if (task?.id) {
-      stickyIdsRef.current.set(key, String(task.id));
-      return task;
-    }
+    if (task?.id) return task;
 
     const cellText = sheetCellText(matrix, rowIdx, colIdx);
     const rowTaskName =
@@ -546,11 +425,8 @@ export function WeeklyPlanAttachmentPreview({
     const half = findHalfForSheetColumn(matrix, colIdx);
 
     const rebuild = (list) => {
-      const next = buildSheetTaskIndex(matrix, list, stickyIdsRef.current);
+      const next = buildSheetTaskIndex(matrix, list);
       indexRef.current = next;
-      for (const [k, t] of next.entries()) {
-        if (t?.id) stickyIdsRef.current.set(k, String(t.id));
-      }
       return next.get(key) || findTaskForSheetCell(list, {
         cellText,
         rowTaskName,
@@ -562,27 +438,21 @@ export function WeeklyPlanAttachmentPreview({
       });
     };
 
-    // Reload saved tasks only — avoid full re-ingest on every click.
-    const refreshed = await loadTasks();
-    setTasks(refreshed);
-    task = rebuild(refreshed);
-    if (task?.id) {
-      stickyIdsRef.current.set(key, String(task.id));
-      return task;
-    }
-
-    // Last resort: ingest parse (or this one cell) then rematch.
+    // 1) Ingest full parse (deduped) then rematch.
     const parsed = parsedRef.current;
     if (parsed.length) {
-      const afterIngest = await ingestParsed({ tasks: parsed });
-      setTasks(afterIngest);
-      task = rebuild(afterIngest);
-      if (task?.id) {
-        stickyIdsRef.current.set(key, String(task.id));
-        return task;
-      }
+      const refreshed = await ingestParsed({ tasks: parsed });
+      setTasks(refreshed);
+      task = rebuild(refreshed);
+      if (task?.id) return task;
+    } else {
+      const refreshed = await loadTasks();
+      setTasks(refreshed);
+      task = rebuild(refreshed);
+      if (task?.id) return task;
     }
 
+    // 2) Create exactly this cell as a saved task, then rematch.
     if (!taskDate || !rowTaskName || !cellText) return null;
     const synthetic = {
       task_date: taskDate,
@@ -592,16 +462,13 @@ export function WeeklyPlanAttachmentPreview({
       sr_no: srNo,
       half: half || 0,
     };
-    const after = await ingestParsed({ tasks: [synthetic, ...(parsed || [])] });
+    const after = await ingestParsed({ tasks: [synthetic, ...parsed] });
     setTasks(after);
-    task = rebuild(after);
-    if (task?.id) stickyIdsRef.current.set(key, String(task.id));
-    return task;
+    return rebuild(after);
   };
 
   const completeCell = async (rowIdx, colIdx) => {
     const busyKey = cellBusyKey(rowIdx, colIdx);
-    const key = `${rowIdx}:${colIdx}`;
     if (!eaId) {
       setNote("Missing EM attendance id — cannot update task status.");
       return;
@@ -617,7 +484,6 @@ export function WeeklyPlanAttachmentPreview({
           "Could not save a task for this cell. Re-upload the weekly plan, then try again."
         );
       }
-      stickyIdsRef.current.set(key, String(task.id));
 
       const live =
         tasksRef.current.find((row) => String(row.id) === String(task.id)) || task;
@@ -636,16 +502,8 @@ export function WeeklyPlanAttachmentPreview({
     }
 
     const busyKey = cellBusyKey(rowIdx, colIdx);
-    const key = `${rowIdx}:${colIdx}`;
-    const stickyId = stickyIdsRef.current.get(key);
-    const stickyTask = stickyId
-      ? tasks.find((row) => String(row.id) === String(stickyId))
-      : null;
-    const task = stickyTask || cellTaskIndex.get(key) || null;
-    // Prefer live DB status on the sticky task; cellStatus only for in-flight clicks.
-    const status =
-      cellStatus[busyKey] ||
-      (task ? getCellStatusText(task) : "Pending");
+    const task = cellTaskIndex.get(`${rowIdx}:${colIdx}`) || null;
+    const status = cellStatus[busyKey] || (task ? getCellStatusText(task) : "Pending");
     const statusCss = statusClass(status);
     const done = statusCss === "smt-excel-sheet__cell--done";
     const cancelled = statusCss === "smt-excel-sheet__cell--cancel";
@@ -659,7 +517,7 @@ export function WeeklyPlanAttachmentPreview({
         <button
           type="button"
           className={`smt-excel-sheet__status-btn ${statusCss}`}
-          disabled={!clickable || busy}
+          disabled={!clickable || Boolean(busyId)}
           title={
             cancelled
               ? "Cancelled"
@@ -694,9 +552,10 @@ export function WeeklyPlanAttachmentPreview({
           <button
             type="button"
             className="smt-excel-preview__link"
-            onClick={load}
-            disabled={loading}
+            onClick={() => refreshFromDb()}
+            disabled={loading || !eaId}
             style={{ background: "none", border: 0, cursor: "pointer", padding: 0 }}
+            title="Reload Completed / Pending from database (WhatsApp updates)"
           >
             Refresh
           </button>
