@@ -3463,7 +3463,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (!btn) return;
     btn.innerHTML = `${VERIFY_ICON_START}<span>Start Verification</span>`;
   }
-  
+
   async function updateStatus(taskId, status, status_note) {
     try {
       await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
@@ -10085,6 +10085,20 @@ export async function mountTaskflowApp(opts = {}) {
     return s || '—';
   }
 
+  /** Project-wise lines for one employee, worded like the Work By Employee card. */
+  function pdfProjectLines(e) {
+    const personal = e.is_verifier ? 'Personal: ' : '';
+    return (e.projects || [])
+      .filter((p) => p.count || p.verified)
+      .map((p) => {
+        const parts = [];
+        if (p.count) parts.push(`${personal}${p.count} ${p.count === 1 ? 'task' : 'tasks'} (${fmtWorkedHours(p.hours)})`);
+        if (p.verified) parts.push(`Verified: ${p.verified} ${p.verified === 1 ? 'task' : 'tasks'} (${fmtWorkedHours(p.verify_hours)})`);
+        return `${p.name}: ${parts.join(' · ')}`;
+      })
+      .join('\n') || '—';
+  }
+
   function downloadReportPdf({ title, subtitle, sections }) {
     const win = window.open('', '_blank');
     if (!win) return showToast('Allow pop-ups so the print box can open', 'error');
@@ -10102,7 +10116,7 @@ export async function mountTaskflowApp(opts = {}) {
         .sub { text-align: center; font-size: 11pt; color: #444; margin: 0 0 12px; }
         h2 { font-size: 12pt; margin: 12px 0 6px; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; }
+        th, td { border: 1px solid #d1d5db; padding: 4px 5px; vertical-align: top; font-size: 10pt; line-height: 1.25; word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-line; }
         th { background: #1f2937; color: #fff; font-weight: 700; }
         tr:nth-child(even) td { background: #f7f3ec; }
         thead { display: table-header-group; }
@@ -10140,7 +10154,7 @@ export async function mountTaskflowApp(opts = {}) {
             pdfCell(e.total),
             pdfCell(e.verified),
             pdfCell(e.pending),
-            pdfCell((e.projects || []).map((p) => `${p.name}: ${p.count}`).join(', ')),
+            pdfProjectLines(e),
           ]),
         },
         {
@@ -10178,10 +10192,11 @@ export async function mountTaskflowApp(opts = {}) {
         },
         {
           heading: '5a. Task completion time',
-          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Submitted', 'Office hours'],
+          head: ['SR', 'Employee', 'Project', 'Task description', 'Task type', 'Assigned', 'Accepted', 'Submitted', 'Office hours'],
           body: (ct.rows || []).map((r) => [
             pdfCell(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
             pdfCell(r.task_type), pdfCell(fmtWvdDateTime(r.assigned_at)),
+            pdfCell(fmtWvdDateTime(r.accepted_at)),
             pdfCell(fmtWvdDateTime(r.submitted_at)), pdfCell(fmtHrs(r.hours)),
           ]),
         },
@@ -10197,6 +10212,90 @@ export async function mountTaskflowApp(opts = {}) {
       ],
     });
     showToast('Print box opened. All columns are on the page.', 'success');
+  }
+
+  /** Task-wise time popup for one employee on one project (from the Work By Employee card). */
+  function showEmpProjectPopup(emp, proj) {
+    const existing = document.getElementById('empProjPopup');
+    if (existing) existing.remove();
+
+    const done = proj.completed_tasks || [];
+    const verified = proj.verified_tasks || [];
+    const totalHrs = done.reduce((sum, t) => sum + (Number(t.hours) || 0), 0);
+
+
+    const doneRows = done.map((t) => `<tr>
+        <td>${escapeHtml(String(t.sr ?? '—'))}</td>
+        <td class="epp-desc">${escapeHtml(t.description || '—')}</td>
+        <td>${escapeHtml(t.task_type || '—')}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.assigned_at))}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.accepted_at))}</td>
+        <td>${escapeHtml(fmtWvdDateTime(t.submitted_at))}</td>
+        <td class="epp-time">${escapeHtml(fmtWorkedHours(t.hours))}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty-state">No completed tasks</td></tr>';
+
+    const verifiedSection = verified.length ? `
+          <h4 class="epp-sec-title">Verified by ${escapeHtml(emp.name)} <small>time = start verification → verified (office hrs)</small></h4>
+          <div class="epp-table-wrap"><table class="epp-table">
+            <thead><tr><th>SR</th><th>Task</th><th>Submitted by</th><th>Type</th><th>Start verification</th><th>Verified</th><th>Time taken</th></tr></thead>
+            <tbody>${verified.map((t) => `<tr>
+              <td>${escapeHtml(String(t.sr ?? '—'))}</td>
+              <td class="epp-desc">${escapeHtml(t.description || '—')}</td>
+              <td>${escapeHtml(t.employee || '—')}</td>
+              <td>${escapeHtml(t.task_type || '—')}</td>
+              <td>${escapeHtml(fmtWvdDateTime(t.verify_started_at))}</td>
+              <td>${escapeHtml(fmtWvdDateTime(t.verified_at))}</td>
+              <td class="epp-time">${escapeHtml(fmtWorkedHours(t.verify_hours))}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>` : '';
+
+    const el = document.createElement('div');
+    el.id = 'empProjPopup';
+    el.className = 'dr-popup-backdrop';
+    el.innerHTML = `
+      <div class="dr-popup epp-popup" role="dialog" aria-modal="true" aria-label="Task-wise time">
+        <div class="dr-popup-header">
+          <h3>${escapeHtml(emp.name)} · ${escapeHtml(proj.name)}</h3>
+          <button class="dr-popup-close" aria-label="Close">✕</button>
+        </div>
+        <div class="dr-popup-body">
+          <div class="epp-summary">
+            <span><strong>${done.length}</strong> ${done.length === 1 ? 'task' : 'tasks'} completed</span>
+            <span>Total time <strong>${escapeHtml(fmtWorkedHours(totalHrs))}</strong> <small>(office hrs)</small></span>
+          </div>
+          <h4 class="epp-sec-title">Completed tasks <small>time = accepted → sent for verification, minus hold time</small></h4>
+          <div class="epp-table-wrap"><table class="epp-table">
+            <thead><tr><th>SR</th><th>Task</th><th>Type</th><th>Assigned</th><th>Accepted</th><th>Submitted</th><th>Time taken</th></tr></thead>
+            <tbody>${doneRows}</tbody>
+          </table></div>
+          ${verifiedSection}
+        </div>
+      </div>`;
+
+    const close = () => {
+      el.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    el.addEventListener('click', (e) => { if (e.target === el) close(); });
+    el.querySelector('.dr-popup-close').addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(el);
+  }
+
+  function openEmpProjectPopupFromRow(row) {
+    const emp = _tdDash?.by_employee?.[Number(row.dataset.empIdx)];
+    const proj = emp?.projects?.[Number(row.dataset.projIdx)];
+    if (!emp || !proj) {
+      showToast('Could not find this project in the dashboard data — reload the dashboard', 'error');
+      return;
+    }
+    showEmpProjectPopup(emp, proj, {
+      empIdx: row.dataset.empIdx,
+      projIdx: row.dataset.projIdx,
+      rowCount: row.dataset.count,
+      rowVerified: row.dataset.verified,
+    });
   }
 
   function filterDashboardData(dash, allEmps) {
