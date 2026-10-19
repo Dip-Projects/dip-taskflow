@@ -7799,10 +7799,23 @@ body.org-print-mode .org-tree-svg .org-line {
 
 @media print {
 
-  /* A3 landscape = ~1.4× larger than A4 while staying on one page */
-  @page {
+  /* Keep the chart on its own A3 sheet; other app reports use A4 below. */
+  @page org-chart {
     size: A3 landscape;
     margin: 5mm;
+  }
+
+  body.org-print-mode {
+    page: org-chart;
+    width: 410mm !important;
+    min-width: 410mm !important;
+    max-width: 410mm !important;
+  }
+
+  html:has(body.org-print-mode) {
+    width: 410mm !important;
+    min-width: 410mm !important;
+    max-width: 410mm !important;
   }
 
   html,
@@ -7823,7 +7836,7 @@ body.org-print-mode .org-tree-svg .org-line {
     position: static !important;
     left: auto !important;
     top: auto !important;
-    width: 100% !important;
+    width: 410mm !important;
     max-width: 100% !important;
     max-height: none !important;
     height: auto !important;
