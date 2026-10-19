@@ -63,6 +63,7 @@ function collectEls() {
     employeeModal: document.getElementById('employeeModal'),
     employeeForm: document.getElementById('employeeForm'),
     employeeFormMsg: document.getElementById('employeeFormMsg'),
+    empDepartment: document.getElementById('emp-department'),
     closeEmployeeModal: document.getElementById('closeEmployeeModal'),
     cancelEmployeeModal: document.getElementById('cancelEmployeeModal'),
     empReportingHead: document.getElementById('emp-reporting-head'),
@@ -6580,8 +6581,30 @@ export async function mountTaskflowApp(opts = {}) {
     } catch (err) { showToast(err.message, 'error'); }
   }
 
-  els.openAddEmployee?.addEventListener('click', () => {
+  els.openAddEmployee?.addEventListener('click', async () => {
     els.employeeForm.reset(); els.employeeFormMsg.hidden = true;
+    fillSelect(els.empDepartment, [], {
+      placeholder: 'Loading departments…',
+      valueKey: 'name',
+      labelKey: 'name',
+    });
+    try {
+      const departments = await api('/master/departments');
+      state.master.departments = sortByLabel(departments);
+      fillSelect(els.empDepartment, state.master.departments, {
+        placeholder: 'Select department',
+        valueKey: 'name',
+        labelKey: 'name',
+      });
+    } catch (err) {
+      fillSelect(els.empDepartment, [], {
+        placeholder: 'Departments unavailable',
+        valueKey: 'name',
+        labelKey: 'name',
+      });
+      els.employeeFormMsg.textContent = `Could not load departments: ${err.message}`;
+      els.employeeFormMsg.hidden = false;
+    }
     fillSiteMultiSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], []);
     els.employeeModal.hidden = false;
   });
@@ -6591,7 +6614,7 @@ export async function mountTaskflowApp(opts = {}) {
     e.preventDefault(); els.employeeFormMsg.hidden = true;
     const sites = getSelectedSites(els.empSite || document.getElementById('emp-site'));
     const role = document.getElementById('emp-role').value;
-    let department = document.getElementById('emp-department').value.trim();
+    let department = els.empDepartment.value;
     if (role === 'client' && !department) department = 'Client';
     if (role === 'client' && !sites.length) {
       els.employeeFormMsg.textContent = 'Please select at least one project for this client';
