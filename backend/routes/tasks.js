@@ -398,6 +398,13 @@ async function loadTaskCheckpoints(taskId) {
 
 async function upsertTypeCheckpointTemplate(taskTypeId, labels) {
   if (!taskTypeId) return;
+  const { data: taskType, error: taskTypeError } = await supabase
+    .from('task_types')
+    .select('is_default')
+    .eq('id', taskTypeId)
+    .maybeSingle();
+  if (taskTypeError) throw taskTypeError;
+  if (taskType?.is_default !== false) return;
   await supabase.from('task_type_checkpoint_templates').delete().eq('task_type_id', taskTypeId);
   const rows = (labels || [])
     .map((label, i) => ({ task_type_id: taskTypeId, label: String(label || '').trim(), sort_order: i }))
