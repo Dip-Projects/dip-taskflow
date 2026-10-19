@@ -938,7 +938,7 @@ export default function TaskflowDom() {
                   </form>
                   <div className="table-card" style={{ marginTop: 16 }}>
                     <table className="data-table">
-                      <thead><tr><th>Task type</th></tr></thead>
+                      <thead><tr><th>Task type</th><th>Checkpoint access</th></tr></thead>
                       <tbody id="taskTypesTableBody"></tbody>
                     </table>
                   </div>
@@ -1918,7 +1918,9 @@ export default function TaskflowDom() {
             </div>
             <div className="field">
               <label htmlFor="emp-department">Department <span className="req">*</span></label>
-              <input id="emp-department" type="text" placeholder="e.g., Site Execution" required />
+              <select id="emp-department" required>
+                <option value="">Select department</option>
+              </select>
             </div>
             <div className="field">
               <label htmlFor="emp-designation">Designation <span className="req">*</span></label>
@@ -2497,7 +2499,9 @@ export default function TaskflowDom() {
           </div>
           <div className="modal-body">
             <p className="form-note" id="taskCpModalSub">Tick every checkpoint. The task is assigned only after all are ticked.</p>
+            <p className="form-note" id="taskCpTypeNotice" hidden={true}></p>
             <div id="taskCpModalList"></div>
+            <div id="taskCpTemplateControls" hidden={true}></div>
             <p id="taskCpModalMsg" className="form-error" hidden={true}></p>
             <div className="modal-actions">
               <button type="button" className="ghost-btn-text" id="cancelTaskCpModal">Cancel</button>
