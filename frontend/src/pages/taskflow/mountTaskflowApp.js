@@ -6765,10 +6765,9 @@ export async function mountTaskflowApp(opts = {}) {
       slot.appendChild(fit);
     }
 
-    // A3 landscape usable area (~5mm margins) at 96dpi — bigger sheet so
-    // one-page PDF stays readable (A4 forces the chart too small).
-    const pageW = 1540;
-    const pageH = 1060;
+    // A3 landscape printable area (420 × 297mm with 5mm margins) at 96dpi.
+    const pageW = 1549;
+    const pageH = 1085;
     const containerW = Math.max(wrap.clientWidth - 16, 280);
 
     fit.style.transform = 'none';
