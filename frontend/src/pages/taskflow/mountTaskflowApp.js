@@ -3527,8 +3527,12 @@ export async function mountTaskflowApp(opts = {}) {
   async function openAssignCheckpointGate() {
     const typeId = els.fTaskType.value;
     const typeName = els.fTaskType.options[els.fTaskType.selectedIndex]?.text || 'this task type';
+    const taskType = state.master.taskTypes.find((type) => String(type.id) === String(typeId));
+    const canEditTemplate = taskType?.is_default === false;
     const modal = document.getElementById('taskCpModal');
     const listEl = document.getElementById('taskCpModalList');
+    const controlsEl = document.getElementById('taskCpTemplateControls');
+    const typeNotice = document.getElementById('taskCpTypeNotice');
     const msgEl = document.getElementById('taskCpModalMsg');
     const titleEl = document.getElementById('taskCpModalTitle');
     const assignBtn = document.getElementById('submitTaskCpModal');
@@ -3538,14 +3542,74 @@ export async function mountTaskflowApp(opts = {}) {
     }
     if (titleEl) titleEl.textContent = `Checkpoints — ${typeName}`;
     if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+    if (typeNotice) {
+      typeNotice.hidden = taskType?.is_default !== undefined;
+      typeNotice.textContent = 'Task type category is unavailable. Apply the task-type checkpoint migration and deploy the updated backend before editing checkpoints.';
+    }
     listEl.innerHTML = '<p class="form-note">Loading checkpoints…</p>';
+    if (controlsEl) {
+      controlsEl.hidden = !canEditTemplate;
+      controlsEl.innerHTML = canEditTemplate
+        ? `<div class="row-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+            <button type="button" class="ghost-btn-text" data-cp-template-action="add">+ Add checkpoint</button>
+            <button type="button" class="primary-btn primary-btn-inline" data-cp-template-action="save" disabled>Save checkpoint changes</button>
+          </div>
+          <div data-cp-template-editor hidden style="display:flex;gap:8px;margin-top:8px">
+            <input type="text" data-cp-template-input class="checkpoint-input" placeholder="New checkpoint label…" />
+            <button type="button" class="ghost-btn-text" data-cp-template-action="confirm-add">Add</button>
+          </div>`
+        : '';
+    }
     if (assignBtn) { assignBtn.disabled = true; assignBtn.hidden = false; }
     modal.hidden = false;
 
     let labels = [];
+    let checked = [];
+    let editingIndex = -1;
+    let templateDirty = false;
+    const syncAssignBtn = () => {
+      const boxes = [...listEl.querySelectorAll('input[type=checkbox]')];
+      const allTicked = editingIndex === -1 && (boxes.length === 0 || boxes.every((box) => box.checked));
+      if (assignBtn) assignBtn.disabled = !allTicked || templateDirty;
+      if (msgEl) {
+        if (templateDirty) {
+          msgEl.textContent = 'Save checkpoint changes before assigning this task.';
+          msgEl.hidden = false;
+        } else if (!allTicked) {
+          msgEl.textContent = 'Tick every checkpoint to assign this task.';
+          msgEl.hidden = false;
+        } else {
+          msgEl.hidden = true;
+          msgEl.textContent = '';
+        }
+      }
+    };
+    const syncTemplateSaveButton = () => {
+      controlsEl?.querySelector('[data-cp-template-action="save"]')?.toggleAttribute('disabled', !templateDirty);
+    };
+    const renderLabels = () => {
+      if (!labels.length) {
+        listEl.innerHTML = '<p class="form-note">No checkpoints for this task type. You can assign it now.</p>';
+        syncAssignBtn();
+        return;
+      }
+      listEl.innerHTML = `<div class="checkpoint-list">${labels.map((label, i) => `
+        <div class="checkpoint-item" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" data-cp-index="${i}" ${checked[i] ? 'checked' : ''} ${editingIndex === i ? 'disabled' : ''} />
+          ${editingIndex === i
+            ? `<input type="text" class="checkpoint-input" data-cp-edit-value value="${escapeHtml(label)}" />
+               <button type="button" class="ghost-btn-text" data-cp-action="save-edit" data-cp-index="${i}">Save</button>
+               <button type="button" class="ghost-btn-text" data-cp-action="cancel-edit">Cancel</button>`
+            : `<span style="flex:1">${escapeHtml(label)}</span>
+               ${canEditTemplate ? `<button type="button" class="ghost-btn-text" data-cp-action="edit" data-cp-index="${i}">Edit</button>
+               <button type="button" class="ghost-btn-text" data-cp-action="delete" data-cp-index="${i}">Delete</button>` : ''}`}
+        </div>`).join('')}</div>`;
+      syncAssignBtn();
+    };
     try {
       const template = await api(`/master/task-types/${typeId}/checkpoints`);
       labels = (template || []).map((r) => r.label).filter(Boolean);
+      checked = labels.map(() => false);
     } catch (err) {
       listEl.innerHTML = '';
       const hint = /permission|403|add task/i.test(err.message || '')
@@ -3556,39 +3620,98 @@ export async function mountTaskflowApp(opts = {}) {
       return;
     }
 
-    if (!labels.length) {
-      listEl.innerHTML = '<p class="form-note">No checkpoints for this task type. You can assign it now.</p>';
-      if (assignBtn) assignBtn.disabled = false;
-      return;
-    }
+    renderLabels();
+    syncTemplateSaveButton();
 
-    listEl.innerHTML = `<div class="checkpoint-list">${labels.map((label, i) => `
-      <label class="checkpoint-item">
-        <input type="checkbox" data-cp-label="${escapeHtml(label)}" data-cp-i="${i}" />
-        <span>${escapeHtml(label)}</span>
-      </label>`).join('')}</div>`;
-
-    const syncAssignBtn = () => {
-      const boxes = [...listEl.querySelectorAll('input[type=checkbox]')];
-      const allTicked = boxes.length > 0 && boxes.every((b) => b.checked);
-      if (assignBtn) assignBtn.disabled = !allTicked;
-      if (msgEl) {
-        if (allTicked) {
-          msgEl.hidden = true;
-          msgEl.textContent = '';
-        } else {
-          msgEl.textContent = 'Tick every checkpoint to assign this task.';
-          msgEl.hidden = false;
+    listEl.onclick = (event) => {
+      const button = event.target.closest('button[data-cp-action]');
+      if (!button) return;
+      const index = Number(button.dataset.cpIndex);
+      switch (button.dataset.cpAction) {
+        case 'edit':
+          editingIndex = index;
+          renderLabels();
+          listEl.querySelector('[data-cp-edit-value]')?.focus();
+          break;
+        case 'cancel-edit':
+          editingIndex = -1;
+          renderLabels();
+          break;
+        case 'save-edit': {
+          const value = listEl.querySelector('[data-cp-edit-value]')?.value.trim();
+          if (!value) {
+            if (msgEl) { msgEl.textContent = 'Checkpoint label cannot be empty.'; msgEl.hidden = false; }
+            return;
+          }
+          labels[index] = value;
+          checked[index] = false;
+          editingIndex = -1;
+          templateDirty = true;
+          renderLabels();
+          syncTemplateSaveButton();
+          break;
         }
+        case 'delete':
+          labels.splice(index, 1);
+          checked.splice(index, 1);
+          templateDirty = true;
+          renderLabels();
+          syncTemplateSaveButton();
+          break;
       }
     };
-    listEl.querySelectorAll('input[type=checkbox]').forEach((box) => {
-      box.addEventListener('change', () => {
-        box.closest('.checkpoint-item')?.classList.toggle('cp-done', box.checked);
-        syncAssignBtn();
-      });
-    });
-    syncAssignBtn();
+    listEl.onchange = (event) => {
+      const box = event.target.closest('input[type=checkbox][data-cp-index]');
+      if (!box) return;
+      checked[Number(box.dataset.cpIndex)] = box.checked;
+      box.closest('.checkpoint-item')?.classList.toggle('cp-done', box.checked);
+      syncAssignBtn();
+    };
+    if (controlsEl && canEditTemplate) {
+      controlsEl.onclick = async (event) => {
+        const button = event.target.closest('button[data-cp-template-action]');
+        if (!button) return;
+        const action = button.dataset.cpTemplateAction;
+        if (action === 'add') {
+          const editor = controlsEl.querySelector('[data-cp-template-editor]');
+          if (editor) editor.hidden = false;
+          controlsEl.querySelector('[data-cp-template-input]')?.focus();
+          return;
+        }
+        if (action === 'confirm-add') {
+          const input = controlsEl.querySelector('[data-cp-template-input]');
+          const value = input?.value.trim();
+          if (!value) {
+            if (msgEl) { msgEl.textContent = 'Checkpoint label cannot be empty.'; msgEl.hidden = false; }
+            return;
+          }
+          labels.push(value);
+          checked.push(false);
+          templateDirty = true;
+          if (input) input.value = '';
+          const editor = controlsEl.querySelector('[data-cp-template-editor]');
+          if (editor) editor.hidden = true;
+          renderLabels();
+          syncTemplateSaveButton();
+          return;
+        }
+        if (action === 'save' && templateDirty) {
+          button.disabled = true;
+          try {
+            await api(`/master/task-types/${typeId}/checkpoints`, { method: 'PUT', body: { labels } });
+            templateDirty = false;
+            checked = labels.map(() => false);
+            if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
+            renderLabels();
+            syncTemplateSaveButton();
+            showToast('Checkpoints saved on this task type', 'success');
+          } catch (err) {
+            if (msgEl) { msgEl.textContent = err.message || 'Could not save checkpoints'; msgEl.hidden = false; }
+            syncTemplateSaveButton();
+          }
+        }
+      };
+    }
   }
 
   function closeTaskCpModal() {
@@ -3600,8 +3723,8 @@ export async function mountTaskflowApp(opts = {}) {
   document.getElementById('submitTaskCpModal')?.addEventListener('click', async () => {
     const msgEl = document.getElementById('taskCpModalMsg');
     const assignBtn = document.getElementById('submitTaskCpModal');
-    const boxes = [...document.querySelectorAll('#taskCpModalList input[type=checkbox]')];
-    const labels = boxes.map((b) => b.dataset.cpLabel || '').filter(Boolean);
+    const boxes = [...document.querySelectorAll('#taskCpModalList input[type=checkbox][data-cp-index]')];
+    const labels = [...document.querySelectorAll('#taskCpModalList .checkpoint-item > span')].map((el) => el.textContent.trim()).filter(Boolean);
     if (boxes.length && !boxes.every((b) => b.checked)) {
       if (msgEl) { msgEl.textContent = 'Tick every checkpoint to assign this task.'; msgEl.hidden = false; }
       return;
@@ -7457,19 +7580,22 @@ export async function mountTaskflowApp(opts = {}) {
         api('/master/departments'), api('/master/task-types')
       ]);
       renderSimpleNameTable(els.departmentsTableBody, departments);
-      renderSimpleNameTable(els.taskTypesTableBody, taskTypes);
+      renderSimpleNameTable(els.taskTypesTableBody, taskTypes, { showTaskTypeOrigin: true });
     } catch (err) { showToast(err.message, 'error'); }
   }
-  function renderSimpleNameTable(tbody, items) {
+  function renderSimpleNameTable(tbody, items, { showTaskTypeOrigin = false } = {}) {
     const sorted = sortByLabel(items);
     if (!sorted.length) {
-      tbody.innerHTML = `<tr><td class="empty-state">None yet — add one above</td></tr>`;
+      tbody.innerHTML = `<tr><td class="empty-state" colspan="${showTaskTypeOrigin ? 2 : 1}">None yet — add one above</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
     sorted.forEach((item) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${escapeHtml(item.name)}</td>`;
+      const origin = item.is_default === false
+        ? '<span class="pill pill-Completed">New — checkpoints editable</span>'
+        : '<span class="pill pill-Pending">Default — checkpoints protected</span>';
+      tr.innerHTML = `<td>${escapeHtml(item.name)}</td>${showTaskTypeOrigin ? `<td>${origin}</td>` : ''}`;
       tbody.appendChild(tr);
     });
   }
