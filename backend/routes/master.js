@@ -62,15 +62,15 @@ router.post('/projects', requireCanAddTask, async (req, res) => {
 });
 
 router.get('/task-types', async (req, res) => {
-  const { data, error } = await supabase.from('task_types').select('id, name').order('name');
+  const { data, error } = await supabase.from('task_types').select('id, name, is_default').order('name');
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
 
 router.post('/task-types', requireCanAddTask, async (req, res) => {
-  const { name } = req.body || {};
+  const name = String((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ error: 'Task type name is required' });
-  const { data, error } = await supabase.from('task_types').insert({ name }).select('id, name').single();
+  const { data, error } = await supabase.from('task_types').insert({ name, is_default: false }).select('id, name, is_default').single();
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json(data);
 });
@@ -94,10 +94,28 @@ router.get('/task-types/:id/checkpoints', async (req, res) => {
 router.put('/task-types/:id/checkpoints', requireCanAddTask, async (req, res) => {
   try {
     const taskTypeId = req.params.id;
-    const labels = (req.body?.labels || [])
+    const { data: taskType, error: taskTypeError } = await supabase
+      .from('task_types')
+      .select('id, is_default')
+      .eq('id', taskTypeId)
+      .maybeSingle();
+    if (taskTypeError) throw taskTypeError;
+    if (!taskType) return res.status(404).json({ error: 'Task type not found' });
+    if (taskType.is_default !== false) {
+      return res.status(403).json({ error: 'Default task type checkpoints cannot be changed' });
+    }
+
+    if (!Array.isArray(req.body?.labels)) {
+      return res.status(400).json({ error: 'Checkpoint labels must be an array' });
+    }
+    const labels = req.body.labels
       .map((x) => String(typeof x === 'string' ? x : x?.label || '').trim())
       .filter(Boolean);
-    await supabase.from('task_type_checkpoint_templates').delete().eq('task_type_id', taskTypeId);
+    const { error: deleteError } = await supabase
+      .from('task_type_checkpoint_templates')
+      .delete()
+      .eq('task_type_id', taskTypeId);
+    if (deleteError) throw deleteError;
     if (labels.length) {
       const { error } = await supabase.from('task_type_checkpoint_templates').insert(
         labels.map((label, i) => ({ task_type_id: taskTypeId, label, sort_order: i }))
