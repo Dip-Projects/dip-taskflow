@@ -1540,6 +1540,25 @@ export async function mountTaskflowApp(opts = {}) {
     wrap.appendChild(hdr);
     wrap.appendChild(kids);
     els.navList.appendChild(wrap);
+    updateNavSectionIndicator(wrap);
+  }
+
+  function updateNavSectionIndicator(group) {
+    const header = group.querySelector('.nav-section-toggle');
+    if (!header) return;
+    let indicator = header.querySelector('.nav-section-indicator');
+    const hasNotifications = !!group.querySelector('.nav-group-kids .nav-badge');
+
+    if (hasNotifications && !indicator) {
+      indicator = document.createElement('span');
+      indicator.className = 'nav-section-indicator';
+      indicator.setAttribute('role', 'img');
+      indicator.setAttribute('aria-label', 'New notifications');
+      indicator.title = 'New notifications in this section';
+      header.querySelector('.nav-section-toggle-label')?.after(indicator);
+    } else if (!hasNotifications && indicator) {
+      indicator.remove();
+    }
   }
 
   function setNavGroupOpen(group, open, { accordion = false } = {}) {
@@ -1606,6 +1625,8 @@ export async function mountTaskflowApp(opts = {}) {
     let bdg = btn.querySelector('.nav-badge');
     if (!count || count <= 0) {
       if (bdg) bdg.remove();
+      const group = btn.closest('.nav-group');
+      if (group) updateNavSectionIndicator(group);
       return;
     }
     if (!bdg) {
@@ -1614,6 +1635,8 @@ export async function mountTaskflowApp(opts = {}) {
       btn.appendChild(bdg);
     }
     bdg.textContent = count > 99 ? '99+' : count;
+    const group = btn.closest('.nav-group');
+    if (group) updateNavSectionIndicator(group);
   }
 
   function setupTopbarQuick() {
@@ -8756,7 +8779,7 @@ export async function mountTaskflowApp(opts = {}) {
 
   async function loadAdminRecurringTasks() {
     const tbody = recEls.adminTable();
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading…</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading…</td></tr>`;
     recEls.adminCards().innerHTML = `<div class="empty-state">Loading…</div>`;
     try {
       const tasks = await api('/recurring-tasks/all');
@@ -8788,7 +8811,7 @@ export async function mountTaskflowApp(opts = {}) {
   function renderAdminRecurringTable(tasks) {
     const tbody = recEls.adminTable();
     if (!tasks.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No recurring tasks yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No recurring tasks yet</td></tr>`;
       return;
     }
     tbody.innerHTML = '';
@@ -8797,6 +8820,7 @@ export async function mountTaskflowApp(opts = {}) {
       const cpCount = (task.checkpoints || []).length;
       tr.innerHTML = `
         <td><strong>${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</strong></td>
+        <td style="max-width:200px">${escapeHtml(task.project?.name ?? '—')}</td>
         <td style="max-width:200px">${escapeHtml(task.description?.slice(0, 80) ?? '—')}${task.description?.length > 80 ? '…' : ''}</td>
         <td>${escapeHtml(freqLabel(task))}</td>
         <td style="font-size:12px">${escapeHtml(task.start_date ?? '—')} → ${escapeHtml(task.end_date ?? 'ongoing')}</td>
