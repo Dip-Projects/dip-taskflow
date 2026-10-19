@@ -634,6 +634,7 @@ function setNavBadge(viewKey, count) {
   let bdg = btn.querySelector('.nav-badge');
   if (!count || count <= 0) {
     if (bdg) bdg.remove();
+    updateNavSectionIndicators();
     return;
   }
   if (!bdg) {
@@ -642,6 +643,37 @@ function setNavBadge(viewKey, count) {
     btn.appendChild(bdg);
   }
   bdg.textContent = count > 99 ? '99+' : count;
+  updateNavSectionIndicators();
+}
+
+function updateNavSectionIndicators() {
+  let sectionLabel = null;
+  let hasNotifications = false;
+  const updateLabel = () => {
+    if (!sectionLabel) return;
+    let indicator = sectionLabel.querySelector('.nav-section-indicator');
+    if (hasNotifications && !indicator) {
+      indicator = document.createElement('span');
+      indicator.className = 'nav-section-indicator';
+      indicator.setAttribute('role', 'img');
+      indicator.setAttribute('aria-label', 'New notifications');
+      indicator.title = 'New notifications in this section';
+      sectionLabel.appendChild(indicator);
+    } else if (!hasNotifications && indicator) {
+      indicator.remove();
+    }
+  };
+
+  Array.from(els.navList.children).forEach((item) => {
+    if (item.classList.contains('nav-section-label')) {
+      updateLabel();
+      sectionLabel = item;
+      hasNotifications = false;
+    } else if (sectionLabel && item.classList.contains('nav-btn') && item.querySelector('.nav-badge')) {
+      hasNotifications = true;
+    }
+  });
+  updateLabel();
 }
 
 // Poll badge counts from the API and update nav
