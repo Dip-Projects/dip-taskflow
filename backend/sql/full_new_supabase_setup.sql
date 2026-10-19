@@ -51,8 +51,11 @@ create table if not exists projects (
 
 create table if not exists task_types (
   id uuid primary key default gen_random_uuid(),
-  name text unique not null
+  name text unique not null,
+  is_default boolean not null default true
 );
+
+alter table task_types add column if not exists is_default boolean not null default true;
 
 -- Default checkpoint template per task type. When an admin picks a Task Type
 -- while creating/editing a recurring task, these labels are pre-filled into
