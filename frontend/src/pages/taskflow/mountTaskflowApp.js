@@ -1357,7 +1357,7 @@ export async function mountTaskflowApp(opts = {}) {
     if (isAdmin || canAddTask || visOk('add')) {
       taskItems.push({ key: 'add', label: '➕ Add new task' });
     }
-    if (isAdmin || canAddTask) taskItems.push({ key: 'taskbank', label: '📋 Pre-defined Task List' });
+    if (isAdmin) taskItems.push({ key: 'taskbank', label: '📋 Pre-defined Task List' });
     if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
     if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
     if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
@@ -1782,6 +1782,10 @@ export async function mountTaskflowApp(opts = {}) {
   }
 
   function switchView(viewKey) {
+    if (viewKey === 'taskbank' && state.user?.role !== 'admin') {
+      showToast('Pre-defined Task List is only available to admins', 'error');
+      return;
+    }
     // DIP Bot is admin-only
     if (viewKey === 'visibility') {
       const misOnly = state.user?.role !== 'admin' && (
