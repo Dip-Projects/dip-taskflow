@@ -1,9 +1,9 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireCanAddTask } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
-router.use(requireAuth, requireCanAddTask);
+router.use(requireAuth, requireAdmin);
 
 const SELECT = `
   id, title, details, project_id, task_type_id, department_id, assigned_to,
