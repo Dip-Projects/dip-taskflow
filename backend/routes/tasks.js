@@ -284,6 +284,32 @@ const TASK_SELECT_LEGACY = `
   reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
 `;
 
+const VERIFICATION_SELECT = `
+  id, description, hours_to_complete, target_date, priority, status,
+  attachment_url, voice_note_url, assigned_at, accepted_at,
+  sent_for_verification_at, verifier_id, verification_started_at, verification_started_by,
+  verification_allowed_hours, verification_status, verification_note,
+  verification_attachment_urls, correction_voice_url, updation_note,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name )
+`;
+
+const VERIFICATION_SELECT_BASIC = `
+  id, description, hours_to_complete, target_date, priority, status,
+  attachment_url, voice_note_url, accepted_at, verifier_id,
+  verification_started_at, verification_started_by, verification_status,
+  verification_note, verification_attachment_urls, correction_voice_url,
+  updation_note,
+  project:projects ( id, name ),
+  task_type:task_types ( id, name ),
+  department:departments ( id, name ),
+  assigned_to_user:users!tasks_assigned_to_fkey ( id, full_name ),
+  verifier:users!tasks_verifier_id_fkey ( id, full_name )
+`;
+
 // Resolved once — picks the richest select the database actually supports.
 let TASK_SELECT = TASK_SELECT_PLAN;
 let _taskSelectReady = null;
@@ -759,29 +785,43 @@ router.get('/verifications', async (req, res) => {
         !!req.user.is_head ||
         /\bhead\b/i.test(String(req.user.designation || '')));
 
-    const applyScope = (q) => {
+    const applyScope = (q, includeStartedBy = true) => {
       if (isMdoOversight) return q;
-      if (req.user.role === 'admin') return q.eq('department_id', req.user.department_id);
-      return q.eq('verifier_id', req.user.id);
+      if (!includeStartedBy) {
+        if (req.user.role === 'admin' && req.user.department_id) {
+          return q.eq('department_id', req.user.department_id);
+        }
+        return q.eq('verifier_id', req.user.id);
+      }
+      if (req.user.role === 'admin' && req.user.department_id) {
+        return q.or(
+          `department_id.eq.${req.user.department_id},verification_started_by.eq.${req.user.id}`
+        );
+      }
+      return q.or(
+        `verifier_id.eq.${req.user.id},verification_started_by.eq.${req.user.id}`
+      );
     };
 
-    let query = applyScope(
+    const buildQuery = (select, orderBy, ascending = false, includeStartedBy = true) => applyScope(
       supabase
         .from('tasks')
-        .select(TASK_SELECT)
+        .select(select)
         .eq('verification_status', 'Pending Verification')
-        .order('sent_for_verification_at', { ascending: false })
+        .order(orderBy, { ascending }),
+      includeStartedBy
     );
-    let { data, error } = await query;
+    let { data, error } = await buildQuery(VERIFICATION_SELECT, 'sent_for_verification_at');
 
-    // Older DBs may lack sent_for_verification_at — fall back to target_date sort
-    if (error && /sent_for_verification_at|column|schema cache/i.test(error.message || '')) {
-      ({ data, error } = await applyScope(
-        supabase
-          .from('tasks')
-          .select(TASK_SELECT)
-          .eq('verification_status', 'Pending Verification')
-          .order('target_date', { ascending: true })
+    // Older schemas may lack verification timer columns. Retry with the
+    // established task fields and target-date ordering rather than repeating
+    // the same incompatible select.
+    if (error && /column|schema cache/i.test(error.message || '')) {
+      ({ data, error } = await buildQuery(
+        VERIFICATION_SELECT_BASIC,
+        'target_date',
+        true,
+        false
       ));
     }
     if (error) throw error;
@@ -1056,7 +1096,16 @@ router.patch('/:id/hold', async (req, res) => {
       if (t.verification_status === 'Pending Verification') return false;
       return t.status === 'In Progress' || t.status === 'Ticket Raised' || !!t.is_on_hold;
     });
-    if (activeAccepted.length < 2) {
+    const { data: verificationRows, error: verificationErr } = await supabase
+      .from('tasks')
+      .select('id, verifier_id, verification_status, verification_started_at, verification_started_by')
+      .or(`verifier_id.eq.${assigneeId},verification_started_by.eq.${assigneeId}`)
+      .eq('verification_status', 'Pending Verification');
+    if (verificationErr) throw verificationErr;
+    const activeVerifications = (verificationRows || []).filter((t) =>
+      t.verification_started_at || t.verification_started_by
+    );
+    if (activeAccepted.length + activeVerifications.length < 2) {
       return res.status(400).json({
         error: 'Hold is only available when you have 2 or more accepted tasks in progress',
       });
