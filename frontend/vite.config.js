@@ -1,0 +1,72 @@
+import { defineConfig, loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  return {
+    plugins: [
+      react(),
+      {
+        name: 'tf-config-dev',
+        configureServer(server) {
+          server.middlewares.use('/config.js', (_req, res) => {
+            const payload = {
+              supabaseUrl: env.VITE_SUPABASE_URL || '',
+              supabaseAnonKey: env.VITE_SUPABASE_ANON_KEY || '',
+              apiBase: '/api',
+            };
+            res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+            res.end(`window.__TF_CONFIG__=${JSON.stringify(payload)};`);
+          });
+        },
+      },
+    ],
+    server: {
+      port: 5173,
+      proxy: {
+        '/api': { target: 'http://localhost:4000', changeOrigin: true },
+        '/legacy': { target: 'http://localhost:4000', changeOrigin: true },
+      },
+    },
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
+      target: 'es2020',
+      chunkSizeWarningLimit: 1800,
+      // Login must stay light — do not preload Site/Taskflow/Client/heic chunks.
+      modulePreload: {
+        resolveDependencies: (_filename, deps) =>
+          deps.filter(
+            (d) =>
+              !/site-portal|taskflow|client-portal|hr-portal|SiteApp|Taskflow|ClientApp|HrApp|heic2any|jspdf|html2canvas|pptxgen|xlsx|exceljs/i.test(
+                d
+              )
+          ),
+      },
+      rollupOptions: {
+        output: {
+          format: 'es',
+          manualChunks(id) {
+            if (id.includes('heic2any')) return 'heic2any';
+            // Keep React shared for login; leave other node_modules with the
+            // page that imports them (avoids a 1.5–2.5MB vendor on /login).
+            if (
+              id.includes('node_modules/react-dom') ||
+              id.includes('node_modules/react-router') ||
+              id.includes('node_modules/react/') ||
+              id.includes('node_modules\\react-dom') ||
+              id.includes('node_modules\\react-router') ||
+              id.includes('node_modules\\react\\')
+            ) {
+              return 'react-vendor';
+            }
+            if (id.includes('/pages/client/')) return 'client-portal';
+            if (id.includes('/pages/site/')) return 'site-portal';
+            if (id.includes('/pages/taskflow/')) return 'taskflow';
+            if (id.includes('/pages/hr/')) return 'hr-portal';
+          },
+        },
+      },
+    },
+  };
+});
