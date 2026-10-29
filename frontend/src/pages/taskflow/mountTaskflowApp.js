@@ -1,4 +1,5 @@
 import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from './checklist/checklistBus';
+import { NAV_ICONS, tfIcon } from './navIcons';
 
   /**
    * Adapted from backend/legacy/app.js for React (no iframe).
@@ -797,7 +798,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const hrsPast = verificationOverdueWorkingHours(task, now);
         return `
           <div>Verify due: ${fmtDate(due.toISOString())}</div>
-          <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past ${verificationAllowedHoursOf(task)}h working-hour limit 🔴` : 'Verify limit crossed 🔴'}</div>
+          <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsPast > 0 ? `${hrsPast}h past ${verificationAllowedHoursOf(task)}h working-hour limit ${tfIcon('dot')}` : `Verify limit crossed ${tfIcon('dot')}`}</div>
         `;
       }
       // Rescheduled but never accepted again — the plan date is the miss here.
@@ -806,7 +807,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const days = overdueCalendarDays(task, now);
         return `
           <div>Rescheduled to: ${planEnd ? fmtDate(planEnd.toISOString()) : '—'}</div>
-          <div style="color:#d33;font-size:0.8rem;font-weight:600">Not accepted again${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''} 🔴</div>
+          <div style="color:#d33;font-size:0.8rem;font-weight:600">Not accepted again${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''} ${tfIcon('dot')}</div>
         `;
       }
       const workDue = employeeWorkDueDate(task);
@@ -814,14 +815,14 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const hrsLate = Math.max(0, Math.floor(elapsedWorkingHoursBetween(workDue, now)));
         return `
           <div>Work due: ${fmtDate(workDue.toISOString())}</div>
-          <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsLate > 0 ? `${hrsLate}h work overdue 🔴` : 'Work overdue today 🔴'}</div>
+          <div style="color:#d33;font-size:0.8rem;font-weight:600">${hrsLate > 0 ? `${hrsLate}h work overdue ${tfIcon('dot')}` : `Work overdue today ${tfIcon('dot')}`}</div>
         `;
       }
       const plan = activePlanDate(task);
       const daysOverdue = plan ? Math.floor((now - parseLocalDate(plan)) / 86400000) : 0;
       return `
         <div>${plan ? fmtDateOnly(plan) : '—'}</div>
-        <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue 🔴`}</div>
+        <div style="color:#d33;font-size:0.8rem;font-weight:600">${daysOverdue <= 0 ? 'Overdue today' : `${daysOverdue} day${daysOverdue !== 1 ? 's' : ''} overdue ${tfIcon('dot')}`}</div>
       `;
     }
     
@@ -977,7 +978,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (task.is_on_hold) {
         const rem = task.hold_remaining_hours ?? task.hours_to_complete;
         return `
-          <div class="task-timer-hold">⏸ Timer paused</div>
+          <div class="task-timer-hold">${tfIcon('pause')} Timer paused</div>
           <div class="task-timer-sub">${formatHoursLabel(rem)} saved — tap Resume to continue</div>
         `;
       }
@@ -989,7 +990,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
           const days = overdueCalendarDays(task, now);
           return `
             <div class="task-timer-due">Rescheduled to ${planEnd ? fmtDateOnly(planEnd.toISOString()) : '—'}</div>
-            <div class="task-timer-overdue">🔴 Not accepted${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''}</div>
+            <div class="task-timer-overdue">${tfIcon('dot')} Not accepted${days > 0 ? ` · ${days} day${days !== 1 ? 's' : ''} overdue` : ''}</div>
           `;
         }
         return `
@@ -1030,7 +1031,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const overdueMs = workingTimeLeftMs(workDue, now);
         return `
           <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
-          <div class="task-timer-overdue">🔴 Overdue by ${formatDurationShort(overdueMs)}</div>
+          <div class="task-timer-overdue">${tfIcon('dot')} Overdue by ${formatDurationShort(overdueMs)}</div>
         `;
       }
 
@@ -1038,7 +1039,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       const urgent = msLeft < 30 * 60 * 1000;
       return `
         <div class="task-timer-due">Due ${fmtDate(workDue.toISOString())}</div>
-        <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">⏱ ${formatDurationShort(msLeft)} left</div>
+        <div class="task-timer-left${urgent ? ' task-timer-urgent' : ''}">${tfIcon('clock')} ${formatDurationShort(msLeft)} left</div>
       `;
     }
 
@@ -1373,15 +1374,15 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       const taskItems = [];
       // Admin always; Permissions “Add task”; or Who sees what grants the role
       if (isAdmin || canAddTask || visOk('add')) {
-        taskItems.push({ key: 'add', label: '➕ Add new task' });
+        taskItems.push({ key: 'add', label: 'Add new task' });
       }
-      if (isAdmin) taskItems.push({ key: 'taskbank', label: '📋 Pre-defined Task List' });
-      if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: '📋 All delegated tasks' });
-      if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: '⏰ Overdue tasks' });
-      if (visOk('my')) taskItems.push({ key: 'my', label: '✅ My tasks' });
-      // if (visOk('all-task')) taskItems.push({ key: 'all_task', label: '📋 All Tasks' });
-      if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? '🔁 Recurring tasks' : '🔁 My recurring tasks' });
-      if (visOk('my')) taskItems.push({ key: 'task-history', label: '📜 Task History' });
+      if (isAdmin) taskItems.push({ key: 'taskbank', label: 'Pre-defined Task List' });
+      if (visOk('all') && isAdmin) taskItems.push({ key: 'all', label: 'All delegated tasks' });
+      if (visOk('overdue') && isAdmin) taskItems.push({ key: 'overdue', label: 'Overdue tasks' });
+      if (visOk('my')) taskItems.push({ key: 'my', label: 'My tasks' });
+      // if (visOk('all-task')) taskItems.push({ key: 'all_task', label: 'All Tasks' });
+      if (visOk('recurring')) taskItems.push({ key: 'recurring', label: isAdmin ? 'Recurring tasks' : 'My recurring tasks' });
+      if (visOk('my')) taskItems.push({ key: 'task-history', label: 'Task History' });
 
       els.navList.innerHTML = '';
       if (taskItems.length) {
@@ -1400,7 +1401,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (visOk('verifications') && (isAdmin || state.user.can_verify || isMis || isMdoHead)) {
         appendCollapsibleNav(
           'Verification',
-          [makeNavButton('verifications', '🔎 Verification requests')],
+          [makeNavButton('verifications', 'Verification requests')],
           { collapsed: true, sectionId: 'verification' }
         );
       }
@@ -1408,7 +1409,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (visOk('tickets')) {
         appendCollapsibleNav(
           isMis ? 'MIS — Ticket Tracking' : 'Support',
-          [makeNavButton('tickets-open', '🟠 Open Tickets'), makeNavButton('tickets-resolved', '✅ Resolved Tickets')],
+          [makeNavButton('tickets-open', 'Open Tickets'), makeNavButton('tickets-resolved', 'Resolved Tickets')],
           { collapsed: true, sectionId: 'support' }
         );
       }
@@ -1416,7 +1417,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (!isAdmin && visOk('corrections')) {
         appendCollapsibleNav(
           'Corrections',
-          [makeNavButton('corrections', '↩ Corrections'), makeNavButton('updations', '📝 Updations')],
+          [makeNavButton('corrections', 'Corrections'), makeNavButton('updations', 'Updations')],
           { collapsed: true, sectionId: 'corrections' }
         );
       }
@@ -1424,7 +1425,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (isAdmin && visOk('reschedule-requests') !== false) {
         appendCollapsibleNav(
           'Reschedule',
-          [makeNavButton('reschedule-requests', '🗓️ Reschedule requests')],
+          [makeNavButton('reschedule-requests', 'Reschedule requests')],
           { collapsed: true, sectionId: 'reschedule' }
         );
       }
@@ -1446,23 +1447,23 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
 
       if (showAdminBlock) {
         const adminBtns = [];
-        if (visOk('employees') && (isAdmin || canAddEmployee)) adminBtns.push(makeNavButton('employees', '👥 Manage employees'));
+        if (visOk('employees') && (isAdmin || canAddEmployee)) adminBtns.push(makeNavButton('employees', 'Manage employees'));
         if (visOk('hierarchy') && isAdmin) {
-          adminBtns.push(makeNavButton('hierarchy', '🌳 Org Hierarchy'));
-          if (visOk('project-mgmt')) adminBtns.push(makeNavButton('project-mgmt', '🗂️ Project management'));
+          adminBtns.push(makeNavButton('hierarchy', 'Org Hierarchy'));
+          if (visOk('project-mgmt')) adminBtns.push(makeNavButton('project-mgmt', 'Project management'));
         }
-        if (visOk('sites') && (isAdmin || canAddSite)) adminBtns.push(makeNavButton('sites', '🏗️ Manage sites'));
-        if (visOk('clients') && isAdmin) adminBtns.push(makeNavButton('clients', '👤 Manage clients'));
-        if (visOk('masterdata') && isAdmin) adminBtns.push(makeNavButton('masterdata', '🗂️ Departments & task types'));
-        if (visOk('task-checklist') && isAdmin) adminBtns.push(makeNavButton('task-checklist', '📋 Task checklist'));
-        if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', '🔐 Permissions'));
-        if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', '📋 Daily Report'));
-        if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', '📊 MIS Report'));
-        if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', '⏱ Work & Verification'));
-        if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', '📌 Emp Delay Report'));
-        if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', '📋 Emp Report'));
-        //if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', '📌 MDO Task Delay Report'));
-        if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', '📑 FMS tracker'));
+        if (visOk('sites') && (isAdmin || canAddSite)) adminBtns.push(makeNavButton('sites', 'Manage sites'));
+        if (visOk('clients') && isAdmin) adminBtns.push(makeNavButton('clients', 'Manage clients'));
+        if (visOk('masterdata') && isAdmin) adminBtns.push(makeNavButton('masterdata', 'Departments & task types'));
+        if (visOk('task-checklist') && isAdmin) adminBtns.push(makeNavButton('task-checklist', 'Task checklist'));
+        if (visOk('permissions') && isAdmin) adminBtns.push(makeNavButton('permissions', 'Permissions'));
+        if (visOk('daily-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('daily-report', 'Daily Report'));
+        if (visOk('mis-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('mis-report', 'MIS Report'));
+        if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', 'Work & Verification'));
+        if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', 'Emp Delay Report'));
+        if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', 'Emp Report'));
+        //if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', 'MDO Task Delay Report'));
+        if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', 'FMS tracker'));
         appendCollapsibleNav(
           isMis && !isAdmin ? 'MIS' : 'Administration',
           adminBtns,
@@ -1473,7 +1474,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (isMis && state.user?.role !== 'admin') {
         appendCollapsibleNav(
           'MIS Support',
-          [makeNavButton('visibility', '👁 Who sees what')],
+          [makeNavButton('visibility', 'Who sees what')],
           { collapsed: true, sectionId: 'mis-support' }
         );
       }
@@ -1481,17 +1482,17 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (visOk('drawings') && isAdmin) {
         appendCollapsibleNav(
           'Drawings',
-          [makeNavButton('drawings-add', '➕ Add Drawing'), makeNavButton('drawings-all', '📐 All Drawings')],
+          [makeNavButton('drawings-add', 'Add Drawing'), makeNavButton('drawings-all', 'All Drawings')],
           { collapsed: true, sectionId: 'drawings' }
         );
       }
 
       const reportBtns = [
-        makeNavButton('site-report', '🏗️ Site Visit Report'),
-        makeNavButton('my-reports', '📄 My Reports'),
+        makeNavButton('site-report', 'Site Visit Report'),
+        makeNavButton('my-reports', 'My Reports'),
       ];
       if (visOk('monthly-report')) {
-        reportBtns.push(makeNavButton('monthly-report', '📁 Monthly Report'));
+        reportBtns.push(makeNavButton('monthly-report', 'Monthly Report'));
       }
       if (reportBtns.length) {
         appendCollapsibleNav(
@@ -1502,9 +1503,9 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       }
 
       const leaveBtns = [];
-      if (visOk('applyleave')) leaveBtns.push(makeNavButton('applyleave', '🌴 Apply Leave'));
-      if (visOk('buddyrequests')) leaveBtns.push(makeNavButton('buddyrequests', '🤝 Buddy requests'));
-      if (visOk('leaveapprovals') && isAdmin) leaveBtns.push(makeNavButton('leaveapprovals', '🗒️ Leave Approvals'));
+      if (visOk('applyleave')) leaveBtns.push(makeNavButton('applyleave', 'Apply Leave'));
+      if (visOk('buddyrequests')) leaveBtns.push(makeNavButton('buddyrequests', 'Buddy requests'));
+      if (visOk('leaveapprovals') && isAdmin) leaveBtns.push(makeNavButton('leaveapprovals', 'Leave Approvals'));
       if (leaveBtns.length) {
         appendCollapsibleNav('Leave', leaveBtns, { collapsed: true, sectionId: 'leave' });
       }
@@ -1516,7 +1517,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (isHeadUser || isAdmin) {
         appendCollapsibleNav(
           'HR / Hiring',
-          [makeNavButton('new-recruitment', '🧑‍💼 Hiring requirement')],
+          [makeNavButton('new-recruitment', 'Hiring requirement')],
           { collapsed: true, sectionId: 'hr-hiring' }
         );
       }
@@ -1610,6 +1611,11 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       const btn = document.createElement('button');
       btn.className = 'nav-btn'; btn.dataset.view = key;
       btn.dataset.label = label;
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'nav-btn-icon';
+      iconSpan.setAttribute('aria-hidden', 'true');
+      iconSpan.innerHTML = NAV_ICONS[key] || '';
+      btn.appendChild(iconSpan);
       const labelSpan = document.createElement('span');
       labelSpan.className = 'nav-btn-label';
       labelSpan.textContent = label;
@@ -2286,7 +2292,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
 
     function renderAllTasksTable(tbody, tasks) {
       if (!tasks || tasks.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-state">${tfIcon('inbox')}No tasks found</td></tr>`;
         return;
       }
       tbody.innerHTML = '';
@@ -2324,7 +2330,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         if (task.voice_note_url) {
           const a = document.createElement('a');
           a.href = task.voice_note_url; a.target = '_blank'; a.rel = 'noopener';
-          a.className = 'media-link'; a.title = 'Play voice note'; a.textContent = '🎤';
+          a.className = 'media-link'; a.title = 'Play voice note'; a.innerHTML = tfIcon('mic');
           tdVoice.appendChild(a);
         } else {
           tdVoice.innerHTML = `<span class="media-none">—</span>`;
@@ -2336,7 +2342,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         if (task.attachment_url) {
           const a = document.createElement('a');
           a.href = task.attachment_url; a.target = '_blank'; a.rel = 'noopener';
-          a.className = 'media-link'; a.title = 'View attachment'; a.textContent = '📎';
+          a.className = 'media-link'; a.title = 'View attachment'; a.innerHTML = tfIcon('clip');
           tdAttach.appendChild(a);
         } else {
           tdAttach.innerHTML = `<span class="media-none">—</span>`;
@@ -2350,7 +2356,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const tdStatus = document.createElement('td');
         let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
         if (task.is_on_hold) {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pause')} On hold</span>`;
         } else if (task.verification_status === 'Pending Verification') {
           statusHtml += verifyingStatusPillHtml(task);
         } else if (task.verification_status === 'Verified') {
@@ -2358,8 +2364,9 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         } else if (task.verification_status === 'Verification Rejected') {
           statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
         } else if (task.verification_status === 'Updation Required') {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pencil')} Updation</span>`;
         }
+        tdStatus.className = 'th-center';
         tdStatus.innerHTML = statusHtml;
 
         // Actions
@@ -2468,8 +2475,8 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       if (!tbody || !cards) return;
 
       if (tasks.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</td></tr>`;
-        cards.innerHTML = `<div class="empty-state"><span class="emoji">🎉</span>No overdue recurring tasks</div>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state">${tfIcon('done')}No overdue recurring tasks</td></tr>`;
+        cards.innerHTML = `<div class="empty-state">${tfIcon('done')}No overdue recurring tasks</div>`;
         return;
       }
 
@@ -2511,7 +2518,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     // detail drawer for that task.
     function renderOverdueTasksTable(tbody, tasks) {
       if (!tasks || tasks.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><span class="emoji">🎉</span>No overdue tasks</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${tfIcon('done')}No overdue tasks</td></tr>`;
         return;
       }
       tbody.innerHTML = '';
@@ -2533,15 +2540,15 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         // Source — why is this overdue: stuck before submission, or stuck in verification?
         const tdSource = document.createElement('td');
         tdSource.innerHTML = source === 'verification'
-          ? `<span class="source-badge source-verification">⏳ Verification</span>`
-          : `<span class="source-badge source-assignment">📋 Assignment</span>`;
+          ? `<span class="source-badge source-verification">${tfIcon('hourglass')} Verification</span>`
+          : `<span class="source-badge source-assignment">${tfIcon('clipboard')} Assignment</span>`;
 
         // Overdue detail (assignment work hours or verification SLA — verifier's chosen hours)
         const tdDate = document.createElement('td');
         tdDate.style.wordBreak = 'break-word';
         tdDate.innerHTML = fmtOverdueDateCell(task);
         if (isOverdueExtensionActive(task)) {
-          tdDate.innerHTML += `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">⏱ Extended to ${fmtDate(task.overdue_extended_until)}</div>`;
+          tdDate.innerHTML += `<div style="color:var(--emerald);font-size:0.75rem;margin-top:2px">${tfIcon('clock')} Extended to ${fmtDate(task.overdue_extended_until)}</div>`;
         }
 
         // Assigned to
@@ -2569,14 +2576,15 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const tdStatus = document.createElement('td');
         let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
         if (task.is_on_hold) {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pause')} On hold</span>`;
         } else if (task.verification_status === 'Pending Verification') {
           statusHtml += verifyingStatusPillHtml(task);
         } else if (task.verification_status === 'Verification Rejected') {
           statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
         } else if (task.verification_status === 'Updation Required') {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pencil')} Updation</span>`;
         }
+        tdStatus.className = 'th-center';
         tdStatus.innerHTML = statusHtml;
 
         // Actions — overdue view only offers "Mark as done" + "Set extended time"
@@ -2692,15 +2700,15 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         item.className = 'drawer-task-item';
         item.innerHTML = `
           ${source === 'verification'
-            ? `<span class="source-badge source-verification">⏳ Verification</span>`
-            : `<span class="source-badge source-assignment">📋 Assignment</span>`}
+            ? `<span class="source-badge source-verification">${tfIcon('hourglass')} Verification</span>`
+            : `<span class="source-badge source-assignment">${tfIcon('clipboard')} Assignment</span>`}
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
           <div class="task-detail-line"><span class="task-detail-label">Assigned to:</span> ${escapeHtml(task.assigned_to_user?.full_name ?? '—')}</div>
           ${task.verifier?.full_name ? `<div class="task-detail-line"><span class="task-detail-label">Verifier:</span> ${escapeHtml(task.verifier.full_name)}</div>` : ''}
           <div class="task-detail-line"><span class="task-detail-label">Planned date:</span> ${escapeHtml(fmtDateOnly(task.target_date))}</div>
           ${overdueDrawerTab === 'pending' ? `
             <div class="drawer-extension-note">
-              ⏱ Extended to <strong>${escapeHtml(fmtDate(task.overdue_extended_until))}</strong>
+              ${tfIcon('clock')} Extended to <strong>${escapeHtml(fmtDate(task.overdue_extended_until))}</strong>
               ${task.overdue_extension_reason ? `<br>Reason: ${escapeHtml(task.overdue_extension_reason)}` : ''}
             </div>
           ` : ''}
@@ -2819,7 +2827,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       );
       if (!visibleTasks.length) {
         els.myTasksTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">No tasks</td></tr>`;
-        els.myTasksList.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks</div>`;
+        els.myTasksList.innerHTML = `<div class="empty-state">${tfIcon('inbox')}No tasks</div>`;
       }
     }
 
@@ -3072,7 +3080,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     // "Assigned to" (it's always you), since this is the employee's own task list.
     function renderMyTasksTable(tbody, tasks, recurringTasks = []) {
       if ((!tasks || tasks.length === 0) && recurringTasks.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state"><span class="emoji">📭</span>No tasks found</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">${tfIcon('inbox')}No tasks found</td></tr>`;
         return;
       }
       tbody.innerHTML = '';
@@ -3102,7 +3110,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         if (task.voice_note_url) {
           const a = document.createElement('a');
           a.href = task.voice_note_url; a.target = '_blank'; a.rel = 'noopener';
-          a.className = 'media-link'; a.title = 'Play voice note'; a.textContent = '🎤';
+          a.className = 'media-link'; a.title = 'Play voice note'; a.innerHTML = tfIcon('mic');
           tdVoice.appendChild(a);
         } else {
           tdVoice.innerHTML = `<span class="media-none">—</span>`;
@@ -3114,7 +3122,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         if (task.attachment_url) {
           const a = document.createElement('a');
           a.href = task.attachment_url; a.target = '_blank'; a.rel = 'noopener';
-          a.className = 'media-link'; a.title = 'View attachment'; a.textContent = '📎';
+          a.className = 'media-link'; a.title = 'View attachment'; a.innerHTML = tfIcon('clip');
           tdAttach.appendChild(a);
         } else {
           tdAttach.innerHTML = `<span class="media-none">—</span>`;
@@ -3128,7 +3136,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const tdStatus = document.createElement('td');
         let statusHtml = `<span class="pill pill-${statusClass}">${task.status}</span>`;
         if (task.is_on_hold) {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">⏸ On hold</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pause')} On hold</span>`;
         } else if (task.verification_status === 'Pending Verification') {
           statusHtml += verifyingStatusPillHtml(task);
         } else if (task.verification_status === 'Verified') {
@@ -3136,8 +3144,9 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         } else if (task.verification_status === 'Verification Rejected') {
           statusHtml += `<br><span class="pill pill-Rejected" style="margin-top:4px">Correction</span>`;
         } else if (task.verification_status === 'Updation Required') {
-          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">📝 Updation</span>`;
+          statusHtml += `<br><span class="pill pill-Pending" style="margin-top:4px">${tfIcon('pencil')} Updation</span>`;
         }
+        tdStatus.className = 'th-center';
         tdStatus.innerHTML = statusHtml;
 
         // Actions
@@ -3178,7 +3187,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
         const tdDetails = document.createElement('td');
         tdDetails.className = 'task-name-cell';
         tdDetails.innerHTML = `
-          <div class="task-detail-line"><span class="pill pill-InProgress" style="font-size:10px">🔁 Recurring</span></div>
+          <div class="task-detail-line"><span class="pill pill-InProgress" style="font-size:10px">${tfIcon('repeat')} Recurring</span></div>
           <div class="task-detail-line"><strong>${escapeHtml(task.description ?? '')}</strong></div>
           ${task.project ? `<div class="task-detail-line"><span class="task-detail-label">Project:</span> ${escapeHtml(task.project.name)}</div>` : ''}
           ${task.task_type ? `<div class="task-detail-line"><span class="task-detail-label">Type:</span> ${escapeHtml(task.task_type.name)}</div>` : ''}
@@ -3216,7 +3225,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     // ─── shared task card rendering (My Tasks / Verifications) ───────────────────
     function renderTaskList(container, tasks, { showAssignee, allowActions, verificationMode = false }) {
       if (!tasks || tasks.length === 0) {
-        container.innerHTML = `<div class="empty-state"><span class="emoji">📭</span>No tasks found</div>`;
+        container.innerHTML = `<div class="empty-state">${tfIcon('inbox')}No tasks found</div>`;
         return;
       }
       container.classList.add('task-list');
@@ -3232,16 +3241,16 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     function verifyingStatusPillHtml(task) {
       const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
       const label = who
-        ? `⏳ Verifying · ${escapeHtml(who)}`
-        : '⏳ Verifying';
+        ? `${tfIcon('hourglass')} Verifying · ${escapeHtml(who)}`
+        : `${tfIcon('hourglass')} Verifying`;
       return `<br><span class="pill pill-PendingVerification" style="margin-top:4px" title="${who ? `Verifier: ${escapeHtml(who)}` : ''}">${label}</span>`;
     }
 
     function verifiedStatusPillHtml(task) {
       const who = task.verifier?.full_name || task.verifier_user?.full_name || '';
       const label = who
-        ? `✅ Verified by ${escapeHtml(who)}`
-        : '✅ Verified';
+        ? `${tfIcon('done')} Verified by ${escapeHtml(who)}`
+        : `${tfIcon('done')} Verified`;
       return `<br><span class="pill pill-Completed" style="margin-top:4px" title="${who ? `Verified by: ${escapeHtml(who)}` : ''}">${label}</span>`;
     }
 
@@ -3558,11 +3567,9 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     });
 
     let taskCpModalMode = 'assign';
-    let pendingVerificationStart = null;
 
     async function openAssignCheckpointGate() {
       taskCpModalMode = 'assign';
-      pendingVerificationStart = null;
       const typeId = els.fTaskType.value;
       const typeName = els.fTaskType.options[els.fTaskType.selectedIndex]?.text || 'this task type';
       const taskType = state.master.taskTypes.find((type) => String(type.id) === String(typeId));
@@ -3758,70 +3765,6 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       }
     }
 
-    async function openVerificationCheckpointGate(task, actionsEl, btn) {
-      const modal = document.getElementById('taskCpModal');
-      const listEl = document.getElementById('taskCpModalList');
-      const controlsEl = document.getElementById('taskCpTemplateControls');
-      const typeNotice = document.getElementById('taskCpTypeNotice');
-      const msgEl = document.getElementById('taskCpModalMsg');
-      const titleEl = document.getElementById('taskCpModalTitle');
-      const subEl = document.getElementById('taskCpModalSub');
-      const submitBtn = document.getElementById('submitTaskCpModal');
-      if (!modal || !listEl || !submitBtn) {
-        showToast('Could not open checkpoint popup', 'error');
-        return;
-      }
-
-      taskCpModalMode = 'verification';
-      pendingVerificationStart = { task, actionsEl, btn };
-      if (titleEl) titleEl.textContent = `Checkpoints — ${task.task_type?.name || 'Task'}`;
-      if (subEl) subEl.textContent = 'Tick every checkpoint. Verification starts only after all are checked and submitted.';
-      if (controlsEl) controlsEl.hidden = true;
-      if (typeNotice) typeNotice.hidden = true;
-      if (msgEl) { msgEl.hidden = true; msgEl.textContent = ''; }
-      listEl.innerHTML = '<p class="form-note">Loading checkpoints…</p>';
-      submitBtn.textContent = 'Submit';
-      submitBtn.disabled = true;
-      submitBtn.hidden = false;
-      modal.hidden = false;
-
-      try {
-        const checkpoints = await api(`/tasks/${task.id}/checkpoints`);
-        const ordered = [...(checkpoints || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        if (ordered.length) {
-          listEl.innerHTML = `<div class="checkpoint-list">${ordered.map((checkpoint, index) => `
-            <div class="checkpoint-item" style="display:flex;align-items:center;gap:8px">
-              <input type="checkbox" data-cp-index="${index}" />
-              <span style="flex:1">${escapeHtml(checkpoint.label || 'Checkpoint')}</span>
-            </div>`).join('')}</div>`;
-          submitBtn.disabled = true;
-        } else {
-          listEl.innerHTML = '<p class="form-note">No checkpoints for this task. Submit to continue.</p>';
-          submitBtn.disabled = false;
-        }
-
-        listEl.onchange = (event) => {
-          const box = event.target.closest('input[type="checkbox"][data-cp-index]');
-          if (!box) return;
-          box.closest('.checkpoint-item')?.classList.toggle('cp-done', box.checked);
-          const boxes = [...listEl.querySelectorAll('input[type="checkbox"][data-cp-index]')];
-          const allChecked = boxes.length === 0 || boxes.every((item) => item.checked);
-          submitBtn.disabled = !allChecked;
-          if (msgEl) {
-            msgEl.textContent = allChecked ? '' : 'Tick every checkpoint to start verification.';
-            msgEl.hidden = allChecked;
-          }
-        };
-      } catch (err) {
-        listEl.innerHTML = '';
-        if (msgEl) {
-          msgEl.textContent = err.message || 'Could not load task checkpoints';
-          msgEl.hidden = false;
-        }
-        submitBtn.disabled = true;
-      }
-    }
-
     // Accepting uses the same tick-box popup as assigning: every checkpoint of the task
     // must be ticked. Submitting saves the ticks, then the task starts.
     let pendingAccept = null;
@@ -3892,7 +3835,6 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
     function closeTaskCpModal() {
       const modal = document.getElementById('taskCpModal');
       if (modal) modal.hidden = true;
-      pendingVerificationStart = null;
       pendingAccept = null;
       taskCpModalMode = 'assign';
     }
@@ -3923,18 +3865,6 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
           if (msgEl) { msgEl.textContent = err.message || 'Could not accept task'; msgEl.hidden = false; }
           if (assignBtn) assignBtn.disabled = false;
         }
-        return;
-      }
-      if (taskCpModalMode === 'verification') {
-        if (boxes.some((box) => !box.checked)) {
-          if (msgEl) { msgEl.textContent = 'Tick every checkpoint to start verification.'; msgEl.hidden = false; }
-          return;
-        }
-        const pending = pendingVerificationStart;
-        if (!pending) return;
-        if (assignBtn) assignBtn.disabled = true;
-        closeTaskCpModal();
-        await startVerificationAfterCheckpoints(pending.task, pending.actionsEl, pending.btn);
         return;
       }
       const labels = [...document.querySelectorAll('#taskCpModalList .checkpoint-item > span')].map((el) => el.textContent.trim()).filter(Boolean);
@@ -4387,11 +4317,11 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
 
     async function clickStartVerification(task, actionsEl, btn) {
       const id = task?.id;
-      if (!id || _startVerifyBusy.has(id) || taskCpModalMode === 'verification' || verificationHasStarted(task)) return;
-      await openVerificationCheckpointGate(task, actionsEl, btn);
+      if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
+      await startVerificationWithHours(task, actionsEl, btn);
     }
 
-    async function startVerificationAfterCheckpoints(task, actionsEl, btn) {
+    async function startVerificationWithHours(task, actionsEl, btn) {
       const id = task?.id;
       if (!id || _startVerifyBusy.has(id) || verificationHasStarted(task)) return;
       const verificationHours = await askVerificationHours();
@@ -6885,28 +6815,95 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       } catch (err) { showToast(err.message, 'error'); }
     }
 
+    // ─── Department / designation dropdowns (shared by add + edit employee) ─
+    let employeeLookups = { departments: [], designations: [] };
+
+    async function loadEmployeeLookups() {
+      const [departments, designations] = await Promise.all([
+        api('/master/departments'),
+        api('/master/designations'),
+      ]);
+      employeeLookups = {
+        departments: sortByLabel(departments),
+        designations: sortByLabel(designations),
+      };
+    }
+
+    // Fills a select with names; keeps the current value (or `current`) even if it isn't in the list yet.
+    function fillNameSelect(select, names, { placeholder, current } = {}) {
+      if (!select) return;
+      const value = current ?? select.value ?? '';
+      const list = [...new Set([...names, value].map((n) => String(n || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      select.innerHTML = '';
+      select.appendChild(new Option(placeholder, ''));
+      list.forEach((n) => select.appendChild(new Option(n, n)));
+      select.value = value;
+    }
+
+    function renderEmployeeLookups({ department, designation } = {}) {
+      const depts = employeeLookups.departments.map((d) => d.name);
+      const desigs = employeeLookups.designations.map((d) => d.name);
+      const addDesig = document.getElementById('emp-designation');
+      fillNameSelect(els.empDepartment, depts, { placeholder: 'Select department' });
+      fillNameSelect(addDesig, desigs, { placeholder: 'Select designation' });
+      fillNameSelect(els.editEmpDepartment, depts, { placeholder: 'Select department', current: department });
+      fillNameSelect(els.editEmpDesignation, desigs, { placeholder: 'Select designation', current: designation });
+    }
+
+    function hideLookupAddRows(ids) {
+      ids.forEach((id) => {
+        const row = document.getElementById(id);
+        if (row) row.hidden = true;
+      });
+    }
+
+    // "+ Add" row: saves a new department/designation, refreshes the lists and selects it.
+    function wireLookupAdd({ btnId, rowId, inputId, saveId, endpoint, listKey, label, selectEl }) {
+      document.getElementById(btnId)?.addEventListener('click', () => toggleInlineAdd(rowId));
+      document.getElementById(saveId)?.addEventListener('click', async () => {
+        const input = document.getElementById(inputId);
+        const name = (input?.value || '').trim();
+        if (!name) return showToast(`Enter a ${label} name`, 'error');
+        try {
+          const created = await api(endpoint, { method: 'POST', body: { name } });
+          await loadEmployeeLookups();
+          renderEmployeeLookups();
+          const select = selectEl();
+          if (select) select.value = created.name;
+          if (input) input.value = '';
+          hideLookupAddRows([rowId]);
+          showToast(`${label[0].toUpperCase()}${label.slice(1)} added`, 'success');
+        } catch (err) { showToast(err.message, 'error'); }
+      });
+    }
+
+    wireLookupAdd({
+      btnId: 'emp-add-dept-btn', rowId: 'emp-add-dept-row', inputId: 'emp-new-dept', saveId: 'emp-save-dept',
+      endpoint: '/master/departments', listKey: 'departments', label: 'department', selectEl: () => els.empDepartment,
+    });
+    wireLookupAdd({
+      btnId: 'emp-add-desig-btn', rowId: 'emp-add-desig-row', inputId: 'emp-new-desig', saveId: 'emp-save-desig',
+      endpoint: '/master/designations', listKey: 'designations', label: 'designation', selectEl: () => document.getElementById('emp-designation'),
+    });
+    wireLookupAdd({
+      btnId: 'edit-emp-add-dept-btn', rowId: 'edit-emp-add-dept-row', inputId: 'edit-emp-new-dept', saveId: 'edit-emp-save-dept',
+      endpoint: '/master/departments', listKey: 'departments', label: 'department', selectEl: () => els.editEmpDepartment,
+    });
+    wireLookupAdd({
+      btnId: 'edit-emp-add-desig-btn', rowId: 'edit-emp-add-desig-row', inputId: 'edit-emp-new-desig', saveId: 'edit-emp-save-desig',
+      endpoint: '/master/designations', listKey: 'designations', label: 'designation', selectEl: () => els.editEmpDesignation,
+    });
+
     els.openAddEmployee?.addEventListener('click', async () => {
       els.employeeForm.reset(); els.employeeFormMsg.hidden = true;
-      fillSelect(els.empDepartment, [], {
-        placeholder: 'Loading departments…',
-        valueKey: 'name',
-        labelKey: 'name',
-      });
+      hideLookupAddRows(['emp-add-dept-row', 'emp-add-desig-row']);
+      renderEmployeeLookups({ department: '', designation: '' });
       try {
-        const departments = await api('/master/departments');
-        state.master.departments = sortByLabel(departments);
-        fillSelect(els.empDepartment, state.master.departments, {
-          placeholder: 'Select department',
-          valueKey: 'name',
-          labelKey: 'name',
-        });
+        await loadEmployeeLookups();
+        renderEmployeeLookups({ department: '', designation: '' });
       } catch (err) {
-        fillSelect(els.empDepartment, [], {
-          placeholder: 'Departments unavailable',
-          valueKey: 'name',
-          labelKey: 'name',
-        });
-        els.employeeFormMsg.textContent = `Could not load departments: ${err.message}`;
+        els.employeeFormMsg.textContent = `Could not load departments/designations: ${err.message}`;
         els.employeeFormMsg.hidden = false;
       }
       fillSiteMultiSelect(els.empSite || document.getElementById('emp-site'), state.master.projects || [], []);
@@ -6954,8 +6951,11 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       els.editEmployeeFormMsg.hidden = true;
       els.editEmpId.value = emp.id;
       els.editEmpFullname.value = emp.full_name || '';
-      els.editEmpDepartment.value = emp.department || '';
-      els.editEmpDesignation.value = emp.designation || '';
+      hideLookupAddRows(['edit-emp-add-dept-row', 'edit-emp-add-desig-row']);
+      renderEmployeeLookups({ department: emp.department || '', designation: emp.designation || '' });
+      loadEmployeeLookups()
+        .catch((err) => showToast(`Could not load departments/designations: ${err.message}`, 'error'))
+        .finally(() => renderEmployeeLookups({ department: emp.department || '', designation: emp.designation || '' }));
       els.editEmpRole.value = emp.role || 'employee';
       // Reporting Head — can't be your own reporting head, so exclude self from the list.
       const headOptions = (state.master.employees || []).filter((e) => e.id !== emp.id);
@@ -9597,7 +9597,7 @@ import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from '
       } else {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
-        empty.textContent = 'Nothing due today 🎉';
+        empty.innerHTML = `${tfIcon('done')} Nothing due today`;
         wrap.appendChild(empty);
       }
     }

@@ -588,9 +588,19 @@
   .sgroup-kids.shut{max-height:0;opacity:0;pointer-events:none;}
   .sni{display:flex;align-items:center;gap:9px;padding:12px;border-radius:9px;cursor:pointer;color:var(--ink2);font-size:13px;font-weight:500;border:none;background:transparent;width:100%;text-align:left;transition:background .15s,color .15s;}
   .sni:hover{background:var(--paper);color:var(--ink);}
+  /* MDO sidebar: grey text by default, icon keeps its own colour.
+     On hover / active the text takes the section colour and the item uses the page's light background. */
+  .site-sidebar .mdo-nav-item .mdo-nav-icon{
+    display:inline-flex;
+    align-items:center;
+    flex-shrink:0;
+  }
+  .site-sidebar .mdo-nav-item .mdo-nav-icon svg{
+    stroke:currentColor;
+  }
   .site-sidebar .mdo-nav-item:hover,
   .site-sidebar .mdo-nav-item.mdo-nav-highlighted{
-    background:var(--mdo-nav-hover-bg);
+    background:var(--paper);
     color:var(--mdo-nav-accent);
   }
 

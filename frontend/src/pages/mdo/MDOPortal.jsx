@@ -7,6 +7,8 @@ import { formatWeekDate } from "../../lib/weeklyPlanPreview";
 import SiteReport from "../site/Sitereport";
 import MyReports from "../site/MyReports";
 import WprReport from "./WprReport";
+import { reportDateToISO } from "../../lib/wprDates";
+import SvrReport from "../site/SvrReport";
 import "../site/SitePortal.css";
 import "../site/SiteMyTasks.css";
 
@@ -507,6 +509,70 @@ allDrawings: (
     <path d="M3 9h18" /><path d="M9 3v18" /><path d="M15 3v18" /><path d="M3 15h18" />
   </svg>
 ),
+  navUsers: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="9" cy="7" r="4" />
+      <path d="M3 21v-2a6 6 0 0 1 12 0v2" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      <path d="M21 21v-2a6 6 0 0 0-4-5.65" />
+    </svg>
+  ),
+  navPie: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+    </svg>
+  ),
+  navAward: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="6" />
+      <path d="M15.47 13.89L17 22l-5-3-5 3 1.53-8.11" />
+    </svg>
+  ),
+  navBars: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="6" y1="20" x2="6" y2="14" />
+      <line x1="12" y1="20" x2="12" y2="6" />
+      <line x1="18" y1="20" x2="18" y2="10" />
+    </svg>
+  ),
+  navPin: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  ),
+  navBuilding: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="2" width="16" height="20" rx="1" />
+      <path d="M9 22v-4h6v4" />
+      <path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01" />
+    </svg>
+  ),
+  navFolder: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  navListCheck: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </svg>
+  ),
+  navUmbrella: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 12a11.05 11.05 0 0 0-22 0z" />
+      <path d="M12 12v7a3 3 0 0 1-6 0" />
+    </svg>
+  ),
+  navAlert: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  ),
   dl: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -895,6 +961,28 @@ function engineerReportMark(onLeave, done) {
   return done ? "Done" : "Pend";
 }
 
+// Percentages for one employee's Employee Report rows, over the days that are not approved leave.
+function engineerSheetPercents(rows) {
+  const days = (rows || []).filter((r) => !r.onLeave);
+  const n = days.length;
+  const morningDone = days.filter((r) => r.morning === "Done").length;
+  const eveningDone = days.filter((r) => r.evening === "Done").length;
+  return {
+    days: n,
+    clockIn: summaryPct(days.filter((r) => r.clockIn).length, n),
+    clockOut: summaryPct(days.filter((r) => r.clockOut).length, n),
+    morning: summaryPct(morningDone, n),
+    evening: summaryPct(eveningDone, n),
+    dpr: summaryPct(morningDone + eveningDone, n * 2),
+  };
+}
+
+function engineerSheetPercentText(rows) {
+  const p = engineerSheetPercents(rows);
+  const fmt = (v) => (v == null ? "—" : `${v}%`);
+  return `Clock-In ${fmt(p.clockIn)} · Clock-Out ${fmt(p.clockOut)} · Morning DPR ${fmt(p.morning)} · Evening DPR ${fmt(p.evening)} · DPR overall ${fmt(p.dpr)} (${p.days} day${p.days !== 1 ? "s" : ""})`;
+}
+
 function isOnLeaveValue(value) {
   return String(value || "").trim().toLowerCase() === "on leave";
 }
@@ -1068,6 +1156,63 @@ function summaryClockOutCategory(att) {
   return "early";
 }
 
+// Percent of `whole`, or null when there is nothing to measure against (e.g. all days on leave).
+function summaryPct(part, whole) {
+  return whole > 0 ? Math.round((part / whole) * 100) : null;
+}
+
+/** Usernames and names of co-ordinators. Their DPR and WPR cells show N/A. */
+async function resolveCoordinatorKeys() {
+  const keys = new Set();
+  const { data: users } = await fromMaybe("users", (q) =>
+    q.select("username, full_name, role, designation, department")
+  );
+  (users || []).forEach((u) => {
+    const blob = `${u.role || ""} ${u.designation || ""} ${u.department || ""}`;
+    if (!/co-?ordinator/i.test(blob)) return;
+    if (u.username) keys.add(normKey(u.username));
+    if (u.full_name) keys.add(normKey(u.full_name));
+  });
+  return keys;
+}
+
+/**
+ * WPR engineer_name is typed by the engineer, so it is not always the directory name.
+ * Match on login, full name, or a close name (one contains the other, both 4+ chars).
+ */
+function wprMatchesEmployee(engineerName, person) {
+  const n = normKey(engineerName);
+  if (!n) return false;
+  const nSquash = n.replace(/[^a-z0-9]/g, "");
+  const nTokens = n.split(/[^a-z0-9]+/).filter(Boolean);
+  return [person?.username, person?.name].some((raw) => {
+    const a = normKey(raw);
+    if (!a) return false;
+    if (n === a) return true;
+    // "roshan.patel" and "Roshan Patel" are the same person.
+    if (a.replace(/[^a-z0-9]/g, "") === nSquash) return true;
+    if (a.length >= 4 && n.length >= 4 && (n.includes(a) || a.includes(n))) return true;
+    const aTokens = a.split(/[^a-z0-9]+/).filter(Boolean);
+    return nTokens.length >= 2 && aTokens.length >= 2
+      && nTokens[0] === aTokens[0]
+      && nTokens[nTokens.length - 1] === aTokens[aTokens.length - 1];
+  });
+}
+
+/** Adds WPR count, WPR % and the co-ordinator flag. WPR is weekly, so WPR % = WPRs ÷ weeks in the duration. */
+function withWprAndRole(rows, { dayCount, wprRows, coordKeys }) {
+  const weeks = Math.max(1, Math.ceil(dayCount / 7));
+  return rows.map((r) => {
+    const count = wprRows.filter((w) => wprMatchesEmployee(w.engineer_name, r)).length;
+    return {
+      ...r,
+      coordinator: coordKeys.has(normKey(r.username)) || coordKeys.has(normKey(r.name)),
+      wprCount: count,
+      wprPct: Math.min(100, Math.round((count / weeks) * 100)),
+    };
+  });
+}
+
 async function fetchEmployeeAttendanceSummary(sites, from, to) {
   const dates = dateRange(from, to);
   if (!dates.length) return { dayCount: 0, rows: [] };
@@ -1132,6 +1277,7 @@ async function fetchEmployeeAttendanceSummary(sites, from, to) {
         earlyOut: 0,
         morningReport: 0,
         eveningDpr: 0,
+        leaveDays: 0,
       };
       dates.forEach((date) => {
         const dpr = dprByNameDate.get(`${normKey(eng.name)}__${date}`)
@@ -1141,7 +1287,10 @@ async function fetchEmployeeAttendanceSummary(sites, from, to) {
 
         const onLeave = leaveDays.has(`${normKey(eng.username)}__${date}`)
           || leaveDays.has(`${normKey(eng.name)}__${date}`);
-        if (onLeave) return;
+        if (onLeave) {
+          s.leaveDays += 1;
+          return;
+        }
         const att = attByUserDate.get(`${normKey(eng.username)}__${date}`)
           || attByUserDate.get(`${normKey(eng.name)}__${date}`);
 
@@ -1163,6 +1312,12 @@ async function fetchEmployeeAttendanceSummary(sites, from, to) {
         else if (outCat === "ontime") s.onTimeOut += 1;
         else s.earlyOut += 1;
       });
+      // Percentages are over non-leave days, so approved leave does not count against the employee.
+      s.eligibleDays = dates.length - s.leaveDays;
+      s.attendancePct = summaryPct(s.onTimeIn + s.lateIn + s.earlyIn, s.eligibleDays);
+      s.morningPct = summaryPct(s.morningReport, s.eligibleDays);
+      s.eveningPct = summaryPct(s.eveningDpr, s.eligibleDays);
+      s.dprPct = summaryPct(s.morningReport + s.eveningDpr, s.eligibleDays * 2);
       return s;
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -1185,11 +1340,15 @@ const EMP_SUMMARY_COLUMNS = [
   { key: "onTimeOut", label: "On Time Clock Out (count)", tone: "good" },
   { key: "earlyOut", label: "Early Clock Out (count)" },
   { key: "pendingOut", label: "Pending Clock Out (count)", tone: "bad" },
-  { key: "morningReport", label: "Morning Report (count)" },
-  { key: "eveningDpr", label: "Evening DPR (count)" },
+  { key: "morningReport", label: "Morning Report (count)", coordNa: true },
+  { key: "eveningDpr", label: "Evening DPR (count)", coordNa: true },
+  { key: "wprCount", label: "WPR (count)", coordNa: true },
+  { key: "wprPct", label: "WPR %", pct: true, coordNa: true },
 ];
 
 function employeeSummaryCellText(row, col) {
+  if (col.coordNa && row.coordinator) return "N/A";
+  if (col.pct) return row[col.key] == null ? "—" : `${row[col.key]}%`;
   return row[col.key];
 }
 
@@ -1249,8 +1408,8 @@ function downloadEmployeeSummaryExcel(result) {
   });
 
   ws["!cols"] = [
-    { wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
-    { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
+    { wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 },
+    { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 },
   ];
   ws["!rows"] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 34 }];
 
@@ -1296,8 +1455,17 @@ function EmployeeAttendanceSummary() {
     setBusy(true);
     setErr("");
     try {
-      const data = await fetchEmployeeAttendanceSummary(null, from, to);
-      setResult({ ...data, from, to });
+      const [data, wprRows, coordKeys] = await Promise.all([
+        fetchEmployeeAttendanceSummary(null, from, to),
+        fetchWprRowsInRange(from, to),
+        resolveCoordinatorKeys(),
+      ]);
+      setResult({
+        ...data,
+        rows: withWprAndRole(data.rows, { dayCount: data.dayCount, wprRows, coordKeys }),
+        from,
+        to,
+      });
     } catch (e) {
       setErr(e.message || "Failed to build employee summary.");
       setResult(null);
@@ -1353,6 +1521,7 @@ function EmployeeAttendanceSummary() {
           </div>
           <div style={{ fontSize: 12, color: "var(--ink2)", marginBottom: 12 }}>
             Shift 09:00–19:00 IST. Pending = no clock-in / clock-out record on a day that is not approved leave.
+            WPR % = WPR reports ÷ weeks in the duration. N/A = co-ordinator (DPR and WPR not applicable).
           </div>
 
           {visibleRows.length === 0 ? (
@@ -1395,6 +1564,674 @@ function EmployeeAttendanceSummary() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// EMPLOYEE OVERALL REPORT — one employee, full date range, overall performance %
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Weights for the overall score. Co-ordinators have no DPR/WPR duty, so their
+// score is made from attendance and punctuality only (weights re-scaled).
+const OVERALL_WEIGHTS = { attendance: 30, punctuality: 20, dpr: 30, wpr: 20 };
+
+function overallGrade(score) {
+  if (score == null) return "No data";
+  if (score >= 90) return "Excellent";
+  if (score >= 75) return "Good";
+  if (score >= 60) return "Average";
+  return "Needs improvement";
+}
+
+function overallColor(score) {
+  if (score == null) return "var(--ink2)";
+  if (score >= 75) return "#16a34a";
+  if (score >= 60) return "#d97706";
+  return "#dc2626";
+}
+
+/**
+ * WPR rows in the range. report_date is text (e.g. "14 September 2026"), so the range
+ * is applied here in the browser, the same way the WPR report does it.
+ */
+async function fetchWprRowsInRange(from, to) {
+  const rows = await fetchPagedRows(
+    "wpr_reports",
+    "engineer_name, report_number, report_date, site_name, presentation_url",
+    (q) => q
+  );
+  return rows
+    .map((r) => ({ ...r, iso: reportDateToISO(r.report_date) }))
+    .filter((r) => r.iso && (!from || r.iso >= from) && (!to || r.iso <= to));
+}
+
+function buildEmployeeOverall({ days, wprRows, dayCount, isCoordinator }) {
+  const working = days.filter((d) => !d.onLeave);
+  const eligibleDays = working.length;
+  const clockedIn = working.filter((d) => d.clockIn).length;
+  const onTime = working.filter((d) => d.status === "On Time").length;
+  const late = working.filter((d) => d.status === "Late").length;
+  const incomplete = working.filter((d) => d.status === "Pend").length;
+  const morningDone = working.filter((d) => d.morning === "Done").length;
+  const eveningDone = working.filter((d) => d.evening === "Done").length;
+  const leaveDays = days.length - eligibleDays;
+  const weeks = Math.max(1, Math.ceil(dayCount / 7));
+  const wprCount = wprRows.length;
+
+  const breakdown = [
+    {
+      key: "attendance",
+      label: "Attendance",
+      detail: `${clockedIn} of ${eligibleDays} working day${eligibleDays !== 1 ? "s" : ""} clocked in`,
+      score: summaryPct(clockedIn, eligibleDays),
+    },
+    {
+      key: "punctuality",
+      label: "Punctuality",
+      detail: `${onTime} on time of ${clockedIn} clock-in${clockedIn !== 1 ? "s" : ""} (${late} late)`,
+      score: summaryPct(onTime, clockedIn),
+    },
+    {
+      key: "dpr",
+      label: "DPR submission",
+      detail: `${morningDone} morning + ${eveningDone} evening of ${eligibleDays * 2} expected`,
+      score: isCoordinator ? null : summaryPct(morningDone + eveningDone, eligibleDays * 2),
+    },
+    {
+      key: "wpr",
+      label: "WPR submission",
+      detail: `${wprCount} WPR in ${weeks} week${weeks !== 1 ? "s" : ""}`,
+      score: isCoordinator ? null : Math.min(100, Math.round((wprCount / weeks) * 100)),
+    },
+  ].map((b) => ({ ...b, weight: OVERALL_WEIGHTS[b.key] }));
+
+  const applicable = breakdown.filter((b) => b.score != null);
+  const weightSum = applicable.reduce((sum, b) => sum + b.weight, 0);
+  const withEffective = breakdown.map((b) => ({
+    ...b,
+    effectiveWeight: b.score == null || !weightSum ? null : Math.round((b.weight / weightSum) * 100),
+  }));
+  const overall = weightSum
+    ? Math.round(applicable.reduce((sum, b) => sum + b.score * b.weight, 0) / weightSum)
+    : null;
+
+  return {
+    eligibleDays,
+    clockedIn,
+    onTime,
+    late,
+    incomplete,
+    leaveDays,
+    morningDone,
+    eveningDone,
+    wprCount,
+    weeks,
+    breakdown: withEffective,
+    overall,
+    grade: overallGrade(overall),
+  };
+}
+
+function downloadEmployeeOverallExcel(result) {
+  const wb = XLSX.utils.book_new();
+
+  const summary = [
+    ["EMPLOYEE OVERALL PERFORMANCE REPORT"],
+    [`Employee: ${result.name}${result.username ? ` (${result.username})` : ""}`],
+    [`Duration: ${fmtDMonYYYY(result.from)} to ${fmtDMonYYYY(result.to)} (${result.dayCount} day${result.dayCount !== 1 ? "s" : ""})`],
+    [],
+    ["Overall performance %", result.overall == null ? "—" : `${result.overall}%`, result.grade],
+    [],
+    ["Metric", "Detail", "Score %", "Weight %"],
+    ...result.breakdown.map((b) => [
+      b.label,
+      b.detail,
+      b.score == null ? "N/A" : b.score,
+      b.effectiveWeight == null ? "N/A" : b.effectiveWeight,
+    ]),
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summary);
+  wsSummary["!cols"] = [{ wch: 28 }, { wch: 52 }, { wch: 14 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Overall");
+
+  const daily = [
+    ["Date", "Day", "Clock In", "Clock Out", "Status", "Morning DPR", "Evening DPR"],
+    ...result.days.map((d) => [
+      fmtDMonYYYY(d.date),
+      new Date(`${d.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" }),
+      clockDisplay(d.clockIn),
+      clockDisplay(d.clockOut),
+      d.status,
+      d.morning,
+      d.evening,
+    ]),
+  ];
+  const wsDaily = XLSX.utils.aoa_to_sheet(daily);
+  wsDaily["!cols"] = [{ wch: 14 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsDaily, "Daily");
+
+  const wpr = [
+    ["Report Date", "WPR No.", "Site", "WPR Link"],
+    ...result.wprRows.map((r) => [fmtDMonYYYY(r.iso), r.report_number || "", r.site_name || "", r.presentation_url || ""]),
+  ];
+  const wsWpr = XLSX.utils.aoa_to_sheet(wpr);
+  wsWpr["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 28 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, wsWpr, "WPR");
+
+  const safeName = String(result.name || "employee").replace(/[^\w-]+/g, "_");
+  XLSX.writeFile(wb, `EMP_OVERALL_${safeName}_${fmtDDMMYYYY(result.from)}_TO_${fmtDDMMYYYY(result.to)}.xlsx`);
+}
+
+function EmployeeOverallReport() {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [employeeKey, setEmployeeKey] = useState("");
+  const [employees, setEmployees] = useState([]);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([resolveAllSiteEngineers(null), resolveNameByUsername()])
+      .then(([list, names]) => {
+        if (!live) return;
+        setEmployees((list || []).map((e) => applyOfficialName({ ...e }, names)));
+      })
+      .catch(() => {
+        if (live) setEmployees([]);
+      });
+    return () => { live = false; };
+  }, []);
+
+  const employeeOptions = useMemo(() => {
+    const byKey = new Map();
+    (employees || []).forEach((e) => {
+      const key = employeeOptionKey(e);
+      if (key) byKey.set(key, e);
+    });
+    return [...byKey.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [employees]);
+
+  const generate = async () => {
+    if (!employeeKey || !from || !to) return;
+    if (from > to) {
+      setErr("'From' date must be on or before 'To' date.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      const [sheets, wprAll, coordKeys] = await Promise.all([
+        fetchEngineerExcelReport(null, from, to, employeeKey),
+        fetchWprRowsInRange(from, to),
+        resolveCoordinatorKeys(),
+      ]);
+      const sheet = sheets.find((s) => employeeMatches(s, employeeKey)) || sheets[0];
+      if (!sheet) throw new Error("No data found for this employee in the selected dates.");
+
+      const wprRows = wprAll.filter((r) => wprMatchesEmployee(r.engineer_name, sheet));
+      const isCoordinator = coordKeys.has(normKey(sheet.username)) || coordKeys.has(normKey(sheet.name));
+      const dayCount = sheet.rows.length;
+      const metrics = buildEmployeeOverall({ days: sheet.rows, wprRows, dayCount, isCoordinator });
+
+      setResult({
+        from,
+        to,
+        name: sheet.name,
+        username: sheet.username,
+        isCoordinator,
+        dayCount,
+        wprNamesInRange: [...new Set(wprAll.map((r) => String(r.engineer_name || "").trim()).filter(Boolean))].sort(),
+        days: sheet.rows,
+        wprRows: [...wprRows].sort((a, b) => b.iso.localeCompare(a.iso)),
+        ...metrics,
+      });
+    } catch (e) {
+      setErr(e.message || "Failed to build the employee report.");
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const statusColor = (status) => {
+    if (status === "On Time") return "#16a34a";
+    if (status === "Late") return "#d97706";
+    if (status === "Pend") return "#dc2626";
+    if (status === "On Leave") return "#7c3aed";
+    return undefined;
+  };
+
+  const cardStyle = {
+    border: "1px solid var(--line)",
+    borderRadius: 10,
+    padding: 16,
+    background: "var(--card)",
+  };
+
+  return (
+    <div>
+      <form
+        onSubmit={(e) => { e.preventDefault(); generate(); }}
+        className="grid2"
+        style={{ marginBottom: 20 }}
+      >
+        <div className="fgroup">
+          <label className="flabel">From Date <span className="req">*</span></label>
+          <input
+            type="date"
+            className="finput"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </div>
+        <div className="fgroup">
+          <label className="flabel">To Date <span className="req">*</span></label>
+          <input
+            type="date"
+            className="finput"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </div>
+        <div className="fgroup col2">
+          <label className="flabel">Employee <span className="req">*</span></label>
+          <select className="finput" value={employeeKey} onChange={(e) => setEmployeeKey(e.target.value)}>
+            <option value="">Select employee</option>
+            {employeeOptions.map((e) => (
+              <option key={employeeOptionKey(e)} value={employeeOptionKey(e)}>{e.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="col2 act-row" style={{ marginTop: 0 }}>
+          <button type="submit" className="btn btn-pri" disabled={!employeeKey || !from || !to || busy}>
+            {busy ? "Generating…" : "Generate Report"}
+          </button>
+        </div>
+      </form>
+
+      {err && <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>{err}</div>}
+
+      {!result && !busy && (
+        <div className="empty-state">
+          <div className="empty-title">No report generated yet</div>
+          <div className="empty-sub">Select an employee and a date range, then click Generate Report.</div>
+        </div>
+      )}
+
+      {result && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)" }}>{result.name}</div>
+              <div style={{ fontSize: 13, color: "var(--ink2)" }}>
+                {fmtDMonYYYY(result.from)} to {fmtDMonYYYY(result.to)} · {result.dayCount} day{result.dayCount !== 1 ? "s" : ""}
+                {result.isCoordinator ? " · Co-ordinator (DPR and WPR not applicable)" : ""}
+              </div>
+            </div>
+            <button type="button" className="btn btn-out" onClick={() => downloadEmployeeOverallExcel(result)}>
+              {Ico.dl} Download Excel
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
+            <div style={{ ...cardStyle, minWidth: 220, textAlign: "center", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink2)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                Overall performance
+              </div>
+              <div style={{ fontSize: 44, fontWeight: 800, color: overallColor(result.overall), lineHeight: 1.1, marginTop: 6 }}>
+                {result.overall == null ? "—" : `${result.overall}%`}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: overallColor(result.overall), marginTop: 4 }}>
+                {result.grade}
+              </div>
+            </div>
+
+            <div style={{ ...cardStyle, flex: 1, minWidth: 320, overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Metric</th>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Detail</th>
+                    <th style={{ padding: "8px 8px", textAlign: "center" }}>Score</th>
+                    <th style={{ padding: "8px 8px", textAlign: "center" }}>Weight</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.breakdown.map((b) => (
+                    <tr key={b.key} style={{ borderBottom: "1px solid var(--line)" }}>
+                      <td style={{ padding: "7px 8px", fontWeight: 600 }}>{b.label}</td>
+                      <td style={{ padding: "7px 8px", color: "var(--ink2)" }}>{b.detail}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: 700, color: b.score == null ? "var(--ink2)" : overallColor(b.score) }}>
+                        {b.score == null ? "N/A" : `${b.score}%`}
+                      </td>
+                      <td style={{ padding: "7px 8px", textAlign: "center" }}>
+                        {b.effectiveWeight == null ? "—" : `${b.effectiveWeight}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ fontSize: 11.5, color: "var(--ink2)", marginTop: 10, lineHeight: 1.5 }}>
+                Overall = weighted average of the applicable metrics (Attendance 30%, Punctuality 20%, DPR 30%, WPR 20%).
+                Approved leave days are not counted. WPR % = WPR reports ÷ weeks in the duration.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>
+            Day-wise attendance and reports
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink2)", marginBottom: 10 }}>
+            On time {result.onTime} · Late {result.late} · Incomplete {result.incomplete} · Leave {result.leaveDays} day{result.leaveDays !== 1 ? "s" : ""} · Morning DPR {result.morningDone} · Evening DPR {result.eveningDone}
+          </div>
+          <div style={{ overflowX: "auto", marginBottom: 22 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                  <th style={{ padding: "8px 8px", textAlign: "left" }}>Date</th>
+                  <th style={{ padding: "8px 8px", textAlign: "left" }}>Day</th>
+                  <th style={{ padding: "8px 8px", textAlign: "center" }}>Clock In</th>
+                  <th style={{ padding: "8px 8px", textAlign: "center" }}>Clock Out</th>
+                  <th style={{ padding: "8px 8px", textAlign: "center" }}>Status</th>
+                  <th style={{ padding: "8px 8px", textAlign: "center" }}>Morning DPR</th>
+                  <th style={{ padding: "8px 8px", textAlign: "center" }}>Evening DPR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.days.map((d) => (
+                  <tr key={d.date} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <td style={{ padding: "7px 8px" }}>{fmtDMonYYYY(d.date)}</td>
+                    <td style={{ padding: "7px 8px" }}>
+                      {new Date(`${d.date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short" })}
+                    </td>
+                    <td style={{ padding: "7px 8px", textAlign: "center" }}>{clockDisplay(d.clockIn)}</td>
+                    <td style={{ padding: "7px 8px", textAlign: "center" }}>{clockDisplay(d.clockOut)}</td>
+                    <td style={{ padding: "7px 8px", textAlign: "center", fontWeight: 700, color: statusColor(d.status) }}>{d.status}</td>
+                    <td style={{ padding: "7px 8px", textAlign: "center", color: d.onLeave ? "#7c3aed" : undefined }}>
+                      {result.isCoordinator && !d.onLeave ? "N/A" : d.morning}
+                    </td>
+                    <td style={{ padding: "7px 8px", textAlign: "center", color: d.onLeave ? "#7c3aed" : undefined }}>
+                      {result.isCoordinator && !d.onLeave ? "N/A" : d.evening}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>
+            WPR submissions
+          </div>
+          {result.isCoordinator ? (
+            <div className="empty-state">
+              <div className="empty-title">N/A</div>
+              <div className="empty-sub">WPR is not applicable for co-ordinators.</div>
+            </div>
+          ) : result.wprRows.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-title">No WPR submitted</div>
+              <div className="empty-sub">No WPR reports found for this employee in the selected dates.</div>
+              {result.wprNamesInRange.length > 0 && (
+                <div className="empty-sub" style={{ marginTop: 8 }}>
+                  WPR engineer names in this range: {result.wprNamesInRange.slice(0, 20).join(", ")}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Report Date</th>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>WPR No.</th>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Site</th>
+                    <th style={{ padding: "8px 8px", textAlign: "center" }}>Link</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.wprRows.map((r, i) => (
+                    <tr key={`${r.iso}-${r.report_number || i}`} style={{ borderBottom: "1px solid var(--line)" }}>
+                      <td style={{ padding: "7px 8px" }}>{fmtDMonYYYY(r.iso)}</td>
+                      <td style={{ padding: "7px 8px" }}>{r.report_number || "—"}</td>
+                      <td style={{ padding: "7px 8px" }}>{r.site_name || "—"}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center" }}>
+                        {r.presentation_url ? (
+                          <a href={r.presentation_url} target="_blank" rel="noreferrer" style={{ color: "var(--blue, #0563c1)", fontWeight: 600 }}>
+                            Open
+                          </a>
+                        ) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const EMP_PCT_COLUMNS = [
+  { key: "clockIn", label: "Clock-In %", pct: true },
+  { key: "clockOut", label: "Clock-Out %", pct: true },
+  { key: "morning", label: "Morning DPR %", pct: true, coordNa: true },
+  { key: "evening", label: "Evening DPR %", pct: true, coordNa: true },
+  { key: "dpr", label: "DPR % (overall)", pct: true, coordNa: true },
+  { key: "wprCount", label: "WPR (count)", coordNa: true },
+  { key: "wprPct", label: "WPR %", pct: true, coordNa: true },
+];
+
+function employeePctCellText(row, col) {
+  if (col.coordNa && row.coordinator) return "N/A";
+  const v = row[col.key];
+  if (!col.pct) return v ?? "—";
+  return v == null ? "—" : `${v}%`;
+}
+
+function downloadEmployeePercentageExcel(result, rows) {
+  const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
+  const border = { top: thin, bottom: thin, left: thin, right: thin };
+  const titleStyle = {
+    font: { bold: true, sz: 14, name: "Calibri", color: { rgb: "FF1A3A5C" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FFBDD7EE" } },
+    alignment: { horizontal: "center", vertical: "center" },
+    border,
+  };
+  const headStyle = {
+    font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
+    fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
+    border,
+  };
+  const bodyStyle = (align) => ({
+    font: { sz: 10, name: "Calibri", color: { rgb: "FF1A2E42" } },
+    alignment: { horizontal: align, vertical: "center" },
+    border,
+  });
+  const headers = ["Employee Name", "Days", ...EMP_PCT_COLUMNS.map((c) => c.label)];
+  const aoa = [
+    ["EMPLOYEE PERCENTAGE REPORT"],
+    [`Duration: ${fmtDMonYYYY(result.from)} to ${fmtDMonYYYY(result.to)}`],
+    headers,
+    ...rows.map((r) => [r.name, r.days, ...EMP_PCT_COLUMNS.map((c) => employeePctCellText(r, c))]),
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const lastCol = headers.length - 1;
+  ws["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } },
+  ];
+
+  for (let c = 0; c <= lastCol; c++) {
+    ws[XLSX.utils.encode_cell({ r: 0, c })] = { ...ws[XLSX.utils.encode_cell({ r: 0, c })], s: titleStyle };
+    ws[XLSX.utils.encode_cell({ r: 1, c })] = {
+      ...ws[XLSX.utils.encode_cell({ r: 1, c })],
+      s: { ...titleStyle, font: { ...titleStyle.font, sz: 11, bold: false } },
+    };
+    ws[XLSX.utils.encode_cell({ r: 2, c })] = { ...ws[XLSX.utils.encode_cell({ r: 2, c })], s: headStyle };
+  }
+  rows.forEach((_, i) => {
+    headers.forEach((_h, c) => {
+      const addr = XLSX.utils.encode_cell({ r: 3 + i, c });
+      if (!ws[addr]) return;
+      ws[addr].s = bodyStyle(c === 0 ? "left" : "center");
+      if (c > 0) ws[addr].s.font = { ...ws[addr].s.font, bold: true };
+    });
+  });
+
+  ws["!cols"] = [{ wch: 28 }, { wch: 10 }, ...EMP_PCT_COLUMNS.map(() => ({ wch: 16 }))];
+  ws["!rows"] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 34 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Employee Percentage");
+  XLSX.writeFile(wb, `EMP_PERCENTAGE_${fmtDDMMYYYY(result.from)} TO ${fmtDDMMYYYY(result.to)}.xlsx`);
+}
+
+// Percentage-only view: pick a date range, get each employee's clock-in / clock-out / DPR %.
+function EmployeePercentageReport({ sites }) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [employeeKey, setEmployeeKey] = useState("all");
+  const [employees, setEmployees] = useState([]);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([resolveAllSiteEngineers(null), resolveNameByUsername()])
+      .then(([list, names]) => {
+        if (!live) return;
+        setEmployees((list || []).map((e) => applyOfficialName({ ...e }, names)));
+      })
+      .catch(() => {
+        if (live) setEmployees([]);
+      });
+    return () => { live = false; };
+  }, []);
+
+  const employeeOptions = useMemo(() => {
+    const byKey = new Map();
+    (employees || []).forEach((e) => {
+      const key = employeeOptionKey(e);
+      if (key) byKey.set(key, e);
+    });
+    return [...byKey.values()].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [employees]);
+
+  const visibleRows = result ? result.rows.filter((r) => employeeMatches(r, employeeKey)) : [];
+
+  const generate = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const [data, wprRows, coordKeys] = await Promise.all([
+        fetchEngineerExcelReport(null, from, to, "all"),
+        fetchWprRowsInRange(from, to),
+        resolveCoordinatorKeys(),
+      ]);
+      const base = data.map((s) => ({ name: s.name, username: s.username, ...engineerSheetPercents(s.rows) }));
+      setResult({
+        from,
+        to,
+        rows: withWprAndRole(base, { dayCount: dateRange(from, to).length, wprRows, coordKeys }),
+      });
+    } catch (e) {
+      setErr(e.message || "Failed to build employee percentages.");
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <RangeFilter
+        from={from}
+        to={to}
+        setFrom={setFrom}
+        setTo={setTo}
+        onGenerate={generate}
+        busy={busy}
+        extra={(
+          <div className="fgroup col2">
+            <label className="flabel">Employee</label>
+            <select
+              className="finput"
+              value={employeeKey}
+              onChange={(e) => setEmployeeKey(e.target.value)}
+            >
+              <option value="all">All Employees</option>
+              {employeeOptions.map((e) => (
+                <option key={employeeOptionKey(e)} value={employeeOptionKey(e)}>{e.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      />
+      {err && <div className="info-banner warn-banner" style={{ marginBottom: 16 }}>{err}</div>}
+
+      {result && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+              Duration: {fmtDMonYYYY(result.from)} to {fmtDMonYYYY(result.to)}
+            </div>
+            <button
+              className="btn btn-out"
+              onClick={() => downloadEmployeePercentageExcel(result, visibleRows)}
+              disabled={!visibleRows.length}
+              title="Percentages for the employees shown"
+            >
+              {Ico.dl} Download Excel
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink2)", marginBottom: 12 }}>
+            % = share of days in the duration, excluding each employee's approved leave days. WPR % = WPR reports ÷ weeks in the duration. N/A = co-ordinator.
+          </div>
+
+          {visibleRows.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-title">No employees found</div>
+              <div className="empty-sub">No employee data for the selected dates or employee.</div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: "#1f4e79", color: "#fff" }}>
+                    <th style={{ padding: "8px 8px", textAlign: "left" }}>Employee Name</th>
+                    <th style={{ padding: "8px 8px" }}>Days</th>
+                    {EMP_PCT_COLUMNS.map((c) => (
+                      <th key={c.key} style={{ padding: "8px 8px" }}>{c.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRows.map((r) => (
+                    <tr key={r.username || r.name} style={{ borderBottom: "1px solid var(--line)" }}>
+                      <td style={{ padding: "7px 8px", fontWeight: 600 }}>{r.name}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "center" }}>{r.days}</td>
+                      {EMP_PCT_COLUMNS.map((c) => (
+                        <td key={c.key} style={{ padding: "7px 8px", textAlign: "center", fontWeight: 700 }}>
+                          {employeePctCellText(r, c)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function engineerExcelTableStyles() {
   const thin = { style: "thin", color: { rgb: "FFB0B7C3" } };
   const border = { top: thin, bottom: thin, left: thin, right: thin };
@@ -1410,6 +2247,12 @@ function engineerExcelTableStyles() {
       font: { bold: true, sz: 11, name: "Calibri", color: { rgb: "FFFFFFFF" } },
       fill: { patternType: "solid", fgColor: { rgb: "FF1F4E79" } },
       alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border,
+    },
+    pctStyle: {
+      font: { bold: true, sz: 10, name: "Calibri", color: { rgb: "FF1F4E79" } },
+      fill: { patternType: "solid", fgColor: { rgb: "FFEAF1FA" } },
+      alignment: { horizontal: "center", vertical: "center" },
       border,
     },
     bodyStyle: (align = "center") => ({
@@ -1432,8 +2275,9 @@ function engineerExcelTableStyles() {
 
 /** Write one employee attendance table into `ws` at (startR, startC). Returns row height used. */
 function writeEngineerExcelTable(ws, sheet, startR, startC, merges, styles) {
-  const { titleStyle, headStyle, bodyStyle, headers } = styles;
+  const { titleStyle, headStyle, pctStyle, bodyStyle, headers } = styles;
   const name = String(sheet.name || "ENGINEER").toUpperCase();
+  const pctText = engineerSheetPercentText(sheet.rows);
   const lastCol = startC + 9;
 
   for (let c = startC; c <= lastCol; c++) {
@@ -1445,8 +2289,17 @@ function writeEngineerExcelTable(ws, sheet, startR, startC, merges, styles) {
   }
   merges.push({ s: { r: startR, c: startC }, e: { r: startR, c: lastCol } });
 
+  for (let c = startC; c <= lastCol; c++) {
+    ws[XLSX.utils.encode_cell({ r: startR + 1, c })] = {
+      v: c === startC ? pctText : "",
+      t: "s",
+      s: pctStyle,
+    };
+  }
+  merges.push({ s: { r: startR + 1, c: startC }, e: { r: startR + 1, c: lastCol } });
+
   headers.forEach((h, i) => {
-    ws[XLSX.utils.encode_cell({ r: startR + 1, c: startC + i })] = {
+    ws[XLSX.utils.encode_cell({ r: startR + 2, c: startC + i })] = {
       v: h,
       t: "s",
       s: headStyle,
@@ -1454,7 +2307,7 @@ function writeEngineerExcelTable(ws, sheet, startR, startC, merges, styles) {
   });
 
   (sheet.rows || []).forEach((row, i) => {
-    const r = startR + 2 + i;
+    const r = startR + 3 + i;
     const vals = [
       fmtDMonYY(row.date),
       row.name,
@@ -1501,7 +2354,7 @@ function writeEngineerExcelTable(ws, sheet, startR, startC, merges, styles) {
     });
   });
 
-  return 2 + (sheet.rows?.length || 0);
+  return 3 + (sheet.rows?.length || 0);
 }
 
 function downloadEngineerExcel(sheets, from, to) {
@@ -1519,7 +2372,7 @@ function downloadEngineerExcel(sheets, from, to) {
       e: { r: Math.max(height - 1, 1), c: 9 },
     });
     ws["!cols"] = styles.colWidths;
-    ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
+    ws["!rows"] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 22 }];
     XLSX.utils.book_append_sheet(wb, ws, excelSheetName(sheet.name, usedNames));
   });
 
@@ -1579,7 +2432,7 @@ function downloadEngineerExcelCombined(sheets, from, to) {
     else cols.push(styles.colWidths[within] || { wch: 12 });
   }
   ws["!cols"] = cols;
-  ws["!rows"] = [{ hpt: 24 }, { hpt: 22 }];
+  ws["!rows"] = [{ hpt: 24 }, { hpt: 20 }, { hpt: 22 }];
 
   XLSX.utils.book_append_sheet(wb, ws, "All Employees");
   XLSX.writeFile(wb, `SITE_ATT_REPORT_COMBINED_${fmtDDMMYYYY(from)} TO ${fmtDDMMYYYY(to)}.xlsx`);
@@ -2779,6 +3632,9 @@ function EngineerExcelReport({ sites }) {
                     border: "1px solid #9eb3cc",
                   }}>
                     {String(s.name || "").toUpperCase()}
+                    <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0, marginTop: 4 }}>
+                      {engineerSheetPercentText(s.rows)}
+                    </div>
                   </div>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                     <thead>
@@ -3359,17 +4215,20 @@ const BASE_NAV = [
   { key: "attendance", label: "Attendance Report", icon: Ico.attendance },
   { key: "attendance-log", label: "Attendance Log", icon: Ico.log },
   { key: "engineer-excel", label: "Employee Report", icon: Ico.excel },
-  { key: "employee-summary", label: "Employee Summary", icon: Ico.excel },
+  { key: "employee-summary", label: "Employee Summary", icon: Ico.navUsers },
+  { key: "employee-percent", label: "Employee Percentage", icon: Ico.navPie },
+  { key: "employee-overall", label: "Employee Overall Report", icon: Ico.navAward },
   { key: "dpr", label: "Daily Report (DPR)", icon: Ico.dpr },
-  { key: "wpr-report", label: "WPR Report", icon: Ico.weeklyPlan, pcOnly: true },
-  { key: "site-report", label: "Site Visit Report", icon: Ico.dpr },
-  { key: "my-reports", label: "My Reports", icon: Ico.dpr },
-  { key: "weekly-plan", label: "Weekly Plan", icon: Ico.weeklyPlan, pcOnly: true },
-  { key: "task-delay", label: "Task Delay Report", icon: Ico.taskReport, restricted: "chirag_only" },
+  { key: "wpr-report", label: "WPR Report", icon: Ico.navBars, pcOnly: true },
+  { key: "svr-report", label: "SVR Report", icon: Ico.navPin, pcOnly: true },
+  { key: "site-report", label: "Site Visit Report", icon: Ico.navBuilding },
+  { key: "my-reports", label: "My Reports", icon: Ico.navFolder },
+  { key: "weekly-plan", label: "Weekly Plan", icon: Ico.navListCheck, pcOnly: true },
+  { key: "task-delay", label: "Task Delay Report", icon: Ico.navAlert, restricted: "chirag_only" },
   { key: "add-drawings", label: "Add Drawings", icon: Ico.addDrawing },
   { key: "all-drawings", label: "All Drawings", icon: Ico.allDrawings },
   { key: "apply-leave", label: "Apply Leave", icon: Ico.apply },
-  { key: "my-leave", label: "My Leave", icon: Ico.leave },
+  { key: "my-leave", label: "My Leave", icon: Ico.navUmbrella },
   { key: "proxy-request", label: "Leave Approvals", icon: Ico.proxy },
 ];
 
@@ -3397,22 +4256,26 @@ function lightenHex(hex, amount) {
   return `#${parts.join("")}`;
 }
 
+// One distinct colour per sidebar item. Used for the icon, and for the text on hover/active.
 const NAV_COLORS = {
   attendance: "#2563eb",
-  "attendance-log": "#2563eb",
-  "engineer-excel": "#0f766e",
-  "employee-summary": "#b45309",
+  "attendance-log": "#0891b2",
+  "engineer-excel": "#059669",
+  "employee-summary": "#d97706",
+  "employee-percent": "#7c3aed",
+  "employee-overall": "#be185d",
   dpr: "#16a34a",
-  "site-report": "#c96a10",
-  "my-reports": "#a55622",
-  "wpr-report": "#0f766e",
-  "weekly-plan": "#0f766e",
-  "task-delay": "#c2410c",
-  "apply-leave": "#7c3aed",
-  "my-leave": "#7c3aed",
-  "proxy-request": "#eb2727",
-  "add-drawings": "#d97706",
-  "all-drawings": "#d97706",
+  "wpr-report": "#0d9488",
+  "svr-report": "#ea580c",
+  "site-report": "#b45309",
+  "my-reports": "#65a30d",
+  "weekly-plan": "#4f46e5",
+  "task-delay": "#dc2626",
+  "add-drawings": "#ca8a04",
+  "all-drawings": "#0ea5e9",
+  "apply-leave": "#db2777",
+  "my-leave": "#9333ea",
+  "proxy-request": "#1e3a8a",
 };
 
 const LEAVE_TYPES = [
@@ -4244,10 +5107,10 @@ useEffect(() => {
                   minHeight: 40,
                   flexShrink: 0,
                   "--mdo-nav-accent": shown,
-                  "--mdo-nav-hover-bg": `${shown}${isDark ? "38" : "28"}`,
                 }}
               >
-                {n.icon} {n.label}
+                <span className="mdo-nav-icon" style={{ color: shown }}>{n.icon}</span>
+                {n.label}
               </button>
             );
           })}
@@ -4334,12 +5197,18 @@ useEffect(() => {
               <EngineerExcelReport sites={sites} />
             ) : activeTab === "employee-summary" ? (
               <EmployeeAttendanceSummary sites={sites} />
+            ) : activeTab === "employee-percent" ? (
+              <EmployeePercentageReport sites={sites} />
+            ) : activeTab === "employee-overall" ? (
+              <EmployeeOverallReport />
             ) : activeTab === "dpr" ? (
               <DprSheetReport sites={sites} />
             ) : activeTab === "site-report" ? (
               <SiteReport user={user} />
             ) : activeTab === "my-reports" ? (
               <MyReports user={user} />
+            ) : activeTab === "svr-report" ? (
+              <SvrReport />
             ) : activeTab === "wpr-report" ? (
               <WprReport sites={allSites} />
             ) : activeTab === "weekly-plan" && mdoCanSeeWeeklyPlan(user, visMap) ? (

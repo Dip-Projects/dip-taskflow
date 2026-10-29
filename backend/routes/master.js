@@ -1,6 +1,6 @@
 const express = require('express');
 const supabase = require('../lib/supabaseClient');
-const { requireAuth, requireAdmin, requireCanAddTask } = require('../middleware/auth');
+const { requireAuth, requireAdmin, requireCanAddTask, isHrUser } = require('../middleware/auth');
 const { MODULES, ROLES, mergeMap, canSee, isMisExecutive } = require('../lib/navVisibility');
 const {
   getReminderSettings,
@@ -19,12 +19,42 @@ router.get('/departments', async (req, res) => {
   res.json(data);
 });
 
-router.post('/departments', requireCanAddTask, async (req, res) => {
-  const { name } = req.body || {};
-  if (!name) return res.status(400).json({ error: 'Department name is required' });
-  const { data, error } = await supabase.from('departments').insert({ name }).select('id, name').single();
+// Admin, HR, or anyone with Add task — the employee form can add departments/designations.
+function requireDirectoryEditor(req, res, next) {
+  if (req.user?.role === 'admin' || isHrUser(req.user)) return next();
+  return requireCanAddTask(req, res, next);
+}
+
+// Adds a name to a master table, or returns the existing row (case-insensitive match).
+async function findOrAddName(table, rawName) {
+  const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+  if (!name) return { status: 400, error: 'Name is required' };
+  const pattern = name.replace(/[\\%_]/g, '\\$&');
+  const { data: existing, error: findErr } = await supabase
+    .from(table).select('id, name').ilike('name', pattern).limit(1).maybeSingle();
+  if (findErr) return { status: 500, error: findErr.message };
+  if (existing) return { status: 200, row: existing };
+  const { data, error } = await supabase.from(table).insert({ name }).select('id, name').single();
+  if (error) return { status: 500, error: error.message };
+  return { status: 201, row: data };
+}
+
+router.post('/departments', requireDirectoryEditor, async (req, res) => {
+  const result = await findOrAddName('departments', req.body?.name);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(result.status).json(result.row);
+});
+
+router.get('/designations', async (req, res) => {
+  const { data, error } = await supabase.from('designations').select('id, name').order('name');
   if (error) return res.status(500).json({ error: error.message });
-  res.status(201).json(data);
+  res.json(data);
+});
+
+router.post('/designations', requireDirectoryEditor, async (req, res) => {
+  const result = await findOrAddName('designations', req.body?.name);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.status(result.status).json(result.row);
 });
 
 router.get('/projects', async (req, res) => {

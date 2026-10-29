@@ -48,7 +48,7 @@
   --sh-lg: 0 20px 50px -16px rgba(220, 105, 0, .18), 0 8px 20px rgba(15, 17, 35, .06);
   --sh-modal: 0 32px 72px -20px rgba(15, 17, 35, .32);
 
-  --sidebar-w: 230px;
+  --sidebar-w: 260px;
   --topbar-h: 58px;
 }
 
@@ -562,7 +562,7 @@ html:has(.tf-shell) body {
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
-  padding: 14px 10px 28px;
+  padding: 0 10px 28px;
   position: fixed;
   left: 0;
   top: var(--topbar-h);
@@ -570,12 +570,13 @@ html:has(.tf-shell) body {
   overflow-y: auto;
   transform: translateX(-100%);
   transition: transform .22s cubic-bezier(.4, 0, .2, 1), width .22s ease, padding .22s ease, opacity .18s ease;
-  z-index: 42;
+  z-index: 19;
   box-shadow: 8px 0 24px rgba(0, 0, 0, .18);
 }
 
 #appScreen .sidebar.open {
   transform: translateX(0);
+  z-index: 41; /* above the mobile dim overlay (z 40); still below the topbar, which it never overlaps */
 }
 
 #appScreen .sidebar::-webkit-scrollbar {
@@ -682,7 +683,7 @@ body.sidebar-open {
 
 /* When Switch-view bar is above the app, offset the drawer from viewport top */
 .tf-shell:has(.tf-surface-bar) {
-  --drawer-top: calc(36px + var(--topbar-h));
+  --drawer-top: calc(var(--surface-bar-h) + var(--topbar-h));
 }
 
 .tf-shell:has(.tf-surface-bar) #appScreen .sidebar {
@@ -696,8 +697,8 @@ body.sidebar-open {
 
 @media (min-width: 769px) {
   .tf-shell:has(.tf-surface-bar) #appScreen .sidebar {
-    top: var(--topbar-h);
-    height: calc(100vh - var(--topbar-h));
+    top: var(--drawer-top);
+    height: calc(100vh - var(--drawer-top));
   }
 }
 
@@ -3735,18 +3736,46 @@ body.sidebar-open {
 
 #appScreen .nav-btn:hover {
   background: var(--bg);
-  color: var(--ink);
+  color: var(--nav-accent, var(--primary));
 }
 
 #appScreen .nav-btn.active {
-  background: linear-gradient(135deg, var(--primary), var(--primary-dk));
-  color: #fff;
-  box-shadow: 0 3px 10px -3px rgba(220, 105, 0, .5);
+  background: color-mix(in srgb, var(--nav-accent, var(--primary)) 14%, transparent);
+  color: var(--nav-accent, var(--primary));
+}
+
+/* Per-section accent: each group sets --nav-accent for its items and icons */
+#appScreen .nav-group[data-section="tasks"] { --nav-accent: #f97316; }
+#appScreen .nav-group[data-section="verification"] { --nav-accent: #8b5cf6; }
+#appScreen .nav-group[data-section="support"] { --nav-accent: #ef4444; }
+#appScreen .nav-group[data-section="corrections"] { --nav-accent: #d97706; }
+#appScreen .nav-group[data-section="reschedule"] { --nav-accent: #0ea5e9; }
+#appScreen .nav-group[data-section="administration"] { --nav-accent: #3b82f6; }
+#appScreen .nav-group[data-section="mis-support"] { --nav-accent: #14b8a6; }
+#appScreen .nav-group[data-section="drawings"] { --nav-accent: #6366f1; }
+#appScreen .nav-group[data-section="reports"] { --nav-accent: #10b981; }
+#appScreen .nav-group[data-section="leave"] { --nav-accent: #ec4899; }
+#appScreen .nav-group[data-section="hr-hiring"] { --nav-accent: #a855f7; }
+
+#appScreen .nav-btn-icon {
+  color: var(--nav-accent, var(--primary));
 }
 
 .nav-btn-label {
   flex: 1;
   text-align: left;
+}
+
+.nav-btn-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+.nav-btn-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .nav-badge {
@@ -3767,7 +3796,7 @@ body.sidebar-open {
 }
 
 #appScreen .nav-btn.active .nav-badge {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--nav-accent, var(--primary));
   color: #fff;
   box-shadow: none;
 }
@@ -5567,21 +5596,66 @@ body.sidebar-open {
     font-size: 16px;
   }
 
-  .topbar-quick {
-    display: none;
+  /* Single header row: menu | logo | name (ellipsis) | icon chips | icon logout */
+  .topbar-user {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
-  /* use overflow menu on very small — keep chips if space */
-  .topbar-user {
-    flex-wrap: wrap;
-    justify-content: flex-end;
+  .topbar-user-info {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .topbar-user-info strong {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .topbar-quick {
     display: flex;
-    width: 100%;
-    justify-content: flex-end;
-    order: 3;
+    flex-shrink: 0;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .topbar-chip {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
+  }
+
+  .topbar-chip-label {
+    display: none;
+  }
+
+  .topbar-chip-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    margin: 0;
+  }
+
+  .logout-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .logout-label {
+    display: none;
   }
 }
 
@@ -5594,28 +5668,57 @@ body.sidebar-open {
   margin-right: 4px;
 }
 
+/* Each chip sets --chip-accent: it drives the border, the text and the icon */
 .topbar-chip {
   position: relative;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--chip-accent, var(--border));
+  background: #fff;
+  color: var(--chip-accent, var(--ink));
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 6px 12px 6px 10px;
   font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
   white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 17, 23, .04);
 }
 
 .topbar-chip:hover {
-  border-color: var(--primary);
-  background: var(--primary-lt);
+  background: color-mix(in srgb, var(--chip-accent) 10%, #fff);
 }
 
-.topbar-chip--bot {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.topbar-chip[hidden] {
+  display: none !important;
+}
+
+.logout-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.topbar-chip--cal { --chip-accent: #0284c7; }
+.topbar-chip--mom { --chip-accent: #7c3aed; }
+.topbar-chip--chat { --chip-accent: #059669; }
+.topbar-chip--dipbot { --chip-accent: #db2777; }
+
+.topbar-chip-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .topbar-bot-dp,
@@ -5644,6 +5747,10 @@ body.sidebar-open {
   border-radius: 50%;
   object-fit: cover;
   background: #000;
+}
+
+.topbar-chip-badge[hidden] {
+  display: none !important;
 }
 
 .topbar-chip-badge {
@@ -6708,9 +6815,6 @@ body.sidebar-open {
 }
 
 .topbar-chip {
-  background: #fff;
-  border-color: #D8DCE8;
-  box-shadow: 0 1px 2px rgba(15, 17, 23, .04);
   font-family: var(--font-display);
 }
 
@@ -6726,7 +6830,7 @@ body.sidebar-open {
 }
 
 #appScreen .nav-group {
-  margin: 4px 0 2px;
+  margin: 0 0 2px;
 }
 
 #appScreen .nav-section-toggle {
@@ -8088,7 +8192,8 @@ body.org-print-mode .org-tree-svg .org-line {
   box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 6px 20px rgba(15, 23, 42, .05);
 }
 
-#thTable {
+#thTable,
+#appScreen .tf-hist-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -8098,7 +8203,8 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* header */
-#thTable thead th {
+#thTable thead th,
+#appScreen .tf-hist-table thead th {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -8115,62 +8221,75 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* body */
-#thTable tbody td {
+#thTable tbody td,
+#appScreen .tf-hist-table tbody td {
   padding: 14px;
   vertical-align: top;
   border-bottom: 1px solid var(--border, #eceef2);
   color: inherit;
 }
 
-#thTable tbody tr:nth-child(even) td {
+#thTable tbody tr:nth-child(even) td,
+#appScreen .tf-hist-table tbody tr:nth-child(even) td {
   background: rgba(0, 0, 0, .018);
 }
 
-#thTable tbody tr {
+#thTable tbody tr,
+#appScreen .tf-hist-table tbody tr {
   transition: background .15s ease;
 }
 
-#thTable tbody tr:nth-child(n):hover td {
+#thTable tbody tr:nth-child(n):hover td,
+#appScreen .tf-hist-table tbody tr:nth-child(n):hover td {
   background: #faf6ee;
 }
 
-#thTable tbody tr:last-child td {
+#thTable tbody tr:last-child td,
+#appScreen .tf-hist-table tbody tr:last-child td {
   border-bottom: none;
 }
 
 /* column sizing */
-#thTable .col-sr {
+#thTable .col-sr,
+#appScreen .tf-hist-table .col-sr {
   width: 5%;
   text-align: center;
 }
 
-#thTable .th-col-details {
+#thTable .th-col-details,
+#appScreen .tf-hist-table .th-col-details {
   width: 25%;
 }
 
-#thTable .th-col-date {
+#thTable .th-col-date,
+#appScreen .tf-hist-table .th-col-date {
   width: 9%;
 }
 
-#thTable .th-col-priority {
+#thTable .th-col-priority,
+#appScreen .tf-hist-table .th-col-priority {
   width: 8%;
   text-align: center;
 }
 
-#thTable .th-col-status {
+#thTable .th-col-status,
+#appScreen .tf-hist-table .th-col-status {
   width: 10%;
   text-align: center;
 }
 
-#thTable .th-col-verifier {
+#thTable .th-col-verifier,
+#appScreen .tf-hist-table .th-col-verifier {
   width: 12%;
 }
 
-#thTable .th-col-checklist {
+#thTable .th-col-checklist,
+#appScreen .tf-hist-table .th-col-checklist {
   width: 13%;
 }
 
-#thTable thead .col-sr {
+#thTable thead .col-sr,
+#appScreen .tf-hist-table thead .col-sr {
   text-align: center;
 }
 
@@ -8184,26 +8303,31 @@ body.org-print-mode .org-tree-svg .org-line {
   text-align: center;
 }
 
-#thTable td:first-child {
+#thTable td:first-child,
+#appScreen .tf-hist-table td:first-child {
   text-align: center;
 }
 
 /* task details block */
-#thTable .task-name-cell {
+#thTable .task-name-cell,
+#appScreen .tf-hist-table .task-name-cell {
   max-width: 420px;
 }
 
-#thTable .task-detail-line {
+#thTable .task-detail-line,
+#appScreen .tf-hist-table .task-detail-line {
   line-height: 1.45;
   margin-bottom: 3px;
   overflow-wrap: anywhere;
 }
 
-#thTable .task-detail-line:last-child {
+#thTable .task-detail-line:last-child,
+#appScreen .tf-hist-table .task-detail-line:last-child {
   margin-bottom: 0;
 }
 
-#thTable .task-detail-label {
+#thTable .task-detail-label,
+#appScreen .tf-hist-table .task-detail-label {
   display: inline-block;
   min-width: 68px;
   font-size: 0.72rem;
@@ -8213,7 +8337,8 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* status + priority pills */
-#thTable .pill {
+#thTable .pill,
+#appScreen .tf-hist-table .pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -8225,7 +8350,8 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* verifier */
-#thTable .th-verifier {
+#thTable .th-verifier,
+#appScreen .tf-hist-table .th-verifier {
   display: inline-block;
   padding: 3px 10px;
   border-radius: 8px;
@@ -8236,7 +8362,8 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* row number badge */
-#thTable .sr-number {
+#thTable .sr-number,
+#appScreen .tf-hist-table .sr-number {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8251,7 +8378,8 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* empty state */
-#thTable .empty-state {
+#thTable .empty-state,
+#appScreen .tf-hist-table .empty-state {
   padding: 40px 12px;
   text-align: center;
 }
@@ -8302,21 +8430,25 @@ body.org-print-mode .org-tree-svg .org-line {
 }
 
 /* ───────── Dark theme ───────── */
-[data-theme="dark"] #thTable thead th {
+[data-theme="dark"] #thTable thead th,
+[data-theme="dark"] #appScreen .tf-hist-table thead th {
   background: #1f2a33;
   color: #a8b5bf;
   border-color: #35434f;
 }
 
-[data-theme="dark"] #thTable tbody td {
+[data-theme="dark"] #thTable tbody td,
+[data-theme="dark"] #appScreen .tf-hist-table tbody td {
   border-color: #2c3944;
 }
 
-[data-theme="dark"] #thTable tbody tr:nth-child(even) td {
+[data-theme="dark"] #thTable tbody tr:nth-child(even) td,
+[data-theme="dark"] #appScreen .tf-hist-table tbody tr:nth-child(even) td {
   background: rgba(255, 255, 255, .025);
 }
 
-[data-theme="dark"] #thTable tbody tr:nth-child(n):hover td {
+[data-theme="dark"] #thTable tbody tr:nth-child(n):hover td,
+[data-theme="dark"] #appScreen .tf-hist-table tbody tr:nth-child(n):hover td {
   background: #243340;
 }
 
@@ -8324,12 +8456,14 @@ body.org-print-mode .org-tree-svg .org-line {
   color: #cbd5e1;
 }
 
-[data-theme="dark"] #thTable .th-verifier {
+[data-theme="dark"] #thTable .th-verifier,
+[data-theme="dark"] #appScreen .tf-hist-table .th-verifier {
   background: #272b4a;
   color: #c7d2fe;
 }
 
-[data-theme="dark"] #thTable .sr-number {
+[data-theme="dark"] #thTable .sr-number,
+[data-theme="dark"] #appScreen .tf-hist-table .sr-number {
   background: #2a3945;
   color: #cbd5e1;
 }
@@ -8338,6 +8472,59 @@ body.org-print-mode .org-tree-svg .org-line {
   background: #202d38;
 }
 
+
+/* ───────── Shared look: All / Overdue / My tasks + recurring tables use the Task History style ───────── */
+#view-all .table-card,
+#view-overdue .table-card,
+#view-my .table-card,
+#view-recurring .table-card {
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 6px 20px rgba(15, 23, 42, .05);
+}
+
+#appScreen .tf-hist-table .th-col-hrs { width: 8%; text-align: center; }
+#appScreen .tf-hist-table .th-col-assigned { width: 12%; }
+#appScreen .tf-hist-table .th-col-voice { width: 6%; text-align: center; }
+#appScreen .tf-hist-table .th-col-attach { width: 7%; text-align: center; }
+#appScreen .tf-hist-table .th-col-actions { width: 8%; text-align: center; }
+#appScreen .tf-hist-table .th-col-source { width: 10%; }
+
+/* SVG icons that replace emoji inside tables, pills, empty states and section titles */
+#appScreen .tf-ico {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#appScreen .empty-state .tf-ico {
+  width: 20px;
+  height: 20px;
+  margin: 0 6px 0 0;
+  vertical-align: -5px;
+  opacity: .75;
+}
+
+#appScreen .view-title-icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#appScreen .view-title-icon .tf-ico {
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  vertical-align: middle;
+}
 
 /* Pre-defined Task List */
 .tb-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }

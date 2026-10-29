@@ -88,17 +88,28 @@ export default function TaskflowDom() {
               <span className="topbar-tagline">Quality + Quantity to be delivered on time every time</span>
             </div>
             <div className="topbar-quick" id="topbarQuick">
-              <button type="button" id="topCalBtn" className="topbar-chip" hidden title="My calendar">📅 Calendar</button>
-              <button type="button" id="topMomBtn" className="topbar-chip" title="Meeting minutes">📝 Meetings</button>
-              <button type="button" id="topChatBtn" className="topbar-chip" title="Team chat">
-                💬 Chat <span id="topChatBadge" className="topbar-chip-badge" hidden></span>
+              <button type="button" id="topCalBtn" className="topbar-chip topbar-chip--cal" hidden title="My calendar" aria-label="My calendar">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="topbar-chip-icon"><rect x="3" y="4.5" width="18" height="16.5" rx="2" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" /></svg>
+                <span className="topbar-chip-label">Calendar</span>
               </button>
-              <button type="button" id="topDipBotBtn" className="topbar-chip topbar-chip--bot" hidden title="DIP Bot">
-                <img src="/logo192.png" alt="" className="topbar-bot-dp" width="18" height="18" />
-                DIP Bot
+              <button type="button" id="topMomBtn" className="topbar-chip topbar-chip--mom" title="Meeting minutes" aria-label="Meeting minutes">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="topbar-chip-icon"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6M8 13h8M8 17h5" /></svg>
+                <span className="topbar-chip-label">Meetings</span>
+              </button>
+              <button type="button" id="topChatBtn" className="topbar-chip topbar-chip--chat" title="Team chat" aria-label="Team chat">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="topbar-chip-icon"><path d="M21 12a8.5 8.5 0 0 1-12.2 7.6L3 21l1.4-5.3A8.5 8.5 0 1 1 21 12z" /></svg>
+                <span className="topbar-chip-label">Chat</span>
+                <span id="topChatBadge" className="topbar-chip-badge" hidden></span>
+              </button>
+              <button type="button" id="topDipBotBtn" className="topbar-chip topbar-chip--bot topbar-chip--dipbot" hidden title="DIP Bot" aria-label="DIP Bot">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="topbar-chip-icon"><rect x="4" y="7" width="16" height="12" rx="3" /><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6" /></svg>
+                <span className="topbar-chip-label">DIP Bot</span>
               </button>
             </div>
-            <button id="logoutBtn" className="logout-btn">↩ Log out</button>
+            <button id="logoutBtn" className="logout-btn" aria-label="Log out" title="Log out">
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="logout-icon"><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
+              <span className="logout-label">Log out</span>
+            </button>
           </div>
         </header>
 
@@ -374,19 +385,19 @@ export default function TaskflowDom() {
 
               <div className="table-card view-desktop-only">
                 <div className="table-scroll">
-                  <table className="data-table" id="allTasksTable">
+                  <table className="data-table tf-hist-table" id="allTasksTable">
                     <thead>
                       <tr>
                         <th className="col-sr">Sr No</th>
-                        <th className="col-details">Task details</th>
-                        <th className="col-date">Planned date</th>
-                        <th className="col-hrs">Hrs to complete</th>
-                        <th className="col-assigned">Assigned to</th>
-                        <th className="col-voice">Voice note</th>
-                        <th className="col-attach">Attachment</th>
-                        <th className="col-priority">Priority</th>
-                        <th className="col-status">Status</th>
-                        <th className="col-actions">Actions</th>
+                        <th className="th-col-details">Task details</th>
+                        <th className="th-col-date">Planned date</th>
+                        <th className="th-col-hrs">Hrs to complete</th>
+                        <th className="th-col-assigned">Assigned to</th>
+                        <th className="th-col-voice">Voice note</th>
+                        <th className="th-col-attach">Attachment</th>
+                        <th className="th-col-priority">Priority</th>
+                        <th className="th-col-status">Status</th>
+                        <th className="th-col-actions">Actions</th>
                       </tr>
                     </thead>
                     <tbody id="allTasksList"></tbody>
@@ -427,18 +438,18 @@ export default function TaskflowDom() {
               <div id="overdueTaskTabPanel">
                 <div className="table-card view-desktop-only">
                   <div className="table-scroll">
-                    <table className="data-table" id="overdueTasksTable">
+                    <table className="data-table tf-hist-table" id="overdueTasksTable">
                       <thead>
                         <tr>
                           <th className="col-sr">Sr No</th>
-                          <th className="col-details">Task details</th>
-                          <th className="col-status">Source</th>
-                          <th className="col-date">Planned date</th>
-                          <th className="col-assigned">Assigned to</th>
-                          <th className="col-assigned">Verifier</th>
-                          <th className="col-priority">Priority</th>
-                          <th className="col-status">Status</th>
-                          <th className="col-actions">Actions</th>
+                          <th className="th-col-details">Task details</th>
+                          <th className="th-col-status">Source</th>
+                          <th className="th-col-date">Planned date</th>
+                          <th className="th-col-assigned">Assigned to</th>
+                          <th className="th-col-assigned">Verifier</th>
+                          <th className="th-col-priority">Priority</th>
+                          <th className="th-col-status">Status</th>
+                          <th className="th-col-actions">Actions</th>
                         </tr>
                       </thead>
                       <tbody id="overdueTasksList"></tbody>
@@ -455,7 +466,7 @@ export default function TaskflowDom() {
               <div id="overdueRecurringTabPanel" hidden={true}>
                 <div className="table-card view-desktop-only">
                   <div className="table-scroll">
-                    <table className="data-table">
+                    <table className="data-table tf-hist-table">
                       <thead>
                         <tr>
                           <th>Employee</th><th>Project</th><th>Task</th><th>Frequency</th><th>Overdue since</th><th>Days overdue</th>
@@ -498,17 +509,17 @@ export default function TaskflowDom() {
               <div id="myTaskTabPanel">
                 <div className="table-card view-desktop-only">
                   <div className="table-scroll">
-                    <table className="data-table" id="myTasksTable">
+                    <table className="data-table tf-hist-table" id="myTasksTable">
                       <thead>
                         <tr>
                           <th className="col-sr">Sr No</th>
-                          <th className="col-details">Task details</th>
-                          <th className="col-date">Due date</th>
-                          <th className="col-voice">Voice note</th>
-                          <th className="col-attach">Attachment</th>
-                          <th className="col-priority">Priority</th>
-                          <th className="col-status">Status</th>
-                          <th className="col-actions">Actions</th>
+                          <th className="th-col-details">Task details</th>
+                          <th className="th-col-date">Due date</th>
+                          <th className="th-col-voice">Voice note</th>
+                          <th className="th-col-attach">Attachment</th>
+                          <th className="th-col-priority">Priority</th>
+                          <th className="th-col-status">Status</th>
+                          <th className="th-col-actions">Actions</th>
                         </tr>
                       </thead>
                       <tbody id="myTasksTableBody"></tbody>
@@ -524,7 +535,7 @@ export default function TaskflowDom() {
                 </p>
                 <div className="table-card view-desktop-only">
                   <div className="table-scroll">
-                    <table className="data-table">
+                    <table className="data-table tf-hist-table">
                       <thead>
                         <tr>
                           <th>Task</th>
@@ -1416,15 +1427,15 @@ export default function TaskflowDom() {
               <div className="view-heading">
                 <h2 className="view-title">📝 Updations</h2>
                 <p className="view-sub">Tasks where admin/verifier has requested changes — review the note and make updates.</p>
-              </div>
+              </div>x
               <div id="updationsList" className="task-list" style={{ marginTop: 20 }}></div>
-            </section>
+            </section>  
 
             {/* RECURRING TASKS */}
             <section id="view-recurring" className="view" hidden={true}>
               <div className="view-header-row">
                 <div className="view-heading" style={{ marginBottom: 0 }}>
-                  <h2 className="view-title">🔁 Recurring Tasks</h2>
+                  <h2 className="view-title view-title-icon">Recurring Tasks</h2>
                   <p className="view-sub" id="recurringViewSub">Tasks that repeat on a schedule.</p>
                 </div>
                 <button id="openAddRecurring" className="primary-btn primary-btn-inline" hidden={true}>+ Add recurring task</button>
@@ -1447,7 +1458,7 @@ export default function TaskflowDom() {
               <div id="adminRecurringWrap" hidden={true}>
                 <div className="table-card view-desktop-only" style={{ marginTop: 20 }}>
                   <div className="table-scroll">
-                    <table className="data-table">
+                    <table className="data-table tf-hist-table">
                       <thead>
                         <tr>
                           <th>Employee</th>
@@ -1470,7 +1481,7 @@ export default function TaskflowDom() {
               <div id="employeeRecurringWrap" hidden={true} style={{ marginTop: 20 }}>
                 <div className="table-card view-desktop-only">
                   <div className="table-scroll">
-                    <table className="data-table">
+                    <table className="data-table tf-hist-table">
                       <thead>
                         <tr>
                           <th>Task</th><th>Frequency</th><th>Planned Date</th>
@@ -1488,7 +1499,7 @@ export default function TaskflowDom() {
             {/* TASK HISTORY */}
             <section id="view-task-history" className="view" hidden={true}>
               <div className="view-heading">
-                <h2 className="view-title">📜 Task History</h2>
+                <h2 className="view-title">Task History</h2>
                 <p className="view-sub">All your completed and verified tasks till date.</p>
               </div>
 
@@ -1931,13 +1942,29 @@ export default function TaskflowDom() {
             </div>
             <div className="field">
               <label htmlFor="emp-department">Department <span className="req">*</span></label>
-              <select id="emp-department" required>
-                <option value="">Select department</option>
-              </select>
+              <div className="field-with-add">
+                <select id="emp-department" required>
+                  <option value="">Select department</option>
+                </select>
+                <button type="button" className="field-add-btn" id="emp-add-dept-btn" title="Add department">+ Add</button>
+              </div>
+              <div className="inline-add-row" id="emp-add-dept-row" hidden>
+                <input type="text" id="emp-new-dept" placeholder="New department name…" />
+                <button type="button" className="primary-btn primary-btn-inline" id="emp-save-dept">Save</button>
+              </div>
             </div>
             <div className="field">
               <label htmlFor="emp-designation">Designation <span className="req">*</span></label>
-              <input id="emp-designation" type="text" placeholder="e.g., Project Manager" required />
+              <div className="field-with-add">
+                <select id="emp-designation" required>
+                  <option value="">Select designation</option>
+                </select>
+                <button type="button" className="field-add-btn" id="emp-add-desig-btn" title="Add designation">+ Add</button>
+              </div>
+              <div className="inline-add-row" id="emp-add-desig-row" hidden>
+                <input type="text" id="emp-new-desig" placeholder="New designation…" />
+                <button type="button" className="primary-btn primary-btn-inline" id="emp-save-desig">Save</button>
+              </div>
             </div>
             <div className="field">
               <label htmlFor="emp-role">Role <span className="req">*</span></label>
@@ -1990,11 +2017,29 @@ export default function TaskflowDom() {
             </div>
             <div className="field">
               <label htmlFor="edit-emp-department">Department <span className="req">*</span></label>
-              <input id="edit-emp-department" type="text" required />
+              <div className="field-with-add">
+                <select id="edit-emp-department" required>
+                  <option value="">Select department</option>
+                </select>
+                <button type="button" className="field-add-btn" id="edit-emp-add-dept-btn" title="Add department">+ Add</button>
+              </div>
+              <div className="inline-add-row" id="edit-emp-add-dept-row" hidden>
+                <input type="text" id="edit-emp-new-dept" placeholder="New department name…" />
+                <button type="button" className="primary-btn primary-btn-inline" id="edit-emp-save-dept">Save</button>
+              </div>
             </div>
             <div className="field">
               <label htmlFor="edit-emp-designation">Designation <span className="req">*</span></label>
-              <input id="edit-emp-designation" type="text" required />
+              <div className="field-with-add">
+                <select id="edit-emp-designation" required>
+                  <option value="">Select designation</option>
+                </select>
+                <button type="button" className="field-add-btn" id="edit-emp-add-desig-btn" title="Add designation">+ Add</button>
+              </div>
+              <div className="inline-add-row" id="edit-emp-add-desig-row" hidden>
+                <input type="text" id="edit-emp-new-desig" placeholder="New designation…" />
+                <button type="button" className="primary-btn primary-btn-inline" id="edit-emp-save-desig">Save</button>
+              </div>
             </div>
             <div className="field">
               <label htmlFor="edit-emp-role">Role <span className="req">*</span></label>

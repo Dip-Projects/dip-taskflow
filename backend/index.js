@@ -73,6 +73,7 @@ app.use('/api/bot',             require('./routes/bot'));
 app.use('/api/client',          require('./routes/client'));
 app.use('/api/whatsapp',        require('./routes/whatsapp'));
 app.use('/api/ea-meeting',      require('./routes/ea_meeting'));
+app.use('/api/svr-report',      require('./routes/svr_report'));
 app.use('/api/geocode',         require('./routes/geocode'));
 app.get('/api/health', async (_, res) => {
   const phoneIdRaw = String(process.env.META_PHONE_NUMBER_ID || '').trim();

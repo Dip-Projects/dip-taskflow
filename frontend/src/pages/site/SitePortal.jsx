@@ -5,6 +5,7 @@ import SiteReport from "./Sitereport";
 import { ClockInOut, CalendarView, CLOCK_CSS } from "./Clockinout.jsx";
 import MyReports from "./MyReports";
 import EaMeetingReport from "./EaMeetingReport";
+import SvrReport from "./SvrReport";
 import DPR from "./Dpr.jsx";
 import ManpowerReport from "./Manpowerreport.jsx";
 import Profile from "./Profile";
@@ -641,7 +642,10 @@ function buildNav(user, visMap) {
       ? [{ key: "material-received", label: "Material Received", icon: Ico.materialRequirement }]
       : []),
     ...(showEaReport
-      ? [{ key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal }]
+      ? [
+          { key: "ea-attendance", label: "EA Attendance Report", icon: Ico.cal },
+          { key: "svr-report", label: "SVR Report", icon: Ico.site },
+        ]
       : []),
     { key: "clock-in", label: "Clock In / Out", icon: Ico.clock },
     { key: "calendar", label: "Attendance", icon: Ico.cal },
@@ -1964,6 +1968,7 @@ const NAV_COLORS = {
   "wpr": "#db2777",
   "svr": "#c96a10",
   "ea-attendance": "#b45309",
+  "svr-report": "#c96a10",
   "team-chat": "#4f46e5",
 };
 
@@ -2420,6 +2425,8 @@ useEffect(() => {
         return <SiteTeamChat user={user} />;
       case "ea-attendance":
         return <EaMeetingReport />;
+      case "svr-report":
+        return <SvrReport />;
       case "clock-in":
         return <ClockInOut user={user} supabase={supabase} />;
       case "calendar":
