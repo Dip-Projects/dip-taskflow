@@ -8192,6 +8192,15 @@ body.org-print-mode .org-tree-svg .org-line {
   box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 6px 20px rgba(15, 23, 42, .05);
 }
 
+/* Scroll the rows inside the table so the column header stays visible at the top */
+#view-task-history .table-scroll,
+#view-all .table-scroll:has(> .tf-hist-table),
+#view-overdue .table-scroll:has(> .tf-hist-table),
+#view-my .table-scroll:has(> .tf-hist-table) {
+  max-height: 70vh;
+  overflow: auto;
+}
+
 #thTable,
 #appScreen .tf-hist-table {
   width: 100%;
