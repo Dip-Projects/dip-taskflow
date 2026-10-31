@@ -29,6 +29,7 @@ export default function Verifications() {
     setBusyId(id);
     try {
       await api(`/tasks/${id}/${action}`, { method: 'PATCH', body: '{}' });
+      if (action === 'verify') window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
       await load();
     } catch (e) {
       alert(e.message || 'Action failed');

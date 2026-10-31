@@ -281,7 +281,7 @@
 }
 
 .tfc-detail-item dt .tfc-detail-icon {
-  color: var(--primary, #dc6900);
+  color: var(--primary, var(--dv-primary, #dc6900));
 }
 
 .tfc-status-pill {
@@ -685,8 +685,8 @@
 }
 
 .tfc-common-toggle input[type="checkbox"]:checked {
-  border-color: var(--primary, #dc6900);
-  background: var(--primary, #dc6900);
+  border-color: var(--primary, var(--dv-primary, #dc6900));
+  background: var(--primary, var(--dv-primary, #dc6900));
 }
 
 .tfc-common-toggle input[type="checkbox"]:checked::after {
@@ -740,7 +740,7 @@
 .tfc-big-text:focus,
 .tfc-comment:focus,
 .tfc-filters select:focus {
-  border-color: var(--primary, #dc6900);
+  border-color: var(--primary, var(--dv-primary, #dc6900));
   outline: none;
   box-shadow: 0 0 0 3px rgba(220, 105, 0, .12);
 }
@@ -763,7 +763,7 @@
   height: 30px;
   border-radius: 9px;
   background: var(--primary-lt, #fdf0e4);
-  color: var(--primary-dk, #561501);
+  color: var(--primary-dk, var(--dv-maroon-dark, #561501));
 }
 
 .tfc-setup-items {
@@ -787,7 +787,7 @@
 
 .tfc-setup-items li.is-drop-target {
   background: var(--primary-lt, #fdf0e4);
-  box-shadow: inset 3px 0 var(--primary, #dc6900);
+  box-shadow: inset 3px 0 var(--primary, var(--dv-primary, #dc6900));
 }
 
 .tfc-drag-handle {
@@ -874,7 +874,7 @@
 .tfc-add-stack > .ghost-btn-text {
   border-color: transparent;
   background: var(--primary-lt, #fdf0e4);
-  color: var(--primary-dk, #561501);
+  color: var(--primary-dk, var(--dv-maroon-dark, #561501));
   font-weight: 650;
 }
 
@@ -1211,7 +1211,7 @@
 
 #appScreen .tfc-common {
   border-color: #e3e7ef;
-  border-left: 3px solid #d97706;
+  border-left: 3px solid var(--dv-amber, #d97706);
   background: #fff;
 }
 
@@ -1235,7 +1235,7 @@
 }
 
 #appScreen .tfc-setup-section.tfc-common {
-  border-left-color: color-mix(in srgb, var(--tfc-block-bg, #f2f7ff) 55%, #d97706);
+  border-left-color: color-mix(in srgb, var(--tfc-block-bg, #f2f7ff) 55%, var(--dv-amber, #d97706));
   background: var(--tfc-block-bg, #f2f7ff);
 }
 

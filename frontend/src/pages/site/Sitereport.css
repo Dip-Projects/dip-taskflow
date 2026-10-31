@@ -90,7 +90,7 @@
 
   [data-theme="dark"] .svr-root .svr-sec-header {
     background: linear-gradient(#252320,#252320) padding-box,
-                linear-gradient(135deg,#c8641a,#f97316) border-box;
+                linear-gradient(135deg,#c8641a,var(--dv-orange-2, #f97316)) border-box;
     color: #fbbf24;
   }
   [data-theme="dark"] .svr-root .svr-sec-num { background: rgba(249,115,22,.15); }
@@ -107,7 +107,7 @@
   [data-theme="dark"] .svr-root .svr-input:focus,
   [data-theme="dark"] .svr-root .svr-select:focus,
   [data-theme="dark"] .svr-root .svr-textarea:focus {
-    border-color: #f59e0b;
+    border-color: var(--dv-amber, #f59e0b);
     box-shadow: 0 0 0 3px rgba(107,45,15,.2);
     background: #2e2b27; }
   [data-theme="dark"] .svr-root .svr-input::placeholder,
@@ -119,12 +119,12 @@
   [data-theme="dark"] .svr-root .svr-photo-btn:hover {
     background: #2e2b27; border-color: #4b5563; }
   [data-theme="dark"] .svr-root .svr-photo-btn.has-photos {
-    background: #2a1f08; border-color: #f59e0b; color: #fbbf24; }
+    background: #2a1f08; border-color: var(--dv-amber, #f59e0b); color: #fbbf24; }
 
   [data-theme="dark"] .svr-root .svr-photo-thumb { border-color: #3a3733; }
   [data-theme="dark"] .svr-root .svr-caption-input {
     background: #252320; border-color: #3a3733; color: #c4bdb4; }
-  [data-theme="dark"] .svr-root .svr-caption-input:focus { border-color: #f59e0b; }
+  [data-theme="dark"] .svr-root .svr-caption-input:focus { border-color: var(--dv-amber, #f59e0b); }
 
   [data-theme="dark"] .svr-root .svr-stage { color: #7a7368; }
 

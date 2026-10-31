@@ -8,9 +8,9 @@
   --ink: #241207;
   --ink-soft: #6b5646;
   --ink-faint: #9c8676;
-  --brand: #561501;
+  --brand: var(--dv-maroon-dark, #561501);
   --brand-2: #7a2408;
-  --accent: #dc6900;
+  --accent: var(--dv-primary, #dc6900);
   --accent-soft: #fff1e0;
   --success: #2f7a4d;
   --success-bg: #ebf7ef;
@@ -1510,14 +1510,14 @@
 
 .cp-tree-row.cp-tree-year.year-active {
   background: #fff4e8;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   font-weight: 700;
 }
 
 .cp-tree-active-pill {
   font-size: 10px;
   font-weight: 700;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   background: #ffedd5;
   border: 1px solid #fdba74;
   border-radius: 999px;
@@ -1531,7 +1531,7 @@
   margin: 4px 0 2px;
   font-size: 10px;
   font-weight: 700;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   background: #ffedd5;
   border: 1px solid #fdba74;
   border-radius: 999px;
@@ -1663,14 +1663,14 @@
 
 .cp-tree-row.cp-tree-year.year-active {
   background: #fff4e8;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   font-weight: 700;
 }
 
 .cp-tree-active-pill {
   font-size: 10px;
   font-weight: 700;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   background: #ffedd5;
   border: 1px solid #fdba74;
   border-radius: 999px;
@@ -1684,7 +1684,7 @@
   margin: 4px 0 2px;
   font-size: 10px;
   font-weight: 700;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
   background: #ffedd5;
   border: 1px solid #fdba74;
   border-radius: 999px;
@@ -2695,7 +2695,7 @@
   --danger-bg: #3a1a1a;
   --warning: #fbbf24;
   --warning-bg: #3a2a10;
-  --info: #fb923c;
+  --info: var(--dv-orange-2, #fb923c);
   --info-bg: #33210f;
 
   background: linear-gradient(135deg, #19120c 0%, #241a12 100%);
@@ -3025,17 +3025,17 @@ html {
   background: #f3e8de;
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #c96a10, #7a2e00);
+  background: linear-gradient(180deg, var(--dv-orange, #c96a10), var(--dv-brown, #7a2e00));
   border-radius: 999px;
   border: 2px solid #f3e8de;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #7a2e00;
+  background: var(--dv-brown, #7a2e00);
 }
 .theme-dark { scrollbar-color: #ff8a3d #241a12; }
 .theme-dark ::-webkit-scrollbar-track { background: #241a12; }
 .theme-dark ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #ff8a3d, #c96a10);
+  background: linear-gradient(180deg, #ff8a3d, var(--dv-orange, #c96a10));
   border-color: #241a12;
 }
 #cp-filter-bar{

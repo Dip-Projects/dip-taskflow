@@ -50,13 +50,7 @@ export default function ChecklistSetup() {
       setLoading(false);
     }
   };
-
-  useEffect(() => {
-    load(typeId);
-    setNewItems({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeId]);
-
+  
   /**
    * Runs one change. The screen is updated from each server response, so nothing
    * reloads. Only a failed change reloads the list, to show what is really saved.

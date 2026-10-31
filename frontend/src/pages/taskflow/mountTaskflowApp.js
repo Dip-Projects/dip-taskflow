@@ -1,5 +1,6 @@
 import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from './checklist/checklistBus';
 import { NAV_ICONS, tfIcon } from './navIcons';
+import { showConfirm } from '../../lib/confirmDialog';
 
   /**
    * Adapted from backend/legacy/app.js for React (no iframe).
@@ -3532,6 +3533,7 @@ import { NAV_ICONS, tfIcon } from './navIcons';
       try {
         await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
         showToast('Task updated ✅', 'success'); reloadCurrentTaskView(); refreshNavBadges();
+        if (status === 'Completed') window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
       } catch (err) { showToast(err.message, 'error'); }
     }
 
@@ -3645,7 +3647,7 @@ import { NAV_ICONS, tfIcon } from './navIcons';
           return;
         }
         listEl.innerHTML = `<div class="checkpoint-list">${labels.map((label, i) => `
-          <div class="checkpoint-item" style="display:flex;align-items:center;gap:8px">
+          <label class="checkpoint-item" style="display:flex;align-items:center;gap:8px">
             <input type="checkbox" data-cp-index="${i}" ${checked[i] ? 'checked' : ''} ${editingIndex === i ? 'disabled' : ''} />
             ${editingIndex === i
               ? `<input type="text" class="checkpoint-input" data-cp-edit-value value="${escapeHtml(label)}" />
@@ -3654,7 +3656,7 @@ import { NAV_ICONS, tfIcon } from './navIcons';
               : `<span style="flex:1">${escapeHtml(label)}</span>
                 ${canEditTemplate ? `<button type="button" class="ghost-btn-text" data-cp-action="edit" data-cp-index="${i}">Edit</button>
                 <button type="button" class="ghost-btn-text" data-cp-action="delete" data-cp-index="${i}">Delete</button>` : ''}`}
-          </div>`).join('')}</div>`;
+          </label>`).join('')}</div>`;
         syncAssignBtn();
       };
       try {
@@ -3800,10 +3802,10 @@ import { NAV_ICONS, tfIcon } from './navIcons';
         const ordered = [...(checkpoints || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
         listEl.innerHTML = ordered.length
           ? `<div class="checkpoint-list">${ordered.map((cp, index) => `
-              <div class="checkpoint-item${cp.is_done ? ' cp-done' : ''}" style="display:flex;align-items:center;gap:8px">
+              <label class="checkpoint-item${cp.is_done ? ' cp-done' : ''}" style="display:flex;align-items:center;gap:8px">
                 <input type="checkbox" data-cp-index="${index}" data-cp-id="${escapeHtml(String(cp.id))}" ${cp.is_done ? 'checked' : ''} />
                 <span style="flex:1">${escapeHtml(cp.label || 'Checkpoint')}</span>
-              </div>`).join('')}</div>`
+              </label>`).join('')}</div>`
           : '<p class="form-note">No checkpoints for this task. Accept to continue.</p>';
 
         const syncAccept = () => {
@@ -3984,7 +3986,15 @@ import { NAV_ICONS, tfIcon } from './navIcons';
           label: 'Verify task',
           className: 'verification-menu-verify',
           icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
-          onClick: () => { if (confirm('Mark this task as Verified?')) verifyApprove(task.id); },
+          onClick: async () => {
+            const ok = await showConfirm({
+              title: 'Verify task',
+              message: 'Mark this task as Verified?',
+              yesText: 'Yes, verify',
+              noText: 'No',
+            });
+            if (ok) verifyApprove(task.id);
+          },
         },
         {
           label: 'Correction',
@@ -4108,6 +4118,7 @@ import { NAV_ICONS, tfIcon } from './navIcons';
       try {
         await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: { approved: true } });
         showToast('Task verified ✅', 'success');
+        window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
         loadVerifications();
       } catch (err) { showToast(err.message, 'error'); }
     }
@@ -9546,6 +9557,7 @@ import { NAV_ICONS, tfIcon } from './navIcons';
           close();
           await refresh();
           if (updated.status === 'Completed') {
+            window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
             showToast(
               photoFile ? 'Done — photo saved ✅' : 'Task marked as done ✅',
               'success'

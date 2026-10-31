@@ -17,7 +17,7 @@
   gap: 6px;
   border: none;
   background: transparent;
-  color: #7a2e00;
+  color: var(--dv-brown, #7a2e00);
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
@@ -46,7 +46,7 @@
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  background: linear-gradient(135deg, var(--dv-brown, #7a2e00), var(--dv-orange, #c96a10));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -173,7 +173,7 @@
 
 .qr-btn-primary {
   border: none;
-  background: linear-gradient(135deg, #7a2e00, #c96a10);
+  background: linear-gradient(135deg, var(--dv-brown, #7a2e00), var(--dv-orange, #c96a10));
   color: #fff;
 }
 
@@ -185,7 +185,7 @@
 .qr-btn-secondary {
   border: 1px solid #e8e2d8;
   background: #fff;
-  color: #3d1200;
+  color: var(--dv-brown-deep, #3d1200);
 }
 
 .qr-emp-chip {
@@ -204,7 +204,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: #c96a10;
+  background: var(--dv-orange, #c96a10);
   color: #fff;
   font-weight: 800;
   display: flex;
@@ -226,7 +226,7 @@
 
 .qr-emp-chip span {
   font-size: 12px;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
 }
 
 .qr-label {
@@ -395,6 +395,6 @@
 
 .qr-popup-hint {
   margin-top: 12px;
-  color: #c96a10;
+  color: var(--dv-orange, #c96a10);
   font-weight: 600;
 }

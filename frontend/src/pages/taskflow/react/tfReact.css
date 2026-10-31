@@ -122,7 +122,7 @@ td.tfr-empty {
 }
 .tfr-pill.mid {
   background: #ffedd5;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
 }
 .tfr-meta {
   font-size: 0.8rem;
@@ -149,8 +149,8 @@ td.tfr-empty {
 }
 .tfr-actions button.ghost {
   background: #fff;
-  color: #7a2e00;
-  border: 1px solid #c96a10;
+  color: var(--dv-brown, #7a2e00);
+  border: 1px solid var(--dv-orange, #c96a10);
 }
 .tfr-toolbar {
   display: flex;
@@ -293,13 +293,13 @@ td.tfr-empty {
 }
 .tfr-table a {
   margin-right: 8px;
-  color: #9a3412;
+  color: var(--dv-brown, #9a3412);
 }
 .tfr-actions .ghost,
 button.ghost {
-  border: 1px solid #c96a10;
+  border: 1px solid var(--dv-orange, #c96a10);
   background: #fff;
-  color: #7a2e00;
+  color: var(--dv-brown, #7a2e00);
   border-radius: 8px;
   padding: 6px 12px;
   font-weight: 600;

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- four-point sparkle star that twinkles (dim to bright, small to big) -->
+  <style>
+    .twinkle { transform-box: fill-box; transform-origin: center; animation: festive-twinkle 2.4s ease-in-out infinite; }
+    @keyframes festive-twinkle {
+      0%, 100% { opacity: 0.25; transform: scale(0.6); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+  </style>
+  <g class="twinkle">
+    <circle cx="8" cy="8" r="4" fill="#FFD54A" opacity="0.35"/>
+    <path d="M8 0 C8.6 5.4 10.6 7.4 16 8 C10.6 8.6 8.6 10.6 8 16 C7.4 10.6 5.4 8.6 0 8 C5.4 7.4 7.4 5.4 8 0Z" fill="#FFE47A"/>
+    <path d="M8 3 C8.3 6.6 9.4 7.7 13 8 C9.4 8.3 8.3 9.4 8 13 C7.7 9.4 6.6 8.3 3 8 C6.6 7.7 7.7 6.6 8 3Z" fill="#FFFFFF"/>
+  </g>
+</svg>

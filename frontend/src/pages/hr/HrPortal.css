@@ -16,7 +16,7 @@
   --surface: #fffefb;
   --line: #e8e2d8;
   --line2: #d4ccc0;
-  --amber: #d97706;
+  --amber: var(--dv-amber, #d97706);
   --amber2: #b45309;
   --amber-bg: #fffbeb;
   --amber-line: #fde68a;
@@ -58,7 +58,7 @@ html:has(.hr-shell) body {
   --surface: #252320;
   --line: #2e2b27;
   --line2: #3a3733;
-  --amber: #f59e0b;
+  --amber: var(--dv-amber, #f59e0b);
   --amber2: #fbbf24;
   --amber-bg: #2a1f08;
   --amber-line: #4a3210;
@@ -1010,13 +1010,13 @@ html:has(.hr-shell) body {
 
 /* Primary (dark) buttons — invisible on dark page bg without these */
 [data-theme='dark'] .hr-btn:not(.ghost):not(.ok):not(.warn):not(.hr-btn-icon) {
-  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  background: linear-gradient(180deg, var(--dv-amber, #f59e0b) 0%, var(--dv-amber, #d97706) 100%);
   color: #1a1208;
   box-shadow: 0 3px 12px rgba(245, 158, 11, 0.32);
 }
 
 [data-theme='dark'] .hr-btn:not(.ghost):not(.ok):not(.warn):not(.hr-btn-icon):hover {
-  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  background: linear-gradient(180deg, #fbbf24 0%, var(--dv-amber, #f59e0b) 100%);
   color: #1a1208;
 }
 
@@ -1033,7 +1033,7 @@ html:has(.hr-shell) body {
 
 [data-theme='dark'] .hr-btn.ghost:hover {
   background: #4a433a;
-  border-color: #f59e0b;
+  border-color: var(--dv-amber, #f59e0b);
   color: #fbbf24;
 }
 
@@ -1208,7 +1208,7 @@ html:has(.hr-shell) body {
 
 .hr-cand-doc--cv:hover {
   background: #fef3c7;
-  border-color: #f59e0b;
+  border-color: var(--dv-amber, #f59e0b);
   color: #92400e;
   box-shadow: 0 1px 4px rgba(217, 119, 6, 0.12);
 }
@@ -1256,7 +1256,7 @@ html:has(.hr-shell) body {
 
 [data-theme='dark'] .hr-cand-doc--cv:hover {
   background: #3a2a0c;
-  border-color: #f59e0b;
+  border-color: var(--dv-amber, #f59e0b);
   color: #fde68a;
   box-shadow: none;
 }
@@ -2069,13 +2069,13 @@ html:has(.hr-shell) body {
 }
 
 [data-theme='dark'] .hr-payroll-download {
-  background: linear-gradient(180deg, #e6a639 0%, #d97706 100%);
+  background: linear-gradient(180deg, #e6a639 0%, var(--dv-amber, #d97706) 100%);
   color: #1a1208;
   box-shadow: 0 4px 16px rgba(245, 158, 11, 0.35);
 }
 
 [data-theme='dark'] .hr-payroll-download:hover:not(:disabled) {
-  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  background: linear-gradient(180deg, #fbbf24 0%, var(--dv-amber, #f59e0b) 100%);
   color: #1a1208;
 }
 
@@ -2205,7 +2205,7 @@ html:has(.hr-shell) body {
 
 [data-theme='dark'] .hr-modal-x:hover:not(:disabled) {
   background: #4a433a;
-  border-color: #f59e0b;
+  border-color: var(--dv-amber, #f59e0b);
   color: #fbbf24;
 }
 
