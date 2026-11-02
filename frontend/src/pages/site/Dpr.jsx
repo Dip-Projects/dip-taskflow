@@ -121,6 +121,29 @@ function blobToDataUrl(blob) {
     reader.readAsDataURL(blob);
   });
 }
+function canvasToJpegBytes(canvas, quality = 0.78) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(
+        (result) => {
+          if (!result) {
+            reject(new Error("Safari could not export a PDF page image."));
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => resolve(new Uint8Array(reader.result));
+          reader.onerror = () =>
+            reject(reader.error || new Error("Could not read the PDF page image."));
+          reader.readAsArrayBuffer(result);
+        },
+        "image/jpeg",
+        quality,
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 async function preparePdfPhotos(photos) {
   return Promise.all(
     (photos || []).map(async (photo) => {
@@ -1405,31 +1428,40 @@ async function generateEveningPdf(payload, onProgress) {
 
     document.body.appendChild(wrap);
 
-    // Wait for ALL images including watermark
-    const imgs = Array.from(wrap.querySelectorAll("img"));
-    await Promise.all(
-      imgs.map((img) =>
-        img.complete
-          ? Promise.resolve()
-          : new Promise((res) => {
-              img.onload = res;
-              img.onerror = res;
-            }),
-      ),
-    );
-    await new Promise((r) => setTimeout(r, 150));
+    try {
+      const imgs = Array.from(wrap.querySelectorAll("img"));
+      await Promise.all(
+        imgs.map(async (img) => {
+          if (!img.complete) {
+            await new Promise((resolve) => {
+              img.onload = resolve;
+              img.onerror = resolve;
+            });
+          }
+          if (!img.naturalWidth || !img.naturalHeight) {
+            throw new Error("A report image could not be loaded for the PDF.");
+          }
+          if (!img.src.startsWith("data:image/")) {
+            throw new Error(
+              "The PDF contains an external image that Safari cannot safely render. Re-add the photo and try again.",
+            );
+          }
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 150));
 
-    const canvas = await window.html2canvas(wrap, {
-      scale: 1.5,
-      useCORS: true,
-      allowTaint: false,
-      backgroundColor: "#ffffff",
-      windowWidth: 794,
-      scrollX: 0,
-      scrollY: 0,
-    });
-    document.body.removeChild(wrap);
-    return canvas;
+      return await window.html2canvas(wrap, {
+        scale: 1.5,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: "#ffffff",
+        windowWidth: 794,
+        scrollX: 0,
+        scrollY: 0,
+      });
+    } finally {
+      wrap.remove();
+    }
   }
 
   // ── helper: add one canvas to PDF, paginating if too tall ─────────────────
@@ -1496,7 +1528,7 @@ async function generateEveningPdf(payload, onProgress) {
         );
 
       pdf.addImage(
-        slice.toDataURL("image/jpeg", 0.78),
+        await canvasToJpegBytes(slice),
         "JPEG",
         MARGIN,
         cursorY,
@@ -1536,9 +1568,9 @@ async function generateEveningPdf(payload, onProgress) {
   <div class="cover">
     <div class="cover-top-bar">
       <div style="display:flex;align-items:center;gap:14px;">
-        <img src="${logoBase64 || ""}"
-  style="width:48px;height:48px;object-fit:contain;flex-shrink:0;${!logoBase64 ? "display:none" : ""}"
-  >
+        ${logoBase64 ? `<img src="${logoBase64}"
+  style="width:48px;height:48px;object-fit:contain;flex-shrink:0;"
+  >` : ""}
         <div>
           <div class="brand-name">DIP Projects</div>
           <div class="brand-sub">Civil Project Management Consultants</div>
@@ -1700,8 +1732,7 @@ async function generateEveningPdf(payload, onProgress) {
   onProgress("Building thank you page…");
   const tyHtml = `
   <div class="ty-page" style="min-height:900px;">
-    <img src="${logoBase64 || ""}" class="ty-logo"
-      style="${!logoBase64 ? "display:none;" : ""}">
+    ${logoBase64 ? `<img src="${logoBase64}" class="ty-logo">` : ""}
     <div class="ty-line"></div>
     <div class="ty-title">Thank You</div>
     <div class="ty-sub">This report has been prepared to ensure transparency, quality, and continuous improvement at the project site.</div>
@@ -1714,7 +1745,7 @@ async function generateEveningPdf(payload, onProgress) {
   const tyHeightMM = Math.min(tyCanvas.height / PX_PER_MM, A4_H - MARGIN * 2);
   const tyY = (A4_H - tyHeightMM) / 2;
   pdf.addImage(
-    tyCanvas.toDataURL("image/jpeg", 0.78),
+    await canvasToJpegBytes(tyCanvas),
     "JPEG",
     MARGIN,
     tyY,
@@ -1751,9 +1782,10 @@ async function dbInsert(table, payload) {
  * New rows use a random signed-int4 id so we never depend on the sequence.
  */
 function randomDprReportId() {
-  const randomValue = Math.floor(Math.random() * 0x1_0000_0000);
+  const buf = new Uint32Array(1);
+  crypto.getRandomValues(buf);
   // Stay in positive int4, skip the low serial range (1..~50k) used historically
-  return 50_000 + (randomValue % 2_097_433_647);
+  return 50_000 + (buf[0] % 2_097_433_647);
 }
 
 async function saveDprReport({
