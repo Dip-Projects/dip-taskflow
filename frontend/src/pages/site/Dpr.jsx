@@ -1529,6 +1529,8 @@ function renderPdfTextFallback(html, fallbackHeader = null) {
       continue;
     }
     if (item.type === "total") {
+      // Table cells leave textAlign at "center"; reset it so the label starts at the left edge.
+      ctx.textAlign = "left";
       ctx.fillStyle = "#374151";
       ctx.fillRect(padding, item.y, contentWidth, item.height);
       ctx.textBaseline = "middle";
@@ -1537,6 +1539,7 @@ function renderPdfTextFallback(html, fallbackHeader = null) {
       ctx.fillText(item.label, padding + 14, item.y + item.height / 2);
       ctx.font = "900 20px Arial, sans-serif";
       ctx.fillStyle = "#fff";
+      ctx.textAlign = "left";
       const totalWidth = ctx.measureText(item.value).width;
       ctx.fillText(
         item.value,
@@ -1546,6 +1549,7 @@ function renderPdfTextFallback(html, fallbackHeader = null) {
       continue;
     }
     if (item.type === "text") {
+      ctx.textAlign = "left";
       ctx.fillStyle = "#1f2937";
       ctx.font = font;
       ctx.textBaseline = "top";
