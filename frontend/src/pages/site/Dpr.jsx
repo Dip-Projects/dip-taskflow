@@ -1025,7 +1025,7 @@ function buildPhotosHtml(photos) {
     html += `
       <div style="border:1px solid #cbd5e1;overflow:hidden;">
         <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
-          <img src="${ph1.supabaseUrl || ph1.data}"
+          <img src="${ph1.data || ph1.supabaseUrl}"
             style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
             crossorigin="anonymous">
         </div>
@@ -1041,7 +1041,7 @@ function buildPhotosHtml(photos) {
       html += `
         <div style="border:1px solid #cbd5e1;overflow:hidden;">
           <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
-            <img src="${ph2.supabaseUrl || ph2.data}"
+            <img src="${ph2.data || ph2.supabaseUrl}"
               style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
               crossorigin="anonymous">
           </div>
