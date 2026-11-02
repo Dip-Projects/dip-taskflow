@@ -113,6 +113,42 @@ async function dataUrlToBlob(dataUrl) {
   const res = await fetch(dataUrl);
   return res.blob();
 }
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read report photo."));
+    reader.readAsDataURL(blob);
+  });
+}
+async function preparePdfPhotos(photos) {
+  return Promise.all(
+    (photos || []).map(async (photo) => {
+      if (photo.data?.startsWith("data:image/")) return photo;
+      if (!photo.supabaseUrl) return photo;
+
+      let response;
+      try {
+        response = await fetch(photo.supabaseUrl, { mode: "cors" });
+      } catch (error) {
+        throw new Error(
+          `Could not load a saved photo for the PDF. Re-add that photo and try again. ${error.message}`,
+        );
+      }
+      if (!response.ok) {
+        throw new Error(
+          `Could not load a saved photo for the PDF (HTTP ${response.status}). Re-add that photo and try again.`,
+        );
+      }
+
+      const data = await blobToDataUrl(await response.blob());
+      if (typeof data !== "string" || !data.startsWith("data:image/")) {
+        throw new Error("A saved report photo could not be prepared for the PDF.");
+      }
+      return { ...photo, data };
+    }),
+  );
+}
 
 // ─── App CSS ─────────────────────────────────────────────────────────────────
 const CSS = `
@@ -1027,7 +1063,7 @@ function buildPhotosHtml(photos) {
         <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
           <img src="${ph1.data || ph1.supabaseUrl}"
             style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
-            crossorigin="anonymous">
+            >
         </div>
         <div style="
           padding:8px 12px;font-size:13px;font-weight:600;
@@ -1043,7 +1079,7 @@ function buildPhotosHtml(photos) {
           <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
             <img src="${ph2.data || ph2.supabaseUrl}"
               style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
-              crossorigin="anonymous">
+              >
           </div>
           <div style="
             padding:8px 12px;font-size:13px;font-weight:600;
@@ -1501,7 +1537,7 @@ async function generateEveningPdf(payload, onProgress) {
       <div style="display:flex;align-items:center;gap:14px;">
         <img src="${logoBase64 || ""}"
   style="width:48px;height:48px;object-fit:contain;flex-shrink:0;${!logoBase64 ? "display:none" : ""}"
-  crossorigin="anonymous">
+  >
         <div>
           <div class="brand-name">DIP Projects</div>
           <div class="brand-sub">Civil Project Management Consultants</div>
@@ -1664,8 +1700,7 @@ async function generateEveningPdf(payload, onProgress) {
   const tyHtml = `
   <div class="ty-page" style="min-height:900px;">
     <img src="${logoBase64 || ""}" class="ty-logo"
-      style="${!logoBase64 ? "display:none;" : ""}"
-      crossorigin="anonymous">
+      style="${!logoBase64 ? "display:none;" : ""}">
     <div class="ty-line"></div>
     <div class="ty-title">Thank You</div>
     <div class="ty-sub">This report has been prepared to ensure transparency, quality, and continuous improvement at the project site.</div>
@@ -4502,9 +4537,11 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
     }
     setSubmitting(true);
     const payload = collectPayload();
+    let activeStep = "preparing report";
     try {
       const photoFolder = `${buildSiteDatePath(date)}/dpr`;
 
+      activeStep = "uploading work photos";
       setSubmitStep("photos");
       setSubmitDetail(`Uploading ${photos.length} photos…`);
       const uploadedPhotos = await uploadBatch(photos, async (ph, i) => {
@@ -4514,8 +4551,9 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         const url = await uploadPhotoToSupabase(ph.data, site, path);
         return { ...ph, supabaseUrl: url, storagePath: path };
       });
-      payload.photos = uploadedPhotos;
+      payload.photos = await preparePdfPhotos(uploadedPhotos);
 
+      activeStep = "uploading checklist photos";
       setSubmitDetail(`Uploading ${checklistPhotos.length} checklist photos…`);
       const uploadedChecklistPhotos = await uploadBatch(checklistPhotos, async (ph, i) => {
         const cap = (ph.caption || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
@@ -4524,10 +4562,11 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         const url = await uploadPhotoToSupabase(ph.data, site, path);
         return { ...ph, supabaseUrl: url, storagePath: path };
       });
-      payload.checklistPhotos = uploadedChecklistPhotos;
+      payload.checklistPhotos = await preparePdfPhotos(uploadedChecklistPhotos);
 
       let uploadedVisitPhotos = [];
       if (visitMode === "photo" && visitPhotos.length) {
+        activeStep = "uploading site-visit photos";
         setSubmitDetail(`Uploading ${visitPhotos.length} site visit photos…`);
         uploadedVisitPhotos = await uploadBatch(visitPhotos, async (ph, i) => {
           if (ph.supabaseUrl && !ph.data) return ph;
@@ -4539,24 +4578,29 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         });
       }
       payload.visitMode = visitMode;
-      payload.visitPhotos = visitMode === "photo" ? uploadedVisitPhotos : [];
+      payload.visitPhotos =
+        visitMode === "photo" ? await preparePdfPhotos(uploadedVisitPhotos) : [];
       if (visitMode === "photo") payload.visitors = [];
 
       if (materialReq.length) {
+        activeStep = "submitting material requirements";
         setSubmitDetail("Submitting material requirements…");
         await submitMaterialRequirements(materialReq, site, engineer);
       }
 
+      activeStep = "rendering PDF";
       setSubmitStep("pdf");
       setSubmitDetail("Building document…");
       const { blob, fileName } = await generateEveningPdf(payload, (msg) =>
         setSubmitDetail(msg),
       );
 
+      activeStep = "uploading PDF to storage";
       setSubmitStep("pdfup");
       setSubmitDetail(fileName);
       const pdfPublicUrl = await uploadPdfToSupabase(blob, fileName, site, date);
 
+      activeStep = "saving report";
       setSubmitStep("db");
       setSubmitDetail("Writing to dpr_reports…");
       const photosForDb = uploadedPhotos.map((p) => ({
@@ -4597,7 +4641,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
       draftOpenedRef.current = false;
     } catch (err) {
       console.error(err);
-      showToast("err", err.message, 10000);
+      showToast("err", `${activeStep}: ${err.message || "Unknown error"}`, 10000);
     }
     setSubmitting(false);
     draftOpenedRef.current = false;
