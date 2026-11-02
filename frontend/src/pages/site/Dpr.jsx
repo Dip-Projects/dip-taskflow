@@ -4184,6 +4184,7 @@ function DprForm({ user }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitStep, setSubmitStep] = useState("");
   const [submitDetail, setSubmitDetail] = useState("");
+  const [errorDetail, setErrorDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [pdfUrl, setPdfUrl] = useState(null);
@@ -4536,6 +4537,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
       return;
     }
     setSubmitting(true);
+    setErrorDetail(null);
     const payload = collectPayload();
     let activeStep = "preparing report";
     try {
@@ -4642,6 +4644,13 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
     } catch (err) {
       console.error(err);
       showToast("err", `${activeStep}: ${err.message || "Unknown error"}`, 10000);
+      setErrorDetail({
+        step: activeStep,
+        name: err?.name || "Error",
+        message: err?.message || String(err),
+        stack: err?.stack || "(no stack)",
+        userAgent: navigator.userAgent,
+      });
     }
     setSubmitting(false);
     draftOpenedRef.current = false;
@@ -5448,6 +5457,17 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         </button>
       </div>
 
+      {errorDetail && (
+        <div style={{ margin: "16px 0", padding: 12, border: "1px solid #dc2626", borderRadius: 8, background: "#fef2f2", fontSize: 12 }}>
+          <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Error details (send this to the developer)</div>
+          <div><b>Step:</b> {errorDetail.step}</div>
+          <div><b>Name:</b> {errorDetail.name}</div>
+          <div><b>Message:</b> {errorDetail.message}</div>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 220, overflow: "auto", marginTop: 6 }}>{errorDetail.stack}</pre>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(JSON.stringify(errorDetail, null, 2))} style={{ marginTop: 6 }}>Copy details</button>
+          <button type="button" onClick={() => setErrorDetail(null)} style={{ marginTop: 6, marginLeft: 8 }}>Dismiss</button>
+        </div>
+      )}
       {submitting && reportType === "evening" && (
         <SubmitOverlay currentStep={submitStep} detail={submitDetail} />
       )}
