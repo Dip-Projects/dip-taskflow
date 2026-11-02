@@ -1385,7 +1385,7 @@ async function generateEveningPdf(payload, onProgress) {
     const canvas = await window.html2canvas(wrap, {
       scale: 1.5,
       useCORS: true,
-      allowTaint: true,
+      allowTaint: false,
       backgroundColor: "#ffffff",
       windowWidth: 794,
       scrollX: 0,
