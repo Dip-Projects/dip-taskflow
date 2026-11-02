@@ -358,6 +358,7 @@ border:2px solid transparent;border-radius:12px;color:#6b2d0f;cursor:pointer;fon
 
 @media(max-width:600px) {
   .dpr-root { padding:8px 6px 40px; }
+  .dpr-toast { left:12px; right:12px; bottom:12px; max-width:none; flex-wrap:wrap; overflow-wrap:anywhere; }
   .cement-row { grid-template-columns:1fr; }
   .act-row { flex-direction:column-reverse; }
   .act-row .btn { width:100%; justify-content:center; }
@@ -4508,7 +4509,7 @@ function DprForm({ user }) {
       setSubmitted(true);
       draftOpenedRef.current = false;
     } catch (err) {
-      showToast("err", err.message, 10000);
+      showToast("err", `Saving morning report: ${err.message || "Unknown error"}`, 10000);
     }
     setSubmitting(false);
   };
@@ -4853,7 +4854,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
 
       setSubmitted(true);
     } catch (err) {
-      showToast("err", err.message, 10000);
+      showToast("err", `Saving morning report: ${err.message || "Unknown error"}`, 10000);
     }
     setSubmitting(false);
   };
