@@ -113,65 +113,6 @@ async function dataUrlToBlob(dataUrl) {
   const res = await fetch(dataUrl);
   return res.blob();
 }
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("Could not read report photo."));
-    reader.readAsDataURL(blob);
-  });
-}
-function canvasToJpegBytes(canvas, quality = 0.78) {
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob(
-        (result) => {
-          if (!result) {
-            reject(new Error("Safari could not export a PDF page image."));
-            return;
-          }
-          const reader = new FileReader();
-          reader.onload = () => resolve(new Uint8Array(reader.result));
-          reader.onerror = () =>
-            reject(reader.error || new Error("Could not read the PDF page image."));
-          reader.readAsArrayBuffer(result);
-        },
-        "image/jpeg",
-        quality,
-      );
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-async function preparePdfPhotos(photos) {
-  return Promise.all(
-    (photos || []).map(async (photo) => {
-      if (photo.data?.startsWith("data:image/")) return photo;
-      if (!photo.supabaseUrl) return photo;
-
-      let response;
-      try {
-        response = await fetch(photo.supabaseUrl, { mode: "cors" });
-      } catch (error) {
-        throw new Error(
-          `Could not load a saved photo for the PDF. Re-add that photo and try again. ${error.message}`,
-        );
-      }
-      if (!response.ok) {
-        throw new Error(
-          `Could not load a saved photo for the PDF (HTTP ${response.status}). Re-add that photo and try again.`,
-        );
-      }
-
-      const data = await blobToDataUrl(await response.blob());
-      if (typeof data !== "string" || !data.startsWith("data:image/")) {
-        throw new Error("A saved report photo could not be prepared for the PDF.");
-      }
-      return { ...photo, data };
-    }),
-  );
-}
 
 // ─── App CSS ─────────────────────────────────────────────────────────────────
 const CSS = `
@@ -381,7 +322,6 @@ border:2px solid transparent;border-radius:12px;color:#6b2d0f;cursor:pointer;fon
 
 @media(max-width:600px) {
   .dpr-root { padding:8px 6px 40px; }
-  .dpr-toast { left:12px; right:12px; bottom:12px; max-width:none; flex-wrap:wrap; overflow-wrap:anywhere; }
   .cement-row { grid-template-columns:1fr; }
   .act-row { flex-direction:column-reverse; }
   .act-row .btn { width:100%; justify-content:center; }
@@ -1086,8 +1026,7 @@ function buildPhotosHtml(photos) {
       <div style="border:1px solid #cbd5e1;overflow:hidden;">
         <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
           <img src="${ph1.data || ph1.supabaseUrl}"
-            style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
-            >
+            style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;">
         </div>
         <div style="
           padding:8px 12px;font-size:13px;font-weight:600;
@@ -1102,8 +1041,7 @@ function buildPhotosHtml(photos) {
         <div style="border:1px solid #cbd5e1;overflow:hidden;">
           <div style="width:100%;height:340px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">
             <img src="${ph2.data || ph2.supabaseUrl}"
-              style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;"
-              >
+              style="width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;display:block;">
           </div>
           <div style="
             padding:8px 12px;font-size:13px;font-weight:600;
@@ -1249,8 +1187,7 @@ function buildEveningPdfHtml(payload, pendingMaterials) {
   <div class="cover-top-bar">
     <div style="display:flex;align-items:center;gap:12px;">
       <img src="{LOGO_URL}"
-        style="width:48px;height:48px;object-fit:contain;flex-shrink:0;"
-        crossorigin="anonymous">
+        style="width:48px;height:48px;object-fit:contain;flex-shrink:0;">
       <div>
         <div class="brand-name">DIP Projects</div>
         <div class="brand-sub">Civil Project Management Consultants</div>
@@ -1371,7 +1308,302 @@ async function getLogoBase64() {
   });
 }
 
+let lastPdfImageSources = [];
+let pdfUsedTextFallback = false;
+
+function getCanvasExportError(canvas) {
+  try {
+    if (canvas.toDataURL("image/jpeg", 0.5) === "data:,") {
+      return new Error("Canvas export returned an empty data URL.");
+    }
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function renderPdfTextFallback(html, fallbackHeader = null) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  const blocks = [];
+
+  function collectBlocks(node) {
+    for (const child of node.childNodes) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const text = child.nodeValue.replace(/\s+/g, " ").trim();
+        if (text) blocks.push({ type: "text", text });
+        continue;
+      }
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+      const tag = child.tagName.toLowerCase();
+      if (tag === "img" || tag === "svg" || tag === "style") continue;
+      if (child.classList.contains("sec-header")) {
+        const number = child.querySelector(".sec-num")?.innerText.trim() || "";
+        const title = child.querySelector(".sec-title")?.innerText.trim() || "";
+        blocks.push({ type: "section-header", text: `${number}  ${title}` });
+        continue;
+      }
+      if (child.classList.contains("mp-group-header")) {
+        const name = child.querySelector(".mp-group-name")?.innerText.trim() || "";
+        const source = child.querySelector(".mp-source-tag")?.innerText.trim() || "";
+        blocks.push({ type: "group-header", name, source });
+        continue;
+      }
+      if (child.classList.contains("mp-total")) {
+        const label = child.querySelector(".mp-total-label")?.innerText.trim() || "";
+        const value = child.querySelector(".mp-total-val")?.innerText.trim() || "";
+        blocks.push({ type: "total", label, value });
+        continue;
+      }
+      if (tag === "table") {
+        const rows = Array.from(child.querySelectorAll("tr"))
+          .map((row) => ({
+            isHeader: Boolean(row.closest("thead")) || Boolean(row.querySelector("th")),
+            cells: Array.from(row.querySelectorAll("th, td")).map((cell) => ({
+              text: cell.innerText.replace(/\s+/g, " ").trim(),
+              align:
+                cell.matches(".td-left, .td-main, .s-key") ||
+                cell.style.textAlign === "left"
+                  ? "left"
+                  : "center",
+            })),
+          }))
+          .filter((row) => row.cells.some((cell) => cell.text));
+        if (rows.length) blocks.push({ type: "table", rows });
+        continue;
+      }
+
+      const isBlock = /^(div|p|section|header|footer|li|h[1-6]|br)$/.test(tag);
+      if (isBlock) blocks.push({ type: "space" });
+      collectBlocks(child);
+      if (isBlock) blocks.push({ type: "space" });
+    }
+  }
+
+  collectBlocks(parsed.body);
+  if (fallbackHeader) {
+    for (let index = blocks.length - 1; index >= 0; index--) {
+      if (blocks[index].type === "section-header") blocks.splice(index, 1);
+    }
+    blocks.unshift({
+      type: "section-header",
+      text: `${fallbackHeader.number}  ${fallbackHeader.title}`,
+    });
+  }
+
+  const logicalWidth = 794;
+  const scale = 1.5;
+  const padding = 24;
+  const lineHeight = 18;
+  const tablePadding = 9;
+  const contentWidth = logicalWidth - padding * 2;
+  const measureCanvas = document.createElement("canvas");
+  const measure = measureCanvas.getContext("2d");
+  const font = "12px Arial, sans-serif";
+  const headerFont = "bold 12px Arial, sans-serif";
+  const output = [];
+  let y = padding;
+
+  function wrapText(text, maxWidth, useFont = font) {
+    measure.font = useFont;
+    const lines = [];
+    let line = "";
+    for (const word of text.split(/\s+/)) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && measure.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  for (const block of blocks) {
+    if (block.type === "space") {
+      y += 4;
+      continue;
+    }
+    if (block.type === "section-header") {
+      output.push({ ...block, y, height: 42 });
+      y += 50;
+      continue;
+    }
+    if (block.type === "group-header") {
+      output.push({ ...block, y, height: 34 });
+      y += 38;
+      continue;
+    }
+    if (block.type === "total") {
+      output.push({ ...block, y, height: 40 });
+      y += 46;
+      continue;
+    }
+    if (block.type === "text") {
+      const lines = wrapText(block.text, contentWidth);
+      output.push({ type: "text", lines, y });
+      y += Math.max(1, lines.length) * lineHeight + 3;
+      continue;
+    }
+
+    const columnCount = Math.max(1, ...block.rows.map((row) => row.cells.length));
+    const columnWidth = contentWidth / columnCount;
+    for (const [rowIndex, row] of block.rows.entries()) {
+      const cellLines = Array.from({ length: columnCount }, (_, columnIndex) =>
+        wrapText(
+          row.cells[columnIndex]?.text || "",
+          columnWidth - tablePadding * 2,
+          row.isHeader ? headerFont : font,
+        ),
+      );
+      const rowHeight =
+        Math.max(1, ...cellLines.map((lines) => lines.length)) *
+          lineHeight +
+        tablePadding * 2;
+      output.push({
+        type: "table-row",
+        row: row.cells,
+        alignments: row.cells.map((cell) => cell.align),
+        isHeader: row.isHeader,
+        cellLines,
+        rowIndex,
+        columnCount,
+        columnWidth,
+        rowHeight,
+        y,
+      });
+      y += rowHeight;
+    }
+    y += 8;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = logicalWidth * scale;
+  canvas.height = Math.max(120, Math.ceil((y + padding) * scale));
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, logicalWidth, canvas.height / scale);
+
+  for (const item of output) {
+    if (item.type === "section-header") {
+      const gradient = ctx.createLinearGradient(
+        padding,
+        item.y,
+        padding + contentWidth,
+        item.y + item.height,
+      );
+      gradient.addColorStop(0, "#6b2d0f");
+      gradient.addColorStop(1, "#c8641a");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(padding, item.y, contentWidth, item.height);
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(padding, item.y, contentWidth, item.height);
+      ctx.fillStyle = "#fff";
+      ctx.font = "900 17px Arial, sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.fillText(item.text, padding + 14, item.y + item.height / 2);
+      continue;
+    }
+    if (item.type === "group-header") {
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(padding, item.y, contentWidth, item.height);
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(padding, item.y, contentWidth, item.height);
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 14px Arial, sans-serif";
+      ctx.fillStyle = "#2c3e50";
+      ctx.fillText(item.name, padding + 12, item.y + item.height / 2);
+      ctx.font = "bold 14px Arial, sans-serif";
+      ctx.fillStyle = "#1d4ed8";
+      const sourceWidth = ctx.measureText(item.source).width;
+      ctx.fillText(
+        item.source,
+        padding + contentWidth - sourceWidth - 12,
+        item.y + item.height / 2,
+      );
+      continue;
+    }
+    if (item.type === "total") {
+      ctx.fillStyle = "#374151";
+      ctx.fillRect(padding, item.y, contentWidth, item.height);
+      ctx.textBaseline = "middle";
+      ctx.font = "bold 13px Arial, sans-serif";
+      ctx.fillStyle = "#cbd5e1";
+      ctx.fillText(item.label, padding + 14, item.y + item.height / 2);
+      ctx.font = "900 20px Arial, sans-serif";
+      ctx.fillStyle = "#fff";
+      const totalWidth = ctx.measureText(item.value).width;
+      ctx.fillText(
+        item.value,
+        padding + contentWidth - totalWidth - 14,
+        item.y + item.height / 2,
+      );
+      continue;
+    }
+    if (item.type === "text") {
+      ctx.fillStyle = "#1f2937";
+      ctx.font = font;
+      ctx.textBaseline = "top";
+      item.lines.forEach((line, index) =>
+        ctx.fillText(line, padding, item.y + index * lineHeight),
+      );
+      continue;
+    }
+
+    const x = padding;
+    ctx.fillStyle = item.isHeader
+      ? "#111827"
+      : item.rowIndex % 2 === 0
+        ? "#f8fafc"
+        : "#fff";
+    ctx.fillRect(x, item.y, contentWidth, item.rowHeight);
+    ctx.strokeStyle = "#9ca3af";
+    ctx.lineWidth = 0.6;
+    ctx.strokeRect(x, item.y, contentWidth, item.rowHeight);
+
+    for (let columnIndex = 0; columnIndex < item.columnCount; columnIndex++) {
+      const cellX = x + columnIndex * item.columnWidth;
+      if (columnIndex > 0) {
+        ctx.beginPath();
+        ctx.moveTo(cellX, item.y);
+        ctx.lineTo(cellX, item.y + item.rowHeight);
+        ctx.stroke();
+      }
+      ctx.fillStyle = item.isHeader ? "#fff" : "#1f2937";
+      ctx.font = item.isHeader ? headerFont : font;
+      ctx.textBaseline = "top";
+      ctx.textAlign = item.isHeader ? "center" : item.alignments[columnIndex];
+      item.cellLines[columnIndex].forEach((line, lineIndex) =>
+        ctx.fillText(
+          line,
+          item.alignments[columnIndex] === "left" && !item.isHeader
+            ? cellX + tablePadding
+            : cellX + item.columnWidth / 2,
+          item.y + tablePadding + lineIndex * lineHeight,
+        ),
+      );
+    }
+  }
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  return canvas;
+}
+
+function describeImageSource(src) {
+  if (src.startsWith("data:")) return "data " + src.slice(0, 40);
+  if (/^https?:/i.test(src) && !src.startsWith(location.origin)) return "CROSS-ORIGIN " + src.slice(0, 120);
+  return "same-origin/relative " + src.slice(0, 60);
+}
+
 async function generateEveningPdf(payload, onProgress) {
+  lastPdfImageSources = [];
+  pdfUsedTextFallback = false;
   await ensurePdfDeps();
   const logoBase64 = await getLogoBase64();
   const { jsPDF } = window.jspdf;
@@ -1398,7 +1630,7 @@ async function generateEveningPdf(payload, onProgress) {
   _secNum = 0;
 
   // ── helper: render one HTML chunk, return canvas ──────────────────────────
-  async function renderChunk(html) {
+  async function renderChunk(html, fallbackHeader = null) {
     const wrap = document.createElement("div");
     Object.assign(wrap.style, {
       position: "relative",
@@ -1428,29 +1660,24 @@ async function generateEveningPdf(payload, onProgress) {
 
     document.body.appendChild(wrap);
 
-    try {
-      const imgs = Array.from(wrap.querySelectorAll("img"));
-      await Promise.all(
-        imgs.map(async (img) => {
-          if (!img.complete) {
-            await new Promise((resolve) => {
-              img.onload = resolve;
-              img.onerror = resolve;
-            });
-          }
-          if (!img.naturalWidth || !img.naturalHeight) {
-            throw new Error("A report image could not be loaded for the PDF.");
-          }
-          if (!img.src.startsWith("data:image/")) {
-            throw new Error(
-              "The PDF contains an external image that Safari cannot safely render. Re-add the photo and try again.",
-            );
-          }
-        }),
-      );
-      await new Promise((r) => setTimeout(r, 150));
+    // Wait for ALL images including watermark
+    const imgs = Array.from(wrap.querySelectorAll("img"));
+    lastPdfImageSources.push(...imgs.map((img) => describeImageSource(img.getAttribute("src") || "")));
+    lastPdfImageSources.push("svg elements in chunk: " + wrap.querySelectorAll("svg").length);
+    await Promise.all(
+      imgs.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise((res) => {
+              img.onload = res;
+              img.onerror = res;
+            }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 150));
 
-      return await window.html2canvas(wrap, {
+    const captureWrap = () =>
+      window.html2canvas(wrap, {
         scale: 1.5,
         useCORS: true,
         allowTaint: false,
@@ -1459,9 +1686,53 @@ async function generateEveningPdf(payload, onProgress) {
         scrollX: 0,
         scrollY: 0,
       });
-    } finally {
-      wrap.remove();
+    let canvas = await captureWrap();
+    let exportError = getCanvasExportError(canvas);
+    if (exportError) {
+      lastPdfImageSources.push(
+        `canvas export failed: ${exportError.name}: ${exportError.message}`,
+      );
+      // Keep the photos: hide the images, capture the layout, then draw each
+      // image back onto the clean canvas at its on-screen position and size.
+      const wrapRect = wrap.getBoundingClientRect();
+      const placed = Array.from(wrap.querySelectorAll("img")).map((img) => ({
+        img,
+        rect: img.getBoundingClientRect(),
+      }));
+      placed.forEach(({ img }) => (img.style.visibility = "hidden"));
+      lastPdfImageSources.push(
+        "retry: images hidden during capture and drawn back onto the canvas",
+      );
+      canvas = await captureWrap();
+      exportError = getCanvasExportError(canvas);
+      if (!exportError) {
+        const ctx = canvas.getContext("2d");
+        const scale = canvas.width / wrapRect.width;
+        placed.forEach(({ img, rect }) => {
+          if (!img.naturalWidth) return;
+          ctx.drawImage(
+            img,
+            (rect.left - wrapRect.left) * scale,
+            (rect.top - wrapRect.top) * scale,
+            rect.width * scale,
+            rect.height * scale,
+          );
+        });
+      }
+      if (exportError) {
+        lastPdfImageSources.push(
+          `image-free canvas export failed: ${exportError.name}: ${exportError.message}`,
+        );
+        pdfUsedTextFallback = true;
+        lastPdfImageSources.push(
+          "fallback: generated this section as text; embedded photos may be omitted",
+        );
+        wrap.remove();
+        return renderPdfTextFallback(html, fallbackHeader);
+      }
     }
+    document.body.removeChild(wrap);
+    return canvas;
   }
 
   // ── helper: add one canvas to PDF, paginating if too tall ─────────────────
@@ -1528,7 +1799,7 @@ async function generateEveningPdf(payload, onProgress) {
         );
 
       pdf.addImage(
-        await canvasToJpegBytes(slice),
+        slice.toDataURL("image/jpeg", 0.78),
         "JPEG",
         MARGIN,
         cursorY,
@@ -1568,9 +1839,8 @@ async function generateEveningPdf(payload, onProgress) {
   <div class="cover">
     <div class="cover-top-bar">
       <div style="display:flex;align-items:center;gap:14px;">
-        ${logoBase64 ? `<img src="${logoBase64}"
-  style="width:48px;height:48px;object-fit:contain;flex-shrink:0;"
-  >` : ""}
+        <img src="${logoBase64 || ""}"
+  style="width:48px;height:48px;object-fit:contain;flex-shrink:0;${!logoBase64 ? "display:none" : ""}">
         <div>
           <div class="brand-name">DIP Projects</div>
           <div class="brand-sub">Civil Project Management Consultants</div>
@@ -1666,7 +1936,10 @@ async function generateEveningPdf(payload, onProgress) {
             ? `<div>${sectionHeaderHtml}${pairBody}</div>`
             : `<div>${pairBody}</div>`;
 
-        const pairCanvas = await renderChunk(chunkHtml);
+        const pairCanvas = await renderChunk(
+          chunkHtml,
+          pi === 0 ? { number: _secNum, title } : null,
+        );
         const PX_PER_MM = pairCanvas.width / CONTENT_W;
         ensureSpaceFor(pairCanvas.height / PX_PER_MM);
         await addCanvasToPdf(pairCanvas);
@@ -1704,7 +1977,10 @@ async function generateEveningPdf(payload, onProgress) {
             ? `<div>${sectionHeaderHtml}${groupBody}</div>`
             : `<div>${groupBody}</div>`;
 
-        const groupCanvas = await renderChunk(chunkHtml);
+        const groupCanvas = await renderChunk(
+          chunkHtml,
+          gi === 0 ? { number: _secNum, title } : null,
+        );
         const PX_PER_MM = groupCanvas.width / CONTENT_W;
         ensureSpaceFor(groupCanvas.height / PX_PER_MM);
         await addCanvasToPdf(groupCanvas);
@@ -1722,7 +1998,10 @@ async function generateEveningPdf(payload, onProgress) {
         <div class="pdf-sec-body">${body}</div>
     </div>`;
       onProgress(`Rendering: ${title}…`);
-      const canvas = await renderChunk(secHtml);
+      const canvas = await renderChunk(secHtml, {
+        number: _secNum,
+        title,
+      });
       await addCanvasToPdf(canvas);
     }
   }
@@ -1732,7 +2011,8 @@ async function generateEveningPdf(payload, onProgress) {
   onProgress("Building thank you page…");
   const tyHtml = `
   <div class="ty-page" style="min-height:900px;">
-    ${logoBase64 ? `<img src="${logoBase64}" class="ty-logo">` : ""}
+    <img src="${logoBase64 || ""}" class="ty-logo"
+      style="${!logoBase64 ? "display:none;" : ""}">
     <div class="ty-line"></div>
     <div class="ty-title">Thank You</div>
     <div class="ty-sub">This report has been prepared to ensure transparency, quality, and continuous improvement at the project site.</div>
@@ -1745,7 +2025,7 @@ async function generateEveningPdf(payload, onProgress) {
   const tyHeightMM = Math.min(tyCanvas.height / PX_PER_MM, A4_H - MARGIN * 2);
   const tyY = (A4_H - tyHeightMM) / 2;
   pdf.addImage(
-    await canvasToJpegBytes(tyCanvas),
+    tyCanvas.toDataURL("image/jpeg", 0.78),
     "JPEG",
     MARGIN,
     tyY,
@@ -4216,6 +4496,7 @@ function DprForm({ user }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitStep, setSubmitStep] = useState("");
   const [submitDetail, setSubmitDetail] = useState("");
+  const [errorDetail, setErrorDetail] = useState(null);
   const [toast, setToast] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [pdfUrl, setPdfUrl] = useState(null);
@@ -4540,7 +4821,7 @@ function DprForm({ user }) {
       setSubmitted(true);
       draftOpenedRef.current = false;
     } catch (err) {
-      showToast("err", `Saving morning report: ${err.message || "Unknown error"}`, 10000);
+      showToast("err", err.message, 10000);
     }
     setSubmitting(false);
   };
@@ -4568,12 +4849,11 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
       return;
     }
     setSubmitting(true);
+    setErrorDetail(null);
     const payload = collectPayload();
-    let activeStep = "preparing report";
     try {
       const photoFolder = `${buildSiteDatePath(date)}/dpr`;
 
-      activeStep = "uploading work photos";
       setSubmitStep("photos");
       setSubmitDetail(`Uploading ${photos.length} photos…`);
       const uploadedPhotos = await uploadBatch(photos, async (ph, i) => {
@@ -4583,9 +4863,8 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         const url = await uploadPhotoToSupabase(ph.data, site, path);
         return { ...ph, supabaseUrl: url, storagePath: path };
       });
-      payload.photos = await preparePdfPhotos(uploadedPhotos);
+      payload.photos = uploadedPhotos;
 
-      activeStep = "uploading checklist photos";
       setSubmitDetail(`Uploading ${checklistPhotos.length} checklist photos…`);
       const uploadedChecklistPhotos = await uploadBatch(checklistPhotos, async (ph, i) => {
         const cap = (ph.caption || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
@@ -4594,11 +4873,10 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         const url = await uploadPhotoToSupabase(ph.data, site, path);
         return { ...ph, supabaseUrl: url, storagePath: path };
       });
-      payload.checklistPhotos = await preparePdfPhotos(uploadedChecklistPhotos);
+      payload.checklistPhotos = uploadedChecklistPhotos;
 
       let uploadedVisitPhotos = [];
       if (visitMode === "photo" && visitPhotos.length) {
-        activeStep = "uploading site-visit photos";
         setSubmitDetail(`Uploading ${visitPhotos.length} site visit photos…`);
         uploadedVisitPhotos = await uploadBatch(visitPhotos, async (ph, i) => {
           if (ph.supabaseUrl && !ph.data) return ph;
@@ -4610,29 +4888,24 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         });
       }
       payload.visitMode = visitMode;
-      payload.visitPhotos =
-        visitMode === "photo" ? await preparePdfPhotos(uploadedVisitPhotos) : [];
+      payload.visitPhotos = visitMode === "photo" ? uploadedVisitPhotos : [];
       if (visitMode === "photo") payload.visitors = [];
 
       if (materialReq.length) {
-        activeStep = "submitting material requirements";
         setSubmitDetail("Submitting material requirements…");
         await submitMaterialRequirements(materialReq, site, engineer);
       }
 
-      activeStep = "rendering PDF";
       setSubmitStep("pdf");
       setSubmitDetail("Building document…");
       const { blob, fileName } = await generateEveningPdf(payload, (msg) =>
         setSubmitDetail(msg),
       );
 
-      activeStep = "uploading PDF to storage";
       setSubmitStep("pdfup");
       setSubmitDetail(fileName);
       const pdfPublicUrl = await uploadPdfToSupabase(blob, fileName, site, date);
 
-      activeStep = "saving report";
       setSubmitStep("db");
       setSubmitDetail("Writing to dpr_reports…");
       const photosForDb = uploadedPhotos.map((p) => ({
@@ -4667,13 +4940,36 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         photo_folder: photoFolder,
       });
 
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+
       setPdfUrl(pdfPublicUrl);
       setMaterialReq([]);
       setSubmitted(true);
+      if (pdfUsedTextFallback) {
+        showToast(
+          "err",
+          "DPR saved, but Safari required a text-only PDF fallback for some sections. Photos are still stored with the report.",
+          12000,
+        );
+      }
       draftOpenedRef.current = false;
     } catch (err) {
       console.error(err);
-      showToast("err", `${activeStep}: ${err.message || "Unknown error"}`, 10000);
+      showToast("err", err.message, 10000);
+      setErrorDetail({
+        name: err?.name || "Error",
+        message: err?.message || String(err),
+        stack: err?.stack || "(no stack)",
+        userAgent: navigator.userAgent,
+        images: lastPdfImageSources,
+      });
     }
     setSubmitting(false);
     draftOpenedRef.current = false;
@@ -4885,7 +5181,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
 
       setSubmitted(true);
     } catch (err) {
-      showToast("err", `Saving morning report: ${err.message || "Unknown error"}`, 10000);
+      showToast("err", err.message, 10000);
     }
     setSubmitting(false);
   };
@@ -5480,6 +5776,18 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         </button>
       </div>
 
+      {errorDetail && (
+        <div style={{ margin: "16px 0", padding: 12, border: "1px solid #dc2626", borderRadius: 8, background: "#fef2f2", fontSize: 12 }}>
+          <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Error details (send this to the developer)</div>
+          <div><b>Name:</b> {errorDetail.name}</div>
+          <div><b>Message:</b> {errorDetail.message}</div>
+          <div style={{ marginTop: 6 }}><b>PDF images:</b></div>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 160, overflow: "auto" }}>{(errorDetail.images || []).join("\n")}</pre>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 220, overflow: "auto", marginTop: 6 }}>{errorDetail.stack}</pre>
+          <button type="button" onClick={() => navigator.clipboard?.writeText(JSON.stringify(errorDetail, null, 2))} style={{ marginTop: 6 }}>Copy details</button>
+          <button type="button" onClick={() => setErrorDetail(null)} style={{ marginTop: 6, marginLeft: 8 }}>Dismiss</button>
+        </div>
+      )}
       {submitting && reportType === "evening" && (
         <SubmitOverlay currentStep={submitStep} detail={submitDetail} />
       )}
