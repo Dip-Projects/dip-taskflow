@@ -4591,15 +4591,6 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         photo_folder: photoFolder,
       });
 
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = fileName;
-      a.style.display = "none";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-
       setPdfUrl(pdfPublicUrl);
       setMaterialReq([]);
       setSubmitted(true);
