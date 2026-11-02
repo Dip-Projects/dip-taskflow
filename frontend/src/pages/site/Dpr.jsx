@@ -1751,10 +1751,9 @@ async function dbInsert(table, payload) {
  * New rows use a random signed-int4 id so we never depend on the sequence.
  */
 function randomDprReportId() {
-  const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
+  const randomValue = Math.floor(Math.random() * 0x1_0000_0000);
   // Stay in positive int4, skip the low serial range (1..~50k) used historically
-  return 50_000 + (buf[0] % 2_097_433_647);
+  return 50_000 + (randomValue % 2_097_433_647);
 }
 
 async function saveDprReport({
