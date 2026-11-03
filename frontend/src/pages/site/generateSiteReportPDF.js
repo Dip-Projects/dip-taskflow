@@ -193,7 +193,7 @@ async function renderChunk(html) {
   });
 
   const style = document.createElement("style");
-  style.textContent = SVR_PDF_CSS;
+  style.textContent = SVR_PDF_CSS + "\n#pdf-capture-root, #pdf-capture-root * { box-shadow:none !important; text-shadow:none !important; filter:none !important; outline:none !important; transition:none !important; animation:none !important; }";
   wrap.appendChild(style);
 
   const inner = document.createElement("div");
@@ -202,6 +202,7 @@ async function renderChunk(html) {
   inner.innerHTML = html;
   wrap.appendChild(inner);
 
+  wrap.id = "pdf-capture-root";
   document.body.appendChild(wrap);
 
   const imgs = Array.from(wrap.querySelectorAll("img"));

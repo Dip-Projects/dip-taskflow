@@ -1650,11 +1650,12 @@ async function generateEveningPdf(payload, onProgress) {
       colorScheme: "light",
     });
     wrap.setAttribute("data-theme", "light");
+    wrap.id = "pdf-capture-root";
     wrap.style.position = "fixed"; // keep off-screen
 
     // CSS
     const style = document.createElement("style");
-    style.textContent = PDF_CSS;
+    style.textContent = PDF_CSS + "\n#pdf-capture-root, #pdf-capture-root * { box-shadow:none !important; text-shadow:none !important; filter:none !important; outline:none !important; transition:none !important; animation:none !important; }";
     wrap.appendChild(style);
 
     // Content
