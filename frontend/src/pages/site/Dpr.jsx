@@ -1307,10 +1307,22 @@ async function getLogoBase64() {
     img.src = LOGO_URL; // ← uses the imported local asset
   });
 }
+//Ios Error--------------------------------------------------------
 
+//--------------------------------------------------------------------------------
 let lastPdfImageSources = [];
-let pdfUsedTextFallback = false;
+function getCanvasExportError(canvas) {
+  try {
+    if (canvas.toDataURL("image/jpeg", 0.5) === "data:,") {
+      return new Error("Canvas export returned an empty data URL.");
+    }
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
 
+let pdfUsedTextFallback = false;
 
 function renderPdfTextFallback(html, fallbackHeader = null) {
   const parsed = new DOMParser().parseFromString(html, "text/html");
