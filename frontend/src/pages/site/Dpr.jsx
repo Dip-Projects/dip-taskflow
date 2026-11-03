@@ -1,3 +1,4 @@
+import { captureWithoutTheme } from "../../lib/pdfCapture";
 import { useState, useEffect, useRef } from "react";
 
 import LOGO_URL from "../../assets/logo.png";
@@ -1684,7 +1685,7 @@ async function generateEveningPdf(payload, onProgress) {
     await new Promise((r) => setTimeout(r, 150));
 
     const captureWrap = () =>
-      window.html2canvas(wrap, {
+      captureWithoutTheme(() => window.html2canvas(wrap, {
         scale: 1.5,
         useCORS: true,
         allowTaint: false,
@@ -1692,7 +1693,7 @@ async function generateEveningPdf(payload, onProgress) {
         windowWidth: 794,
         scrollX: 0,
         scrollY: 0,
-      });
+      }));
     let canvas = await captureWrap();
     let exportError = getCanvasExportError(canvas);
     if (exportError) {

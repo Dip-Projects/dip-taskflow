@@ -1,3 +1,4 @@
+import { captureWithoutTheme } from "../../lib/pdfCapture";
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
 // ─── generateSiteReportPDF.js ─────────────────────────────────────────────────
 // Mirrors DPR.jsx's generateEveningPdf approach:
@@ -213,7 +214,7 @@ async function renderChunk(html) {
   ));
   await new Promise(r => setTimeout(r, 150));
 
-  const canvas = await window.html2canvas(wrap, {
+  const canvas = await captureWithoutTheme(() => window.html2canvas(wrap, {
     scale:           2,
     useCORS:         true,
     allowTaint:      true,
@@ -221,7 +222,7 @@ async function renderChunk(html) {
     windowWidth:     794,
     scrollX:         0,
     scrollY:         0,
-  });
+  }));
   document.body.removeChild(wrap);
   return canvas;
 }
