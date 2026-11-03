@@ -1311,16 +1311,6 @@ async function getLogoBase64() {
 let lastPdfImageSources = [];
 let pdfUsedTextFallback = false;
 
-function getCanvasExportError(canvas) {
-  try {
-    if (canvas.toDataURL("image/jpeg", 0.5) === "data:,") {
-      return new Error("Canvas export returned an empty data URL.");
-    }
-    return null;
-  } catch (error) {
-    return error;
-  }
-}
 
 function renderPdfTextFallback(html, fallbackHeader = null) {
   const parsed = new DOMParser().parseFromString(html, "text/html");

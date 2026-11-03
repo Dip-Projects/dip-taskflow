@@ -1278,7 +1278,7 @@ function LeaveApprovals({ user }) {
                       </span>
                     )}
                 </div>
-
+                
                 {reasons.length > 0 && (
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
                     {reasons.map(r => (
@@ -1786,6 +1786,7 @@ function WeeklyReport() {
     </div>
   );
 }
+
 // Merge a new rejection entry into the existing rejection_reason array (max 2: one per slot)
 function WeeklyPlanReport({ user }) {
   const [rows, setRows] = useState([]);
