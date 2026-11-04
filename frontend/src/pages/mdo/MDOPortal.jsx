@@ -774,9 +774,8 @@ async function resolveSiteEngineersForSites(sites) {
 async function fetchAttendanceLog(sites, from, to) {
   if (!from || !to) return [];
 
-  const people = await resolveSiteEngineersForSites(sites); // ← changed
-  const nameByUsername = Object.fromEntries(people);
-  const usernames = [...people.keys()];
+  // Same roster as the other MDO reports (department-aware, case-insensitive)
+  const engineers = await resolveAllSiteEngineers(sites);
   const dates = dateRange(from, to);
 
   const { data, error } = await supabase
@@ -788,16 +787,16 @@ async function fetchAttendanceLog(sites, from, to) {
 
   const byKey = new Map();
   (data || []).forEach((r) => {
-    byKey.set(`${r.user_name}__${r.date}`, r);
+    byKey.set(`${normKey(r.user_name)}__${r.date}`, r);
   });
 
   const rows = [];
-  usernames.forEach((uname) => {
+  engineers.forEach((e) => {
     dates.forEach((d) => {
-      const rec = byKey.get(`${uname}__${d}`);
+      const rec = byKey.get(`${normKey(e.username)}__${d}`);
       rows.push({
         date: d,
-        name: nameByUsername[uname] || uname,
+        name: e.name || e.username,
         clockIn: rec?.clock_in || null,
         clockOut: rec?.clock_out || null,
         late: rec ? isLateAttendance(rec) : false,

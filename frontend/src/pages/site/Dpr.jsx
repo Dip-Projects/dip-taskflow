@@ -1,5 +1,5 @@
 import { captureWithoutTheme } from "../../lib/pdfCapture";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 import LOGO_URL from "../../assets/logo.png";
 import { supabase, supabaseUrl, supabaseAnonKey } from '../../lib/supabase';
@@ -2245,7 +2245,7 @@ async function getManpowerTypesForScope(rawScope) {
   ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
-// REPLACE getManpowerTypesByCategory
+
 async function getManpowerTypesByCategory(category) {
   if (!category) return [];
   const { data } = await supabase
