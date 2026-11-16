@@ -3533,7 +3533,7 @@ import { showConfirm } from '../../lib/confirmDialog';
       try {
         await api(`/tasks/${taskId}/status`, { method: 'PATCH', body: { status, status_note } });
         showToast('Task updated ✅', 'success'); reloadCurrentTaskView(); refreshNavBadges();
-        if (status === 'Completed') window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
+        
       } catch (err) { showToast(err.message, 'error'); }
     }
 
@@ -4118,7 +4118,7 @@ import { showConfirm } from '../../lib/confirmDialog';
       try {
         await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: { approved: true } });
         showToast('Task verified ✅', 'success');
-        window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
+        
         loadVerifications();
       } catch (err) { showToast(err.message, 'error'); }
     }
@@ -9557,7 +9557,7 @@ import { showConfirm } from '../../lib/confirmDialog';
           close();
           await refresh();
           if (updated.status === 'Completed') {
-            window.dispatchEvent(new Event('festive:verified')); // Diwali fireworks; see src/festive
+           
             showToast(
               photoFile ? 'Done — photo saved ✅' : 'Task marked as done ✅',
               'success'
