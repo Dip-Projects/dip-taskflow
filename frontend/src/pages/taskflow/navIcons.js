@@ -33,6 +33,7 @@ export const NAV_ICONS = {
   'mis-report': svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
   'time-dashboard': svg('<path d="M3.5 16a8.5 8.5 0 1 1 17 0"/><path d="M12 16l4-4M7 20h10"/>'),
   'delay-report': svg('<path d="M10.3 4.2 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 10v4M12 17.5v.01"/>'),
+  'rating-report': svg('<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>'),
   'emp-report': svg('<rect x="2.5" y="5" width="19" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.5 16c.6-1.5 1.9-2.3 3.5-2.3s2.9.8 3.5 2.3M15 10h3M15 14h3"/>'),
   fms: svg('<rect x="2.5" y="3.5" width="7" height="5" rx="1"/><rect x="14.5" y="3.5" width="7" height="5" rx="1"/><rect x="8.5" y="15.5" width="7" height="5" rx="1"/><path d="M6 8.5V12h6v3.5M18 8.5V12h-6"/>'),
 

@@ -1,6 +1,7 @@
 import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from './checklist/checklistBus';
 import { NAV_ICONS, tfIcon } from './navIcons';
 import { showConfirm } from '../../lib/confirmDialog';
+import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './ratingModal';
 
   /**
    * Adapted from backend/legacy/app.js for React (no iframe).
@@ -1351,6 +1352,8 @@ import { showConfirm } from '../../lib/confirmDialog';
       if (who === 'client') return false;
       // Admin always keeps Add / All / Overdue menus
       if (who === 'admin' && (key === 'add' || key === 'all' || key === 'overdue')) return true;
+      // Rating Report: admin always; everyone else only if MIS enabled it in Who sees what
+      if (key === 'rating-report') return who === 'admin' || (!!row && row[who] === true);
       // Per-user Add task flag (Permissions) overrides role map for "add"
       if (key === 'add' && (state.user?.role === 'admin' || state.user?.can_add_task)) return true;
       if (!row) return true;
@@ -1444,6 +1447,7 @@ import { showConfirm } from '../../lib/confirmDialog';
         || visOk('time-dashboard') && (isAdmin || isMis)
         || visOk('delay-report') && (isAdmin || isMis)
         || visOk('fms') && (isAdmin || isMis)
+        || visOk('rating-report')
         || isChirag;
 
       if (showAdminBlock) {
@@ -1463,6 +1467,7 @@ import { showConfirm } from '../../lib/confirmDialog';
         if (visOk('time-dashboard') && (isAdmin || isMis)) adminBtns.push(makeNavButton('time-dashboard', 'Work & Verification'));
         if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('delay-report', 'Emp Delay Report'));
         if (visOk('delay-report') && (isAdmin || isMis)) adminBtns.push(makeNavButton('emp-report', 'Emp Report'));
+        if (visOk('rating-report')) adminBtns.push(makeNavButton('rating-report', 'Rating Report'));
         //if (isChirag) adminBtns.push(makeNavButton('mdo-delay-report', 'MDO Task Delay Report'));
         if (visOk('fms') && (isAdmin || isMis)) adminBtns.push(makeNavButton('fms', 'FMS tracker'));
         appendCollapsibleNav(
@@ -1532,7 +1537,7 @@ import { showConfirm } from '../../lib/confirmDialog';
       sites: 'administration', clients: 'administration', masterdata: 'administration', permissions: 'administration',
       'task-checklist': 'administration',
       'daily-report': 'administration', 'mis-report': 'administration',
-      'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
+      'time-dashboard': 'administration', 'delay-report': 'administration', 'emp-report': 'administration', 'rating-report': 'administration', 'mdo-delay-report': 'administration', fms: 'administration',
       'site-report': 'reports', 'my-reports': 'reports', 'monthly-report': 'reports',
       visibility: 'mis-support',
       applyleave: 'leave', buddyrequests: 'leave', leaveapprovals: 'leave',
@@ -1870,6 +1875,7 @@ import { showConfirm } from '../../lib/confirmDialog';
       if (viewKey === 'time-dashboard') loadTimeDashboard();
       if (viewKey === 'delay-report') loadDelayReport();
       if (viewKey === 'emp-report') loadEmpReport();
+      if (viewKey === 'rating-report') loadRatingReport();
       //if (viewKey === 'mdo-delay-report') loadMdoDelayReport();
       if (viewKey === 'fms') loadFms();
       if (viewKey === 'ai-bot') loadAiBot();
@@ -3269,7 +3275,16 @@ import { showConfirm } from '../../lib/confirmDialog';
         return `<div class="verify-badge rejected">Correction${task.verification_note ? `: ${escapeHtml(task.verification_note)}` : ''}</div>`;
       }
       if (task.verification_status === 'Verified') {
-        return `<div class="verify-badge verified">✅ Verified by <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong></div>`;
+        const stars = task.rating
+          ? `<div style="margin-top:2px;color:#f5a623;font-size:0.95rem" title="Overall rating ${task.rating}/5">${ratingStarsText(task.rating)} <span style="color:#666;font-size:0.75rem">${task.rating}/5</span></div>`
+          : '';
+        const qa = task.rating_answers
+          ? `<div style="font-size:0.72rem;color:#666;margin-top:2px">${RATING_QUESTIONS.map((q) => `${escapeHtml(q.short || q.label)}: ${Number(task.rating_answers[q.key]) || '—'}/5`).join(' · ')}</div>`
+          : '';
+        const fb = task.rating_feedback
+          ? `<div style="font-size:0.78rem;margin-top:3px">💬 ${escapeHtml(task.rating_feedback)}</div>`
+          : '';
+        return `<div class="verify-badge verified">✅ Verified by <strong>${escapeHtml(task.verifier?.full_name ?? '—')}</strong>${stars}${qa}${fb}</div>`;
       }
       return '';
     }
@@ -3987,13 +4002,12 @@ import { showConfirm } from '../../lib/confirmDialog';
           className: 'verification-menu-verify',
           icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
           onClick: async () => {
-            const ok = await showConfirm({
-              title: 'Verify task',
-              message: 'Mark this task as Verified?',
-              yesText: 'Yes, verify',
-              noText: 'No',
+            const review = await openVerifyRatingModal({
+              description: task.description,
+              assignee: task.assigned_to_user?.full_name,
+              project: task.project?.name,
             });
-            if (ok) verifyApprove(task.id);
+            if (review) verifyApprove(task.id, review);
           },
         },
         {
@@ -4114,11 +4128,15 @@ import { showConfirm } from '../../lib/confirmDialog';
       appendForwardVerificationBtn(actionsEl, task);
     }
 
-    async function verifyApprove(taskId) {
+    async function verifyApprove(taskId, review) {
       try {
-        await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: { approved: true } });
-        showToast('Task verified ✅', 'success');
-        
+        const res = await api(`/tasks/${taskId}/verify`, { method: 'PATCH', body: review || { approved: true } });
+        showToast('Task verified & rated ✅', 'success');
+        if (review?.send_whatsapp) {
+          if (res?._feedbackWhatsapp?.ok) showToast('Feedback sent to employee on WhatsApp 📲', 'success');
+          else showToast('Verified. WhatsApp feedback was not delivered.', 'error');
+        }
+
         loadVerifications();
       } catch (err) { showToast(err.message, 'error'); }
     }
@@ -7819,7 +7837,7 @@ import { showConfirm } from '../../lib/confirmDialog';
         modules.forEach((mod) => {
           const tr = document.createElement('tr');
           const name = document.createElement('td');
-          const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
+          const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue' || mod.key === 'rating-report';
           name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${adminLocked ? ' · Admin always on; other roles editable' : ''
             }</div>`;
           tr.appendChild(name);
@@ -11500,6 +11518,112 @@ import { showConfirm } from '../../lib/confirmDialog';
 
       return html;
     }
+
+    // ─── Rating Report (verifier ratings per employee) ─────────────────────────
+    let _rrLast = null;
+    let _rrEmpFilled = false;
+
+    async function fillRatingReportEmployees() {
+      const sel = document.getElementById('rrEmployee');
+      if (!sel || _rrEmpFilled) return;
+      try {
+        const list = await api('/rating-report/employees');
+        sel.innerHTML = '<option value="">All employees</option>' +
+          (list || []).map((e) => `<option value="${escapeHtml(String(e.id))}">${escapeHtml(e.full_name)}</option>`).join('');
+        _rrEmpFilled = true;
+      } catch (_) { /* ignore */ }
+    }
+
+    function renderRatingReport(data) {
+      const s = data.summary || {};
+      const qs = data.questions || [];
+      const fmt = (v) => (v == null ? '—' : Number(v).toFixed(1));
+      const cards = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:10px 0">
+        <div class="mis-card"><strong>${s.total || 0}</strong><br><small>Tasks rated</small></div>
+        <div class="mis-card"><strong>${fmt(s.avg_rating)} ★</strong><br><small>Average rating</small></div>
+        <div class="mis-card"><strong>${s.low_ratings || 0}</strong><br><small>Low (1-2★)</small></div>
+      </div>`;
+      if (!s.total) return `${cards}<div class="empty-state">No rated tasks in this range.</div>`;
+      const empRows = (data.employees || []).map((e, i) => `<tr>
+        <td>${i + 1}</td><td><strong>${escapeHtml(e.employee)}</strong></td><td>${e.tasks_rated}</td>
+        <td style="color:#f5a623;white-space:nowrap">${ratingStarsText(Math.round(e.avg_rating || 0))} ${fmt(e.avg_rating)}</td>
+        ${qs.map((q) => `<td>${fmt(e.answers_avg?.[q.key])}</td>`).join('')}
+        <td>${e.low_ratings}</td></tr>`).join('');
+      const taskRows = (data.rows || []).map((r) => `<tr>
+        <td>${r.sr}</td><td>${escapeHtml(r.employee)}</td><td>${escapeHtml(r.project)}</td>
+        <td>${escapeHtml(r.description)}</td>
+        <td style="color:#f5a623;white-space:nowrap">${ratingStarsText(r.rating)}</td>
+        <td>${escapeHtml(r.feedback || '—')}</td><td>${escapeHtml(r.verifier)}</td>
+        <td>${escapeHtml(String(r.rated_at || '').slice(0, 10))}</td></tr>`).join('');
+      return `${cards}
+        <h3 style="margin:14px 0 6px">Employee-wise average</h3>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table"><thead><tr>
+          <th>#</th><th>Employee</th><th>Tasks</th><th>Avg</th>${qs.map((q) => `<th>${escapeHtml(q.label)}</th>`).join('')}<th>Low</th>
+        </tr></thead><tbody>${empRows}</tbody></table></div>
+        <h3 style="margin:18px 0 6px">Task-wise ratings</h3>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table"><thead><tr>
+          <th>#</th><th>Employee</th><th>Project</th><th>Task</th><th>Rating</th><th>Feedback</th><th>Verifier</th><th>Date</th>
+        </tr></thead><tbody>${taskRows}</tbody></table></div>`;
+    }
+
+    async function loadRatingReport() {
+      const body = document.getElementById('rrBody');
+      if (!body) return;
+      const pad = (n) => String(n).padStart(2, '0');
+      const now = new Date();
+      const fromEl = document.getElementById('rrFrom');
+      const toEl = document.getElementById('rrTo');
+      if (fromEl && !fromEl.value) fromEl.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+      if (toEl && !toEl.value) toEl.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      await fillRatingReportEmployees();
+      const from = fromEl?.value || '';
+      const to = toEl?.value || '';
+      const emp = document.getElementById('rrEmployee')?.value || '';
+      if (!from || !to) { body.innerHTML = '<div class="empty-state">Select From and To dates</div>'; return; }
+      body.innerHTML = '<div class="empty-state">Loading Rating Report…</div>';
+      try {
+        const qs = new URLSearchParams({ from, to });
+        if (emp) qs.set('employee_id', emp);
+        const data = await api(`/rating-report?${qs}`);
+        _rrLast = data;
+        body.innerHTML = renderRatingReport(data);
+      } catch (err) {
+        body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function printRatingReportPdf() {
+      const data = _rrLast;
+      if (!data?.rows) return showToast('Generate the report first', 'error');
+      const qs = data.questions || [];
+      const fmt = (v) => (v == null ? '-' : Number(v).toFixed(1));
+      downloadReportPdf({
+        title: 'Rating Report',
+        subtitle: `${data.from} → ${data.to} · ${data.summary?.total || 0} tasks rated · avg ${fmt(data.summary?.avg_rating)}/5`,
+        filename: `rating-report-${data.from}.pdf`,
+        sections: [
+          {
+            heading: 'Employee-wise average',
+            head: ['SR', 'Employee', 'Tasks', 'Avg', ...qs.map((q) => q.label), 'Low (1-2)'],
+            body: (data.employees || []).map((e, i) => [
+              String(i + 1), pdfCell(e.employee), String(e.tasks_rated), fmt(e.avg_rating),
+              ...qs.map((q) => fmt(e.answers_avg?.[q.key])), String(e.low_ratings),
+            ]),
+          },
+          {
+            heading: 'Task-wise ratings',
+            head: ['SR', 'Employee', 'Project', 'Task', 'Rating', 'Feedback', 'Verifier', 'Date'],
+            body: (data.rows || []).map((r) => [
+              String(r.sr), pdfCell(r.employee), pdfCell(r.project), pdfCell(r.description),
+              `${r.rating}/5`, pdfCell(r.feedback), pdfCell(r.verifier), String(r.rated_at || '').slice(0, 10),
+            ]),
+          },
+        ],
+      });
+    }
+
+    document.getElementById('rrGenBtn')?.addEventListener('click', loadRatingReport);
+    document.getElementById('rrPdfBtn')?.addEventListener('click', printRatingReportPdf);
 
     async function loadEmpReport() {
       const body = document.getElementById('erBody');

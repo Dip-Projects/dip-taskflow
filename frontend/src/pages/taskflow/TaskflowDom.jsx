@@ -1852,6 +1852,26 @@ export default function TaskflowDom() {
               <div id="erBody"></div>
             </section>
 
+            {/* RATING REPORT — verifier ratings, employee-wise average */}
+            <section id="view-rating-report" className="view" hidden={true}>
+              <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="view-heading" style={{ marginBottom: 0 }}>
+                  <h2 className="view-title">Rating Report</h2>
+                  <p className="view-sub">Ratings and feedback given by verifiers when tasks were verified. Employee-wise average and task-wise detail.</p>
+                </div>
+                <div className="mis-toolbar">
+                  <label className="mis-field"><span>From</span><input type="date" id="rrFrom" /></label>
+                  <label className="mis-field"><span>To</span><input type="date" id="rrTo" /></label>
+                  <label className="mis-field"><span>Employee</span>
+                    <select id="rrEmployee"><option value="">All employees</option></select>
+                  </label>
+                  <button type="button" id="rrGenBtn" className="primary-btn primary-btn-inline">🔄 Generate</button>
+                  <button type="button" id="rrPdfBtn" className="ghost-btn">⬇️ PDF</button>
+                </div>
+              </div>
+              <div id="rrBody"></div>
+            </section>
+
             {/* MDO TASK DELAY REPORT — Chirag Shah only */}
             <section id="view-mdo-delay-report" className="view" hidden={true}>
               <div className="view-header-row" style={{ flexWrap: 'wrap', gap: 12 }}>

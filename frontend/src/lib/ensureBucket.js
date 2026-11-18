@@ -1,4 +1,4 @@
-import { getToken } from './api';
+import { getToken, setSession } from './api';
 import { supabase } from './supabase';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
@@ -45,6 +45,24 @@ export function sanitizeStorageKey(path) {
     .join('/');
 }
 
+/** 401 from the upload endpoints = the login token is dead (expired / invalid).
+ *  Flag it so screens can show a clear "log in again" message instead of a
+ *  developer error. We do NOT wipe the session here, so a half-filled report
+ *  (photos, text) stays on screen while the user logs in again in another tab. */
+export const SESSION_EXPIRED_MESSAGE = 'Your login has expired. Please log in again, then try again.';
+
+function sessionExpiredError() {
+  const e = new Error(SESSION_EXPIRED_MESSAGE);
+  e.code = 'SESSION_EXPIRED';
+  return e;
+}
+
+/** Keep the sliding-session token fresh, same as api() does. */
+function keepTokenFresh(res) {
+  const fresh = res.headers.get('X-New-Token');
+  if (fresh) setSession(fresh);
+}
+
 let _sharedReady = false;
 
 async function sleep(ms) {
@@ -70,6 +88,8 @@ export async function ensureSiteBucket(site) {
     },
     body: JSON.stringify({ site: SITE_FILES_BUCKET, shared: true }),
   });
+  keepTokenFresh(res);
+  if (res.status === 401) throw sessionExpiredError();
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -100,6 +120,8 @@ async function uploadViaSignedUrl({ path, blob, contentType, bucket }) {
     },
     body: JSON.stringify({ path, bucket }),
   });
+  keepTokenFresh(res);
+  if (res.status === 401) throw sessionExpiredError();
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
@@ -164,6 +186,8 @@ export async function uploadViaApi({
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
+      keepTokenFresh(res);
+      if (res.status === 401) throw sessionExpiredError();
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

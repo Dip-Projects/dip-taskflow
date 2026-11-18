@@ -20,6 +20,7 @@ const MODULES = [
   { key: 'mis-report', label: 'MIS report', area: 'office' },
   { key: 'time-dashboard', label: 'Work & Verification', area: 'office' },
   { key: 'delay-report', label: 'Task Report', area: 'office' },
+  { key: 'rating-report', label: 'Rating Report', area: 'office' },
   { key: 'fms', label: 'FMS tracker', area: 'office' },
   { key: 'monthly-report', label: 'Monthly Report', area: 'office' },
   { key: 'applyleave', label: 'Apply leave', area: 'office' },
@@ -65,6 +66,7 @@ function defaultRow(key) {
     'mis-report': adminMis,
     'time-dashboard': adminMis,
     'delay-report': adminMis,
+    'rating-report': adminOnly,
     fms: adminMis,
     'monthly-report': { admin: true, mis: true, employee: true, site: false, site_head: false },
     applyleave: officeStaff,
@@ -103,7 +105,8 @@ function mergeMap(saved) {
   base.visibility = { admin: false, mis: true, employee: false, site: false, site_head: false };
   // Admin always keeps Add / All / Overdue. Other roles follow saved map
   // so MIS can grant "Add task" to anyone via Who sees what.
-  for (const k of ['add', 'all', 'overdue']) {
+  // Rating Report: admin always keeps it; MIS decides who else sees it.
+  for (const k of ['add', 'all', 'overdue', 'rating-report']) {
     base[k] = { ...(base[k] || {}), admin: true };
   }
   return base;

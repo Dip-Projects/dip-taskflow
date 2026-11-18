@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
+import { openVerifyRatingModal } from '../ratingModal';
 import './tfReact.css';
 
 export default function Verifications() {
@@ -28,10 +29,32 @@ export default function Verifications() {
   const act = async (id, action) => {
     setBusyId(id);
     try {
-        await api(`/tasks/${id}/${action}`, { method: 'PATCH', body: '{}' }); 
+      await api(`/tasks/${id}/${action}`, { method: 'PATCH', body: '{}' });
       await load();
     } catch (e) {
       alert(e.message || 'Action failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Verify now needs a mandatory rating + feedback.
+  const verify = async (t) => {
+    const review = await openVerifyRatingModal({
+      description: t.description,
+      assignee: t.assigned_to_user?.full_name,
+      project: t.project?.name,
+    });
+    if (!review) return;
+    setBusyId(t.id);
+    try {
+      const res = await api(`/tasks/${t.id}/verify`, { method: 'PATCH', body: review });
+      if (review.send_whatsapp && !res?._feedbackWhatsapp?.ok) {
+        alert('Task verified. WhatsApp feedback was not delivered.');
+      }
+      await load();
+    } catch (e) {
+      alert(e.message || 'Verify failed');
     } finally {
       setBusyId(null);
     }
@@ -57,7 +80,7 @@ export default function Verifications() {
             <button type="button" disabled={busyId === t.id} onClick={() => act(t.id, 'start-verification')}>
               Start
             </button>
-            <button type="button" disabled={busyId === t.id} onClick={() => act(t.id, 'verify')}>
+            <button type="button" disabled={busyId === t.id} onClick={() => verify(t)}>
               Verify
             </button>
           </div>

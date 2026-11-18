@@ -4504,6 +4504,7 @@ function DprForm({ user }) {
   const [submitStep, setSubmitStep] = useState("");
   const [submitDetail, setSubmitDetail] = useState("");
   const [errorDetail, setErrorDetail] = useState(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [toast, setToast] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [pdfUrl, setPdfUrl] = useState(null);
@@ -4857,6 +4858,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
     }
     setSubmitting(true);
     setErrorDetail(null);
+    setSessionExpired(false);
     const payload = collectPayload();
     try {
       const photoFolder = `${buildSiteDatePath(date)}/dpr`;
@@ -4969,6 +4971,10 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
       draftOpenedRef.current = false;
     } catch (err) {
       console.error(err);
+      if (err?.code === "SESSION_EXPIRED" || /session expired|login has expired/i.test(String(err?.message || ""))) {
+        // Dead login token — show a clear fix, not the developer error box.
+        setSessionExpired(true);
+      } else {
       showToast("err", err.message, 10000);
       setErrorDetail({
         name: err?.name || "Error",
@@ -4977,6 +4983,7 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         userAgent: navigator.userAgent,
         images: lastPdfImageSources,
       });
+      }
     }
     setSubmitting(false);
     draftOpenedRef.current = false;
@@ -5783,6 +5790,30 @@ async function uploadBatch(items, uploadFn, concurrency = 2) {
         </button>
       </div>
 
+      {sessionExpired && (
+        <div style={{ margin: "16px 0", padding: 14, border: "1px solid #f59e0b", borderRadius: 8, background: "#fffbeb", fontSize: 13, color: "#78350f" }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Your login has expired</div>
+          <div style={{ lineHeight: 1.5 }}>
+            Your report is safe — your photos and text are still on this screen.
+            Tap <b>Log in again</b> (opens in a new tab), log in, then come back here and press
+            <b> Generate Evening DPR</b> again.
+          </div>
+          <button
+            type="button"
+            onClick={() => window.open("/login", "_blank")}
+            style={{ marginTop: 10, padding: "8px 14px", borderRadius: 8, border: "none", background: "#b45309", color: "#fff", fontWeight: 600 }}
+          >
+            Log in again
+          </button>
+          <button
+            type="button"
+            onClick={() => setSessionExpired(false)}
+            style={{ marginTop: 10, marginLeft: 8, padding: "8px 14px", borderRadius: 8, border: "1px solid #d6a45a", background: "transparent", color: "#78350f" }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {errorDetail && (
         <div style={{ margin: "16px 0", padding: 12, border: "1px solid #dc2626", borderRadius: 8, background: "#fef2f2", fontSize: 12 }}>
           <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Error details (send this to the developer)</div>

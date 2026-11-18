@@ -14,6 +14,7 @@ const {
 const {
   sendWhatsAppTemplate,
   sendVerificationAlertTemplate,
+  sendTaskFeedbackTemplate,
 } = require('../lib/whatsapp');
 const { notifyAssigneeOpenTasksList } = require('../lib/taskListDigest');
 const { isMdoOfficeWorkTask } = require('../lib/mdoOfficeWork');
@@ -133,8 +134,13 @@ async function updateTaskTolerant(id, updates, select) {
       delete attempt[col];
       continue;
     }
+    // Rating columns not created yet — drop them from the select but keep the plan columns.
+    if (/rating|rated_/i.test(msg) && /column|schema cache/i.test(msg) && sel === TASK_SELECT_PLAN) {
+      TASK_SELECT = TASK_SELECT_PLAN_NO_RATING;
+      return updateTaskTolerant(id, attempt, TASK_SELECT_PLAN_NO_RATING);
+    }
     // Select string references a missing column — step down one tier and retry.
-    if (/column|schema cache/i.test(msg) && sel === TASK_SELECT_PLAN) {
+    if (/column|schema cache/i.test(msg) && (sel === TASK_SELECT_PLAN || sel === TASK_SELECT_PLAN_NO_RATING)) {
       TASK_SELECT = TASK_SELECT_FULL;
       return updateTaskTolerant(id, attempt, TASK_SELECT_FULL);
     }
@@ -234,6 +240,7 @@ const TASK_SELECT_PLAN = `
   verification_status, verification_note, verification_attachment_urls,
   verification_started_by, verification_started_at, verification_allowed_hours,
   correction_voice_url, updation_note, task_events,
+  rating, rating_answers, rating_feedback, rated_at,
   reschedule_status, reschedule_requested_date, reschedule_requested_additional_hours, reschedule_reason,
   reschedule_requested_at, reschedule_decided_at,
   project:projects ( id, name ),
@@ -244,6 +251,10 @@ const TASK_SELECT_PLAN = `
   verifier:users!tasks_verifier_id_fkey ( id, full_name ),
   reschedule_decided_by_user:users!tasks_reschedule_decided_by_fkey ( id, full_name )
 `;
+
+// Same as PLAN but without the rating columns — used when add_task_rating.sql
+// has not been run yet, so task lists never break because of missing columns.
+const TASK_SELECT_PLAN_NO_RATING = TASK_SELECT_PLAN.replace('  rating, rating_answers, rating_feedback, rated_at,\n', '');
 
 const TASK_SELECT_FULL = `
   id, description, hours_to_complete, original_hours_to_complete, target_date, priority,
@@ -322,7 +333,16 @@ async function resolveTaskSelect() {
       .select('id, original_target_date, work_due_at, reaccept_required, total_hold_seconds, reschedule_requested_additional_hours')
       .limit(1);
     if (!plan.error) {
-      TASK_SELECT = TASK_SELECT_PLAN;
+      const ratingProbe = await supabase
+        .from('tasks')
+        .select('id, rating, rating_answers, rating_feedback, rated_at')
+        .limit(1);
+      if (ratingProbe.error) {
+        console.warn('tasks: rating columns missing (run backend/sql/add_task_rating.sql in Supabase)');
+        TASK_SELECT = TASK_SELECT_PLAN_NO_RATING;
+      } else {
+        TASK_SELECT = TASK_SELECT_PLAN;
+      }
       return TASK_SELECT;
     }
     console.warn('tasks: plan columns missing (run backend/sql/add_task_plan_separation.sql)');
@@ -1547,10 +1567,13 @@ router.patch(
 );
 
 // ----------------------------- approve verification (the chosen verifier, or admin) -----------------------------
+const RATING_QUESTION_KEYS = ['quality', 'timeliness', 'instructions', 'corrections', 'communication', 'ownership'];
+
 router.patch('/:id/verify', async (req, res) => {
   try {
     const { id } = req.params;
     const { approved, note } = req.body || {};
+    const sendWhatsapp = req.body?.send_whatsapp !== false;
 
     const existing = await loadTaskForStamp(id);
     if (!existing) return res.status(404).json({ error: 'Task not found' });
@@ -1560,15 +1583,42 @@ router.patch('/:id/verify', async (req, res) => {
       return res.status(403).json({ error: 'You are not the verifier for this task' });
     }
 
+    // Rating is mandatory when approving. Overall = average of the question
+    // answers (computed here, never trusted from the client).
+    let rating = null;
+    let answers = null;
+    const feedback = String(req.body?.rating_feedback ?? note ?? '').trim();
+    if (approved) {
+      const rawAns = req.body?.rating_answers;
+      answers = {};
+      for (const k of RATING_QUESTION_KEYS) {
+        const v = Number(rawAns?.[k]);
+        if (!Number.isInteger(v) || v < 1 || v > 5) {
+          return res.status(400).json({ error: 'Please answer all the rating questions (1-5 stars each)' });
+        }
+        answers[k] = v;
+      }
+      const avgScore = RATING_QUESTION_KEYS.reduce((a, k) => a + answers[k], 0) / RATING_QUESTION_KEYS.length;
+      rating = Math.min(5, Math.max(1, Math.round(avgScore)));
+      if (rating <= 2 && !feedback) {
+        return res.status(400).json({ error: 'Overall rating is 1-2 stars - please write a note so the employee knows what to improve' });
+      }
+    }
+
     const at = nowIso();
     const updates = approved
       ? {
         verification_status: 'Verified',
-        verification_note: note || null,
+        verification_note: feedback || note || null,
         status: 'Completed',
         verified_at: at,
         first_verified_at: firstStamp(existing, 'first_verified_at', at),
         verification_decided_at: at,
+        rating,
+        rating_answers: answers,
+        rating_feedback: feedback || null,
+        rated_by: req.user.id,
+        rated_at: at,
         task_events: withTaskEvent(existing, 'verified', req.user.id),
       }
       : {
@@ -1580,6 +1630,37 @@ router.patch('/:id/verify', async (req, res) => {
       };
 
     const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+
+    // Optional WhatsApp feedback to the employee (best-effort, never blocks verify).
+    if (approved && sendWhatsapp) {
+      let wa = { ok: false, reason: 'no_number' };
+      try {
+        const { data: emp } = await supabase
+          .from('users')
+          .select('full_name, whatsapp_number')
+          .eq('id', existing.assigned_to)
+          .maybeSingle();
+        const digits = String(emp?.whatsapp_number || '').replace(/\D/g, '').slice(-10);
+        if (emp?.whatsapp_number && digits !== '8208026194') {
+          wa = await sendTaskFeedbackTemplate(emp.whatsapp_number, {
+            employeeName: emp.full_name,
+            taskDescription: data?.description,
+            projectName: data?.project?.name,
+            rating,
+            feedback,
+            verifierName: req.user.full_name,
+          });
+        } else if (emp?.whatsapp_number) {
+          wa = { ok: false, reason: 'shared_placeholder_number' };
+        }
+      } catch (waErr) {
+        wa = { ok: false, reason: waErr.message };
+      }
+      if (wa?.ok) {
+        await supabase.from('tasks').update({ feedback_sent_whatsapp: true }).eq('id', id);
+      }
+      return res.json({ ...data, _feedbackWhatsapp: { ok: !!wa?.ok, reason: wa?.reason || null } });
+    }
     res.json(data);
   } catch (err) {
     console.error('Verify task error:', err.message);

@@ -152,6 +152,26 @@ async function sendVerificationAlertTemplate(toNumber, { verifierName, taskDescr
 }
 
 /**
+ * Verifier feedback → employee. Needs an approved Meta template (default name
+ * task_feedback_v1) with 5 body variables:
+ * {{1}} employee, {{2}} task, {{3}} project, {{4}} rating, {{5}} feedback + verifier.
+ */
+async function sendTaskFeedbackTemplate(toNumber, { employeeName, taskDescription, projectName, rating, feedback, verifierName }) {
+  const stars = '\u2605'.repeat(rating) + '\u2606'.repeat(5 - rating);
+  return sendWhatsAppTemplate(
+    toNumber,
+    process.env.WHATSAPP_TASK_FEEDBACK_TEMPLATE || 'task_feedback_v1',
+    [
+      employeeName || 'Team',
+      String(taskDescription || 'Task').slice(0, 160),
+      projectName || 'DIP Projects',
+      `${stars} (${rating}/5)`,
+      `${String(feedback || 'No additional note').slice(0, 400)} - Verified by ${verifierName || 'Verifier'}`,
+    ]
+  );
+}
+
+/**
  * Template with Quick Reply buttons. Payload is set at send time so Done can
  * carry tf_done_<taskId>. Requires an approved Meta template with QUICK_REPLY.
  */
@@ -418,4 +438,5 @@ module.exports = {
   normalizeWhatsAppNumber,
   sendLeaveAlertTemplate,
   sendVerificationAlertTemplate,
+  sendTaskFeedbackTemplate,
 };
