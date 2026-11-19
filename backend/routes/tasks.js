@@ -1567,7 +1567,7 @@ router.patch(
 );
 
 // ----------------------------- approve verification (the chosen verifier, or admin) -----------------------------
-const RATING_QUESTION_KEYS = ['quality', 'timeliness', 'instructions', 'corrections', 'communication', 'ownership'];
+const RATING_QUESTION_KEYS = ['quality', 'instructions', 'corrections', 'communication', 'ownership'];
 
 router.patch('/:id/verify', async (req, res) => {
   try {
@@ -1593,8 +1593,8 @@ router.patch('/:id/verify', async (req, res) => {
       answers = {};
       for (const k of RATING_QUESTION_KEYS) {
         const v = Number(rawAns?.[k]);
-        if (!Number.isInteger(v) || v < 1 || v > 5) {
-          return res.status(400).json({ error: 'Please answer all the rating questions (1-5 stars each)' });
+        if (!Number.isInteger(v * 2) || v < 0.5 || v > 5) {
+          return res.status(400).json({ error: 'Please answer all the rating questions (0.5-5 stars in half-star steps)' });
         }
         answers[k] = v;
       }
