@@ -46,6 +46,15 @@ WHATSAPP_TASK_LIST_TEMPLATE=task_notification_v2
 # WA_DIGEST_USERNAMES=beena.username
 ```
 
+### Verification feedback
+
+The “Send this feedback to employee on WhatsApp” option sends the approved
+`task_feedback_v1` template in English. It needs five body parameters:
+employee name, task description, project name, rating, and feedback/verifier.
+If your approved template has a different name, set
+`WHATSAPP_TASK_FEEDBACK_TEMPLATE` in the Vercel project to that exact name,
+then redeploy.
+
 ## Limits
 
 - WhatsApp list: max **10 rows** (1 = ALL + up to 9 tasks).

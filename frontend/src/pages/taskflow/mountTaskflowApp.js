@@ -4134,7 +4134,10 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
         showToast('Task verified & rated ✅', 'success');
         if (review?.send_whatsapp) {
           if (res?._feedbackWhatsapp?.ok) showToast('Feedback sent to employee on WhatsApp 📲', 'success');
-          else showToast('Verified. WhatsApp feedback was not delivered.', 'error');
+          else {
+            const reason = res?._feedbackWhatsapp?.error || res?._feedbackWhatsapp?.reason;
+            showToast(reason ? `Verified; WhatsApp failed: ${reason}` : 'Verified. WhatsApp feedback was not delivered.', 'error');
+          }
         }
 
         loadVerifications();

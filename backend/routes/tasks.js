@@ -1635,13 +1635,18 @@ router.patch('/:id/verify', async (req, res) => {
     if (approved && sendWhatsapp) {
       let wa = { ok: false, reason: 'no_number' };
       try {
-        const { data: emp } = await supabase
+        const { data: emp, error: employeeError } = await supabase
           .from('users')
           .select('full_name, whatsapp_number')
           .eq('id', existing.assigned_to)
           .maybeSingle();
         const digits = String(emp?.whatsapp_number || '').replace(/\D/g, '').slice(-10);
-        if (emp?.whatsapp_number && digits !== '8208026194') {
+        if (employeeError) {
+          console.error('WhatsApp feedback employee lookup failed:', employeeError.message);
+          wa = { ok: false, reason: 'employee_lookup_failed', error: 'Could not load employee WhatsApp details.' };
+        } else if (!emp?.whatsapp_number) {
+          wa = { ok: false, reason: 'no_number', error: 'Add a WhatsApp number to the employee profile and try again.' };
+        } else if (digits !== '8208026194') {
           wa = await sendTaskFeedbackTemplate(emp.whatsapp_number, {
             employeeName: emp.full_name,
             taskDescription: data?.description,
@@ -1650,16 +1655,31 @@ router.patch('/:id/verify', async (req, res) => {
             feedback,
             verifierName: req.user.full_name,
           });
-        } else if (emp?.whatsapp_number) {
-          wa = { ok: false, reason: 'shared_placeholder_number' };
+        } else {
+          wa = { ok: false, reason: 'shared_placeholder_number', error: 'The employee profile has a placeholder WhatsApp number. Update it first.' };
         }
       } catch (waErr) {
+        console.error('WhatsApp feedback send failed:', waErr.message);
         wa = { ok: false, reason: waErr.message };
       }
-      if (wa?.ok) {
-        await supabase.from('tasks').update({ feedback_sent_whatsapp: true }).eq('id', id);
+      if (!wa.ok) {
+        console.error('WhatsApp feedback not sent:', wa.reason, wa.error || '');
       }
-      return res.json({ ...data, _feedbackWhatsapp: { ok: !!wa?.ok, reason: wa?.reason || null } });
+      if (wa?.ok) {
+        const { error: updateError } = await supabase
+          .from('tasks')
+          .update({ feedback_sent_whatsapp: true })
+          .eq('id', id);
+        if (updateError) console.error('WhatsApp feedback sent but task flag update failed:', updateError.message);
+      }
+      return res.json({
+        ...data,
+        _feedbackWhatsapp: {
+          ok: !!wa?.ok,
+          reason: wa?.reason || null,
+          error: wa?.error || null,
+        },
+      });
     }
     res.json(data);
   } catch (err) {
