@@ -2405,5 +2405,96 @@ router.delete('/insurances/:id', requireAdminOrHr, async (req, res) => {
   }
 });
 
+// ----------------------------- Official office holidays (public.office_holidays) -----------------------------
+// Table (see sql/office_holidays_ranges.sql): id uuid, from_date date, to_date date, title text.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Table: id uuid, from_date date, to_date date, title text, created_at. One row per holiday range.
+const toHolidayDto = (r) => ({ id: r.id, from: r.from_date, to: r.to_date, name: r.title });
+
+router.get('/office-holidays', requireAdminOrHr, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('office_holidays')
+      .select('id, from_date, to_date, title')
+      .order('from_date', { ascending: true })
+      .limit(1000);
+    if (error) throw error;
+    res.json({ holidays: (data || []).map(toHolidayDto) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Body: { from, to, name }. "to" defaults to "from". Stores a single row for the whole range.
+router.post('/office-holidays', requireAdminOrHr, async (req, res) => {
+  try {
+    const from = String(req.body?.from || req.body?.date || '').trim();
+    const to = String(req.body?.to || from).trim();
+    const name = String(req.body?.name || '').trim();
+    if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+      return res.status(400).json({ error: 'from and to must be YYYY-MM-DD' });
+    }
+    if (to < from) return res.status(400).json({ error: '"to" must be on or after "from"' });
+    if (!name) return res.status(400).json({ error: 'name required' });
+
+    const { data, error } = await supabase
+      .from('office_holidays')
+      .insert({ from_date: from, to_date: to, title: name })
+      .select('id, from_date, to_date, title')
+      .single();
+    if (error) throw error;
+    res.status(201).json({ holiday: toHolidayDto(data) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/office-holidays/:id', requireAdminOrHr, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const { error } = await supabase.from('office_holidays').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Edits an existing holiday range in place (no new row). Body may contain from, to and/or name.
+router.patch('/office-holidays/:id', requireAdminOrHr, async (req, res) => {
+  try {
+    if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid id' });
+    const body = req.body || {};
+    const { data: current, error: readErr } = await supabase
+      .from('office_holidays')
+      .select('id, from_date, to_date, title')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (readErr) throw readErr;
+    if (!current) return res.status(404).json({ error: 'Holiday not found' });
+
+    const from = body.from !== undefined ? String(body.from).trim() : current.from_date;
+    const to = body.to !== undefined ? String(body.to).trim() : current.to_date;
+    const name = body.name !== undefined ? String(body.name).trim() : current.title;
+    if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+      return res.status(400).json({ error: 'from and to must be YYYY-MM-DD' });
+    }
+    if (to < from) return res.status(400).json({ error: '"to" must be on or after "from"' });
+    if (!name) return res.status(400).json({ error: 'name required' });
+
+    const { data, error } = await supabase
+      .from('office_holidays')
+      .update({ from_date: from, to_date: to, title: name })
+      .eq('id', req.params.id)
+      .select('id, from_date, to_date, title')
+      .single();
+    if (error) throw error;
+    res.json({ holiday: toHolidayDto(data) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.RECRUIT_STATUSES = RECRUIT_STATUSES;
