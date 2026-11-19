@@ -1640,13 +1640,12 @@ router.patch('/:id/verify', async (req, res) => {
           .select('full_name, whatsapp_number')
           .eq('id', existing.assigned_to)
           .maybeSingle();
-        const digits = String(emp?.whatsapp_number || '').replace(/\D/g, '').slice(-10);
         if (employeeError) {
           console.error('WhatsApp feedback employee lookup failed:', employeeError.message);
           wa = { ok: false, reason: 'employee_lookup_failed', error: 'Could not load employee WhatsApp details.' };
         } else if (!emp?.whatsapp_number) {
           wa = { ok: false, reason: 'no_number', error: 'Add a WhatsApp number to the employee profile and try again.' };
-        } else if (digits !== '8208026194') {
+        } else {
           wa = await sendTaskFeedbackTemplate(emp.whatsapp_number, {
             employeeName: emp.full_name,
             taskDescription: data?.description,
@@ -1655,8 +1654,6 @@ router.patch('/:id/verify', async (req, res) => {
             feedback,
             verifierName: req.user.full_name,
           });
-        } else {
-          wa = { ok: false, reason: 'shared_placeholder_number', error: 'The employee profile has a placeholder WhatsApp number. Update it first.' };
         }
       } catch (waErr) {
         console.error('WhatsApp feedback send failed:', waErr.message);
