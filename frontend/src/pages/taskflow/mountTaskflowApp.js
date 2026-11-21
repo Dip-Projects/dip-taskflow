@@ -5762,7 +5762,8 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const payload = {
         from_date: els.leaveFrom?.value,
         to_date: els.leaveTo?.value,
-        is_half_day: !!els.leaveHalfDay?.checked,
+        is_half_day: !!els.leaveHalfDay?.value,
+        half_day_period: els.leaveHalfDay?.value || null,
       };
       const req = leaveRequestDays(payload);
       const avail = bal?.available;
@@ -5883,6 +5884,15 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       document.getElementById(id)?.addEventListener('change', updateLeaveFormBalancePreview);
       document.getElementById(id)?.addEventListener('input', updateLeaveFormBalancePreview);
     });
+    els.leaveHalfDay?.addEventListener('change', () => {
+      if (els.leaveHalfDay.value) els.leaveTo.value = els.leaveFrom.value;
+      els.leaveTo.disabled = !!els.leaveHalfDay.value;
+      updateLeaveFormBalancePreview();
+    });
+    els.leaveFrom?.addEventListener('change', () => {
+      if (els.leaveHalfDay?.value) els.leaveTo.value = els.leaveFrom.value;
+      updateLeaveFormBalancePreview();
+    });
     els.leaveForm?.addEventListener('submit', async (e) => {
       e.preventDefault(); els.leaveFormMsg.hidden = true;
       const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
@@ -5894,7 +5904,8 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const payload = {
         from_date: els.leaveFrom.value,
         to_date: els.leaveTo.value,
-        is_half_day: els.leaveHalfDay.checked,
+        is_half_day: !!els.leaveHalfDay.value,
+        half_day_period: els.leaveHalfDay.value || null,
         reason: els.leaveReason.value.trim(),
         buddy_id: buddyId,
       };
@@ -6289,7 +6300,13 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const from = fmtDateOnly(leave.from_date);
       const to = fmtDateOnly(leave.to_date);
       const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
-      return leave.is_half_day ? `${range} (Half day)` : range;
+      if (!leave.is_half_day) return range;
+      const period = leave.half_day_period === 'first_half'
+        ? '1st Half'
+        : leave.half_day_period === 'second_half'
+          ? '2nd Half'
+          : 'Half day';
+      return `${range} (${period})`;
     }
 
     function leaveMonthKey(leave) {
@@ -8137,9 +8154,10 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     }
 
     async function loadSites() {
-      els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
+      els.sitesTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading sites…</td></tr>`;
       try {
-        sitesCache = await api('/sites') || [];
+        // Manage sites shows inactive sites too; every other dropdown gets active sites only
+        sitesCache = await api('/sites?include_inactive=1') || [];
         mergeSiteProjectTypesFromSites(sitesCache);
         fillSiteFilterOptions(sitesCache);
         applySitesFilter();
@@ -8220,12 +8238,13 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     function renderSitesTable(sites) {
       if (!sites.length) {
         const emptyMsg = sitesCache.length ? 'No matching sites' : 'No sites yet';
-        els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">${emptyMsg}</td></tr>`;
+        els.sitesTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${emptyMsg}</td></tr>`;
         return;
       }
       els.sitesTableBody.innerHTML = '';
       sites.forEach((site) => {
         const tr = document.createElement('tr');
+        const isActive = site.is_active !== false;
         tr.innerHTML = `
           <td><strong style="font-weight:600">${escapeHtml(site.name)}</strong></td>
           <td>${escapeHtml(site.client_name ?? '—')}</td>
@@ -8233,9 +8252,31 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
           <td>${escapeHtml(site.project_type ?? '—')}</td>
           <td><span class="pill pill-Pending">${escapeHtml(site.status)}</span></td>
           <td>${escapeHtml(site.team_leader?.full_name ?? '—')}</td>
+          <td class="site-active-cell"></td>
           <td class="row-actions"></td>
         `;
-        const actionsCell = tr.children[6];
+        const activeCell = tr.children[6];
+        const activeBtn = document.createElement('button');
+        activeBtn.type = 'button';
+        activeBtn.textContent = isActive ? 'ACTIVE' : 'INACTIVE';
+        activeBtn.style.cssText = [
+          'display:inline-block',
+          'padding:4px 14px',
+          'border-radius:999px',
+          'font-size:11px',
+          'font-weight:600',
+          'letter-spacing:0.06em',
+          'cursor:pointer',
+          isActive
+            ? 'background:#ecfdf5;border:1px solid #6ee7b7;color:#047857'
+            : 'background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c',
+        ].join(';');
+        activeBtn.title = isActive
+          ? 'Click to make inactive (hides this site from all dropdowns)'
+          : 'Click to make active again';
+        activeBtn.addEventListener('click', () => toggleSiteActive(site, activeBtn));
+        activeCell.appendChild(activeBtn);
+        const actionsCell = tr.children[7];
         const editBtn = document.createElement('button');
         editBtn.className = 'action-btn action-accept';
         editBtn.textContent = '✏️ Edit';
@@ -8252,6 +8293,21 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     els.siteFilterType?.addEventListener('change', applySitesFilter);
     els.siteFilterStatus?.addEventListener('change', applySitesFilter);
     els.clearSiteFilters?.addEventListener('click', clearSitesFilter);
+
+    async function toggleSiteActive(site, btn) {
+      const makeActive = site.is_active === false;
+      const verb = makeActive ? 'activate' : 'deactivate';
+      if (!makeActive && !confirm(`Make "${site.name}" inactive? It will be hidden from every dropdown until it is made active again.`)) return;
+      btn.disabled = true;
+      try {
+        await api(`/sites/${site.id}`, { method: 'PATCH', body: { is_active: makeActive } });
+        showToast(makeActive ? 'Site is active again' : 'Site made inactive', 'success');
+        await loadSites(); loadMasterData();
+      } catch (err) {
+        showToast(err.message || `Could not ${verb} site`, 'error');
+        btn.disabled = false;
+      }
+    }
 
     async function deleteSite(site) {
       if (!confirm(`Delete site "${site.name}"? This cannot be undone.`)) return;
