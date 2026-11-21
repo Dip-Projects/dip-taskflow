@@ -10,7 +10,7 @@ export default function Leaves() {
   const [form, setForm] = useState({
     from_date: '',
     to_date: '',
-    is_half_day: false,
+    half_day_period: '',
     reason: '',
   });
   const [busy, setBusy] = useState(false);
@@ -42,9 +42,13 @@ export default function Leaves() {
     try {
       await api('/leaves', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          is_half_day: !!form.half_day_period,
+          half_day_period: form.half_day_period || null,
+        }),
       });
-      setForm({ from_date: '', to_date: '', is_half_day: false, reason: '' });
+      setForm({ from_date: '', to_date: '', half_day_period: '', reason: '' });
       setTab('my');
     } catch (err) {
       setError(err.message || 'Apply failed');
@@ -105,7 +109,11 @@ export default function Leaves() {
               type="date"
               required
               value={form.from_date}
-              onChange={(e) => setForm((f) => ({ ...f, from_date: e.target.value }))}
+              onChange={(e) => setForm((f) => ({
+                ...f,
+                from_date: e.target.value,
+                to_date: f.half_day_period ? e.target.value : f.to_date,
+              }))}
             />
           </label>
           <label>
@@ -114,16 +122,25 @@ export default function Leaves() {
               type="date"
               required
               value={form.to_date}
+              min={form.from_date || undefined}
+              disabled={!!form.half_day_period}
               onChange={(e) => setForm((f) => ({ ...f, to_date: e.target.value }))}
             />
           </label>
-          <label className="tfr-check">
-            <input
-              type="checkbox"
-              checked={form.is_half_day}
-              onChange={(e) => setForm((f) => ({ ...f, is_half_day: e.target.checked }))}
-            />
-            Half day
+          <label>
+            Day part
+            <select
+              value={form.half_day_period}
+              onChange={(e) => setForm((f) => ({
+                ...f,
+                half_day_period: e.target.value,
+                to_date: e.target.value ? f.from_date : f.to_date,
+              }))}
+            >
+              <option value="">Full day</option>
+              <option value="first_half">1st Half</option>
+              <option value="second_half">2nd Half</option>
+            </select>
           </label>
           <label>
             Reason
@@ -162,7 +179,9 @@ export default function Leaves() {
                 <tr key={l.id}>
                   <td>{l.user?.full_name || 'You'}</td>
                   <td>{l.from_date}</td>
-                  <td>{l.to_date}{l.is_half_day ? ' (½)' : ''}</td>
+                  <td>{l.to_date}{l.is_half_day
+                    ? ` (${l.half_day_period === 'first_half' ? '1st Half' : l.half_day_period === 'second_half' ? '2nd Half' : '½'})`
+                    : ''}</td>
                   <td>{l.reason}</td>
                   <td>{l.status}</td>
                   <td>
