@@ -1020,7 +1020,11 @@ router.post('/chats/join', requireAuth, async (req, res) => {
 // ─── Project membership management ───────────────────────────────────────────
 router.get('/management/projects', requireAuth, async (req, res) => {
   try {
-    const { data: projects, error } = await supabase.from('projects').select('id, name').order('name');
+    const { data: projects, error } = await supabase
+      .from('projects')
+      .select('id, name')
+      .neq('is_active', false)
+      .order('name');
     if (error) throw error;
     const { data: members, error: mErr } = await supabase
       .from('project_members')
