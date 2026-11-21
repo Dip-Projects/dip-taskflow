@@ -1491,9 +1491,15 @@ function LeavesView({ bundle, loading, error, onReload }) {
                     <td>{l.to_date}</td>
                     <td>
                       {tab === 'site'
-                        ? l.leave_type || '—'
+                        ? `${l.leave_type || '—'}${l.is_half_day
+                          ? ` · ${l.half_day_period === 'first_half' ? '1st Half' : l.half_day_period === 'second_half' ? '2nd Half' : 'Half day'}`
+                          : ''}`
                         : l.is_half_day
-                          ? 'Yes'
+                          ? l.half_day_period === 'first_half'
+                            ? '1st Half'
+                            : l.half_day_period === 'second_half'
+                              ? '2nd Half'
+                              : 'Yes'
                           : '—'}
                     </td>
                     <td>{l.reason || '—'}</td>
