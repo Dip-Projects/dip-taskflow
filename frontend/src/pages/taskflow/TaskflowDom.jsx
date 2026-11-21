@@ -853,7 +853,7 @@ export default function TaskflowDom() {
                     <thead>
                       <tr>
                         <th>Site name</th><th>Client</th><th>Location</th>
-                        <th>Type</th><th>Status</th><th>Team leader</th><th>Actions</th>
+                        <th>Type</th><th>Status</th><th>Team leader</th><th>Active</th><th>Actions</th>
                       </tr>
                     </thead>
                     <tbody id="sitesTableBody"></tbody>
@@ -2445,10 +2445,12 @@ export default function TaskflowDom() {
               </div>
             </div>
             <div className="field">
-              <label className="checkbox-label">
-                <input id="leave-halfday" type="checkbox" />
-                Half day leave
-              </label>
+              <label htmlFor="leave-halfday">Day part</label>
+              <select id="leave-halfday">
+                <option value="">Full day</option>
+                <option value="first_half">1st Half</option>
+                <option value="second_half">2nd Half</option>
+              </select>
             </div>
             <div className="field">
               <label htmlFor="leave-reason">Reason <span className="req">*</span></label>
