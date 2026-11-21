@@ -123,18 +123,31 @@ export default function MonthlyReport({ user }) {
     if (!open) return;
     (async () => {
       const names = new Set();
-      const add = (v) => { const s = String(v || "").trim(); if (s) names.add(s); };
-      add(user?.site_name);
-      const arr = user?.site_names;
-      if (Array.isArray(arr)) arr.forEach(add);
+      const activeKeys = new Set();
+      const addActive = (v) => {
+        const s = String(v || "").trim();
+        if (!s) return;
+        names.add(s);
+        activeKeys.add(s.toLowerCase());
+      };
       try {
         const sites = await api("/sites");
-        (sites || []).forEach((p) => add(p.name || p.site_name));
+        (sites || []).forEach((p) => addActive(p.name || p.site_name));
       } catch { /* optional */ }
       try {
-        const { data } = await supabase.from("projects").select("name").order("name");
-        (data || []).forEach((p) => add(p.name));
+        const { data } = await supabase
+          .from("projects")
+          .select("name")
+          .neq("is_active", false)
+          .order("name");
+        (data || []).forEach((p) => addActive(p.name));
       } catch { /* optional */ }
+      // The user's own assigned sites only show while they are still active
+      const mine = [user?.site_name, ...(Array.isArray(user?.site_names) ? user.site_names : [])];
+      mine.forEach((v) => {
+        const s = String(v || "").trim();
+        if (s && activeKeys.has(s.toLowerCase())) names.add(s);
+      });
       setProjects([...names].sort((a, b) => a.localeCompare(b)));
     })();
   }, [open, user]);
