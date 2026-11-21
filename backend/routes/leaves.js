@@ -14,7 +14,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 const LEAVE_SELECT_BASIC = `
-  id, from_date, to_date, is_half_day, half_day_period, reason, status,
+  id, from_date, to_date, is_half_day, reason, status,
   decision_note, created_at, decided_at,
   user:users!leaves_user_id_fkey ( id, full_name ),
   decided_by_user:users!leaves_decided_by_fkey ( id, full_name )
@@ -464,196 +464,6 @@ router.get('/buddies', async (req, res) => {
   }
 });
 
-router.get('/proxy-buddies', async (req, res) => {
-  try {
-    const pcBlob = [
-      req.user.role,
-      req.user.designation,
-      req.user.department,
-    ].map((value) => String(value || '').toLowerCase()).join(' ');
-    const isPc =
-      req.user.role === 'admin' ||
-      /process controller|\bpc\b|\bbeena\b|mdo office|engineer office/.test(pcBlob);
-    if (!isPc) {
-      return res.status(403).json({ error: 'Only the Process Controller can load employee buddies' });
-    }
-
-    const applicantId = String(req.query.applicant_id || '').trim();
-    if (!applicantId) return res.status(400).json({ error: 'Please select an employee' });
-
-    const { data: applicant, error: applicantErr } = await supabase
-      .from('users')
-      .select('id, department, department_id, is_active, role')
-      .eq('id', applicantId)
-      .maybeSingle();
-    if (applicantErr) throw applicantErr;
-    if (!applicant || applicant.is_active === false) {
-      return res.status(404).json({ error: 'Selected employee is not available' });
-    }
-    if (
-      String(applicant.role || '').toLowerCase() === 'client' ||
-      normDept(applicant.department) === 'client'
-    ) {
-      return res.status(400).json({ error: 'Client users cannot apply for employee leave' });
-    }
-
-    const { data: users, error } = await supabase
-      .from('users')
-      .select('id, username, full_name, department, department_id, role, is_active')
-      .eq('is_active', true)
-      .order('full_name', { ascending: true });
-    if (error) throw error;
-
-    const applicantDept = normDept(applicant.department);
-    const buddies = (users || [])
-      .filter((row) =>
-        String(row.id) !== String(applicant.id) &&
-        String(row.role || '').toLowerCase() !== 'client' &&
-        normDept(row.department) !== 'client'
-      )
-      .filter((row) => {
-        const sameById =
-          applicant.department_id &&
-          row.department_id &&
-          String(applicant.department_id) === String(row.department_id);
-        const sameByName =
-          applicantDept && normDept(row.department) === applicantDept;
-        return sameById || sameByName;
-      })
-      .map((row) => ({
-        id: row.id,
-        username: row.username,
-        name: row.full_name || row.username,
-      }));
-
-    res.json(buddies);
-  } catch (err) {
-    console.error('Proxy buddy list error:', err.message);
-    res.status(500).json({ error: 'Could not load buddy list' });
-  }
-});
-
-router.get('/proxy-balance', async (req, res) => {
-  try {
-    const pcBlob = [
-      req.user.role,
-      req.user.designation,
-      req.user.department,
-    ].map((value) => String(value || '').toLowerCase()).join(' ');
-    const isPc =
-      req.user.role === 'admin' ||
-      /process controller|\bpc\b|\bbeena\b|mdo office|engineer office/.test(pcBlob);
-    if (!isPc) {
-      return res.status(403).json({ error: 'Only the Process Controller can view employee leave balances' });
-    }
-
-    const applicantId = String(req.query.applicant_id || '').trim();
-    if (!applicantId) return res.status(400).json({ error: 'Please select an employee' });
-    const { data: applicant, error: applicantErr } = await supabase
-      .from('users')
-      .select('id, username, full_name, department, designation, role, is_active')
-      .eq('id', applicantId)
-      .maybeSingle();
-    if (applicantErr) throw applicantErr;
-    if (!applicant || applicant.is_active === false) {
-      return res.status(404).json({ error: 'Selected employee is not available' });
-    }
-
-    const department = normDept(applicant.department);
-    const role = String(applicant.designation || applicant.role || '').trim().toLowerCase();
-    const isSiteEmployee =
-      department.includes('site') ||
-      /jr\.?\s*site engineer|junior site engineer|site engineer|site in-?charge|site co-?ordinator|project head|team leader/.test(role);
-    if (!isSiteEmployee) {
-      const leaves = await selectLeaves((query) => query.eq('user_id', applicant.id));
-      res.json({
-        type: 'office',
-        applicable: true,
-        ...buildOfficeLeaveBalance(leaves || []),
-      });
-      return;
-    }
-
-    const isMonthlyRole =
-      /(jr\.?|junior).*(engineer)|engineer|in-?charge|co-?ordinator/.test(role);
-    if (!isMonthlyRole) {
-      res.json({ type: 'site', applicable: false });
-      return;
-    }
-
-    const nowParts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-    }).formatToParts(new Date());
-    const year = Number(nowParts.find((part) => part.type === 'year')?.value);
-    const month = Number(nowParts.find((part) => part.type === 'month')?.value);
-    const targetMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const targetDate = new Date(year, month - 1, 1);
-    const { data: siteUser } = await supabase
-      .from('site_user_details')
-      .select('created_at')
-      .eq('username', applicant.username)
-      .maybeSingle();
-    let startDate = siteUser?.created_at
-      ? new Date(new Date(siteUser.created_at).getFullYear(), new Date(siteUser.created_at).getMonth(), 1)
-      : new Date(targetDate);
-    const capDate = new Date(targetDate);
-    capDate.setMonth(capDate.getMonth() - 36);
-    if (startDate < capDate) startDate = capDate;
-    if (startDate > targetDate) startDate = new Date(targetDate);
-    const fromDate = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-01`;
-
-    const { data: siteLeaves, error: siteLeavesErr } = await supabase
-      .from('site_leaves')
-      .select('from_date, to_date, is_half_day, level_approved, head_approved')
-      .eq('user_name', applicant.username)
-      .gte('to_date', fromDate);
-    if (siteLeavesErr) throw siteLeavesErr;
-
-    const usedByMonth = {};
-    (siteLeaves || [])
-      .filter((leave) => leave.level_approved === true && leave.head_approved === true)
-      .forEach((leave) => {
-        if (!leave.from_date || !leave.to_date) return;
-        if (leave.is_half_day) {
-          const date = new Date(`${leave.from_date}T00:00:00Z`);
-          const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-          usedByMonth[key] = (usedByMonth[key] || 0) + 0.5;
-          return;
-        }
-        const cursor = new Date(`${leave.from_date}T00:00:00Z`);
-        const end = new Date(`${leave.to_date}T00:00:00Z`);
-        while (cursor <= end) {
-          const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, '0')}`;
-          usedByMonth[key] = (usedByMonth[key] || 0) + 1;
-          cursor.setUTCDate(cursor.getUTCDate() + 1);
-        }
-      });
-
-    let remaining = 0;
-    let broughtForward = 0;
-    const cursor = new Date(startDate);
-    while (cursor <= targetDate) {
-      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
-      if (key === targetMonth) broughtForward = remaining;
-      remaining += 4 - (usedByMonth[key] || 0);
-      cursor.setMonth(cursor.getMonth() + 1);
-    }
-    res.json({
-      type: 'site',
-      applicable: true,
-      remaining: Math.max(0, remaining),
-      broughtForward: Math.max(0, broughtForward),
-      thisMonthUsed: usedByMonth[targetMonth] || 0,
-      quotaPerMonth: 4,
-    });
-  } catch (err) {
-    console.error('Proxy leave balance error:', err.message);
-    res.status(500).json({ error: 'Could not load employee leave balance' });
-  }
-});
-
 /**
  * Office / MDO leave balance — FY April→March, +1 leave/month, carry within FY.
  */
@@ -839,191 +649,15 @@ router.post('/mdo-notify', async (req, res) => {
 });
 
 // ----------------------------- apply for leave -----------------------------
-router.post('/proxy-apply', async (req, res) => {
-  try {
-    const pcBlob = [
-      req.user.role,
-      req.user.designation,
-      req.user.department,
-    ].map((value) => String(value || '').toLowerCase()).join(' ');
-    const isPc =
-      req.user.role === 'admin' ||
-      /process controller|\bpc\b|\bbeena\b|mdo office|engineer office/.test(pcBlob);
-    if (!isPc) {
-      return res.status(403).json({ error: 'Only the Process Controller can apply leave for employees' });
-    }
-
-    const {
-      applicant_id,
-      from_date,
-      to_date,
-      is_half_day,
-      half_day_period,
-      reason,
-      buddy_id,
-      acknowledge_negative,
-    } = req.body || {};
-
-    if (!applicant_id) return res.status(400).json({ error: 'Please select an employee' });
-    if (!from_date || !to_date) return res.status(400).json({ error: 'Please select both from and to dates' });
-    if (!reason || !reason.trim()) return res.status(400).json({ error: 'Please give a reason for the leave' });
-    if (new Date(to_date) < new Date(from_date)) return res.status(400).json({ error: 'To date cannot be before from date' });
-    if (half_day_period && !['first_half', 'second_half'].includes(half_day_period)) {
-      return res.status(400).json({ error: 'Half-day period must be first_half or second_half' });
-    }
-    if (!buddy_id) return res.status(400).json({ error: 'Please choose a buddy to cover the employee tasks' });
-
-    const { data: applicant, error: applicantErr } = await supabase
-      .from('users')
-      .select('id, full_name, username, department, department_id, is_active')
-      .eq('id', applicant_id)
-      .maybeSingle();
-    if (applicantErr) throw applicantErr;
-    if (!applicant || applicant.is_active === false) {
-      return res.status(400).json({ error: 'Selected employee is not available' });
-    }
-
-    if (String(applicant.id) === String(buddy_id)) {
-      return res.status(400).json({ error: 'The employee cannot select themselves as buddy' });
-    }
-
-    const { data: buddy, error: buddyErr } = await supabase
-      .from('users')
-      .select('id, full_name, whatsapp_number, is_active, role, department, department_id')
-      .eq('id', buddy_id)
-      .maybeSingle();
-    if (buddyErr) throw buddyErr;
-    if (!buddy || buddy.is_active === false) {
-      return res.status(400).json({ error: 'Selected buddy is not available' });
-    }
-    if (String(buddy.role || '').toLowerCase() === 'client') {
-      return res.status(400).json({ error: 'Client users cannot be leave buddies' });
-    }
-
-    const applicantDept = normDept(applicant.department);
-    const buddyDept = normDept(buddy.department);
-    const sameById =
-      applicant.department_id &&
-      buddy.department_id &&
-      String(applicant.department_id) === String(buddy.department_id);
-    const sameByName = applicantDept && buddyDept && applicantDept === buddyDept;
-    if (!sameById && !sameByName) {
-      return res.status(400).json({
-        error: 'Buddy must be from the employee own department',
-      });
-    }
-
-    const requestedDays = leaveDayCount({ from_date, to_date, is_half_day: !!is_half_day });
-    try {
-      const existing = await selectLeaves((q) => q.eq('user_id', applicant.id));
-      const bal = buildOfficeLeaveBalance(existing || []);
-      const after = Math.round((bal.available - requestedDays) * 10) / 10;
-      if ((bal.available < requestedDays || bal.in_deficit) && !acknowledge_negative) {
-        return res.status(409).json({
-          error: 'insufficient_leave_balance',
-          message:
-            bal.in_deficit || bal.available < 0
-              ? `This employee's leave balance is ${bal.available} (in minus). Still want to apply for ${requestedDays} day(s)?`
-              : `This employee has ${bal.available} leave day(s) left but this request is ${requestedDays} day(s). Still want to apply?`,
-          balance: bal,
-          requested_days: requestedDays,
-          balance_after: after,
-          needs_confirm: true,
-        });
-      }
-    } catch (balanceError) {
-      console.warn('Proxy leave balance check skip:', balanceError.message);
-    }
-
-    const insertPayload = {
-      user_id: applicant.id,
-      from_date,
-      to_date,
-      is_half_day: !!is_half_day,
-      half_day_period: is_half_day ? (half_day_period || null) : null,
-      reason: reason.trim(),
-      status: 'Pending',
-      buddy_id: buddy.id,
-      buddy_status: 'Pending',
-    };
-    let { data, error } = await supabase
-      .from('leaves')
-      .insert(insertPayload)
-      .select(LEAVE_SELECT)
-      .single();
-
-    if (error && isBuddySchemaError(error)) {
-      return res.status(503).json({
-        error: 'Leave buddy setup is not ready in the database yet. Run add_leave_buddy.sql in Supabase, then try again.',
-      });
-    }
-    if (error) throw error;
-
-    const applicantName = applicant.full_name || applicant.username;
-    let waStakeholders = [];
-    let waBuddy = null;
-    try {
-      waStakeholders = await notifyOfficeLeaveStakeholders({
-        applicantName,
-        from_date,
-        to_date,
-        reason: reason.trim(),
-        applicantId: applicant.id,
-      });
-    } catch (waError) {
-      console.warn('Proxy leave stakeholder WA skip:', waError.message);
-    }
-    try {
-      if (buddy.whatsapp_number) {
-        const sent = await sendLeaveBuddyRequestWa(buddy.whatsapp_number, {
-          buddyName: buddy.full_name,
-          applicantName,
-          from_date,
-          to_date,
-          reason: reason.trim(),
-        });
-        waBuddy = { label: buddy.full_name, ok: !!sent?.ok, reason: sent?.reason || null };
-      } else {
-        waBuddy = { label: buddy.full_name, ok: false, reason: 'no_number' };
-      }
-    } catch (waError) {
-      waBuddy = { label: buddy.full_name, ok: false, reason: waError.message };
-    }
-
-    res.status(201).json({
-      ...data,
-      _whatsapp: {
-        stakeholders: waStakeholders,
-        buddy: waBuddy,
-        ok: (waStakeholders || []).some((row) => row.ok) || !!(waBuddy && waBuddy.ok),
-      },
-    });
-  } catch (err) {
-    console.error('Proxy apply leave error:', err.message);
-    res.status(500).json({ error: err.message || 'Could not submit employee leave' });
-  }
-});
-
 router.post('/', async (req, res) => {
   try {
-    const {
-      from_date,
-      to_date,
-      is_half_day,
-      half_day_period,
-      reason,
-      buddy_id,
-      acknowledge_negative,
-    } = req.body || {};
+    const { from_date, to_date, is_half_day, reason, buddy_id, acknowledge_negative } = req.body || {};
 
     if (!from_date || !to_date) {
       return res.status(400).json({ error: 'Please select both from and to dates' });
     }
     if (!reason || !reason.trim()) {
       return res.status(400).json({ error: 'Please give a reason for the leave' });
-    }
-    if (half_day_period && !['first_half', 'second_half'].includes(half_day_period)) {
-      return res.status(400).json({ error: 'Half-day period must be first_half or second_half' });
     }
     if (new Date(to_date) < new Date(from_date)) {
       return res.status(400).json({ error: 'To date cannot be before from date' });
@@ -1109,7 +743,6 @@ router.post('/', async (req, res) => {
         from_date,
         to_date,
         is_half_day: !!is_half_day,
-        half_day_period: is_half_day ? (half_day_period || null) : null,
         reason: reason.trim(),
       status: 'Pending',
       buddy_id,
@@ -1774,7 +1407,7 @@ router.get('/hr-status', requireAdminOrHr, async (req, res) => {
     const officeQuery = await supabase
       .from('leaves')
       .select(
-        `id, user_id, from_date, to_date, is_half_day, half_day_period, reason, status, buddy_status, created_at,
+        `id, user_id, from_date, to_date, is_half_day, reason, status, buddy_status, created_at,
          user:users!leaves_user_id_fkey ( id, full_name, username, department )`
       )
       .order('created_at', { ascending: false })
@@ -1796,7 +1429,7 @@ router.get('/hr-status', requireAdminOrHr, async (req, res) => {
       supabase
         .from('site_leaves')
         .select(
-          'id, user_name, name, leave_type, from_date, to_date, is_half_day, half_day_period, reason, site_name, status, level_approved, head_approved, level_approver_name, head_approver_name, rejection_reason, created_at'
+          'id, user_name, name, leave_type, from_date, to_date, reason, site_name, status, level_approved, head_approved, level_approver_name, head_approver_name, rejection_reason, created_at'
         )
         .order('created_at', { ascending: false })
         .limit(500),
@@ -1829,7 +1462,6 @@ router.get('/hr-status', requireAdminOrHr, async (req, res) => {
         from_date: row.from_date,
         to_date: row.to_date,
         is_half_day: !!row.is_half_day,
-        half_day_period: row.half_day_period || null,
         reason: row.reason || '',
         status: row.status || 'Pending',
         buddy_status: row.buddy_status || null,
@@ -1865,8 +1497,7 @@ router.get('/hr-status', requireAdminOrHr, async (req, res) => {
         department: 'Site',
         from_date: row.from_date,
         to_date: row.to_date,
-        is_half_day: !!row.is_half_day,
-        half_day_period: row.half_day_period || null,
+        is_half_day: false,
         reason: row.reason || '',
         status: row.status || 'Pending',
         buddy_status: null,

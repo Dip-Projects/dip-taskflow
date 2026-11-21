@@ -217,7 +217,6 @@ async function loadClientSites(userId, jwtUser) {
     const { data } = await supabase
       .from('projects')
       .select('id, name, client_name, location, status')
-      .neq('is_active', false)
       .order('name');
     const allowed = new Set(sites.map((s) => s.toLowerCase()));
     projects = (data || []).filter((p) => allowed.has(String(p.name || '').toLowerCase()));
@@ -516,7 +515,6 @@ router.get('/site-profile', async (req, res) => {
     const { data: proj } = await supabase
       .from('projects')
       .select('name, client_name, location, status')
-      .neq('is_active', false)
       .ilike('name', siteName)
       .maybeSingle();
     if (!proj) return res.json(null);

@@ -58,11 +58,7 @@ router.post('/designations', requireDirectoryEditor, async (req, res) => {
 });
 
 router.get('/projects', async (req, res) => {
-  const { data, error } = await supabase
-    .from('projects')
-    .select('id, name')
-    .neq('is_active', false)
-    .order('name');
+  const { data, error } = await supabase.from('projects').select('id, name').order('name');
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });

@@ -50,10 +50,7 @@ export default function Verifications() {
     try {
       const res = await api(`/tasks/${t.id}/verify`, { method: 'PATCH', body: review });
       if (review.send_whatsapp && !res?._feedbackWhatsapp?.ok) {
-        const reason = res?._feedbackWhatsapp?.error || res?._feedbackWhatsapp?.reason;
-        alert(reason
-          ? `Task verified, but WhatsApp feedback was not delivered: ${reason}`
-          : 'Task verified. WhatsApp feedback was not delivered.');
+        alert('Task verified. WhatsApp feedback was not delivered.');
       }
       await load();
     } catch (e) {

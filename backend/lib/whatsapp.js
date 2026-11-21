@@ -157,7 +157,9 @@ async function sendVerificationAlertTemplate(toNumber, { verifierName, taskDescr
  * {{1}} employee, {{2}} task, {{3}} project, {{4}} rating, {{5}} feedback + verifier.
  */
 async function sendTaskFeedbackTemplate(toNumber, { employeeName, taskDescription, projectName, rating, feedback, verifierName }) {
-  const stars = '\u2605'.repeat(rating) + '\u2606'.repeat(5 - rating);
+  const full = Math.floor(rating);
+  const half = rating - full >= 0.5 ? 1 : 0;
+  const stars = '\u2605'.repeat(full) + (half ? '\u00BD' : '') + '\u2606'.repeat(5 - full - half);
   return sendWhatsAppTemplate(
     toNumber,
     process.env.WHATSAPP_TASK_FEEDBACK_TEMPLATE || 'task_feedback_v1',

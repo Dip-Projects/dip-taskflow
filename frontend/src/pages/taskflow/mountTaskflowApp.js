@@ -1,7 +1,8 @@
 import { openChecklistView, requestChecklist, TASK_CHECKLIST_OPEN_EVENT } from './checklist/checklistBus';
 import { NAV_ICONS, tfIcon } from './navIcons';
 import { showConfirm } from '../../lib/confirmDialog';
-import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './ratingModal';
+import { openVerifyRatingModal, ratingStarsHtml, RATING_QUESTIONS } from './ratingModal';
+import { uploadViaApi, ensureSiteBucket, SITE_FILES_BUCKET } from '../../lib/ensureBucket';
 
   /**
    * Adapted from backend/legacy/app.js for React (no iframe).
@@ -762,13 +763,33 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     }
 
     /** Live work deadline once accepted (and not waiting on a fresh Accept). */
+    /**
+     * Deadline given by the latest "Updation" the verifier sent. It is written in
+     * the same save as the updation itself, so it stays correct even if the
+     * work_due_at column held an older (already passed) value.
+     */
+    function latestUpdationDue(task) {
+      if (task?.verification_status !== 'Updation Required') return null;
+      const list = Array.isArray(task?.correction_extensions) ? task.correction_extensions : [];
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        if (list[i]?.kind !== 'updation') continue;
+        const d = list[i].work_due_at ? parseLocalDate(list[i].work_due_at) : null;
+        return d && !Number.isNaN(d.getTime()) ? d : null;
+      }
+      return null;
+    }
+
     function employeeWorkDueDate(task) {
       if (needsReaccept(task)) return null;
       if (!task?.accepted_at) return null;
+      const updDue = latestUpdationDue(task);
+      let storedDue = null;
       if (task.work_due_at) {
         const stored = parseLocalDate(task.work_due_at);
-        if (stored && !Number.isNaN(stored.getTime())) return stored;
+        if (stored && !Number.isNaN(stored.getTime())) storedDue = stored;
       }
+      if (updDue) return storedDue && storedDue > updDue ? storedDue : updDue;
+      if (storedDue) return storedDue;
       const anchor = workTimerAnchor(task);
       const hours = workTimerBudgetHours(task);
       if (!anchor || !hours || hours <= 0) return null;
@@ -1353,7 +1374,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       // Admin always keeps Add / All / Overdue menus
       if (who === 'admin' && (key === 'add' || key === 'all' || key === 'overdue')) return true;
       // Rating Report: admin always; everyone else only if MIS enabled it in Who sees what
-      if (key === 'rating-report') return who === 'admin' || (!!row && row[who] === true);
+      if (key === 'rating-report') return who === 'admin' ? (!row || row.admin !== false) : (!!row && row[who] === true);
       // Per-user Add task flag (Permissions) overrides role map for "add"
       if (key === 'add' && (state.user?.role === 'admin' || state.user?.can_add_task)) return true;
       if (!row) return true;
@@ -3276,7 +3297,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       }
       if (task.verification_status === 'Verified') {
         const stars = task.rating
-          ? `<div style="margin-top:2px;color:#f5a623;font-size:0.95rem" title="Overall rating ${task.rating}/5">${ratingStarsText(task.rating)} <span style="color:#666;font-size:0.75rem">${task.rating}/5</span></div>`
+          ? `<div style="margin-top:2px;color:#f5a623;font-size:0.95rem" title="Overall rating ${task.rating}/5">${ratingStarsHtml(task.rating)} <span style="color:#666;font-size:0.75rem">${Number(task.rating)}/5</span></div>`
           : '';
         const qa = task.rating_answers
           ? `<div style="font-size:0.72rem;color:#666;margin-top:2px">${RATING_QUESTIONS.map((q) => `${escapeHtml(q.short || q.label)}: ${Number(task.rating_answers[q.key]) || '—'}/5`).join(' · ')}</div>`
@@ -4134,10 +4155,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
         showToast('Task verified & rated ✅', 'success');
         if (review?.send_whatsapp) {
           if (res?._feedbackWhatsapp?.ok) showToast('Feedback sent to employee on WhatsApp 📲', 'success');
-          else {
-            const reason = res?._feedbackWhatsapp?.error || res?._feedbackWhatsapp?.reason;
-            showToast(reason ? `Verified; WhatsApp failed: ${reason}` : 'Verified. WhatsApp feedback was not delivered.', 'error');
-          }
+          else showToast('Verified. WhatsApp feedback was not delivered.', 'error');
         }
 
         loadVerifications();
@@ -5230,6 +5248,13 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       if (note) note.value = '';
       if (msg) msg.hidden = true;
       fillDuePrompt('updation', task);
+      // Updation never edits the plan date: blank the date field, restart-timer wording.
+      const dueLabel = document.getElementById('updationCurrentDue');
+      if (dueLabel) dueLabel.textContent = "The employee's timer restarts from the moment you send this.";
+      const dueInput = document.getElementById('updation-new-due');
+      if (dueInput) dueInput.value = '';
+      const upFiles = document.getElementById('updation-files');
+      if (upFiles) upFiles.value = '';
       if (modal) modal.hidden = false;
     }
 
@@ -5252,21 +5277,63 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
         return;
       }
       try {
-        await api(`/tasks/${state.pendingTaskId}/send-updation`, {
-          method: 'PATCH',
-          body: (() => {
-            const action = document.getElementById('updation-due-action')?.value || 'keep';
-            const payload = { note };
-            if (action === 'hours' || action === 'days') {
-              payload.extra_unit = action;
-              payload.extra_amount = document.getElementById('updation-extra-amount')?.value || '';
+        const action = document.getElementById('updation-due-action')?.value || 'keep';
+        const payload = { note };
+        if (action === 'hours' || action === 'days') {
+          const extraAmount = document.getElementById('updation-extra-amount')?.value || '';
+          if (!extraAmount || Number(extraAmount) <= 0) {
+            if (msgEl) { msgEl.textContent = 'Enter how much time to give'; msgEl.hidden = false; }
+            return;
+          }
+          payload.extra_unit = action;
+          payload.extra_amount = extraAmount;
+        }
+        if (action === 'new') {
+          const newDue = document.getElementById('updation-new-due')?.value || '';
+          if (!newDue) {
+            if (msgEl) { msgEl.textContent = 'Pick the due date and time'; msgEl.hidden = false; }
+            return;
+          }
+          payload.new_target_date = datetimeLocalToIso(newDue);
+        }
+        const picked = Array.from(document.getElementById('updation-files')?.files || []);
+        const MAX_FILE = 5 * 1024 * 1024 * 1024; // 5 GB each
+        if (picked.length > 3) {
+          if (msgEl) { msgEl.textContent = 'You can attach up to 3 files'; msgEl.hidden = false; }
+          return;
+        }
+        const tooBig = picked.find((f) => f.size > MAX_FILE);
+        if (tooBig) {
+          if (msgEl) { msgEl.textContent = `"${tooBig.name}" is larger than 5 GB`; msgEl.hidden = false; }
+          return;
+        }
+        const submitBtn = document.querySelector('#updationForm button[type="submit"]');
+        const submitLabel = submitBtn ? submitBtn.textContent : '';
+        if (submitBtn) submitBtn.disabled = true;
+        try {
+          if (picked.length) {
+            // Files go straight to Storage (any size); only their links are sent to the API.
+            await ensureSiteBucket('task-updations');
+            const uploaded = [];
+            for (let i = 0; i < picked.length; i += 1) {
+              const f = picked[i];
+              if (submitBtn) submitBtn.textContent = `Uploading file ${i + 1} of ${picked.length}…`;
+              const safe = f.name.replace(/[^\w.\-]+/g, '_');
+              const url = await uploadViaApi({
+                path: `task-updations/${state.pendingTaskId}/${Date.now()}_${safe}`,
+                blob: f,
+                contentType: f.type || 'application/octet-stream',
+                bucket: SITE_FILES_BUCKET,
+              });
+              uploaded.push({ url, name: f.name, size: f.size });
             }
-            if (action === 'new') {
-              payload.new_target_date = datetimeLocalToIso(document.getElementById('updation-new-due')?.value || '');
-            }
-            return payload;
-          })(),
-        });
+            payload.updation_files = uploaded;
+          }
+          if (submitBtn) submitBtn.textContent = 'Sending…';
+          await api(`/tasks/${state.pendingTaskId}/send-updation`, { method: 'PATCH', body: payload });
+        } finally {
+          if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
+        }
         showToast('Updation request sent ✅', 'success');
         closeUpdationModal();
         loadVerifications();
@@ -5279,6 +5346,33 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
         }
       }
     });
+
+    // Files the verifier attached to the latest updation (kept in the updation entry of correction_extensions)
+    function updationFilesOf(task) {
+      const list = Array.isArray(task?.correction_extensions) ? task.correction_extensions : [];
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        if (list[i]?.kind !== 'updation') continue;
+        return (Array.isArray(list[i].files) ? list[i].files : [])
+          .map((f, n) => {
+            const url = typeof f === 'string' ? f : f?.url;
+            if (!url) return null;
+            let name = typeof f === 'object' && f?.name ? f.name : '';
+            if (!name) {
+              try { name = decodeURIComponent(String(url).split('/').pop() || '').replace(/^\d{10,}_/, ''); } catch { name = ''; }
+            }
+            return { url, name: name || `File ${n + 1}`, size: typeof f === 'object' ? Number(f?.size) || 0 : 0 };
+          })
+          .filter(Boolean);
+      }
+      return [];
+    }
+    function fmtFileSize(bytes) {
+      const n = Number(bytes) || 0;
+      if (!n) return '';
+      if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+      if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+      return `${Math.max(1, Math.round(n / 1024))} KB`;
+    }
 
     // ─── Load & Render Updations (employee view) ──────────────────────────────────
     async function loadUpdations() {
@@ -5314,6 +5408,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
           <div class="correction-note-box">
             <div class="correction-note-label">📝 Updation note from <strong>${escapeHtml(task.verifier?.full_name ?? 'Verifier')}</strong>:</div>
             <div class="correction-note-text">${escapeHtml(task.updation_note ?? '(no note)')}</div>
+            ${updationFilesOf(task).length ? `<div class="task-meta" style="margin-top:8px">${updationFilesOf(task).map((f) => `<a href="${escapeHtml(f.url)}" target="_blank" rel="noopener" class="attachment-link">📎 ${escapeHtml(f.name)}${f.size ? ` (${fmtFileSize(f.size)})` : ''}</a>`).join(' ')}</div>` : ''}
           </div>
           <div class="task-card-footer">
             <span class="pill pill-InProgress">${task.status}</span>
@@ -5762,8 +5857,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const payload = {
         from_date: els.leaveFrom?.value,
         to_date: els.leaveTo?.value,
-        is_half_day: !!els.leaveHalfDay?.value,
-        half_day_period: els.leaveHalfDay?.value || null,
+        is_half_day: !!els.leaveHalfDay?.checked,
       };
       const req = leaveRequestDays(payload);
       const avail = bal?.available;
@@ -5884,15 +5978,6 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       document.getElementById(id)?.addEventListener('change', updateLeaveFormBalancePreview);
       document.getElementById(id)?.addEventListener('input', updateLeaveFormBalancePreview);
     });
-    els.leaveHalfDay?.addEventListener('change', () => {
-      if (els.leaveHalfDay.value) els.leaveTo.value = els.leaveFrom.value;
-      els.leaveTo.disabled = !!els.leaveHalfDay.value;
-      updateLeaveFormBalancePreview();
-    });
-    els.leaveFrom?.addEventListener('change', () => {
-      if (els.leaveHalfDay?.value) els.leaveTo.value = els.leaveFrom.value;
-      updateLeaveFormBalancePreview();
-    });
     els.leaveForm?.addEventListener('submit', async (e) => {
       e.preventDefault(); els.leaveFormMsg.hidden = true;
       const buddyId = (els.leaveBuddy || document.getElementById('leave-buddy'))?.value;
@@ -5904,8 +5989,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const payload = {
         from_date: els.leaveFrom.value,
         to_date: els.leaveTo.value,
-        is_half_day: !!els.leaveHalfDay.value,
-        half_day_period: els.leaveHalfDay.value || null,
+        is_half_day: els.leaveHalfDay.checked,
         reason: els.leaveReason.value.trim(),
         buddy_id: buddyId,
       };
@@ -6300,13 +6384,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       const from = fmtDateOnly(leave.from_date);
       const to = fmtDateOnly(leave.to_date);
       const range = leave.from_date === leave.to_date ? from : `${from} → ${to}`;
-      if (!leave.is_half_day) return range;
-      const period = leave.half_day_period === 'first_half'
-        ? '1st Half'
-        : leave.half_day_period === 'second_half'
-          ? '2nd Half'
-          : 'Half day';
-      return `${range} (${period})`;
+      return leave.is_half_day ? `${range} (Half day)` : range;
     }
 
     function leaveMonthKey(leave) {
@@ -7763,7 +7841,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
 
     // ─── Permissions (admin only) ──────────────────────────────────────────────────
     async function loadPermissions() {
-      els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">Loading employees…</td></tr>`;
+      els.permissionsTableBody.innerHTML = `<tr><td colspan="12" class="empty-state">Loading employees…</td></tr>`;
       try {
         const employees = (await api('/employees'))
           .filter((e) => !isClientUserRow(e) && e.is_active !== false)
@@ -7775,7 +7853,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     }
     function renderPermissionsTable(employees) {
       if (!employees.length) {
-        els.permissionsTableBody.innerHTML = `<tr><td colspan="10" class="empty-state">No employees yet</td></tr>`;
+        els.permissionsTableBody.innerHTML = `<tr><td colspan="12" class="empty-state">No employees yet</td></tr>`;
         return;
       }
       els.permissionsTableBody.innerHTML = '';
@@ -7798,7 +7876,10 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
           ['is_mis_executive', 'MIS Executive'],
           ['can_switch_office_site', 'Office ↔ Site'],
           ['can_switch_office_mdo', 'Office ↔ MDO'],
+          ['default_site_portal', 'Opens in Site portal after login'],
+          ['can_view_team_overview', 'Team Overview page (Site portal)'],
         ];
+        const SITE_ONLY_FLAGS = ['default_site_portal', 'can_view_team_overview'];
         flags.forEach(([flag, label]) => {
           const td = document.createElement('td');
           td.className = 'perm-col';
@@ -7810,17 +7891,21 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
           const autoMdo =
             flag === 'can_switch_office_mdo' &&
             /process controller/i.test(`${emp.designation || ''} ${emp.role || ''} ${emp.department || ''}`);
-          const checked = isAdminRow || autoSite || autoMdo || !!emp[flag];
+          const nameLocked = SITE_ONLY_FLAGS.includes(flag) && !!emp.site_default_locked;
+          const adminAuto = (isAdminRow && !SITE_ONLY_FLAGS.includes(flag)) || nameLocked;
+          const checked = adminAuto || autoSite || autoMdo || !!emp[flag];
           btn.className = `status-toggle ${checked ? 'active' : 'inactive'}`;
           btn.textContent = checked ? 'Yes' : 'No';
-          btn.title = isAdminRow
+          btn.title = nameLocked
+            ? 'Always on for Divyesh Rana and Jignesh Lad'
+            : adminAuto
             ? 'Admins already have full access'
             : autoSite
               ? 'Head role already has Office ↔ Site'
               : autoMdo
                 ? 'Process Controller already has Office ↔ MDO'
                 : `Toggle "${label}" for ${emp.full_name}`;
-          if (isAdminRow || autoSite || autoMdo) {
+          if (adminAuto || autoSite || autoMdo) {
             btn.disabled = true;
           } else {
             btn.addEventListener('click', () => togglePermission(emp, flag));
@@ -7857,7 +7942,7 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
         modules.forEach((mod) => {
           const tr = document.createElement('tr');
           const name = document.createElement('td');
-          const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue' || mod.key === 'rating-report';
+          const adminLocked = mod.key === 'add' || mod.key === 'all' || mod.key === 'overdue';
           name.innerHTML = `<strong>${escapeHtml(mod.label)}</strong><div class="td-muted">${escapeHtml(mod.area)}${adminLocked ? ' · Admin always on; other roles editable' : ''
             }</div>`;
           tr.appendChild(name);
@@ -8154,10 +8239,9 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     }
 
     async function loadSites() {
-      els.sitesTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">Loading sites…</td></tr>`;
+      els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">Loading sites…</td></tr>`;
       try {
-        // Manage sites shows inactive sites too; every other dropdown gets active sites only
-        sitesCache = await api('/sites?include_inactive=1') || [];
+        sitesCache = await api('/sites') || [];
         mergeSiteProjectTypesFromSites(sitesCache);
         fillSiteFilterOptions(sitesCache);
         applySitesFilter();
@@ -8238,13 +8322,12 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     function renderSitesTable(sites) {
       if (!sites.length) {
         const emptyMsg = sitesCache.length ? 'No matching sites' : 'No sites yet';
-        els.sitesTableBody.innerHTML = `<tr><td colspan="8" class="empty-state">${emptyMsg}</td></tr>`;
+        els.sitesTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">${emptyMsg}</td></tr>`;
         return;
       }
       els.sitesTableBody.innerHTML = '';
       sites.forEach((site) => {
         const tr = document.createElement('tr');
-        const isActive = site.is_active !== false;
         tr.innerHTML = `
           <td><strong style="font-weight:600">${escapeHtml(site.name)}</strong></td>
           <td>${escapeHtml(site.client_name ?? '—')}</td>
@@ -8252,31 +8335,9 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
           <td>${escapeHtml(site.project_type ?? '—')}</td>
           <td><span class="pill pill-Pending">${escapeHtml(site.status)}</span></td>
           <td>${escapeHtml(site.team_leader?.full_name ?? '—')}</td>
-          <td class="site-active-cell"></td>
           <td class="row-actions"></td>
         `;
-        const activeCell = tr.children[6];
-        const activeBtn = document.createElement('button');
-        activeBtn.type = 'button';
-        activeBtn.textContent = isActive ? 'ACTIVE' : 'INACTIVE';
-        activeBtn.style.cssText = [
-          'display:inline-block',
-          'padding:4px 14px',
-          'border-radius:999px',
-          'font-size:11px',
-          'font-weight:600',
-          'letter-spacing:0.06em',
-          'cursor:pointer',
-          isActive
-            ? 'background:#ecfdf5;border:1px solid #6ee7b7;color:#047857'
-            : 'background:#fef2f2;border:1px solid #fca5a5;color:#b91c1c',
-        ].join(';');
-        activeBtn.title = isActive
-          ? 'Click to make inactive (hides this site from all dropdowns)'
-          : 'Click to make active again';
-        activeBtn.addEventListener('click', () => toggleSiteActive(site, activeBtn));
-        activeCell.appendChild(activeBtn);
-        const actionsCell = tr.children[7];
+        const actionsCell = tr.children[6];
         const editBtn = document.createElement('button');
         editBtn.className = 'action-btn action-accept';
         editBtn.textContent = '✏️ Edit';
@@ -8293,21 +8354,6 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
     els.siteFilterType?.addEventListener('change', applySitesFilter);
     els.siteFilterStatus?.addEventListener('change', applySitesFilter);
     els.clearSiteFilters?.addEventListener('click', clearSitesFilter);
-
-    async function toggleSiteActive(site, btn) {
-      const makeActive = site.is_active === false;
-      const verb = makeActive ? 'activate' : 'deactivate';
-      if (!makeActive && !confirm(`Make "${site.name}" inactive? It will be hidden from every dropdown until it is made active again.`)) return;
-      btn.disabled = true;
-      try {
-        await api(`/sites/${site.id}`, { method: 'PATCH', body: { is_active: makeActive } });
-        showToast(makeActive ? 'Site is active again' : 'Site made inactive', 'success');
-        await loadSites(); loadMasterData();
-      } catch (err) {
-        showToast(err.message || `Could not ${verb} site`, 'error');
-        btn.disabled = false;
-      }
-    }
 
     async function deleteSite(site) {
       if (!confirm(`Delete site "${site.name}"? This cannot be undone.`)) return;
@@ -11605,13 +11651,13 @@ import { openVerifyRatingModal, ratingStarsText, RATING_QUESTIONS } from './rati
       if (!s.total) return `${cards}<div class="empty-state">No rated tasks in this range.</div>`;
       const empRows = (data.employees || []).map((e, i) => `<tr>
         <td>${i + 1}</td><td><strong>${escapeHtml(e.employee)}</strong></td><td>${e.tasks_rated}</td>
-        <td style="color:#f5a623;white-space:nowrap">${ratingStarsText(Math.round(e.avg_rating || 0))} ${fmt(e.avg_rating)}</td>
+        <td style="color:#f5a623;white-space:nowrap">${ratingStarsHtml(e.avg_rating || 0)} ${fmt(e.avg_rating)}</td>
         ${qs.map((q) => `<td>${fmt(e.answers_avg?.[q.key])}</td>`).join('')}
         <td>${e.low_ratings}</td></tr>`).join('');
       const taskRows = (data.rows || []).map((r) => `<tr>
         <td>${r.sr}</td><td>${escapeHtml(r.employee)}</td><td>${escapeHtml(r.project)}</td>
         <td>${escapeHtml(r.description)}</td>
-        <td style="color:#f5a623;white-space:nowrap">${ratingStarsText(r.rating)}</td>
+        <td style="color:#f5a623;white-space:nowrap">${ratingStarsHtml(r.rating)}</td>
         <td>${escapeHtml(r.feedback || '—')}</td><td>${escapeHtml(r.verifier)}</td>
         <td>${escapeHtml(String(r.rated_at || '').slice(0, 10))}</td></tr>`).join('');
       return `${cards}

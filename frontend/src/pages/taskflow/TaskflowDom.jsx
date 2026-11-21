@@ -853,7 +853,7 @@ export default function TaskflowDom() {
                     <thead>
                       <tr>
                         <th>Site name</th><th>Client</th><th>Location</th>
-                        <th>Type</th><th>Status</th><th>Team leader</th><th>Active</th><th>Actions</th>
+                        <th>Type</th><th>Status</th><th>Team leader</th><th>Actions</th>
                       </tr>
                     </thead>
                     <tbody id="sitesTableBody"></tbody>
@@ -990,6 +990,8 @@ export default function TaskflowDom() {
                         <th className="perm-col">MIS Executive</th>
                         <th className="perm-col">Office ↔ Site</th>
                         <th className="perm-col">Office ↔ MDO</th>
+                        <th className="perm-col">Opens in Site</th>
+                        <th className="perm-col">Team Overview</th>
                       </tr>
                     </thead>
                     <tbody id="permissionsTableBody"></tbody>
@@ -2370,24 +2372,30 @@ export default function TaskflowDom() {
               <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
             </div>
             <div className="field">
-              <p id="updationCurrentDue" className="form-note" style={{ marginBottom: 8 }}>This was your target date.</p>
-              <label htmlFor="updation-due-action">Now what would you like to do?</label>
+              <p id="updationCurrentDue" className="form-note" style={{ marginBottom: 8 }}>The employee's timer restarts from the moment you send this.</p>
+              <label htmlFor="updation-due-action">How much time should the employee get?</label>
               <select id="updation-due-action">
-                <option value="keep">Keep the same date</option>
-                <option value="hours">Give extra hours</option>
-                <option value="days">Give extra days</option>
-                <option value="new">Set a new date &amp; time</option>
+                <option value="keep">Default - 2 office hours from now</option>
+                <option value="hours">Give hours (office hours, from now)</option>
+                <option value="days">Give days (office days, from now)</option>
+                <option value="new">Set an exact due date &amp; time</option>
               </select>
+              <p className="form-note" style={{ marginTop: 6 }}>Office hours: 9:30 AM - 6:30 PM, lunch 1-2 PM and Sundays not counted.</p>
             </div>
             <div className="field" id="updationExtraWrap" hidden={true}>
-              <label htmlFor="updation-extra-amount">How much extra?</label>
-              <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Amount" />
+              <label htmlFor="updation-extra-amount">How much time?</label>
+              <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Hours or days" />
               <input type="hidden" id="updation-extra-unit" value="" />
             </div>
             <div className="field" id="updationNewDueWrap" hidden={true}>
-              <label htmlFor="updation-new-due">New due date &amp; time</label>
+              <label htmlFor="updation-new-due">Due date &amp; time</label>
               <input id="updation-new-due" type="datetime-local" />
-              <p className="form-note">This exact date and time will become the new target date for this task.</p>
+              <p className="form-note">The employee's timer runs until this exact date and time. The planned date is not changed.</p>
+            </div>
+            <div className="field">
+              <label htmlFor="updation-files">Attach files <span className="optional">(max 3, optional)</span></label>
+              <input id="updation-files" type="file" multiple />
+              <span className="form-note">Reference drawings, markups or documents for the employee (up to 5 GB each). Big files upload first - keep this window open until it finishes.</span>
             </div>
             <p id="updationFormMsg" className="form-error" hidden={true}></p>
             <div className="modal-actions">
@@ -2445,12 +2453,10 @@ export default function TaskflowDom() {
               </div>
             </div>
             <div className="field">
-              <label htmlFor="leave-halfday">Day part</label>
-              <select id="leave-halfday">
-                <option value="">Full day</option>
-                <option value="first_half">1st Half</option>
-                <option value="second_half">2nd Half</option>
-              </select>
+              <label className="checkbox-label">
+                <input id="leave-halfday" type="checkbox" />
+                Half day leave
+              </label>
             </div>
             <div className="field">
               <label htmlFor="leave-reason">Reason <span className="req">*</span></label>

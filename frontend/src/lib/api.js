@@ -180,6 +180,8 @@ export function processControllerPath() {
 export function postLoginPath(user) {
   if (isClient(user)) return '/client';
   if (isHr(user)) return '/hr';
+  // Per-user switch: open the Site portal first (only if they may use it)
+  if (user.default_site_portal && (canToggleSite(user) || isSitePortalOnlyStaff(user))) return '/site';
   // MDO only via Process Controller role or Permissions "Office ↔ MDO" toggle
   // (dept name alone must NOT auto-open MDO when toggle is Off).
   if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();

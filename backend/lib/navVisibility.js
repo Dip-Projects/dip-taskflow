@@ -105,8 +105,7 @@ function mergeMap(saved) {
   base.visibility = { admin: false, mis: true, employee: false, site: false, site_head: false };
   // Admin always keeps Add / All / Overdue. Other roles follow saved map
   // so MIS can grant "Add task" to anyone via Who sees what.
-  // Rating Report: admin always keeps it; MIS decides who else sees it.
-  for (const k of ['add', 'all', 'overdue', 'rating-report']) {
+  for (const k of ['add', 'all', 'overdue']) {
     base[k] = { ...(base[k] || {}), admin: true };
   }
   return base;

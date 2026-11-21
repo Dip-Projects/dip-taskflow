@@ -28,8 +28,7 @@ export default function Sites() {
     setLoading(true);
     setError('');
     try {
-      // Manage sites lists inactive sites too; other dropdowns only get active ones
-      const [sites, emps] = await Promise.all([api('/sites?include_inactive=1'), api('/master/employees')]);
+      const [sites, emps] = await Promise.all([api('/sites'), api('/master/employees')]);
       setRows(Array.isArray(sites) ? sites : []);
       setPeople(Array.isArray(emps) ? emps : []);
     } catch (e) {
@@ -66,20 +65,6 @@ export default function Sites() {
       await load();
     } catch (err) {
       alert(err.message || 'Delete failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleActive = async (site) => {
-    const makeActive = site.is_active === false;
-    if (!makeActive && !confirm(`Make "${site.name}" inactive? It will be hidden from every dropdown until it is made active again.`)) return;
-    setBusy(true);
-    try {
-      await api(`/sites/${site.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: makeActive }) });
-      await load();
-    } catch (err) {
-      alert(err.message || 'Could not update site');
     } finally {
       setBusy(false);
     }
@@ -175,7 +160,6 @@ export default function Sites() {
                 <th>Location</th>
                 <th>Status</th>
                 <th>Incharge</th>
-                <th>Active</th>
                 <th />
               </tr>
             </thead>
@@ -187,27 +171,6 @@ export default function Sites() {
                   <td>{s.location}</td>
                   <td>{s.status}</td>
                   <td>{s.site_incharge?.full_name || '—'}</td>
-                  <td>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => toggleActive(s)}
-                      style={{
-                        display: 'inline-block',
-                        padding: '4px 14px',
-                        borderRadius: 999,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        cursor: 'pointer',
-                        ...(s.is_active === false
-                          ? { background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c' }
-                          : { background: '#ecfdf5', border: '1px solid #6ee7b7', color: '#047857' }),
-                      }}
-                    >
-                      {s.is_active === false ? 'INACTIVE' : 'ACTIVE'}
-                    </button>
-                  </td>
                   <td>
                     <button type="button" className="ghost" disabled={busy} onClick={() => remove(s.id)}>
                       Delete
