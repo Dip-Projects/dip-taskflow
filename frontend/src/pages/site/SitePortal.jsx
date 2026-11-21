@@ -31,6 +31,10 @@ import {
 import { supabase, supabaseUrl, supabaseAnonKey, fromMaybe, tableExists } from '../../lib/supabase';
 import { useAuth } from '../../auth/AuthContext';
 import { api, syncSiteUser, isSiteHead, isOfficeSiteViewer } from '../../lib/api';
+import {
+  buildLeaveWhatsAppMessage,
+  whatsAppShareUrl,
+} from './leaveWhatsAppMessage';
 
 export { ROLE_LEVELS, resolveApprovalChain, deriveLeaveStatus } from "./leaveUtils.js";
 
@@ -666,6 +670,7 @@ function DateField({
   value,
   onChange,
   min,
+  disabled = false,
   invalid,
   placeholder = "dd-mm-yyyy",
 }) {
@@ -681,6 +686,7 @@ function DateField({
         value={value}
         onChange={onChange}
         min={min}
+        disabled={disabled}
         style={{
           color: "transparent",
           caretColor: "transparent",
@@ -790,7 +796,8 @@ function MyLeave({ user, onApply }) {
   });
 
   // Days between two date strings
-  const dayCount = (from, to) => {
+  const dayCount = (from, to, isHalfDay = false) => {
+    if (isHalfDay) return 0.5;
     if (!from || !to) return null;
     return Math.ceil((new Date(to) - new Date(from)) / 86400000) + 1;
   };
@@ -827,7 +834,7 @@ function MyLeave({ user, onApply }) {
         ) : (
           leaves.map((l) => {
             const status = computeLeaveStatus(l);
-            const days = dayCount(l.from_date, l.to_date);
+            const days = dayCount(l.from_date, l.to_date, l.is_half_day);
             const isOpen = expanded === l.id;
             const showCancel = canCancel(l);
             const isCancelling = cancellingId === l.id;
@@ -854,7 +861,9 @@ function MyLeave({ user, onApply }) {
                           {" "}
                           ·{" "}
                           <strong>
-                            {days} day{days > 1 ? "s" : ""}
+                            {l.is_half_day
+                              ? `${l.half_day_period === "first_half" ? "1st Half" : l.half_day_period === "second_half" ? "2nd Half" : "Half day"} (0.5 day)`
+                              : `${days} day${days > 1 ? "s" : ""}`}
                           </strong>
                         </>
                       )}
@@ -1246,7 +1255,7 @@ function LeaveApprovals({ user }) {
         <div className="lv-list">
           {list.map(l => {
             const status = deriveLeaveStatus(l.level_approved, l.head_approved);
-            const days = l.from_date && l.to_date ? Math.ceil((new Date(l.to_date)-new Date(l.from_date))/86400000)+1 : null;
+            const days = l.is_half_day ? 0.5 : l.from_date && l.to_date ? Math.ceil((new Date(l.to_date)-new Date(l.from_date))/86400000)+1 : null;
             const myTurn = needsMyAction(l);
             const reasons = Array.isArray(l.rejection_reason) ? l.rejection_reason : [];
             return (
@@ -1256,7 +1265,9 @@ function LeaveApprovals({ user }) {
                     <div className="lv-type">{l.leave_type} — {l.name}</div>
                     <div className="lv-dates">
                       {fmtD(l.from_date)} → {fmtD(l.to_date)}
-                      {days && <> · <strong>{days} day{days>1?"s":""}</strong></>}
+                      {days && <> · <strong>{l.is_half_day
+                        ? `${l.half_day_period === "first_half" ? "1st Half" : l.half_day_period === "second_half" ? "2nd Half" : "Half day"} (0.5 day)`
+                        : `${days} day${days>1?"s":""}`}</strong></>}
                       {l.site_name && <> · {l.site_name}</>}
                     </div>
                     {l.reason && <div className="lv-reason">"{l.reason}"</div>}
@@ -1348,7 +1359,7 @@ function LeaveApprovals({ user }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ApplyLeave({ user }) {
-  const empty = { leave_type: "", from_date: "", to_date: "", reason: "" };
+  const empty = { leave_type: "", from_date: "", to_date: "", reason: "", half_day_period: "" };
   const [form, setForm] = useState(empty);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1359,9 +1370,10 @@ function ApplyLeave({ user }) {
   const [chainLoading, setChainLoading] = useState(true);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const [monthlyBalance, setMonthlyBalance] = useState(null);
+  const [shareMsg, setShareMsg] = useState("");
+  const [copyNote, setCopyNote] = useState("");
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [balanceRefresh, setBalanceRefresh] = useState(0);
-  const [selectedSite, setSelectedSite] = useState("");
   const monthlyScheme = isMonthlyLeaveRole(user);
   const applicantRole = user.role || user.designation || "";
 
@@ -1371,8 +1383,7 @@ function ApplyLeave({ user }) {
       : user.site_name
         ? [user.site_name]
         : [];
-  const site = selectedSite || sites[0] || "";
-  const sitesKey = sites.join("|");
+  const site = sites[0] || "";
 
   useEffect(() => {
     if (!monthlyScheme) { setBalanceLoading(false); return; }
@@ -1383,13 +1394,18 @@ function ApplyLeave({ user }) {
       .finally(() => setBalanceLoading(false));
   }, [user.user_name, monthlyScheme, balanceRefresh]);
 
-  useEffect(() => {
-    setSelectedSite((prev) => (prev && sites.includes(prev) ? prev : sites[0] || ""));
-  }, [sitesKey]);
-
   const showToast = (msg, ms = 4500) => {
     setToast(msg);
     setTimeout(() => setToast(null), ms);
+  };
+
+  const copyShareMsg = async () => {
+    try {
+      await navigator.clipboard.writeText(shareMsg);
+      setCopyNote("Copied. Paste it in WhatsApp.");
+    } catch {
+      setCopyNote("Could not copy automatically. Select the text above and copy it.");
+    }
   };
 
   useEffect(() => {
@@ -1410,6 +1426,8 @@ function ApplyLeave({ user }) {
           (new Date(form.to_date) - new Date(form.from_date)) / 86400000,
         ) + 1
       : null;
+  const isHalfDay = !!form.half_day_period;
+  const requestedDays = isHalfDay ? 0.5 : days;
 
 const submit = async () => {
   const missing = [];
@@ -1427,16 +1445,16 @@ const submit = async () => {
   }
 
   // NEW — block over-quota applications for monthly-scheme roles
-  if (monthlyScheme && days) {
+  if (monthlyScheme && requestedDays) {
     if (balanceLoading) {
       showToast("Still checking your leave balance — try again in a moment.");
       return; 
     }
-    if (monthlyBalance && days > monthlyBalance.remaining) {
+    if (monthlyBalance && requestedDays > monthlyBalance.remaining) {
       setErr(
-        `You only have ${monthlyBalance.remaining} leave${monthlyBalance.remaining === 1 ? "" : "s"} available, but this request is for ${days} day${days > 1 ? "s" : ""}. Please shorten the range or apply for Unpaid Leave instead.`
+        `You only have ${monthlyBalance.remaining} leave${monthlyBalance.remaining === 1 ? "" : "s"} available, but this request is for ${requestedDays} day${requestedDays > 1 ? "s" : ""}. Please shorten the range or apply for Unpaid Leave instead.`
       );
-      showToast(`Insufficient leave balance: ${monthlyBalance.remaining} available, ${days} requested.`);
+      showToast(`Insufficient leave balance: ${monthlyBalance.remaining} available, ${requestedDays} requested.`);
       return;
     }
   }
@@ -1464,6 +1482,8 @@ const submit = async () => {
     leave_type: form.leave_type,
     from_date: form.from_date,
     to_date: form.to_date,
+    is_half_day: isHalfDay,
+    half_day_period: form.half_day_period || null,
     reason: form.reason || null,
     site_name: site,
     level_approver_user_name: c.levelApprover?.username || null,
@@ -1497,6 +1517,20 @@ const submit = async () => {
     } catch (waErr) {
       console.warn("Site leave WhatsApp skip:", waErr?.message || waErr);
     }
+    // WhatsApp message: "This month leave" = previous approved leave of this month (not including this request)
+    const previousThisMonth = monthlyScheme ? monthlyBalance?.thisMonthUsed || 0 : 0;
+    setShareMsg(
+      buildLeaveWhatsAppMessage({
+        employeeName: user.name || user.user_name,
+        fromDate: form.from_date,
+        toDate: form.to_date,
+        isHalfDay,
+        halfDayPeriod: form.half_day_period,
+        reason: form.reason,
+        thisMonthTotal: previousThisMonth,
+      })
+    );
+    setCopyNote("");
     setBalanceRefresh((p) => p + 1);
     setSubmitted(true);
   };
@@ -1509,11 +1543,54 @@ const submit = async () => {
         <div className="success-sub">
           Your request is pending approval. You'll be notified once reviewed.
         </div>
+        {shareMsg && (
+          <div style={{ width: "100%", maxWidth: 520, marginTop: 16, textAlign: "left" }}>
+            <div style={{ fontSize: 13, color: "var(--ink3)", marginBottom: 6 }}>
+              Leave message to share on WhatsApp
+            </div>
+            <pre
+              style={{
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                margin: 0,
+                padding: 12,
+                border: "1px solid var(--line2)",
+                borderRadius: 8,
+                background: "var(--paper)",
+                fontFamily: "inherit",
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              {shareMsg}
+            </pre>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <a
+                className="btn btn-pri"
+                href={whatsAppShareUrl(shareMsg)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: "none" }}
+              >
+                Share on WhatsApp
+              </a>
+              <button className="btn" type="button" onClick={copyShareMsg}>
+                Copy message
+              </button>
+            </div>
+            {copyNote && (
+              <div style={{ fontSize: 13, color: "var(--ink3)", marginTop: 6 }}>{copyNote}</div>
+            )}
+          </div>
+        )}
         <button
           className="btn btn-pri"
+          style={{ marginTop: 16 }}
           onClick={() => {
             setSubmitted(false);
             setForm(empty);
+            setShareMsg("");
+            setCopyNote("");
           }}
         >
           Apply Another
@@ -1566,38 +1643,6 @@ const submit = async () => {
       <div
         style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}
       >
-        {sites.length > 1 ? (
-          <div style={{ background: "var(--paper)", border: "1px solid var(--line2)", borderRadius: 9, padding: "6px 12px", fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ color: "var(--ink3)", fontWeight: 600 }}>Site:</span>
-            <select
-              className="finput"
-              value={site}
-              onChange={(e) => {
-                setSelectedSite(e.target.value);
-                setInvalidFields((f) => f.filter((x) => x !== "Site"));
-              }}
-              style={{
-                width: "auto",
-                minWidth: 180,
-                padding: "4px 8px",
-                fontWeight: 700,
-                borderColor: invalidFields.includes("Site") ? "var(--red)" : undefined,
-              }}
-            >
-              {sites.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-        ) : (
-          <div
-            style={{ background: "var(--paper)", border: "1px solid var(--line2)", borderRadius: 9, padding: "8px 14px", fontSize: 12.5,}}>
-            <span style={{ color: "var(--ink3)", fontWeight: 600 }}>
-              Site:{"  "}
-            </span>
-            <strong>{sites.length ? sites[0] : "Not Assigned"}</strong>
-          </div>
-        )}
         {monthlyScheme && (
         <div style={{
           display: "flex", alignItems: "center", gap: 8,
@@ -1650,7 +1695,11 @@ const submit = async () => {
             min={today()}
             invalid={invalidFields.includes("From Date")}
             onChange={(e) => {
-              set("from_date", e.target.value);
+              setForm((prev) => ({
+                ...prev,
+                from_date: e.target.value,
+                to_date: prev.half_day_period ? e.target.value : prev.to_date,
+              }));
               setInvalidFields((f) => f.filter((x) => x !== "From Date"));
             }}
           />
@@ -1662,6 +1711,7 @@ const submit = async () => {
           <DateField
             value={form.to_date}
             min={form.from_date || today()}
+            disabled={isHalfDay}
             invalid={invalidFields.includes("To Date")}
             onChange={(e) => {
               set("to_date", e.target.value);
@@ -1669,7 +1719,24 @@ const submit = async () => {
             }}
           />
         </div>
-        {days && (
+        <div className="fgroup col2">
+          <label className="flabel" htmlFor="site-half-day-period">Day part</label>
+          <select
+            id="site-half-day-period"
+            className="finput"
+            value={form.half_day_period}
+            onChange={(e) => setForm((prev) => ({
+              ...prev,
+              half_day_period: e.target.value,
+              to_date: e.target.value ? prev.from_date : prev.to_date,
+            }))}
+          >
+            <option value="">Full day</option>
+            <option value="first_half">1st Half</option>
+            <option value="second_half">2nd Half</option>
+          </select>
+        </div>
+        {requestedDays && (
           <div
             className="col2"
             style={{
@@ -1685,7 +1752,7 @@ const submit = async () => {
               color: "var(--green)",
             }}
           >
-            {Ico.clock} {days} day{days > 1 ? "s" : ""} of leave
+            {Ico.clock} {requestedDays} day{requestedDays !== 1 ? "s" : ""} of leave
           </div>
         )}
         <div className="fgroup col2">
@@ -2036,6 +2103,7 @@ const [hoveredNavKey, setHoveredNavKey] = useState(null);
       const { data: assigned } = await supabase
         .from("projects")
         .select("id")
+        .neq("is_active", false)
         .or(
           `team_leader_id.eq.${uid},coordinator_id.eq.${uid},site_incharge_id.eq.${uid}`,
         )
