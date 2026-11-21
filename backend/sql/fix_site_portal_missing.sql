@@ -44,6 +44,8 @@ create table if not exists public.site_leaves (
   leave_type text,
   from_date date not null,
   to_date date not null,
+  is_half_day boolean not null default false,
+  half_day_period text,
   reason text,
   site_name text,
   level_approver_user_name text,
@@ -58,6 +60,12 @@ create table if not exists public.site_leaves (
   rejection_reason text,
   created_at timestamptz not null default now()
 );
+
+alter table public.site_leaves
+  add column if not exists is_half_day boolean not null default false;
+
+alter table public.site_leaves
+  add column if not exists half_day_period text;
 
 -- Leave badge snapshot
 create table if not exists public.leave_seen_status (
