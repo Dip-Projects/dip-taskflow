@@ -794,16 +794,22 @@ async function fetchAttendanceLog(sites, from, to) {
     byKey.set(`${normKey(r.user_name)}__${r.date}`, r);
   });
 
+  // Approved site/office leave days — a missing punch on these shows "On Leave"
+  const leaveDays = await fetchApprovedLeaveDays(from, to);
+
   const rows = [];
   engineers.forEach((e) => {
     dates.forEach((d) => {
       const rec = byKey.get(`${normKey(e.username)}__${d}`);
+      const onLeave = leaveDays.has(`${normKey(e.username)}__${d}`)
+        || leaveDays.has(`${normKey(e.name || "")}__${d}`);
       rows.push({
         date: d,
         name: e.name || e.username,
         clockIn: rec?.clock_in || null,
         clockOut: rec?.clock_out || null,
         late: rec ? isLateAttendance(rec) : false,
+        onLeave,
       });
     });
   });
@@ -2606,6 +2612,12 @@ function downloadAttendancePdf(rows, from, to) {
 doc.save(`Attendance_${from}_to_${to}.pdf`);
 }
 
+/** Clock cell text: the time, or "On Leave" for an approved leave day with no punch, else "—". */
+function attendanceCellText(time, onLeave) {
+  if (time) return fmtTimeIST(time);
+  return onLeave ? "On Leave" : fmtTimeIST(time);
+}
+
 function downloadAttendanceLogPdf(rows, from, to) {
   const doc = new jsPDF();
   const startY = drawReportHeader(
@@ -2621,8 +2633,8 @@ function downloadAttendanceLogPdf(rows, from, to) {
     body: rows.map((r) => [
       fmtDDMMYYYY(r.date),
       r.name.toUpperCase(),
-      fmtTimeIST(r.clockIn),
-      fmtTimeIST(r.clockOut),
+      attendanceCellText(r.clockIn, r.onLeave),
+      attendanceCellText(r.clockOut, r.onLeave),
     ]),
     styles: { fontSize: 9, halign: "center", cellPadding: 4, lineColor: [0, 0, 0], lineWidth: 0.1 },
     headStyles: { fillColor: [240, 217, 196], textColor: [40, 40, 40], fontStyle: "bold", lineColor: [0, 0, 0], lineWidth: 0.1 },
@@ -2631,6 +2643,7 @@ function downloadAttendanceLogPdf(rows, from, to) {
     didParseCell: (data) => {
       if (data.section === "body" && (data.column.index === 2 || data.column.index === 3)) {
         if (data.cell.raw === "—") data.cell.styles.textColor = [220, 38, 38];
+        if (data.cell.raw === "On Leave") data.cell.styles.textColor = [37, 99, 235];
       }
     },
   });
@@ -2931,19 +2944,21 @@ function AttendanceLog({ sites }) {
                         style={{
                           padding: "8px 10px",
                           textAlign: "center",
-                          color: !r.clockIn ? "var(--red)" : r.late ? "var(--amber2, #d97706)" : "inherit",
+                          color: !r.clockIn
+                            ? (r.onLeave ? "#2563eb" : "var(--red)")
+                            : r.late ? "var(--amber2, #d97706)" : "inherit",
                         }}
                       >
-                        {fmtTimeIST(r.clockIn)}
+                        {attendanceCellText(r.clockIn, r.onLeave)}
                       </td>
                       <td
                         style={{
                           padding: "8px 10px",
                           textAlign: "center",
-                          color: !r.clockOut ? "var(--red)" : "inherit",
+                          color: !r.clockOut ? (r.onLeave ? "#2563eb" : "var(--red)") : "inherit",
                         }}
                       >
-                        {fmtTimeIST(r.clockOut)}
+                        {attendanceCellText(r.clockOut, r.onLeave)}
                       </td>
                     </tr>
                   ))}
