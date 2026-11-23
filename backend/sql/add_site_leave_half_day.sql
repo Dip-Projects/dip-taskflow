@@ -7,4 +7,3 @@ alter table public.site_leaves
 
 alter table public.leaves
   add column if not exists half_day_period text;
-  

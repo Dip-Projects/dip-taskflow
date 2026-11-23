@@ -9,6 +9,7 @@ router.use(requireAuth);
 // Access follows "Who sees what" (MIS controls it). Default: admin only.
 async function requireRatingReportAccess(req, res, next) {
   try {
+    if (req.user?.role === 'admin') return next();
     const [settings, me] = await Promise.all([
       supabase.from('app_settings').select('value').eq('key', 'nav_visibility').maybeSingle(),
       supabase.from('users').select('*').eq('id', req.user.id).maybeSingle(),
@@ -17,7 +18,6 @@ async function requireRatingReportAccess(req, res, next) {
     if (canSee('rating-report', { ...req.user, ...(me?.data || {}) }, map)) return next();
   } catch (err) {
     console.error('Rating report access check failed:', err.message);
-    if (req.user?.role === 'admin') return next(); // settings unreadable → don't lock admin out
   }
   return res.status(403).json({
     error: 'You do not have access to the Rating Report. Ask MIS to enable it in "Who sees what".',

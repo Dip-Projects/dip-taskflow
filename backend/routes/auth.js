@@ -2,7 +2,6 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const supabase = require('../lib/supabaseClient');
 const { requireAuth, signToken } = require('../middleware/auth');
-const { isSiteDefaultPerson } = require('../lib/siteDefaults');
 
 const router = express.Router();
 
@@ -10,22 +9,6 @@ const USER_SELECT_FULL =
   'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, can_add_task, can_resolve_tickets, can_switch_office_site, can_switch_office_mdo, department, department_id, designation, is_head, site_name, site_names';
 const USER_SELECT_BASIC =
   'id, username, password_hash, full_name, role, is_active, can_verify, is_mis_executive, can_add_site, can_add_employee, department, department_id, designation';
-
-// New switches live in their own query so login keeps working even before the
-// SQL migration (add_team_overview_and_default_portal.sql) has been run.
-async function loadSiteFlags(userId) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('default_site_portal, can_view_team_overview')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error || !data) return {};
-    return data;
-  } catch {
-    return {};
-  }
-}
 
 function toPayload(user) {
   const role = (user.role || '').toLowerCase();
@@ -39,13 +22,10 @@ function toPayload(user) {
     ) ||
     /site engineer|site incharge|site coordinator/.test(role);
 
-  const sitePerson = role !== 'client' && isSiteDefaultPerson(user);
-
   // Who may open /site (includes site-only staff + office people with switch permission)
   const canAccessSite =
     role !== 'client' &&
     (siteOnlyStaff ||
-      sitePerson ||
       !!user.can_switch_office_site ||
       !!user.is_head ||
       role === 'admin' ||
@@ -65,7 +45,7 @@ function toPayload(user) {
     is_head: role === 'client' ? false : (!!user.is_head || role === 'head'),
     can_access_site: canAccessSite,
     // Site-only staff never get the Office↔Site switch, even if DB flag was ticked
-    can_switch_office_site: siteOnlyStaff ? false : (!!user.can_switch_office_site || sitePerson),
+    can_switch_office_site: siteOnlyStaff ? false : !!user.can_switch_office_site,
     can_switch_office_mdo: !!user.can_switch_office_mdo,
     site_name: user.site_name || '',
     site_names: user.site_names || null,
@@ -75,8 +55,6 @@ function toPayload(user) {
     can_add_employee: !!user.can_add_employee,
     can_add_task: !!user.can_add_task,
     can_resolve_tickets: !!user.can_resolve_tickets,
-    default_site_portal: !!user.default_site_portal || sitePerson,
-    can_view_team_overview: !!user.can_view_team_overview || sitePerson,
   };
 }
 
@@ -206,7 +184,6 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    Object.assign(user, await loadSiteFlags(user.id));
     const payload = toPayload(user);
     const token = signToken(payload);
 
@@ -226,7 +203,6 @@ router.get('/me', requireAuth, async (req, res) => {
     if (!user || user.is_active === false) {
       return res.status(401).json({ error: 'User not found' });
     }
-    Object.assign(user, await loadSiteFlags(user.id));
     res.json(toPayload(user));
   } catch (err) {
     console.error('Me error:', String(err?.message || err).slice(0, 200));

@@ -180,8 +180,6 @@ export function processControllerPath() {
 export function postLoginPath(user) {
   if (isClient(user)) return '/client';
   if (isHr(user)) return '/hr';
-  // Per-user switch: open the Site portal first (only if they may use it)
-  if (user.default_site_portal && (canToggleSite(user) || isSitePortalOnlyStaff(user))) return '/site';
   // MDO only via Process Controller role or Permissions "Office ↔ MDO" toggle
   // (dept name alone must NOT auto-open MDO when toggle is Off).
   if (isProcessController(user) || user.can_switch_office_mdo) return processControllerPath();
@@ -233,6 +231,20 @@ export function isOfficeSiteViewer(user) {
 
 export function isHead(user) {
   return !!(user?.is_head || user?.can_access_site);
+}
+
+/** Site coordinator (any role/designation/department/site_role mentioning "coordinator"). */
+export function isSiteCoordinator(user) {
+  if (!user) return false;
+  const blob = [user.role, user.designation, user.department, user.site_role]
+    .map((s) => String(s || '').toLowerCase())
+    .join(' ');
+  return /co-?ordinator/.test(blob);
+}
+
+/** Team Submissions (reports from the people under this user) — site heads and coordinators. */
+export function canSeeTeamSubmissions(user) {
+  return isSiteHead(user) || isSiteCoordinator(user);
 }
 
 /** Site portal oversight (team submissions) — not Office↔Site, not every site engineer */

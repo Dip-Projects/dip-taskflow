@@ -9,7 +9,7 @@ router.use(requireAuth);
 const SITE_SELECT_BASE = `
   id, name, client_name, project_type, location, start_date, expected_end_date,
   status, description, created_at,
-  team_leader_id, coordinator_id, site_incharge_id
+  team_leader_id, coordinator_id, site_incharge_id, is_active
 `;
 const SITE_SELECT = `${SITE_SELECT_BASE}, pc_id`;
 
@@ -17,14 +17,17 @@ function isMissingPcColumn(err) {
   return /pc_id/i.test(String(err?.message || err?.details || ''));
 }
 
-async function fetchProjects(order = true) {
-  let q = supabase.from('projects').select(SITE_SELECT);
-  if (order) q = q.order('created_at', { ascending: false });
-  let { data, error } = await q;
+/** Inactive sites are hidden everywhere except the Manage sites page (include_inactive=1). */
+async function fetchProjects(order = true, includeInactive = false) {
+  const build = (select) => {
+    let q = supabase.from('projects').select(select);
+    if (!includeInactive) q = q.neq('is_active', false);
+    if (order) q = q.order('created_at', { ascending: false });
+    return q;
+  };
+  let { data, error } = await build(SITE_SELECT);
   if (error && isMissingPcColumn(error)) {
-    let retry = supabase.from('projects').select(SITE_SELECT_BASE);
-    if (order) retry = retry.order('created_at', { ascending: false });
-    ({ data, error } = await retry);
+    ({ data, error } = await build(SITE_SELECT_BASE));
   }
   if (error) throw error;
   return data || [];
@@ -72,7 +75,10 @@ async function countLinked(table, column, id) {
 
 router.get('/', async (req, res) => {
   try {
-    const data = await fetchProjects(true);
+    const includeInactive = ['1', 'true', 'yes'].includes(
+      String(req.query.include_inactive || '').toLowerCase()
+    );
+    const data = await fetchProjects(true, includeInactive);
     const enriched = await Promise.all(data.map(withPeople));
     res.json(enriched);
   } catch (err) {
@@ -155,12 +161,15 @@ router.patch('/:id', requireAdmin, async (req, res) => {
     const allowedFields = [
       'name', 'client_name', 'project_type', 'location', 'start_date',
       'expected_end_date', 'team_leader_id', 'coordinator_id',
-      'site_incharge_id', 'pc_id', 'description', 'status'
+      'site_incharge_id', 'pc_id', 'description', 'status', 'is_active'
     ];
 
     const updates = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (updates.is_active !== undefined) {
+      updates.is_active = updates.is_active === true || updates.is_active === 'true';
     }
 
     if (Object.keys(updates).length === 0) {

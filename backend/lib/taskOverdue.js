@@ -165,25 +165,11 @@ function assignedWorkDeadline(t) {
 }
 
 /** Live work deadline once the task has been accepted (and not re-accept-pending). */
-/** Deadline given by the latest Updation the verifier sent (saved with it). */
-function latestUpdationDue(t) {
-  if (String(t?.verification_status || '') !== 'Updation Required') return null;
-  const list = Array.isArray(t?.correction_extensions) ? t.correction_extensions : [];
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    if (list[i]?.kind !== 'updation') continue;
-    return toDate(list[i].work_due_at);
-  }
-  return null;
-}
-
 function employeeWorkDueDate(t) {
   if (needsReaccept(t)) return null;
   if (!t?.accepted_at) return null;
-  // Prefer stored work_due_at (accept / resume / reschedule-approve set this),
-  // but never an older value than the deadline the latest updation gave.
+  // Prefer stored work_due_at (accept / resume / reschedule-approve set this).
   const stored = toDate(t.work_due_at);
-  const updDue = latestUpdationDue(t);
-  if (updDue) return stored && stored > updDue ? stored : updDue;
   if (stored) return stored;
   const anchor = workTimerAnchor(t);
   const hours = workTimerBudgetHours(t);

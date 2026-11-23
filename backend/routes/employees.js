@@ -77,34 +77,6 @@ function generatePassword() {
 // constraint name, which breaks silently ("Could not load employees") if it
 // doesn't match — same class of issue we hit before with sites.js, fixed the
 // same way there.
-const { isSiteDefaultPerson } = require('../lib/siteDefaults');
-
-const SITE_FLAG_KEYS = ['default_site_portal', 'can_view_team_overview'];
-
-// Adds the two optional site switches to rows; silently skipped if columns don't exist yet.
-async function attachSiteFlags(rows) {
-  const list = Array.isArray(rows) ? rows : rows ? [rows] : [];
-  if (!list.length) return rows;
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('id, default_site_portal, can_view_team_overview')
-      .in('id', list.map((r) => r.id));
-    if (error) return rows;
-    const byId = new Map((data || []).map((r) => [r.id, r]));
-    list.forEach((r) => Object.assign(r, byId.get(r.id) || {}));
-  } catch { /* columns not created yet */ }
-  // Divyesh Rana / Jignesh Lad are always on (matched by name) — show it, locked
-  list.forEach((r) => {
-    if (isSiteDefaultPerson(r)) {
-      r.default_site_portal = true;
-      r.can_view_team_overview = true;
-      r.site_default_locked = true;
-    }
-  });
-  return rows;
-}
-
 async function attachReportingHead(rows) {
   const list = Array.isArray(rows) ? rows : [rows];
   const headIds = [...new Set(list.map(u => u.reporting_head_id).filter(Boolean))];
@@ -132,7 +104,7 @@ router.get('/', async (req, res) => {
         .order('created_at', { ascending: true }));
     }
     if (error) throw error;
-    res.json(await attachSiteFlags(await attachReportingHead(data)));
+    res.json(await attachReportingHead(data));
   } catch (err) {
     console.error('List employees error:', err.message);
     res.status(500).json({ error: 'Could not load employees' });
@@ -239,29 +211,6 @@ router.patch('/:id', async (req, res) => {
       if (v === 'false' || v === 0 || v === '0') return false;
       return !!v;
     };
-
-    // Site switches (default_site_portal / can_view_team_overview) — own update,
-    // so a missing column never blocks the other permission toggles.
-    const siteFlagUpdates = {};
-    SITE_FLAG_KEYS.forEach((k) => { if (body[k] !== undefined) siteFlagUpdates[k] = asBool(body[k]); });
-    if (Object.keys(siteFlagUpdates).length) {
-      const { error: flagErr } = await supabase.from('users').update(siteFlagUpdates).eq('id', id);
-      if (flagErr) {
-        return res.status(400).json({
-          error: 'Run backend/sql/add_team_overview_and_default_portal.sql in Supabase, then try again.',
-          hint: flagErr.message,
-        });
-      }
-      const onlyFlags = Object.keys(body).every((k) => SITE_FLAG_KEYS.includes(k));
-      if (onlyFlags) {
-        const { data: row } = await supabase
-          .from('users')
-          .select('id, username, full_name, department, designation, role, is_active, reporting_head_id, is_head')
-          .eq('id', id)
-          .maybeSingle();
-        return res.json(await attachSiteFlags(row || { id }));
-      }
-    }
 
     const updates = {};
     if (full_name !== undefined) updates.full_name = full_name;

@@ -88,19 +88,20 @@ export function buildLeaveWhatsAppMessage({
   const total = Number(thisMonthTotal) || 0;
   const totalText = `${total} ${total === 1 ? "day" : "days"}`;
 
+  // WhatsApp bold = *text*
   return [
-    String(employeeName || "Employee").trim(),
+    `*${String(employeeName || "Employee").trim()}*`,
     "",
-    "LEAVE APPLICATION",
+    "*LEAVE APPLICATION*",
     "",
     `TODAY DATE :- ${applied}`,
     "",
     `LEAVE DATE :- ${leaveDate}`,
     "",
-    "Reason:-",
+    "*Reason:-*",
     String(reason || "—").trim(),
     "",
-    "This month leave",
+    "*This month leave*",
     totalText,
     "",
     "Pls give confirmation",

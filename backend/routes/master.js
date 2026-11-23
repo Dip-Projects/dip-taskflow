@@ -58,7 +58,11 @@ router.post('/designations', requireDirectoryEditor, async (req, res) => {
 });
 
 router.get('/projects', async (req, res) => {
-  const { data, error } = await supabase.from('projects').select('id, name').order('name');
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, name')
+    .neq('is_active', false)
+    .order('name');
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });
@@ -316,8 +320,9 @@ router.get('/head-reports', async (req, res) => {
       supabase.from('wpr_reports').select('id, site_name, engineer_name, report_date, report_number, presentation_url, status, submitted_by, created_at').order('created_at', { ascending: false }),
     ]);
 
-    const hasFilter = sitesLc.size > 0 || namesLc.size > 0;
-    const keep = (engineer, site) => (hasFilter ? match(engineer, site) : true);
+    // No team and no sites mapped → show nothing (never fall back to every site's reports).
+    if (sitesLc.size === 0 && namesLc.size === 0) return res.json([]);
+    const keep = (engineer, site) => match(engineer, site);
 
     const rows = [
       ...(dprData || [])

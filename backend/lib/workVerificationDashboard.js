@@ -127,7 +127,105 @@ function countVerificationSubmissions(tasks) {
   return n;
 }
 
-function buildWorkVerificationDashboard(tasks, { srMap, verifierIds = [] } = {}) {
+/**
+ * 4b · Updation Log — one row per updation request (task_events action 'updation'),
+ * grouped employee-wise. Resubmission = next 'send_for_verification' after the request.
+ * Extra work hours / new due date are matched from correction_extensions by time.
+ */
+function buildUpdationLog(tasks, { sr = {}, from, to, users = [] } = {}) {
+  const fromMs = from ? new Date(from).getTime() : -Infinity;
+  const toMs = to ? new Date(to).getTime() : Infinity;
+
+  const nameById = {};
+  (users || []).forEach((u) => {
+    if (u?.id != null && u.full_name) nameById[String(u.id)] = String(u.full_name).trim();
+  });
+  (tasks || []).forEach((t) => {
+    if (t.verifier?.id != null && t.verifier.full_name) {
+      nameById[String(t.verifier.id)] = String(t.verifier.full_name).trim();
+    }
+  });
+
+  const items = [];
+  for (const t of tasks || []) {
+    const events = (Array.isArray(t.task_events) ? t.task_events : [])
+      .filter((e) => e && e.at && !Number.isNaN(new Date(e.at).getTime()))
+      .slice()
+      .sort((a, b) => new Date(a.at) - new Date(b.at));
+    const updations = events.filter((e) => e.action === 'updation');
+    if (!updations.length) continue;
+
+    const exts = Array.isArray(t.correction_extensions) ? t.correction_extensions : [];
+
+    updations.forEach((ev, idx) => {
+      const atMs = new Date(ev.at).getTime();
+      if (atMs < fromMs || atMs > toMs) return;
+
+      const isLatest = idx === updations.length - 1;
+      const resubmit = events.find(
+        (e) => e.action === 'send_for_verification' && new Date(e.at).getTime() > atMs
+      );
+      const nearby = exts.filter(
+        (x) => x && x.at && Math.abs(new Date(x.at).getTime() - atMs) <= 60000
+      );
+      const workHours = nearby
+        .filter((x) => x.unit === 'work_hours')
+        .reduce((s, x) => s + (Number(x.amount) || 0), 0);
+      const newDue = nearby.find((x) => x.unit === 'new_due');
+
+      let status;
+      if (isLatest && isCorrectionAck(t)) status = 'Awaiting update';
+      else if (resubmit) status = 'Resubmitted';
+      else status = 'No resubmission logged';
+
+      items.push({
+        round: idx + 1,
+        sr: sr[t.id] || null,
+        employee: empName(t),
+        project: projName(t),
+        description: String(t.description || '').trim() || '—',
+        task_type: typeName(t),
+        requested_at: ev.at,
+        requested_by: nameById[String(ev.by)] || verName(t) || '—',
+        // Only the latest updation note is stored on the task itself.
+        note: isLatest ? String(t.updation_note || '').trim() : '',
+        extra_work_hours: Math.round(workHours * 10) / 10,
+        new_due_at: newDue?.new_target_date || null,
+        resubmitted_at: resubmit ? resubmit.at : null,
+        resubmit_hours: resubmit ? officeHrsBetween(ev.at, resubmit.at) : null,
+        status,
+      });
+    });
+  }
+
+  items.sort((a, b) =>
+    a.employee.localeCompare(b.employee) || new Date(a.requested_at) - new Date(b.requested_at)
+  );
+
+  const byEmp = new Map();
+  items.forEach((i) => {
+    if (!byEmp.has(i.employee)) {
+      byEmp.set(i.employee, { name: i.employee, requests: 0, open: 0, resubmitted: 0, tasks: new Set() });
+    }
+    const row = byEmp.get(i.employee);
+    row.requests += 1;
+    if (i.status === 'Awaiting update') row.open += 1;
+    if (i.status === 'Resubmitted') row.resubmitted += 1;
+    row.tasks.add(i.sr ?? i.description);
+  });
+
+  return {
+    total_requests: items.length,
+    open: items.filter((i) => i.status === 'Awaiting update').length,
+    resubmitted: items.filter((i) => i.status === 'Resubmitted').length,
+    by_employee: [...byEmp.values()]
+      .map((r) => ({ name: r.name, requests: r.requests, open: r.open, resubmitted: r.resubmitted, tasks: r.tasks.size }))
+      .sort((a, b) => b.requests - a.requests || a.name.localeCompare(b.name)),
+    items,
+  };
+}
+
+function buildWorkVerificationDashboard(tasks, { srMap, verifierIds = [], updationSource, users = [], from, to } = {}) {
   const list = tasks || [];
   const verifierSet = new Set((verifierIds || []).map(String));
   const sr = srMap || buildSrMap(list);
@@ -389,6 +487,11 @@ function buildWorkVerificationDashboard(tasks, { srMap, verifierIds = [] } = {})
     items: correctionItems,
   };
 
+  // —— 4b · Updation Log ——
+  // Uses the unfiltered task list (updation events are not tied to the report's
+  // created/assigned/submitted range), filtered by the updation time itself.
+  const updation_log = buildUpdationLog(updationSource || list, { sr, from, to, users });
+
   // —— 5a · Task Completion Time (assigned → submitted) — office working hours ——
   const completionRows = withSr
     .filter((t) => (t.assigned_at || t.created_at) && t.sent_for_verification_at)
@@ -493,6 +596,7 @@ function buildWorkVerificationDashboard(tasks, { srMap, verifierIds = [] } = {})
     project_verifier_matrix,
     verifier_summary,
     correction_log,
+    updation_log,
     completion_time,
     verify_turnaround,
   };

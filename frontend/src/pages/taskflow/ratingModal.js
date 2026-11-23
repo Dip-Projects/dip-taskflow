@@ -1,4 +1,4 @@
-// Verify-time review popup: 6 quick star questions (half stars allowed, mandatory),
+// Verify-time review popup: 5 quick star questions (half stars allowed, mandatory),
 // overall performance auto-calculated from them, optional note with quick tags,
 // and a WhatsApp-to-employee toggle.
 // Resolves with the payload for PATCH /tasks/:id/verify, or null if cancelled.
@@ -16,15 +16,14 @@ export const RATING_QUESTIONS = [
     hint: 'Took responsibility and solved problems without being chased' },
 ];
 
-// Stars go in half steps (0.5 .. 5). Overall = average of the question stars,
-// rounded to the nearest half (4.17 -> 4, 4.3 -> 4.5).
+// Answers use half-star steps; the overall score is stored as a whole star.
 export const snapHalf = (v) => Math.round(Number(v) * 2) / 2;
 
 export function computeOverall(answers) {
   const vals = RATING_QUESTIONS.map((q) => Number(answers?.[q.key])).filter((v) => v >= 0.5 && v <= 5);
   if (vals.length !== RATING_QUESTIONS.length) return { avg: null, rating: 0 };
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return { avg, rating: Math.min(5, Math.max(0.5, snapHalf(avg))) };
+  return { avg, rating: Math.min(5, Math.max(1, Math.round(avg))) };
 }
 
 function ratingLabel(r) {

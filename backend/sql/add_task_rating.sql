@@ -1,9 +1,6 @@
--- Verifier rating + feedback when a task is verified (half stars allowed: 0.5 .. 5).
--- Run once in Supabase → SQL Editor. Safe to re-run.
-alter table tasks add column if not exists rating numeric(2,1);
-alter table tasks drop constraint if exists tasks_rating_check;
-alter table tasks alter column rating type numeric(2,1) using rating::numeric;
-alter table tasks add constraint tasks_rating_check check (rating >= 0.5 and rating <= 5);
+-- Verifier rating + feedback when a task is verified.
+-- Run once in Supabase → SQL Editor.
+alter table tasks add column if not exists rating smallint check (rating between 1 and 5);
 alter table tasks add column if not exists rating_answers jsonb;
 alter table tasks add column if not exists rating_feedback text;
 alter table tasks add column if not exists rated_by uuid references users(id);

@@ -7352,6 +7352,10 @@ body.sidebar-open {
   border-radius: 999px;
 }
 
+.wvd-upd-emp {
+  margin-bottom: 14px;
+}
+
 .wvd-corr-list {
   display: grid;
   gap: 6px;

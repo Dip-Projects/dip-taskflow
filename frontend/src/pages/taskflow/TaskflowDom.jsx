@@ -853,7 +853,7 @@ export default function TaskflowDom() {
                     <thead>
                       <tr>
                         <th>Site name</th><th>Client</th><th>Location</th>
-                        <th>Type</th><th>Status</th><th>Team leader</th><th>Actions</th>
+                        <th>Type</th><th>Status</th><th>Team leader</th><th>Active</th><th>Actions</th>
                       </tr>
                     </thead>
                     <tbody id="sitesTableBody"></tbody>
@@ -990,8 +990,6 @@ export default function TaskflowDom() {
                         <th className="perm-col">MIS Executive</th>
                         <th className="perm-col">Office ↔ Site</th>
                         <th className="perm-col">Office ↔ MDO</th>
-                        <th className="perm-col">Opens in Site</th>
-                        <th className="perm-col">Team Overview</th>
                       </tr>
                     </thead>
                     <tbody id="permissionsTableBody"></tbody>
@@ -2372,30 +2370,21 @@ export default function TaskflowDom() {
               <textarea id="updation-note" rows={4} placeholder="e.g. Please update the floor plan measurements and recheck the material quantities…" required></textarea>
             </div>
             <div className="field">
-              <p id="updationCurrentDue" className="form-note" style={{ marginBottom: 8 }}>The employee's timer restarts from the moment you send this.</p>
-              <label htmlFor="updation-due-action">How much time should the employee get?</label>
-              <select id="updation-due-action">
-                <option value="keep">Default - 2 office hours from now</option>
-                <option value="hours">Give hours (office hours, from now)</option>
-                <option value="days">Give days (office days, from now)</option>
-                <option value="new">Set an exact due date &amp; time</option>
-              </select>
-              <p className="form-note" style={{ marginTop: 6 }}>Office hours: 9:30 AM - 6:30 PM, lunch 1-2 PM and Sundays not counted.</p>
+              <p id="updationCurrentDue" className="form-note" style={{ marginBottom: 8 }}>This was your target date.</p>
+              <label htmlFor="updation-extra-work">Extra hours to work</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <input id="updation-extra-work" type="number" min="0" step="0.5" placeholder="Hours" style={{ width: 110 }} />
+                <span id="updationFinalTarget" className="form-note" style={{ margin: 0 }}></span>
+              </div>
+              <p id="updationHoursInfo" className="form-note" style={{ marginTop: 4 }}></p>
+              <p id="updationTargetWarn" hidden={true} style={{ marginTop: 4, color: '#dc2626', fontWeight: 600, fontSize: 13 }}>
+                Target date is getting exceeded. Set a new date &amp; time below so the verifier can change it.
+              </p>
             </div>
-            <div className="field" id="updationExtraWrap" hidden={true}>
-              <label htmlFor="updation-extra-amount">How much time?</label>
-              <input id="updation-extra-amount" type="number" min="0" step="0.5" placeholder="Hours or days" />
-              <input type="hidden" id="updation-extra-unit" value="" />
-            </div>
-            <div className="field" id="updationNewDueWrap" hidden={true}>
-              <label htmlFor="updation-new-due">Due date &amp; time</label>
+            <div className="field" id="updationNewDueWrap">
+              <label htmlFor="updation-new-due">New target date &amp; time <span className="optional">(optional)</span></label>
               <input id="updation-new-due" type="datetime-local" />
-              <p className="form-note">The employee's timer runs until this exact date and time. The planned date is not changed.</p>
-            </div>
-            <div className="field">
-              <label htmlFor="updation-files">Attach files <span className="optional">(max 3, optional)</span></label>
-              <input id="updation-files" type="file" multiple />
-              <span className="form-note">Reference drawings, markups or documents for the employee (up to 5 GB each). Big files upload first - keep this window open until it finishes.</span>
+              <p className="form-note">Leave empty to keep the same target date.</p>
             </div>
             <p id="updationFormMsg" className="form-error" hidden={true}></p>
             <div className="modal-actions">
@@ -2453,10 +2442,12 @@ export default function TaskflowDom() {
               </div>
             </div>
             <div className="field">
-              <label className="checkbox-label">
-                <input id="leave-halfday" type="checkbox" />
-                Half day leave
-              </label>
+              <label htmlFor="leave-halfday">Day part</label>
+              <select id="leave-halfday">
+                <option value="">Full day</option>
+                <option value="first_half">1st Half</option>
+                <option value="second_half">2nd Half</option>
+              </select>
             </div>
             <div className="field">
               <label htmlFor="leave-reason">Reason <span className="req">*</span></label>
@@ -2516,6 +2507,49 @@ export default function TaskflowDom() {
             <div className="modal-actions">
               <button type="button" className="ghost-btn-text" id="skipLeaveTaskActions">Skip for now</button>
               <button type="button" className="primary-btn primary-btn-inline" id="submitLeaveTaskActions">Save choices</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Leave applied — WhatsApp-ready message */}
+      <div id="leaveShareModal" className="modal-backdrop" hidden={true}>
+        <div className="modal">
+          <div className="modal-header">
+            <h3>Leave applied ✅</h3>
+            <button className="modal-close" id="closeLeaveShareModal" type="button">&times;</button>
+          </div>
+          <div className="modal-body">
+            <p className="cell-muted" style={{ marginTop: 0 }}>Share this leave message on WhatsApp.</p>
+            <pre
+              id="leaveShareText"
+              style={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                margin: 0,
+                padding: 12,
+                border: '1px solid var(--line2)',
+                borderRadius: 8,
+                background: 'var(--paper)',
+                fontFamily: 'inherit',
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            ></pre>
+            <p id="leaveShareCopyNote" className="cell-muted" hidden={true} style={{ marginTop: 6 }}></p>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn-text" id="copyLeaveShare">Copy message</button>
+              <a
+                className="primary-btn primary-btn-inline"
+                id="shareLeaveWhatsapp"
+                href="#"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'none' }}
+              >
+                Share on WhatsApp
+              </a>
+              <button type="button" className="ghost-btn-text" id="doneLeaveShare">Done</button>
             </div>
           </div>
         </div>

@@ -27,6 +27,3 @@ Thumbs.db
 .env*
 
 .vercel
-
-.vercel
-.env*

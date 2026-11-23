@@ -116,23 +116,21 @@ async function sendWhatsAppTemplate(toNumber, templateName, bodyParams = [], opt
 }
 
 /**
- * Leave / verification templates were created as MARKETING on Meta — WhatsApp
- * often hides or drops those. Prefer UTILITY task_notification_v2 for delivery.
- * Body: {{1}} name, {{2}} detail, {{3}} project, {{4}} date, {{5}} status
+ * Leave alert → leave_application_notification (Meta template, 4 body variables):
+ * "{{1}} has applied for leave. From: {{2}} To: {{3}} Reason: {{4}}"
+ * Set WHATSAPP_LEAVE_TEMPLATE to override the name.
  */
 async function sendLeaveAlertTemplate(toNumber, { applicantName, from_date, to_date, reason }) {
   const from = String(from_date || '—').slice(0, 10);
   const to = String(to_date || '—').slice(0, 10);
-  const dates = from === to ? from : `${from} to ${to}`;
   return sendWhatsAppTemplate(
     toNumber,
-    process.env.WHATSAPP_TASK_LIST_TEMPLATE || 'task_notification_v2',
+    process.env.WHATSAPP_LEAVE_TEMPLATE || 'leave_application_notification',
     [
       applicantName || 'Employee',
-      `Leave request: ${String(reason || '—').slice(0, 160)}`,
-      'DIP Leave',
-      dates,
-      'Pending',
+      from,
+      to,
+      String(reason || '—').slice(0, 160),
     ]
   );
 }
@@ -157,9 +155,7 @@ async function sendVerificationAlertTemplate(toNumber, { verifierName, taskDescr
  * {{1}} employee, {{2}} task, {{3}} project, {{4}} rating, {{5}} feedback + verifier.
  */
 async function sendTaskFeedbackTemplate(toNumber, { employeeName, taskDescription, projectName, rating, feedback, verifierName }) {
-  const full = Math.floor(rating);
-  const half = rating - full >= 0.5 ? 1 : 0;
-  const stars = '\u2605'.repeat(full) + (half ? '\u00BD' : '') + '\u2606'.repeat(5 - full - half);
+  const stars = '\u2605'.repeat(rating) + '\u2606'.repeat(5 - rating);
   return sendWhatsAppTemplate(
     toNumber,
     process.env.WHATSAPP_TASK_FEEDBACK_TEMPLATE || 'task_feedback_v1',

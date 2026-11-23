@@ -10,6 +10,7 @@ const {
   assignedWorkDeadline,
   holdSecondsBetween,
   verificationAllowedHours,
+  employeeDueDate,
 } = require('../lib/taskOverdue');
 const {
   sendWhatsAppTemplate,
@@ -110,6 +111,45 @@ function applyDeadlineChange(existing, body, note) {
     });
   }
   return { target_date, hours_to_complete, extra_hours, extra_days, extensions };
+}
+
+/**
+ * Extra work hours from the updation form. They are added to the task's hours
+ * (and to the live work deadline if one is stored). The target date is NOT moved;
+ * the preview shows whether the final target goes past it.
+ */
+function applyExtraWorkHours(existing, hours) {
+  const current = Number(existing.hours_to_complete) || 0;
+  const patch = {
+    hours_to_complete: current + hours,
+    extra_hours: Number(existing.extra_hours || 0) + hours,
+  };
+  if (existing.work_due_at) {
+    patch.work_due_at = addWorkingHours(existing.work_due_at, hours).toISOString();
+  }
+  return patch;
+}
+
+/**
+ * Final target = work deadline (with extra hours) + verification allowance,
+ * all in office hours. `exceeds` is true when that passes the task's target date.
+ */
+function finalTargetPreview(task, extraHours) {
+  const hours = Math.max(0, Number(extraHours) || 0);
+  const initialHours = Number(task.hours_to_complete) || 0;
+  const base = employeeDueDate(task);
+  const withWork = base ? addWorkingHours(base, hours) : null;
+  const final = withWork ? addWorkingHours(withWork, verificationAllowedHours(task)) : null;
+  const target = task.target_date ? new Date(task.target_date) : null;
+  const validTarget = target && !Number.isNaN(target.getTime()) ? target : null;
+  return {
+    initial_hours: initialHours,
+    extra_hours: hours,
+    total_hours: initialHours + hours,
+    target_date: validTarget ? validTarget.toISOString() : null,
+    final_target: final ? final.toISOString() : null,
+    exceeds: !!(final && validTarget && final.getTime() > validTarget.getTime()),
+  };
 }
 
 // Older deployments may not have run every SQL migration yet. Retry the update
@@ -1567,7 +1607,7 @@ router.patch(
 );
 
 // ----------------------------- approve verification (the chosen verifier, or admin) -----------------------------
-const RATING_QUESTION_KEYS = ['quality', 'timeliness', 'instructions', 'corrections', 'communication', 'ownership'];
+const RATING_QUESTION_KEYS = ['quality', 'instructions', 'corrections', 'communication', 'ownership'];
 
 router.patch('/:id/verify', async (req, res) => {
   try {
@@ -1593,16 +1633,15 @@ router.patch('/:id/verify', async (req, res) => {
       answers = {};
       for (const k of RATING_QUESTION_KEYS) {
         const v = Number(rawAns?.[k]);
-        // half stars allowed: 0.5, 1, 1.5 ... 5
-        if (!Number.isFinite(v) || v < 0.5 || v > 5 || Math.round(v * 2) !== v * 2) {
-          return res.status(400).json({ error: 'Please answer all the rating questions (0.5 to 5 stars each)' });
+        if (!Number.isInteger(v * 2) || v < 0.5 || v > 5) {
+          return res.status(400).json({ error: 'Please answer all the rating questions (0.5-5 stars in half-star steps)' });
         }
         answers[k] = v;
       }
       const avgScore = RATING_QUESTION_KEYS.reduce((a, k) => a + answers[k], 0) / RATING_QUESTION_KEYS.length;
-      rating = Math.min(5, Math.max(0.5, Math.round(avgScore * 2) / 2)); // nearest half star
+      rating = Math.min(5, Math.max(1, Math.round(avgScore)));
       if (rating <= 2 && !feedback) {
-        return res.status(400).json({ error: 'Overall rating is 2 stars or below - please write a note so the employee knows what to improve' });
+        return res.status(400).json({ error: 'Overall rating is 1-2 stars - please write a note so the employee knows what to improve' });
       }
     }
 
@@ -1630,31 +1669,23 @@ router.patch('/:id/verify', async (req, res) => {
         task_events: withTaskEvent(existing, 'verification_rejected', req.user.id),
       };
 
-    let data;
-    try {
-      data = await updateTaskTolerant(id, updates, TASK_SELECT);
-    } catch (saveErr) {
-      // rating column not migrated to half-star yet (still smallint / old 1-5 check)
-      if (approved && /invalid input syntax for type (smallint|integer)|tasks_rating_check/i.test(saveErr.message || '')) {
-        console.warn('tasks: rating column is whole-number only — run backend/sql/allow_half_star_rating.sql for half stars');
-        updates.rating = Math.max(1, Math.round(rating));
-        data = await updateTaskTolerant(id, updates, TASK_SELECT);
-      } else {
-        throw saveErr;
-      }
-    }
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
 
     // Optional WhatsApp feedback to the employee (best-effort, never blocks verify).
     if (approved && sendWhatsapp) {
       let wa = { ok: false, reason: 'no_number' };
       try {
-        const { data: emp } = await supabase
+        const { data: emp, error: employeeError } = await supabase
           .from('users')
           .select('full_name, whatsapp_number')
           .eq('id', existing.assigned_to)
           .maybeSingle();
-        const digits = String(emp?.whatsapp_number || '').replace(/\D/g, '').slice(-10);
-        if (emp?.whatsapp_number && digits !== '8208026194') {
+        if (employeeError) {
+          console.error('WhatsApp feedback employee lookup failed:', employeeError.message);
+          wa = { ok: false, reason: 'employee_lookup_failed', error: 'Could not load employee WhatsApp details.' };
+        } else if (!emp?.whatsapp_number) {
+          wa = { ok: false, reason: 'no_number', error: 'Add a WhatsApp number to the employee profile and try again.' };
+        } else {
           wa = await sendTaskFeedbackTemplate(emp.whatsapp_number, {
             employeeName: emp.full_name,
             taskDescription: data?.description,
@@ -1663,16 +1694,29 @@ router.patch('/:id/verify', async (req, res) => {
             feedback,
             verifierName: req.user.full_name,
           });
-        } else if (emp?.whatsapp_number) {
-          wa = { ok: false, reason: 'shared_placeholder_number' };
         }
       } catch (waErr) {
+        console.error('WhatsApp feedback send failed:', waErr.message);
         wa = { ok: false, reason: waErr.message };
       }
-      if (wa?.ok) {
-        await supabase.from('tasks').update({ feedback_sent_whatsapp: true }).eq('id', id);
+      if (!wa.ok) {
+        console.error('WhatsApp feedback not sent:', wa.reason, wa.error || '');
       }
-      return res.json({ ...data, _feedbackWhatsapp: { ok: !!wa?.ok, reason: wa?.reason || null } });
+      if (wa?.ok) {
+        const { error: updateError } = await supabase
+          .from('tasks')
+          .update({ feedback_sent_whatsapp: true })
+          .eq('id', id);
+        if (updateError) console.error('WhatsApp feedback sent but task flag update failed:', updateError.message);
+      }
+      return res.json({
+        ...data,
+        _feedbackWhatsapp: {
+          ok: !!wa?.ok,
+          reason: wa?.reason || null,
+          error: wa?.error || null,
+        },
+      });
     }
     res.json(data);
   } catch (err) {
@@ -1742,161 +1786,73 @@ router.patch(
   }
 );
 
-// ----------------------------- send updation (verifier/admin: request changes with a note) -----------------------------
-// An updation starts a FRESH work timer for the employee, from the moment it is
-// sent (no Accept needed). The employee's due time is counted in OFFICE hours
-// (9:30-18:30 IST, lunch 13:00-14:00 and Sundays skipped):
-//   extra_unit=hours, extra_amount=N -> now + N office hours
-//   extra_unit=days,  extra_amount=N -> now + N office days (8 office hours each)
-//   new_target_date                  -> exactly that date & time
-//   nothing chosen                   -> now + 2 office hours (default)
-// The plan dates (target_date / original_target_date) are NOT touched.
-// Optional: up to 3 reference files ("updation_files") from the verifier.
-const UPDATION_DEFAULT_HOURS = 2;
-const OFFICE_HOURS_PER_DAY = 8; // 9:30-18:30 minus the 13:00-14:00 lunch
-
-// Verifier files (up to 3, each up to 5 GB). Big files can't pass through the
-// serverless API (~4.5 MB body cap), so the browser uploads them straight to
-// Supabase Storage and sends only the links here: updation_files = [{url,name,size}].
-const MAX_UPDATION_FILE_BYTES = 5 * 1024 * 1024 * 1024;
-const SUPABASE_PUBLIC_PREFIX = process.env.SUPABASE_URL
-  ? `${String(process.env.SUPABASE_URL).replace(/\/+$/, '')}/storage/v1/object/public/`
-  : '';
-
-function cleanUpdationFiles(raw) {
-  let list = raw;
-  if (typeof list === 'string') {
-    try { list = JSON.parse(list); } catch { list = []; }
-  }
-  if (!Array.isArray(list)) return [];
-  return list
-    .slice(0, 3)
-    .map((f) => ({
-      url: String(f?.url || '').trim(),
-      name: String(f?.name || '').trim().slice(0, 200),
-      size: Number(f?.size) > 0 ? Math.min(Number(f.size), MAX_UPDATION_FILE_BYTES) : null,
-    }))
-    .filter((f) => /^https?:\/\//i.test(f.url)
-      && f.url.length <= 2000
-      && (!SUPABASE_PUBLIC_PREFIX || f.url.startsWith(SUPABASE_PUBLIC_PREFIX)));
-}
-
-function parseUpdationDue(raw) {
-  const v = String(raw || '').trim();
-  if (!v) return null;
-  // "2026-11-21T15:30" with no zone is an India wall-clock time
-  const naive = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(v);
-  const d = new Date(naive ? `${v}${v.length === 16 ? ':00' : ''}+05:30` : v);
-  return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
-router.patch(
-  '/:id/send-updation',
-  upload.array('updation_files', 3),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-      const note = String(req.body?.note || '').trim();
-      if (!note) {
-        return res.status(400).json({ error: 'Please write an updation note before sending' });
-      }
-
-      const existing = await loadTaskForStamp(id);
-      if (!existing) return res.status(404).json({ error: 'Task not found' });
-
-      const isChosenVerifier = existing.verifier_id === req.user.id;
-      if (!isChosenVerifier && req.user.role !== 'admin') {
-        return res.status(403).json({ error: 'You are not the verifier for this task' });
-      }
-
-      const now = new Date();
-      const at = now.toISOString();
-      const unit = String(req.body?.extra_unit || '').toLowerCase();
-      const amount = Number(req.body?.extra_amount || 0);
-      const exactDue = parseUpdationDue(req.body?.new_target_date);
-      if (exactDue === undefined) return res.status(400).json({ error: 'Invalid due date & time' });
-      if (exactDue && exactDue <= now) {
-        return res.status(400).json({ error: 'The due date & time must be in the future' });
-      }
-
-      let workDue;
-      let given = 'default';
-      let givenAmount = UPDATION_DEFAULT_HOURS;
-      let givenUnit = 'hours';
-      if (exactDue) {
-        workDue = exactDue;
-        given = 'new_due';
-        givenAmount = 0;
-        givenUnit = 'new_due';
-      } else if (amount > 0 && unit === 'hours') {
-        workDue = addWorkingHours(now, amount);
-        given = 'hours'; givenAmount = amount; givenUnit = 'hours';
-      } else if (amount > 0 && unit === 'days') {
-        workDue = addWorkingHours(now, amount * OFFICE_HOURS_PER_DAY);
-        given = 'days'; givenAmount = amount; givenUnit = 'days';
-      } else {
-        workDue = addWorkingHours(now, UPDATION_DEFAULT_HOURS);
-      }
-
-      // Office-hour budget of this new cycle (what the employee actually gets to work)
-      const budgetHours = Math.max(0.01, Math.round(elapsedWorkingHours(now, workDue) * 100) / 100);
-
-      // Links of files the browser already uploaded to Storage (any size) ...
-      const fileUrls = cleanUpdationFiles(req.body?.updation_files);
-      // ... plus small multipart files from an older browser tab, if any.
-      const legacy = req.files || [];
-      if (legacy.length && fileUrls.length < 3) {
-        const urls = await Promise.all(legacy.slice(0, 3 - fileUrls.length).map((f) => uploadFile(f, 'updation-attachments')));
-        urls.forEach((u, i) => fileUrls.push({ url: u, name: legacy[i].originalname, size: legacy[i].size }));
-      }
-
-      const extensions = Array.isArray(existing.correction_extensions) ? [...existing.correction_extensions] : [];
-      extensions.push({
-        at,
-        by: req.user.id,
-        unit: givenUnit,
-        amount: givenAmount,
-        note: note.slice(0, 200),
-        kind: 'updation',
-        work_due_at: workDue.toISOString(),
-        files: fileUrls,
-      });
-
-      const updates = {
-        verification_status: 'Updation Required',
-        updation_note: note,
-        status: 'In Progress',
-        // Fresh timer cycle starting now. first_accepted_at (audit) is untouched and
-        // so are target_date / original_target_date (the plan dates).
-        accepted_at: at,
-        work_due_at: workDue.toISOString(),
-        hours_to_complete: budgetHours,
-        resumed_at: null,
-        hold_remaining_hours: null,
-        is_on_hold: false,
-        reaccept_required: false,
-        reaccept_reason: null,
-        overdue_since_at: null,
-        extra_hours: given === 'hours' ? Number(existing.extra_hours || 0) + amount : Number(existing.extra_hours || 0),
-        extra_days: given === 'days' ? Number(existing.extra_days || 0) + amount : Number(existing.extra_days || 0),
-        correction_extensions: extensions,
-        verification_decided_at: at,
-        task_events: withTaskEvent(existing, 'updation', req.user.id, {
-          hours: budgetHours,
-          work_due_at: workDue.toISOString(),
-          given,
-          files: fileUrls.length,
-        }),
-      };
-
-      const data = await updateTaskTolerant(id, updates, TASK_SELECT);
-      res.json(data);
-    } catch (err) {
-      console.error('Send updation error:', err.message);
-      res.status(500).json({ error: err.message || 'Could not send updation request' });
+// ----------------------------- updation preview (verifier/admin: final target for extra hours) -----------------------------
+router.get('/:id/updation-preview', async (req, res) => {
+  try {
+    const existing = await loadTaskForStamp(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not the verifier for this task' });
     }
+    res.json(finalTargetPreview(existing, req.query.extra_hours));
+  } catch (err) {
+    console.error('Updation preview error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not calculate final target' });
   }
-);
+});
+
+// ----------------------------- send updation (verifier/admin: request changes with a note) -----------------------------
+router.patch('/:id/send-updation', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note } = req.body || {};
+
+    if (!note || !note.trim()) {
+      return res.status(400).json({ error: 'Please write an updation note before sending' });
+    }
+
+    const existing = await loadTaskForStamp(id);
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    const isChosenVerifier = existing.verifier_id === req.user.id;
+    if (!isChosenVerifier && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'You are not the verifier for this task' });
+    }
+
+    const extra = applyDeadlineChange(existing, { ...req.body, _by: req.user.id }, note);
+    const workHours = Math.max(0, Number(req.body?.extra_work_hours) || 0);
+    const workPatch = workHours > 0 ? applyExtraWorkHours(existing, workHours) : {};
+    if (workHours > 0) {
+      extra.extensions.push({
+        at: new Date().toISOString(),
+        by: req.user.id,
+        unit: 'work_hours',
+        amount: workHours,
+        note: note.trim().slice(0, 200),
+      });
+    }
+    const updates = {
+      verification_status: 'Updation Required',
+      updation_note: note.trim(),
+      status: 'In Progress',
+      target_date: extra.target_date,
+      hours_to_complete: extra.hours_to_complete,
+      extra_hours: extra.extra_hours,
+      extra_days: extra.extra_days,
+      correction_extensions: extra.extensions,
+      verification_decided_at: nowIso(),
+      task_events: withTaskEvent(existing, 'updation', req.user.id),
+      ...workPatch,
+    };
+
+    const data = await updateTaskTolerant(id, updates, TASK_SELECT);
+    res.json(data);
+  } catch (err) {
+    console.error('Send updation error:', err.message);
+    res.status(500).json({ error: err.message || 'Could not send updation request' });
+  }
+});
 
 // ----------------------------- reschedule (admin only — instant, no approval needed) -----------------------------
 router.patch('/:id/reschedule', requireAdmin, async (req, res) => {
@@ -2410,6 +2366,7 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
         hours_to_complete, target_date, extra_hours, extra_days,
         total_hold_seconds, is_on_hold, held_at,
         verification_status, verification_note, verification_decided_at, correction_extensions,
+        updation_note,
         project:projects ( id, name ),
         task_type:task_types ( id, name ),
         department:departments ( id, name ),
@@ -2591,7 +2548,15 @@ router.get('/report', requireAdminOrMis, async (req, res) => {
     const userRows = verifierRows || [];
     const verifierIds = userRows.filter((user) => user.can_verify).map((user) => user.id);
     const adminUsers = userRows.filter((user) => user.role === 'admin');
-    const dashboard = buildWorkVerificationDashboard(enriched, { srMap, verifierIds, adminUsers });
+    const dashboard = buildWorkVerificationDashboard(enriched, {
+      srMap,
+      verifierIds,
+      adminUsers,
+      updationSource: (tasks || []).filter((t) => !isMdoOfficeWorkTask(t)),
+      users: userRows,
+      from: startDate,
+      to: endDate,
+    });
 
     res.json({
       range: range || 'month',

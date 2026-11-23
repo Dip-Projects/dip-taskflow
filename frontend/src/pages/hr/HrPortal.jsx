@@ -10,6 +10,7 @@ import {
 } from './letters/generateOfferLetterPdf';
 import { generateSalarySlipPdf, amountInWords } from './payroll/generateSalarySlipPdf';
 import { generateJoiningFormPdf } from './generateJoiningFormPdf';
+import { PUBLIC_HOLIDAYS } from './publicHolidays';
 import './HrPortal.css';
 
 const svgProps = {
@@ -236,6 +237,365 @@ function statusBadge(status) {
   return '';
 }
 
+const CAL_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function addDaysISO(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+function formatCalDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+/** Map ISO date -> [{ name, status, half, channel }] for every non-rejected leave. */
+function buildLeaveMap(bundle) {
+  const map = {};
+  const sources = [
+    ['Site', bundle?.site],
+    ['MDO', bundle?.mdo],
+    ['Office', bundle?.office],
+  ];
+  for (const [channel, rows] of sources) {
+    for (const l of rows || []) {
+      if (String(l.status || '').toLowerCase() === 'rejected') continue;
+      if (!l.from_date) continue;
+      const start = String(l.from_date).slice(0, 10);
+      const end = String(l.to_date || l.from_date).slice(0, 10);
+      let cur = start;
+      // Guard against malformed ranges: cap at 366 days per leave.
+      for (let i = 0; cur <= end && i < 366; i++) {
+        (map[cur] ||= []).push({
+          name: l.employee_name || l.username || '—',
+          status: l.status || '',
+          half: !!l.is_half_day,
+          channel,
+        });
+        cur = addDaysISO(cur, 1);
+      }
+    }
+  }
+  return map;
+}
+
+function HrLeaveCalendar({ leaveBundle }) {
+  const now = new Date();
+  const todayKey = todayISO();
+  const [cursor, setCursor] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const [selected, setSelected] = useState(todayKey);
+  const [officeHolidays, setOfficeHolidays] = useState([]);
+  const [holidayName, setHolidayName] = useState('');
+  const [holidayTo, setHolidayTo] = useState('');
+  // Id of the holiday range being edited; null means the form creates a new one.
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [calError, setCalError] = useState('');
+
+  const leaveMap = useMemo(() => buildLeaveMap(leaveBundle), [leaveBundle]);
+
+  // Each holiday range is stored once; expand it so every day in the range maps to it.
+  const officeByDate = useMemo(() => {
+    const m = {};
+    for (const h of officeHolidays) {
+      if (!h.from) continue;
+      const end = h.to || h.from;
+      let cur = h.from;
+      for (let i = 0; cur <= end && i < 366; i++) {
+        m[cur] = h;
+        cur = addDaysISO(cur, 1);
+      }
+    }
+    return m;
+  }, [officeHolidays]);
+
+  // Public holidays (system-provided, currently empty) plus HR-marked office holidays.
+  const holidayNameOn = (iso) => officeByDate[iso]?.name || PUBLIC_HOLIDAYS[iso] || '';
+
+  const loadHolidays = useCallback(async () => {
+    try {
+      const data = await api('/hr/office-holidays');
+      setOfficeHolidays(Array.isArray(data.holidays) ? data.holidays : []);
+    } catch {
+      setOfficeHolidays([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHolidays();
+  }, [loadHolidays]);
+
+  const first = new Date(cursor.y, cursor.m, 1);
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const monthLabel = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+
+  const cells = [];
+  for (let i = 0; i < first.getDay(); i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
+  while (cells.length % 7) cells.push(null);
+
+  const shiftMonth = (delta) =>
+    setCursor((c) => {
+      const d = new Date(c.y, c.m + delta, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+
+  // Picking a "From" date moves "To" along if it would end up before it.
+  const pickFrom = (iso) => {
+    setSelected(iso);
+    setHolidayTo((prev) => (!prev || prev < iso ? iso : prev));
+    setCalError('');
+  };
+
+  // Clicking a day: an existing holiday loads its whole range into the form for editing;
+  // any other day starts a new holiday.
+  const selectDay = (iso) => {
+    setCalError('');
+    const rec = officeByDate[iso];
+    if (rec) {
+      setSelected(rec.from);
+      setEditingId(rec.id);
+      setHolidayTo(rec.to || rec.from);
+      setHolidayName(rec.name || '');
+      return;
+    }
+    if (editingId) {
+      setEditingId(null);
+      setHolidayName('');
+    }
+    setSelected(iso);
+    setHolidayTo((prev) => (!prev || prev < iso ? iso : prev));
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setHolidayName('');
+    setHolidayTo(selected);
+    setCalError('');
+  };
+
+  const selLeaves = (selected && leaveMap[selected]) || [];
+  const selRecord = selected ? officeByDate[selected] : null;
+  const selHoliday = selected ? holidayNameOn(selected) : '';
+
+  const markHoliday = async () => {
+    const name = holidayName.trim();
+    if (!selected) {
+      setCalError('Pick a From date first.');
+      return;
+    }
+    const to = holidayTo || selected;
+    if (to < selected) {
+      setCalError('"To" date must be on or after "From" date.');
+      return;
+    }
+    if (!name) {
+      setCalError('Enter a holiday name.');
+      return;
+    }
+    setSaving(true);
+    setCalError('');
+    try {
+      if (editingId) {
+        // Update the existing range row in place (no new entry).
+        await api(`/hr/office-holidays/${encodeURIComponent(editingId)}`, {
+          method: 'PATCH',
+          body: { from: selected, to, name },
+        });
+        setEditingId(null);
+      } else {
+        await api('/hr/office-holidays', { method: 'POST', body: { from: selected, to, name } });
+      }
+      setHolidayName('');
+      await loadHolidays();
+    } catch (e) {
+      setCalError(e.message || 'Could not save the holiday.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeHoliday = async (id) => {
+    if (!window.confirm('Remove this holiday (the whole date range)?')) return;
+    setCalError('');
+    try {
+      await api(`/hr/office-holidays/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await loadHolidays();
+    } catch (e) {
+      setCalError(e.message || 'Could not remove the holiday.');
+    }
+  };
+
+  return (
+    <div className="hr-panel hr-cal">
+      <div className="hr-toolbar">
+        <h3 className="hr-panel-title">
+          <span className="hr-panel-title-ico" aria-hidden>{Ico.leave}</span>
+          Attendance &amp; holiday calendar
+        </h3>
+        <div className="hr-cal-nav">
+          <button type="button" className="hr-btn ghost" aria-label="Previous month" onClick={() => shiftMonth(-1)}>‹</button>
+          <span className="hr-cal-month">{monthLabel}</span>
+          <button type="button" className="hr-btn ghost" aria-label="Next month" onClick={() => shiftMonth(1)}>›</button>
+          <button
+            type="button"
+            className="hr-btn ghost"
+            onClick={() => {
+              setCursor({ y: now.getFullYear(), m: now.getMonth() });
+              setSelected(todayKey);
+            }}
+          >
+            Today
+          </button>
+        </div>
+      </div>
+
+      <div className="hr-cal-grid" role="grid" aria-label={monthLabel}>
+        {CAL_WEEKDAYS.map((w) => (
+          <div key={w} className="hr-cal-wd" role="columnheader">{w}</div>
+        ))}
+        {cells.map((iso, i) => {
+          if (!iso) return <div key={`e-${i}`} className="hr-cal-day is-empty" aria-hidden />;
+          const leaves = leaveMap[iso] || [];
+          const holiday = holidayNameOn(iso);
+          const hasInfo = leaves.length > 0 || !!holiday;
+          const classes = [
+            'hr-cal-day',
+            iso === todayKey && 'is-today',
+            iso === selected && 'is-selected',
+            holiday && 'is-holiday',
+            leaves.length > 0 && 'has-leave',
+          ].filter(Boolean).join(' ');
+          return (
+            <div
+              key={iso}
+              className={classes}
+              role="gridcell"
+              tabIndex={0}
+              aria-selected={iso === selected}
+              aria-label={`${formatCalDate(iso)}${holiday ? `, ${holiday}` : ''}${leaves.length ? `, ${leaves.length} on leave` : ''}`}
+              onClick={() => {
+                selectDay(iso);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  selectDay(iso);
+                }
+              }}
+            >
+              <span className="hr-cal-num">{Number(iso.slice(8))}</span>
+              {holiday && <span className="hr-cal-hol">{holiday}</span>}
+              {leaves.length > 0 && (
+                <span className="hr-cal-label">{leaves.length} on leave</span>
+              )}
+              {hasInfo && (
+                <div className="hr-cal-pop" role="tooltip">
+                  <div className="hr-cal-pop-date">{formatCalDate(iso)}</div>
+                  {holiday && (
+                    <div className="hr-cal-pop-hol">Holiday: <strong>{holiday}</strong></div>
+                  )}
+                  {leaves.length > 0 ? (
+                    <ul className="hr-cal-pop-list">
+                      {leaves.map((l, j) => (
+                        <li key={`${l.name}-${j}`}>
+                          <strong>{l.name}</strong>
+                          <span className="hr-cal-pop-meta">
+                            {' '}· {l.channel}{l.half ? ' · half day' : ''}{l.status ? ` · ${l.status}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="hr-cal-pop-none">No one on leave</div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hr-cal-bar">
+        <div className="hr-cal-bar-row">
+          <span className="hr-cal-bar-date">{selected || '—'}</span>
+          {selHoliday && (
+            <span className="hr-cal-chip is-holiday">
+              Holiday: {selHoliday}
+              {selRecord && (
+                <button
+                  type="button"
+                  className="hr-cal-chip-x"
+                  aria-label="Remove office holiday"
+                  onClick={() => removeHoliday(selRecord.id)}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          )}
+          {editingId && <span className="hr-cal-chip is-edit">Editing holiday</span>}
+          <span className="hr-cal-chip is-neutral">{selLeaves.length} on leave</span>
+        </div>
+        <div className="hr-cal-bar-row hr-cal-bar-form">
+          <label className="hr-cal-bar-lbl">
+            From
+            <input
+              type="date"
+              value={selected}
+              aria-label="Holiday from date"
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  setSelected('');
+                  return;
+                }
+                pickFrom(v);
+                const [y, m] = v.split('-').map(Number);
+                setCursor({ y, m: m - 1 });
+              }}
+            />
+          </label>
+          <label className="hr-cal-bar-lbl">
+            To
+            <input
+              type="date"
+              value={holidayTo}
+              min={selected || undefined}
+              aria-label="Holiday to date"
+              onChange={(e) => setHolidayTo(e.target.value)}
+            />
+          </label>
+          <input
+            type="text"
+            value={holidayName}
+            placeholder="Holiday name (e.g. Diwali)"
+            aria-label="Holiday name"
+            autoComplete="off"
+            onChange={(e) => setHolidayName(e.target.value)}
+          />
+          <button type="button" className="hr-cal-mark" onClick={markHoliday} disabled={saving}>
+            {saving ? 'Saving…' : editingId ? 'Save changes' : 'Mark office holiday'}
+          </button>
+          {editingId && (
+            <button type="button" className="hr-btn ghost" onClick={cancelEdit} disabled={saving}>
+              Cancel
+            </button>
+          )}
+        </div>
+        {calError && <div className="hr-error">{calError}</div>}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts, onSendWa }) {
   const pendingLeaves =
     (leaveBundle?.counts?.site_pending || 0) +
@@ -287,7 +647,11 @@ function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts
         </div>
       </div>
 
-      <div className="hr-panel">
+      <div className="hr-dash-split">
+      <HrLeaveCalendar leaveBundle={leaveBundle} />
+
+      <div className="hr-att-slot">
+      <div className="hr-panel hr-att-panel">
         <div className="hr-toolbar">
           <h3 className="hr-panel-title">
             <span className="hr-panel-title-ico" aria-hidden>{Ico.clock}</span>
@@ -315,6 +679,8 @@ function Dashboard({ employees, leaveBundle, attendanceToday, candidates, alerts
             </tbody>
           </table>
         </div>
+      </div>
+      </div>
       </div>
 
       <div id="hr-alerts-section" className="hr-panel hr-alerts-panel">
@@ -1125,9 +1491,15 @@ function LeavesView({ bundle, loading, error, onReload }) {
                     <td>{l.to_date}</td>
                     <td>
                       {tab === 'site'
-                        ? l.leave_type || '—'
+                        ? `${l.leave_type || '—'}${l.is_half_day
+                          ? ` · ${l.half_day_period === 'first_half' ? '1st Half' : l.half_day_period === 'second_half' ? '2nd Half' : 'Half day'}`
+                          : ''}`
                         : l.is_half_day
-                          ? 'Yes'
+                          ? l.half_day_period === 'first_half'
+                            ? '1st Half'
+                            : l.half_day_period === 'second_half'
+                              ? '2nd Half'
+                              : 'Yes'
                           : '—'}
                     </td>
                     <td>{l.reason || '—'}</td>

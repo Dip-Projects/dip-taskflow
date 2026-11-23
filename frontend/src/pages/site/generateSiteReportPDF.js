@@ -48,14 +48,16 @@ body{font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.7;colo
   border-bottom:1px solid #f1f5f9;}
 .bullet-item:last-child{border-bottom:none;}
 .bullet-arrow{color:#800000;font-weight:700;font-size:12px;margin-top:4px;flex-shrink:0;}
-/* .bullet-text{font-size:15px;color:#0f172a;line-height:1.5;}
- .bullet-item.bullet-title{gap:0;padding:8px 0 4px;}/*
+/* ── Bullet text (rows are paginated individually, so no row is ever cut) ── */
 .bullet-text{font-size:13.5px;color:#0f172a;line-height:1.5;}
-.bullet-item.bullet-title .bullet-text{font-weight:800;font-size:13.5px;color:#0f172a;}
-
-
-
 .bullet-item.bullet-title .bullet-text{font-weight:800;font-size:15.5px;color:#0f172a;}
+/* Text sections are placed row by row, so each piece draws its own frame */
+.sec-piece{border-left:1.5px solid #cbd5e1;border-right:1.5px solid #cbd5e1;background:#fff;}
+.sec-piece-top{border-top:1.5px solid #cbd5e1;}
+.sec-piece-end{border-bottom:1.5px solid #cbd5e1;}
+.sec-row{padding:0 16px;}
+.sec-row .bullet-item{border-bottom:none;}
+.sec-row-sep{border-bottom:1px solid #f1f5f9;}
 
 /* ── INFO ROWS (visit details) ── */
 .info-row{display:flex;gap:20px;padding:10px 16px;border-bottom:1px solid #cbd5e1;}
@@ -112,37 +114,24 @@ function fmtTime(t) {
   return `${h12}:${m} ${ampm}`;
 }
 
-// Bullet list from multiline text
-function bulletBlock(txt) {
-  if (!txt?.trim()) return "";
-  const lines = txt.split("\n").filter(l => l.trim());
-  if (!lines.length) return "";
+// One bullet line → one row of HTML
+function bulletLineHtml(l) {
+  const bulletMatch = l.match(/^(\s*)([•◦\-*])\s*/);
+  if (!bulletMatch) {
+    return `<div class="bullet-item bullet-title"><span class="bullet-text">${esc(l.trim())}</span></div>`;
+  }
+  const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
+  const text  = esc(l.slice(bulletMatch[0].length).trim());
+  if (isSub) {
+    return `<div class="bullet-item" style="padding-left:32px;"><span class="bullet-arrow" style="color:#b45309;font-size:10px;margin-top:5px;">&#9656;</span><span class="bullet-text" style="color:#475569;">${text}</span></div>`;
+  }
+  return `<div class="bullet-item"><span class="bullet-arrow">&#9658;</span><span class="bullet-text">${text}</span></div>`;
+}
 
-  return `<div class="bullet-list">${lines.map(l => {
-    const bulletMatch = l.match(/^(\s*)([•◦\-*])\s*/);
-    if (!bulletMatch) {
-      return `<div class="bullet-item bullet-title">
-        <span class="bullet-text">${esc(l.trim())}</span>
-      </div>`;
-    }
-    const isSub = bulletMatch[2] === "◦" || bulletMatch[1].length >= 2;
-    const text  = esc(l.slice(bulletMatch[0].length).trim());
-
-    if (isSub) {
-      return `<div class="bullet-item" style="padding-left:32px;border-bottom:1px solid #f8fafc;">
-        <span class="bullet-arrow" style="color:#b45309;font-size:10px;margin-top:5px;">&#9656;</span>
-   /* <span class="bullet-text" style="font-size:13.5px;color:#475569;">${text}</span> /*
-
-<span class="bullet-text" style="color:#475569;">${text}</span>
-
-        
-      </div>`;
-    }
-    return `<div class="bullet-item">
-      <span class="bullet-arrow">&#9658;</span>
-      <span class="bullet-text">${text}</span>
-    </div>`;
-  }).join("")}</div>`;
+// Multiline text → one HTML row per line
+function bulletRows(txt) {
+  if (!txt?.trim()) return [];
+  return txt.split("\n").filter(l => l.trim()).map(bulletLineHtml);
 }
 // ── Script loader ──────────────────────────────────────────────────────────────
 async function loadScript(src) {
@@ -320,6 +309,46 @@ export async function generateSiteReportPDF(formData, photos, logoSrc, reportCon
     await addCanvasToPdf(canvas);
   }
 
+  // ── Row-by-row placement ──
+  // A bullet row never splits across pages. A new page starts only when the next
+  // row does not fit, and every page keeps a bottom gap above the footer.
+  const PAGE_BOTTOM = A4_H - MARGIN - 8;
+  function startNewPage() {
+    addWatermark();
+    pdf.addPage();
+    pageNum++;
+    pdf.setFontSize(8); pdf.setTextColor(100);
+    pdf.text(`Page ${pageNum}  ·  DIP Projects  ·`, A4_W / 2, A4_H - 5, { align: "center" });
+    cursorY = MARGIN;
+  }
+  const canvasMM = (canvas) => canvas.height / (canvas.width / CONTENT_W);
+  function placeCanvas(canvas) {
+    const h = canvasMM(canvas);
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.93), "JPEG", MARGIN, cursorY, CONTENT_W, h);
+    cursorY += h;
+  }
+  async function addSectionRows(title, rows) {
+    if (!rows.length) return;
+    const headerCanvas = await renderChunk(
+      `<div class="sec-piece sec-piece-top">${secHeader(title)}</div>`
+    );
+    const rowCanvases = [];
+    for (let i = 0; i < rows.length; i++) {
+      const isLast = i === rows.length - 1;
+      rowCanvases.push(await renderChunk(
+        `<div class="sec-piece${isLast ? " sec-piece-end" : ""}"><div class="sec-row${isLast ? "" : " sec-row-sep"}">${rows[i]}</div></div>`
+      ));
+    }
+    // The section header always sits with its first row
+    if (cursorY + canvasMM(headerCanvas) + canvasMM(rowCanvases[0]) > PAGE_BOTTOM) startNewPage();
+    placeCanvas(headerCanvas);
+    for (const rc of rowCanvases) {
+      if (cursorY + canvasMM(rc) > PAGE_BOTTOM) startNewPage();
+      placeCanvas(rc);
+    }
+    cursorY += 4;
+  }
+
   // ── Section counter ──
   let secNum = 0;
   function secHeader(title) {
@@ -429,9 +458,7 @@ export async function generateSiteReportPDF(formData, photos, logoSrc, reportCon
     ["KEY INSTRUCTIONS",                       formData.key_instructions],
   ];
   for (const [title, txt] of textSections) {
-    const body = bulletBlock(txt);
-    const sec  = section(title, body);
-    if (sec) await addChunk(sec);
+    await addSectionRows(title, bulletRows(txt));
   }
 
   // ── 4. PHOTOS (2-per-row, 340px tall, like DPR) ────────────────────────

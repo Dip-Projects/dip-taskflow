@@ -131,8 +131,14 @@ async function findNextLevelOnSite(supabase, site, applicantUsername, applicantR
   return candidates[0] || null;
 }
 
-function splitLeaveDaysByMonth(fromDate, toDate) {
+function splitLeaveDaysByMonth(fromDate, toDate, isHalfDay = false) {
   const result = {};
+  if (isHalfDay) {
+    const date = new Date(fromDate + "T00:00:00");
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    result[key] = 0.5;
+    return result;
+  }
   let cursor = new Date(fromDate + "T00:00:00");
   const end = new Date(toDate + "T00:00:00");
   while (cursor <= end) {
@@ -171,7 +177,7 @@ export async function computeMonthlyLeaveBalance(supabase, user, targetMonth) {
 
   const { data: leaves } = await fromMaybe("site_leaves", (q) =>
     q
-      .select("from_date, to_date, level_approved, head_approved")
+      .select("from_date, to_date, is_half_day, level_approved, head_approved")
       .eq("user_name", user.user_name)
       .gte("to_date", fromStr)
   );
@@ -179,7 +185,7 @@ export async function computeMonthlyLeaveBalance(supabase, user, targetMonth) {
   const usedByMonth = {};
   (leaves || []).filter(isLeaveApproved).forEach((l) => {
     if (!l.from_date || !l.to_date) return;
-    const perMonth = splitLeaveDaysByMonth(l.from_date, l.to_date);
+    const perMonth = splitLeaveDaysByMonth(l.from_date, l.to_date, l.is_half_day);
     Object.entries(perMonth).forEach(([mo, days]) => {
       usedByMonth[mo] = (usedByMonth[mo] || 0) + days;
     });
@@ -244,7 +250,8 @@ export async function getSiteProjectStaff(supabase, site) {
   if (!want) return { head: null, coordinator: null, teamLeader: null };
   const { data: rows } = await supabase
     .from("projects")
-    .select("id, name, team_leader_id, coordinator_id, site_incharge_id");
+    .select("id, name, team_leader_id, coordinator_id, site_incharge_id")
+    .neq("is_active", false);
   const project = (rows || []).find((p) => String(p.name || "").trim().toLowerCase() === want) || null;
   if (!project) return { head: null, coordinator: null, teamLeader: null };
   const [teamLeader, coordinator, incharge] = await Promise.all([
@@ -337,6 +344,7 @@ export async function fetchManagedSites(supabase, user) {
   const { data: rows } = await supabase
     .from("projects")
     .select("name, team_leader_id, coordinator_id, site_incharge_id")
+    .neq("is_active", false)
     .or(`team_leader_id.eq.${uid},coordinator_id.eq.${uid},site_incharge_id.eq.${uid}`);
   const siteNames = [];
   const headSites = new Set();
